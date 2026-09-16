@@ -60,9 +60,9 @@ Milestones 0–2 of 6 complete (2026-09-16):
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
-decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: DE binary
-reader + time/frames (M3), engine API + ayanamsas (M4), validation gates
-(M5), transports (M6).
+decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0-M3 done
+(reader, time scales, frames); next: modern DE405+ layout, engine API +
+ayanamsas (M4), validation gates (M5), transports (M6).
 
 ## Build
 
