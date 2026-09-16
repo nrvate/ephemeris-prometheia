@@ -15,6 +15,7 @@ pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 add_library(prometheia
   src/catalog.cpp
   src/cbor.cpp
+  src/de.cpp
   src/kepler.cpp)
 target_include_directories(prometheia PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(prometheia PUBLIC PkgConfig::ZSTD)
@@ -50,6 +51,10 @@ add_test(NAME mechanics COMMAND test_mechanics)
 add_executable(test_radau tests/test_radau.cpp)
 target_link_libraries(test_radau PRIVATE prometheia)
 add_test(NAME radau COMMAND test_radau)
+
+add_executable(test_de tests/test_de.cpp)
+target_link_libraries(test_de PRIVATE prometheia)
+add_test(NAME de COMMAND test_de)
 
 add_executable(prometheia-bench tools/bench/bench_main.cpp)
 target_link_libraries(prometheia-bench PRIVATE prometheia)

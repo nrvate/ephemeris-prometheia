@@ -34,12 +34,18 @@ Milestones 0–2 of 6 complete (2026-09-16):
   recurrence, verified against the published paper), cubic-Hermite
   perturber trajectory tables, heliocentric N-body force model, windowed
   memo cache.
+- **DE binary reader** — cleanroom reader for JPL DExxx planetary
+  ephemeris binaries (old DE200-generation format; modern DE405+ layout
+  queued). Validated against a synthetic DE200-layout file in CI and
+  against the real 43 MB `lnxm1600p2170.200`: its Moon distance at J2000
+  agrees with SWE's DE441-derived value to ~0.3 km.
+  Details: [docs/DE.md](docs/DE.md).
 - **Measured on real data** (`prometheia-bench`, 100-body SBDB fixture,
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
 - **Tools** — `prometheia-fetch` (Python), `prometheia-convert`,
-  `prometheia-info`, `prometheia-bench`. Six test suites, clean under
+  `prometheia-info`, `prometheia-bench`. Seven test suites, clean under
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full

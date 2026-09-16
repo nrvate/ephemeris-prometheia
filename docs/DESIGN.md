@@ -128,6 +128,14 @@ tool and script in this repo, and for anyone running them:
 - **M3** — DE binary reader; time scales (TDB/TT/UTC/UT1, ΔT, leap
   seconds); IAU 2006/2000A precession-nutation; ICRF →
   ecliptic/equatorial/topocentric. Test corpus: de200.eph on hand.
+  - Increment 1 (done 2026-09-16): old-format DE reader
+    (`prometheia::de`, docs/DE.md) — header/constant parsing, lazy
+    record decode with cache, Chebyshev state+velocity. Validated
+    exactly against a synthetic DE200-layout file (CI) and physically
+    against the real 43 MB lnxm1600p2170.200 (Moon distance agrees with
+    SWE's DE441-derived value to ~0.3 km at J2000). The modern
+    DE405+-era header layout (pointer table embedded in header record
+    2) is the next slice, to be validated against a real DE441/de440s.
 - **M4** — engine API (`prometheia::Engine`), catalog stack overlay,
   calc() with flags/sigma/provenance, pdes→spkid secondary index,
   ayanamsa layer, C ABI shim, `ephem` CLI.
