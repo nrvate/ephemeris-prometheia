@@ -142,6 +142,13 @@ tool and script in this repo, and for anyone running them:
     directions; TT↔TDB via the Circular 179 truncated series (~10 µs
     class); pluggable Delta T with the Espenak–Meeus polynomials as
     default (ΔT(J2000) = 63.88 s vs 63.83 observed).
+  - Increment 3 (done 2026-09-16): frames (`prometheia::frames`,
+    docs/FRAMES.md) — IAU 2006 precession, the full 1365-term IAU 2000A
+    nutation series (parsed from the public-domain USNO Circular 179
+    table by tools/gen/gen_nutation_table.py), mean/true equator and
+    ecliptic-of-date matrices, ERA/GMST/GAST, WGS84 topocentric helper.
+    Differentially validated against the installed Swiss Ephemeris:
+    mean chain 0.00004", true chain 0.00047", GAST 0.0004".
 - **M4** — engine API (`prometheia::Engine`), catalog stack overlay,
   calc() with flags/sigma/provenance, pdes→spkid secondary index,
   ayanamsa layer, C ABI shim, `ephem` CLI.
