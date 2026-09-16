@@ -116,12 +116,12 @@ tool and script in this repo, and for anyone running them:
 - **M0** — bootstrap: repo, CMake, GPL, CI, docs. *(done)*
 - **M1** — EPM1 container + SBDB ingest pipeline + tools. *(done)*
 - **M2** — mechanics core. *(done 2026-09-16, three increments)*
-  - Increment 1: Kepler engine + adaptive DP5(4) with FSAL (25a1fa6).
+  - Increment 1: Kepler engine + adaptive DP5(4) with FSAL (dc91102).
   - Increment 2: cubic-Hermite perturber tables, heliocentric force
-    model, WindowMemo, benchmark harness (4908ea1).
+    model, WindowMemo, benchmark harness (18475f9).
   - Increment 3: Radau-15, the IAS15-class collocation integrator, with
     constants derived from theory and verified against the paper
-    (1ef6d5c).
+    (18af083).
   - Increment 4 (parked): Everhart's triangular b-sequence in place of
     the monomial Vandermonde solve — better conditioning, fewer
     corrector iterations, lower noise floor.
