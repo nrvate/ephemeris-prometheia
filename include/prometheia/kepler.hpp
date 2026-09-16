@@ -18,18 +18,18 @@
 namespace prometheia {
 
 struct Elements {
-  double a = 0.0;        // semimajor axis (AU in catalogs; any unit works here
-                         // as long as mu matches) — negative for hyperbolic
-  double e = 0.0;        // eccentricity (>= 0, != 1)
-  double inc = 0.0;      // inclination, rad
-  double node = 0.0;     // longitude of ascending node, rad
-  double argp = 0.0;     // argument of perihelion, rad
-  double mean_anom = 0.0;  // mean anomaly at epoch, rad
+    double a = 0.0;         // semimajor axis (AU in catalogs; any unit works here
+                            // as long as mu matches) — negative for hyperbolic
+    double e = 0.0;         // eccentricity (>= 0, != 1)
+    double inc = 0.0;       // inclination, rad
+    double node = 0.0;      // longitude of ascending node, rad
+    double argp = 0.0;      // argument of perihelion, rad
+    double mean_anom = 0.0; // mean anomaly at epoch, rad
 };
 
 struct State {
-  Vec3 pos;
-  Vec3 vel;
+    Vec3 pos;
+    Vec3 vel;
 };
 
 // mean motion n = sqrt(mu / |a|^3), valid elliptic and hyperbolic alike.
@@ -46,6 +46,6 @@ Result<Elements> state_to_elements(double mu, const State& s);
 // anomaly; parabolic (e = 1) is rejected — singular elements.
 Result<State> kepler_propagate(double mu, const State& s0, double t0, double t1);
 
-}  // namespace prometheia
+} // namespace prometheia
 
-#endif  // PROMETHEIA_KEPLER_HPP
+#endif // PROMETHEIA_KEPLER_HPP

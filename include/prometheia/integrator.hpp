@@ -28,21 +28,21 @@ namespace prometheia {
 // Optional per-accepted-step sink (memo cache construction). Called with
 // the accepted (t, y, dydt) after each successful step.
 struct NoSink {
-  void operator()(double, const double*, const double*) const {}
+    void operator()(double, const double*, const double*) const {}
 };
 
 struct IntegrateStats {
-  uint64_t steps = 0;
-  uint64_t accel_evals = 0;
-  uint64_t rejected_steps = 0;
-  double final_error_estimate = 0.0;  // scaled RMS of the last accepted step
+    uint64_t steps = 0;
+    uint64_t accel_evals = 0;
+    uint64_t rejected_steps = 0;
+    double final_error_estimate = 0.0; // scaled RMS of the last accepted step
 };
 
 struct IntegrateOptions {
-  double rtol = 1e-12;   // scaled relative tolerance
-  double atol = 1e-30;   // absolute floor (positions in AU: negligible)
-  double max_step = 0.0; // 0 = unlimited
-  double first_step = 0.0;  // 0 = automatic
+    double rtol = 1e-12;     // scaled relative tolerance
+    double atol = 1e-30;     // absolute floor (positions in AU: negligible)
+    double max_step = 0.0;   // 0 = unlimited
+    double first_step = 0.0; // 0 = automatic
 };
 
 // Integrates y over [t0, t1] with the given force model. On success y holds
@@ -52,8 +52,8 @@ Result<void> integrate_dp54(double* y, double t0, double t1, Force&& accel,
                             const IntegrateOptions& opts, IntegrateStats* stats,
                             Sink&& sink = Sink{});
 
-}  // namespace prometheia
+} // namespace prometheia
 
 #include <prometheia/integrator.inl>
 
-#endif  // PROMETHEIA_INTEGRATOR_HPP
+#endif // PROMETHEIA_INTEGRATOR_HPP

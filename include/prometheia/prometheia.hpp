@@ -23,10 +23,10 @@ inline constexpr int version_minor = PROMETHEIA_VERSION_MINOR;
 inline constexpr int version_patch = PROMETHEIA_VERSION_PATCH;
 inline constexpr const char* version_string = PROMETHEIA_VERSION;
 
-}  // namespace prometheia
+} // namespace prometheia
 
 #include <prometheia/catalog.hpp>
 #include <prometheia/cbor.hpp>
 #include <prometheia/error.hpp>
 
-#endif  // PROMETHEIA_PROMETHEIA_HPP
+#endif // PROMETHEIA_PROMETHEIA_HPP

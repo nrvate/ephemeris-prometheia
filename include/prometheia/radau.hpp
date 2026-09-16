@@ -22,20 +22,20 @@
 namespace prometheia {
 
 struct Radau15Options {
-  // Dimensionless smoothness target from the IAS15 paper; 1e-9 is the
-  // published conservative default.
-  double eps_b = 1e-9;
-  double first_step = 0.0;    // 0 = automatic (fraction of the span)
-  double max_step = 0.0;      // 0 = unlimited
-  int max_iterations = 12;    // corrector cap (paper's value)
+    // Dimensionless smoothness target from the IAS15 paper; 1e-9 is the
+    // published conservative default.
+    double eps_b = 1e-9;
+    double first_step = 0.0; // 0 = automatic (fraction of the span)
+    double max_step = 0.0;   // 0 = unlimited
+    int max_iterations = 12; // corrector cap (paper's value)
 };
 
 struct Radau15Stats {
-  uint64_t steps = 0;
-  uint64_t accel_evals = 0;
-  uint64_t rejected_steps = 0;
-  uint64_t corrector_iterations = 0;
-  double final_ratio = 0.0;  // last accepted step's b8/a scale
+    uint64_t steps = 0;
+    uint64_t accel_evals = 0;
+    uint64_t rejected_steps = 0;
+    uint64_t corrector_iterations = 0;
+    double final_ratio = 0.0; // last accepted step's b8/a scale
 };
 
 // Same calling convention as integrate_dp54: y in/out over [t0, t1], a
@@ -45,8 +45,8 @@ Result<void> integrate_radau15(double* y, double t0, double t1, Force&& accel,
                                const Radau15Options& opts, Radau15Stats* stats,
                                Sink&& sink = Sink{});
 
-}  // namespace prometheia
+} // namespace prometheia
 
 #include <prometheia/radau.inl>
 
-#endif  // PROMETHEIA_RADAU_HPP
+#endif // PROMETHEIA_RADAU_HPP
