@@ -30,7 +30,9 @@ Milestone 1 (of 6) complete:
   (Ceres…), full precision, element sigmas, H/G, diameters.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
-decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: integrator core
+decision record: [docs/DESIGN.md](docs/DESIGN.md). Container byte spec:
+[docs/FORMAT.md](docs/FORMAT.md). Data pipeline in full detail:
+[docs/INGESTION.md](docs/INGESTION.md). Roadmap: integrator core
 (M2), DE binary reader + time/frames (M3), engine API + ayanamsas (M4),
 validation gates (M5), transports (M6).
 

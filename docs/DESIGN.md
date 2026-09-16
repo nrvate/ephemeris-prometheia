@@ -71,6 +71,9 @@ no code read or reused — see Cleanroom policy):
    3.7k comets.
 6. **Format: EPM1** — see [FORMAT.md](FORMAT.md). No Chebyshev, no segments,
    no time axis. CBOR metadata with provenance. Per-chunk zstd + CRC-32.
+   The full ingestion pipeline (SBDB request shape, sbdb-raw v1, unit
+   conversions, validation, freshness strategy) is specified in
+   [INGESTION.md](INGESTION.md).
 7. **API: C++20, no process-wide globals, ever.** Contexts are the
    foundation, not a bolt-on (the lesson of the Swiss Ephemeris threading
    forks). C ABI shim for bindings; transport heads (HTTP, binary socket,
