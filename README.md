@@ -34,12 +34,13 @@ Milestones 0–2 of 6 complete (2026-09-16):
   recurrence, verified against the published paper), cubic-Hermite
   perturber trajectory tables, heliocentric N-body force model, windowed
   memo cache.
-- **DE binary reader** — cleanroom reader for JPL DExxx planetary
-  ephemeris binaries (old DE200-generation format; modern DE405+ layout
-  queued). Validated against a synthetic DE200-layout file in CI and
-  against the real 43 MB `lnxm1600p2170.200`: its Moon distance at J2000
-  agrees with SWE's DE441-derived value to ~0.3 km.
-  Details: [docs/DE.md](docs/DE.md).
+- **Planetary ephemeris readers** — cleanroom readers for JPL DExxx
+  binaries (self-describing layout, DE200 through DE440+, nutation,
+  libration and TT−TDB columns, either byte order) and NAIF SPK kernels
+  (`.bsp`, type 2/3 segments with segment chaining). DE440 reproduces all
+  13,201 of JPL's official `testpo.440` points to 1.4e-14 AU, and
+  `de440s.bsp` agrees with the DE440 binary to 4 cm.
+  Details: [docs/DE.md](docs/DE.md), [docs/SPK.md](docs/SPK.md).
 - **Time scales** — exact proleptic-Gregorian calendar ↔ JD; UTC ↔ TAI ↔
   TT with the USNO leap-second table and correct `23:59:60` labeling in
   both directions; TT ↔ TDB (published truncated series, ~10 µs class);
@@ -56,13 +57,13 @@ Milestones 0–2 of 6 complete (2026-09-16):
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
 - **Tools** — `prometheia-fetch` (Python), `prometheia-convert`,
-  `prometheia-info`, `prometheia-bench`. Nine test suites, clean under
+  `prometheia-info`, `prometheia-bench`. Ten test suites, clean under
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
 decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0-M3 done
-(reader, time scales, frames); next: modern DE405+ layout, engine API +
-ayanamsas (M4), validation gates (M5), transports (M6).
+(DE + SPK readers, time scales, frames); next: engine API with
+apparent place + ayanamsas (M4), validation gates (M5), transports (M6).
 
 ## Build
 

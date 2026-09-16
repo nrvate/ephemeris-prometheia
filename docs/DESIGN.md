@@ -125,17 +125,15 @@ tool and script in this repo, and for anyone running them:
   - Increment 4 (parked): Everhart's triangular b-sequence in place of
     the monomial Vandermonde solve — better conditioning, fewer
     corrector iterations, lower noise floor.
-- **M3** — DE binary reader; time scales (TDB/TT/UTC/UT1, ΔT, leap
-  seconds); IAU 2006/2000A precession-nutation; ICRF →
-  ecliptic/equatorial/topocentric. Test corpus: de200.eph on hand.
-  - Increment 1 (done 2026-09-16): old-format DE reader
-    (`prometheia::de`, docs/DE.md) — header/constant parsing, lazy
-    record decode with cache, Chebyshev state+velocity. Validated
-    exactly against a synthetic DE200-layout file (CI) and physically
-    against the real 43 MB lnxm1600p2170.200 (Moon distance agrees with
-    SWE's DE441-derived value to ~0.3 km at J2000). The modern
-    DE405+-era header layout (pointer table embedded in header record
-    2) is the next slice, to be validated against a real DE441/de440s.
+- **M3** — DE binary + SPK readers; time scales (TDB/TT/UTC/UT1, ΔT,
+  leap seconds); IAU 2006/2000A precession-nutation; ICRF →
+  ecliptic/equatorial/topocentric. Test corpus: de200.eph, DE440 binary
+  + testpo.440, de440s.bsp (the latter three in gitignored `ephe/`).
+  - Increment 1 (done 2026-09-16): DE reader (`prometheia::de`,
+    docs/DE.md) — header/constant parsing, lazy record decode with
+    cache, Chebyshev state+velocity, validated against the real 43 MB
+    lnxm1600p2170.200 (9b97337). Its "old format without an embedded
+    pointer table" premise was wrong; corrected in increment 4.
   - Increment 2 (done 2026-09-16): time scales (`prometheia::time`,
     docs/TIME.md) — Hinnant exact calendar↔JD; the USNO leap-second
     table with UTC↔TAI↔TT including correct 23:59:60 labeling on both
@@ -149,6 +147,16 @@ tool and script in this repo, and for anyone running them:
     ecliptic-of-date matrices, ERA/GMST/GAST, WGS84 topocentric helper.
     Differentially validated against the installed Swiss Ephemeris:
     mean chain 0.00004", true chain 0.00047", GAST 0.0004".
+  - Increment 4 (done 2026-09-16): self-describing DE reader + SPK
+    (docs/DE.md, docs/SPK.md). The DE binary layout embeds NCON, AU,
+    EMRAT, NUMDE and the 15-column pointer table in header record 1 —
+    true of DE200 as much as DE440 — so the per-DENUM table path was
+    removed; nutations, librations, lunar mantle ω and TT−TDB columns,
+    either byte order, `relative_state` composition (Earth/Moon/EMB/SSB).
+    New `prometheia::spk`: DAF container, type 2/3 segments, segment
+    chaining with SPK precedence, either byte order. DE440 reproduces all
+    13,201 of JPL's testpo.440 points to 1.4e-14 AU; de440s.bsp agrees
+    with the DE440 binary to 4 cm over 1850–2149.
 - **M4** — engine API (`prometheia::Engine`), catalog stack overlay,
   calc() with flags/sigma/provenance, pdes→spkid secondary index,
   ayanamsa layer, C ABI shim, `ephem` CLI.

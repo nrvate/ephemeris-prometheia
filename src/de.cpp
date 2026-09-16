@@ -1,79 +1,67 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Old-format JPL DE binary reader. See de.hpp for the format summary
-// and docs/DE.md for the full derivation and provenance.
+// JPL DE binary reader. See de.hpp for the format summary and docs/DE.md
+// for the byte map, derivation and provenance.
 #include "prometheia/de.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 
-#include "prometheia/varint.hpp"
+#include "prometheia/chebyshev.hpp"
 
 namespace prometheia::de {
 namespace {
 
-// DE200 pointer table from JPL's public ASCII header.200 (GROUP 1050),
-// fetched from ssd.jpl.nasa.gov/ftp/eph/planets/ascii/de200/. Rows in
-// order: Mercury, Venus, Earth-Moon barycentre, Mars, Jupiter, Saturn,
-// Uranus, Neptune, Pluto, Moon (geocentric), Sun. The republished Linux
-// binary has no lunar-libration block: its records are NCOEFF=826 f64
-// words and the Sun block ends at slot 792, the rest is padding.
-constexpr OldFormatSpec kDe200 = {
-    200, // denum
-    826, // record_doubles (KSIZE 1652 words of 4 bytes)
-    200, // constant_count (NVALS)
-    400, // name_slot_count
-    {
-        {3, 12, 4},   // Mercury
-        {147, 12, 1}, // Venus
-        {183, 15, 2}, // Earth-Moon barycentre
-        {273, 10, 1}, // Mars
-        {303, 9, 1},  // Jupiter
-        {330, 8, 1},  // Saturn
-        {354, 8, 1},  // Uranus
-        {378, 6, 1},  // Neptune
-        {396, 6, 1},  // Pluto
-        {414, 12, 8}, // Moon (geocentric)
-        {702, 15, 1}, // Sun
-        {},           // Libration: absent from this binary
-    },
-    "JPL DE200 header.200 GROUP 1050 (ssd.jpl.nasa.gov, public domain)",
-};
+// Header record 1 byte map (verified against DE200 and DE440): 3 x 84
+// title bytes, 400 six-character name slots, then SS/FF/NN (start, end,
+// interval) and the fields below.
+constexpr size_t kTitleBytes = 3 * 84;
+constexpr size_t kNameSlots = 400;
+constexpr size_t kEpochOffset = kTitleBytes + kNameSlots * 6; // 2652
 
-constexpr OldFormatSpec kSpecs[] = {kDe200};
+constexpr size_t kNconOffset = 2676;     // int32 NCON
+constexpr size_t kAuOffset = 2680;       // f64 AU (km)
+constexpr size_t kEmratOffset = 2688;    // f64 EMRAT
+constexpr size_t kIptOffset = 2696;      // int32 x 36: columns 1-12
+constexpr size_t kNumdeOffset = 2840;    // int32 NUMDE
+constexpr size_t kLptOffset = 2844;      // int32 x 3: column 13
+constexpr size_t kExtNamesOffset = 2856; // names 401..NCON, then columns 14, 15
 
-constexpr int kTitleBytes = 3 * 84; // three 84-char header lines
+constexpr int kMaxConstants = 4000;
+constexpr size_t kPrefixBytes = kExtNamesOffset + (kMaxConstants - kNameSlots) * 6 + 24;
 
-// Chebyshev value and d/dtau derivative of sum(cs[k] * T_k(tau)).
-// T_0 = 1, T_1 = tau, T_k = 2*tau*T_{k-1} - T_{k-2};
-// T'_k = k * U_{k-1} with the same recurrence for U.
-void chebyshev_eval(const double* cs, int n, double tau, double& value, double& deriv) {
-    if (n <= 0) {
-        value = 0.0;
-        deriv = 0.0;
-        return;
-    }
-    if (n == 1) {
-        value = cs[0];
-        deriv = 0.0;
-        return;
-    }
-    double t_km2 = 1.0, t_km1 = tau;
-    double u_km2 = 1.0, u_km1 = 2.0 * tau;
-    value = cs[0] + cs[1] * tau;
-    deriv = cs[1];
-    for (int k = 2; k < n; ++k) {
-        const double t_k = 2.0 * tau * t_km1 - t_km2;
-        const double u_k = 2.0 * tau * u_km1 - u_km2;
-        value += cs[k] * t_k;
-        deriv += cs[k] * double(k) * u_km1;
-        t_km2 = t_km1;
-        t_km1 = t_k;
-        u_km2 = u_km1;
-        u_km1 = u_k;
-    }
+constexpr uint64_t bswap64(uint64_t v) {
+    uint64_t r = 0;
+    for (int i = 0; i < 8; ++i)
+        r |= ((v >> (8 * i)) & 0xFF) << (8 * (7 - i));
+    return r;
 }
+
+constexpr uint32_t bswap32(uint32_t v) {
+    return (v >> 24) | ((v >> 8) & 0xFF00) | ((v << 8) & 0xFF0000) | (v << 24);
+}
+
+struct ByteReader {
+    const std::string& buf;
+    bool swap;
+
+    bool has(size_t off, size_t n) const { return off <= buf.size() && n <= buf.size() - off; }
+    uint64_t u64(size_t off) const {
+        uint64_t v = 0;
+        for (int i = 0; i < 8; ++i)
+            v |= uint64_t(uint8_t(buf[off + size_t(i)])) << (8 * i);
+        return swap ? bswap64(v) : v;
+    }
+    double f64(size_t off) const { return std::bit_cast<double>(u64(off)); }
+    int32_t i32(size_t off) const {
+        uint32_t v = 0;
+        for (int i = 0; i < 4; ++i)
+            v |= uint32_t(uint8_t(buf[off + size_t(i)])) << (8 * i);
+        return int32_t(swap ? bswap32(v) : v);
+    }
+};
 
 std::string trimmed(const char* p, size_t n) {
     size_t end = n;
@@ -89,21 +77,138 @@ uint64_t file_size(std::ifstream& f) {
     return size < 0 ? 0 : uint64_t(size);
 }
 
+bool read_at(std::ifstream& f, uint64_t off, std::string& buf, size_t n) {
+    buf.assign(n, '\0');
+    f.clear();
+    f.seekg(std::streamoff(off));
+    f.read(buf.data(), std::streamsize(n));
+    return uint64_t(f.gcount()) == n;
+}
+
+// SS/FF/NN sanity: returns the data-record count, or 0 when implausible.
+uint64_t epoch_records(double ss, double ff, double nn) {
+    if (!std::isfinite(ss) || !std::isfinite(ff) || !std::isfinite(nn))
+        return 0;
+    if (!(ff > ss) || !(nn > 0.0) || nn > 64.0)
+        return 0;
+    const double span = (ff - ss) / nn;
+    if (span < 1.0 || span > 1e8 || std::fabs(span - std::round(span)) > 1e-6)
+        return 0;
+    return uint64_t(std::round(span));
+}
+
+bool present(const BodyLayout& b) {
+    return b.offset > 0 && b.ncoeff > 0 && b.nsubint > 0;
+}
+
+// Last 1-based word a column occupies (0 when absent).
+int64_t column_end(const BodyLayout& b, int column) {
+    if (!present(b))
+        return 0;
+    return int64_t(b.offset) - 1 + int64_t(b.ncoeff) * b.nsubint * component_count(Body(column));
+}
+
+enum class Probe { NoMatch, Match, Truncated };
+
+// Parses header record 1. Fills h (except the constant values, which
+// need record 2) and returns Match on success.
+Probe probe_header(const std::string& prefix, uint64_t size, bool swap, Header& h) {
+    const ByteReader r{prefix, swap};
+    if (!r.has(kExtNamesOffset, 24))
+        return Probe::NoMatch;
+    const uint64_t records =
+        epoch_records(r.f64(kEpochOffset), r.f64(kEpochOffset + 8), r.f64(kEpochOffset + 16));
+    if (records == 0)
+        return Probe::NoMatch;
+    const int32_t ncon = r.i32(kNconOffset);
+    const int32_t numde = r.i32(kNumdeOffset);
+    const double au = r.f64(kAuOffset);
+    const double emrat = r.f64(kEmratOffset);
+    if (ncon < 1 || ncon > kMaxConstants || numde < 1 || numde > 100000)
+        return Probe::NoMatch;
+    if (!(au > 1.0e8 && au < 2.0e8) || !(emrat > 70.0 && emrat < 90.0))
+        return Probe::NoMatch;
+
+    BodyLayout bodies[kColumnCount] = {};
+    for (int c = 0; c < 12; ++c) {
+        const size_t o = kIptOffset + size_t(c) * 12;
+        bodies[c] = {r.i32(o), r.i32(o + 4), r.i32(o + 8)};
+    }
+    bodies[12] = {r.i32(kLptOffset), r.i32(kLptOffset + 4), r.i32(kLptOffset + 8)};
+    const size_t ext = ncon > int32_t(kNameSlots) ? size_t(ncon) - kNameSlots : 0;
+    const size_t tail = kExtNamesOffset + ext * 6;
+    if (r.has(tail, 24)) {
+        bodies[13] = {r.i32(tail), r.i32(tail + 4), r.i32(tail + 8)};
+        bodies[14] = {r.i32(tail + 12), r.i32(tail + 16), r.i32(tail + 20)};
+    }
+
+    int64_t record_doubles = 0;
+    for (int c = 0; c < kColumnCount; ++c) {
+        BodyLayout& b = bodies[c];
+        if (!present(b)) {
+            b = {};
+            continue;
+        }
+        if (b.offset < 3 || b.ncoeff > 64 || b.nsubint > 64)
+            return Probe::NoMatch;
+        record_doubles = std::max(record_doubles, column_end(b, c + 1));
+    }
+    // A planetary ephemeris without the Sun or the Earth-Moon barycentre
+    // is not one we recognise.
+    if (!present(bodies[2]) || !present(bodies[10]) || record_doubles > 100000)
+        return Probe::NoMatch;
+    const uint64_t rec_len = uint64_t(record_doubles) * 8;
+    if (tail + 24 > rec_len || uint64_t(ncon) * 8 > rec_len)
+        return Probe::NoMatch;
+    if (size < 2 * rec_len)
+        return Probe::NoMatch;
+    if (size < (records + 2) * rec_len)
+        return Probe::Truncated;
+
+    h.byte_swapped = swap;
+    h.title = trimmed(prefix.data(), kTitleBytes);
+    h.start_jed = r.f64(kEpochOffset);
+    h.end_jed = r.f64(kEpochOffset + 8);
+    h.interval_days = r.f64(kEpochOffset + 16);
+    h.denum = numde;
+    h.record_doubles = int(record_doubles);
+    h.record_count = records;
+    h.au_km = au;
+    h.emrat = emrat;
+    std::copy(std::begin(bodies), std::end(bodies), std::begin(h.bodies));
+    h.constant_names.clear();
+    h.constant_names.reserve(size_t(ncon));
+    for (int32_t i = 0; i < ncon; ++i) {
+        const size_t off = size_t(i) < kNameSlots ? kTitleBytes + size_t(i) * 6
+                                                  : kExtNamesOffset + (size_t(i) - kNameSlots) * 6;
+        h.constant_names.push_back(trimmed(prefix.data() + off, 6));
+    }
+    return Probe::Match;
+}
+
+void subtract(double a[6], const double b[6]) {
+    for (int i = 0; i < 6; ++i)
+        a[i] -= b[i];
+}
+
 } // namespace
 
-const OldFormatSpec* old_format_spec(int denum) {
-    for (const OldFormatSpec& s : kSpecs) {
-        if (s.denum == denum)
-            return &s;
+int component_count(Body body) {
+    switch (body) {
+    case Body::Nutations:
+        return 2;
+    case Body::TTminusTDB:
+        return 1;
+    default:
+        return 3;
     }
-    return nullptr;
 }
 
 bool DeFile::has_body(Body body) const {
     const int b = int(body);
-    if (b < 1 || b > 12 || spec_ == nullptr)
+    if (b < 1 || b > kColumnCount || header_.record_doubles == 0)
         return false;
-    return spec_->bodies[b - 1].offset > 0;
+    return present(header_.bodies[b - 1]);
 }
 
 std::optional<double> DeFile::constant(std::string_view name) const {
@@ -122,141 +227,91 @@ Result<DeFile> DeFile::open(const std::string& path) {
         return make_error(ErrorCode::IoError, "cannot open '" + path + "'");
     }
     const uint64_t size = file_size(out.file_);
-    if (size < 4 * 8) {
+    if (size < kEpochOffset + 24) {
         return make_error(ErrorCode::FormatError,
                           "file too small to be a DE binary: '" + path + "'");
     }
+    std::string prefix;
+    if (!read_at(out.file_, 0, prefix, size_t(std::min<uint64_t>(size, kPrefixBytes)))) {
+        return make_error(ErrorCode::IoError, "cannot read header of '" + path + "'");
+    }
 
-    // The record length is not self-described in the old format: try each
-    // built-in spec and accept the one whose geometry checks out.
-    for (const OldFormatSpec& spec : kSpecs) {
-        const uint64_t rec_len = uint64_t(spec.record_doubles) * 8;
-        if (2 * rec_len > size)
+    // Little-endian first, then byte-swapped.
+    for (bool swap : {false, true}) {
+        Header h;
+        const Probe p = probe_header(prefix, size, swap, h);
+        if (p == Probe::NoMatch)
             continue;
+        const uint64_t rec_len = uint64_t(h.record_doubles) * 8;
+        const size_t ncon = h.constant_names.size();
 
-        // Header record 1: title, constant-name slots, then SS/FF/NN.
-        std::string rec1(rec_len, '\0');
-        out.file_.seekg(0);
-        out.file_.read(rec1.data(), std::streamsize(rec_len));
-        if (uint64_t(out.file_.gcount()) != rec_len)
+        // Header record 2: constant values. DENUM (when named) must agree
+        // with the header's NUMDE.
+        std::string rec2;
+        if (!read_at(out.file_, rec_len, rec2, size_t(rec_len)))
             continue;
-        const size_t epoch_off = size_t(kTitleBytes) + size_t(spec.name_slot_count) * 6;
-        if (epoch_off + 24 > rec_len)
+        const ByteReader r2{rec2, swap};
+        h.constant_values.resize(ncon);
+        for (size_t i = 0; i < ncon; ++i)
+            h.constant_values[i] = r2.f64(i * 8);
+        if (ncon > 0 && h.constant_names[0] == "DENUM" && h.constant_values[0] != double(h.denum)) {
             continue;
-        double ss = 0.0, ff = 0.0, nn = 0.0;
-        const char* rec1_end = rec1.data() + rec_len;
-        const char* q = get_f64(rec1.data() + epoch_off, rec1_end, ss);
-        if (q == nullptr)
-            continue;
-        q = get_f64(q, rec1_end, ff);
-        if (q == nullptr)
-            continue;
-        q = get_f64(q, rec1_end, nn);
-        if (q == nullptr)
-            continue;
-        if (!std::isfinite(ss) || !std::isfinite(ff) || !std::isfinite(nn))
-            continue;
-        if (!(ff > ss) || !(nn > 0.0) || nn > 64.0)
-            continue;
-        const double span = (ff - ss) / nn;
-        if (span < 1.0 || std::fabs(span - std::round(span)) > 1e-6)
-            continue;
-        const uint64_t records = uint64_t(std::round(span));
-        if (size < (records + 2) * rec_len) {
+        }
+        if (p == Probe::Truncated) {
             return make_error(ErrorCode::CorruptionError,
-                              "DE binary truncated: header promises " + std::to_string(records) +
-                                  " data records of " + std::to_string(rec_len) +
-                                  " bytes, file is " + std::to_string(size) + " bytes: '" + path +
-                                  "'");
+                              "DE binary truncated: header promises " +
+                                  std::to_string(h.record_count) + " data records of " +
+                                  std::to_string(rec_len) + " bytes, file is " +
+                                  std::to_string(size) + " bytes: '" + path + "'");
         }
 
-        // Header record 2: constant values, DENUM first.
-        std::string rec2(rec_len, '\0');
-        out.file_.seekg(std::streamoff(rec_len));
-        out.file_.read(rec2.data(), std::streamsize(rec_len));
-        if (uint64_t(out.file_.gcount()) != rec_len)
+        // First data record must start at SS and span one interval.
+        std::string first;
+        if (!read_at(out.file_, 2 * rec_len, first, 16))
             continue;
-        double denum_val = 0.0;
-        if (!get_f64(rec2.data(), rec2.data() + 8, denum_val))
-            continue;
-        if (std::fabs(denum_val - std::round(denum_val)) > 1e-9)
-            continue;
-        if (int(std::round(denum_val)) != spec.denum)
+        const ByteReader r3{first, swap};
+        if (r3.f64(0) != h.start_jed || r3.f64(8) != h.start_jed + h.interval_days)
             continue;
 
-        // Geometry and identity match this spec: fill in the header.
-        out.spec_ = &spec;
-        out.header_.title = trimmed(rec1.data(), kTitleBytes);
-        out.header_.start_jed = ss;
-        out.header_.end_jed = ff;
-        out.header_.interval_days = nn;
-        out.header_.denum = spec.denum;
-        out.header_.record_count = records;
-        out.header_.constant_names.clear();
-        out.header_.constant_values.clear();
-        out.header_.constant_names.reserve(size_t(spec.constant_count));
-        const char* names = rec1.data() + kTitleBytes;
-        for (int i = 0; i < spec.constant_count; ++i) {
-            out.header_.constant_names.push_back(trimmed(names + size_t(i) * 6, 6));
-        }
-        out.header_.constant_values.resize(size_t(spec.constant_count));
-        const char* vp = rec2.data();
-        const char* vend = rec2.data() + rec_len;
-        for (int i = 0; i < spec.constant_count; ++i) {
-            if (!get_f64(vp, vend, out.header_.constant_values[size_t(i)])) {
-                return make_error(ErrorCode::FormatError,
-                                  "constant values truncated in '" + path + "'");
-            }
-            vp += 8;
-        }
+        out.header_ = std::move(h);
         out.cache_.clear();
         out.cached_record_ = ~uint64_t{0};
         return out;
     }
 
-    return make_error(ErrorCode::FormatError,
-                      "not a supported old-format DE binary: '" + path +
-                          "' (known old-format DENUMs: 200; modern-format DE405+ reader pending)");
+    return make_error(ErrorCode::FormatError, "not a recognised JPL DE binary: '" + path + "'");
 }
 
 Result<void> DeFile::load_record(uint64_t index) const {
     if (cached_record_ == index)
         return {};
 
-    const uint64_t rec_len = uint64_t(spec_->record_doubles) * 8;
-    std::string buf(rec_len, '\0');
-    file_.seekg(std::streamoff((index + 2) * rec_len));
-    file_.read(buf.data(), std::streamsize(rec_len));
-    if (uint64_t(file_.gcount()) != rec_len) {
+    const uint64_t rec_len = uint64_t(header_.record_doubles) * 8;
+    std::string buf;
+    if (!read_at(file_, (index + 2) * rec_len, buf, size_t(rec_len))) {
         cached_record_ = ~uint64_t{0};
         return make_error(ErrorCode::CorruptionError,
                           "truncated data record " + std::to_string(index) + " in '" + path_ + "'");
     }
-    cache_.resize(size_t(spec_->record_doubles));
-    const char* p = buf.data();
-    const char* end = buf.data() + rec_len;
-    for (int i = 0; i < spec_->record_doubles; ++i) {
-        if (!get_f64(p, end, cache_[size_t(i)])) {
-            return make_error(ErrorCode::CorruptionError,
-                              "short decode of record " + std::to_string(index));
-        }
-        p += 8;
-    }
+    const ByteReader r{buf, header_.byte_swapped};
+    cache_.resize(size_t(header_.record_doubles));
+    for (size_t i = 0; i < cache_.size(); ++i)
+        cache_[i] = r.f64(i * 8);
     cached_record_ = index;
     return {};
 }
 
 Result<void> DeFile::state(Body body, double jed, double out[6]) const {
-    if (spec_ == nullptr) {
+    if (header_.record_doubles == 0) {
         return make_error(ErrorCode::ArgumentError, "DeFile is not open");
     }
     const int b = int(body);
-    if (b < 1 || b > 12) {
+    if (b < 1 || b > kColumnCount) {
         return make_error(ErrorCode::ArgumentError,
                           "body index out of range: " + std::to_string(b));
     }
-    const BodyLayout& layout = spec_->bodies[b - 1];
-    if (layout.offset <= 0) {
+    const BodyLayout& layout = header_.bodies[b - 1];
+    if (!present(layout)) {
         return make_error(ErrorCode::NotFound,
                           "body " + std::to_string(b) + " is not in this ephemeris");
     }
@@ -292,16 +347,97 @@ Result<void> DeFile::state(Body body, double jed, double out[6]) const {
     tau = std::max(-1.0, std::min(1.0, tau));
 
     // Component c of subinterval sub occupies ncoeff doubles at
-    // (offset - 1) + sub*3*ncoeff + c*ncoeff (0-based, after the epochs).
+    // (offset - 1) + sub*ncomp*ncoeff + c*ncoeff (0-based, after the epochs).
     const int n = layout.ncoeff;
-    const size_t base = size_t(layout.offset - 1) + size_t(sub) * size_t(3 * n);
+    const int ncomp = component_count(body);
+    const size_t base = size_t(layout.offset - 1) + size_t(sub) * size_t(ncomp * n);
     const double scale = 2.0 / width; // dtau/dt
     for (int c = 0; c < 3; ++c) {
+        if (c >= ncomp) {
+            out[c] = 0.0;
+            out[3 + c] = 0.0;
+            continue;
+        }
         double value = 0.0, deriv = 0.0;
         chebyshev_eval(&cache_[base + size_t(c) * size_t(n)], n, tau, value, deriv);
         out[c] = value;
         out[3 + c] = deriv * scale;
     }
+    return {};
+}
+
+Result<void> DeFile::barycentric(Target target, double jed, double out[6]) const {
+    switch (target) {
+    case Target::SolarSystemBary:
+        std::fill(out, out + 6, 0.0);
+        return {};
+    case Target::EarthMoonBary:
+        return state(Body::EarthMoonBary, jed, out);
+    case Target::Earth:
+    case Target::Moon: {
+        double moon[6];
+        Result<void> r = state(Body::EarthMoonBary, jed, out);
+        if (!r.ok())
+            return r;
+        r = state(Body::Moon, jed, moon);
+        if (!r.ok())
+            return r;
+        const double k = 1.0 / (1.0 + header_.emrat);
+        for (int i = 0; i < 6; ++i) {
+            out[i] -= moon[i] * k; // Earth
+            if (target == Target::Moon)
+                out[i] += moon[i];
+        }
+        return {};
+    }
+    default: {
+        const int t = int(target);
+        if (t < 1 || t > 11) {
+            return make_error(ErrorCode::ArgumentError,
+                              "target out of range: " + std::to_string(t));
+        }
+        return state(Body(t), jed, out);
+    }
+    }
+}
+
+Result<void> DeFile::relative_state(Target target, Target center, double jed, double out[6]) const {
+    if (target == center) {
+        // Still validate the query (coverage, bodies present).
+        Result<void> r = barycentric(target, jed, out);
+        if (!r.ok())
+            return r;
+        std::fill(out, out + 6, 0.0);
+        return {};
+    }
+    // Earth-Moon pairs straight from the geocentric Moon column: no
+    // cancellation through barycentric magnitudes.
+    const bool em_pair =
+        (target == Target::Moon || target == Target::Earth || target == Target::EarthMoonBary) &&
+        (center == Target::Moon || center == Target::Earth || center == Target::EarthMoonBary);
+    if (em_pair) {
+        double moon[6];
+        Result<void> r = state(Body::Moon, jed, moon);
+        if (!r.ok())
+            return r;
+        const double k = 1.0 / (1.0 + header_.emrat);
+        // Offsets from the Earth-Moon barycentre along the geocentric Moon.
+        const auto from_emb = [&](Target t) {
+            return t == Target::Moon ? 1.0 - k : (t == Target::Earth ? -k : 0.0);
+        };
+        const double f = from_emb(target) - from_emb(center);
+        for (int i = 0; i < 6; ++i)
+            out[i] = moon[i] * f;
+        return {};
+    }
+    double c[6];
+    Result<void> r = barycentric(target, jed, out);
+    if (!r.ok())
+        return r;
+    r = barycentric(center, jed, c);
+    if (!r.ok())
+        return r;
+    subtract(out, c);
     return {};
 }
 

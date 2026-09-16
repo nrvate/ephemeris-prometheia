@@ -4,93 +4,140 @@
 JPL planetary ephemeris binaries ("DExxx" files). Reading a DE file
 means evaluating *their* Chebyshev representation — nothing here
 contradicts our own storage policy, which keeps Chebyshev out of the
-formats we define (EPM1 stores initial conditions).
+formats we define (EPM1 stores initial conditions). The same ephemerides
+in NAIF's SPK container are read by `prometheia::spk`
+([SPK.md](SPK.md)).
 
-## What is supported
+## Test corpus
 
-The **old-generation binary layout** (DE200 era), as republished by JPL
-for modern machines — verified end-to-end against
-`lnxm1600p2170.200` (the 43 MB file JPL's Swiss-Ephemeris download page
-links to; tracked at `/shares/swisseph/ephe/de200.eph` on this machine,
-set `PROMETHEIA_DE200` to point the tests elsewhere):
+| file | source | size | notes |
+|------|--------|------|-------|
+| `lnxm1600p2170.200` | JPL, via the Swiss Ephemeris download page | 43 MB | DE200, 1600–2170; tracked at `/shares/swisseph/ephe/de200.eph` (`PROMETHEIA_DE200`) |
+| `linux_p1550p2650.440` | `ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/` | 98 MB | DE440, 1550–2650 (`PROMETHEIA_DE440`) |
+| `testpo.440` | same directory | 838 KB | JPL's official test points for DE440 (`PROMETHEIA_TESTPO440`) |
+| `header.440`, `header.200` | JPL ASCII headers | 22 KB | published GROUP 1050 pointer tables, used to pin the tests |
 
-- little-endian f64 throughout, records of `NCOEFF` = 826 doubles
-  (6608 bytes), `KSIZE` = 1652 4-byte words;
-- two header records: title (3 × 84 bytes), 400 six-character constant
-  name slots (junk-padded past the real `NVALS` = 200 names — the
-  blank-scan trap), then the epoch triple SS/FF/NN; the second header
-  record holds the constant values, DENUM first;
-- data records `[start JED, end JED, coefficients...]` of 32 days;
-- DE200 bodies: heliocentric planets, geocentric Moon, barycentric Sun;
-  **no lunar libration block** (the pointer table in the published ASCII
-  `header.200` lists one, but it would overflow the 826-double record;
-  the republished binary simply does not carry it).
+The DE440 files live in the repo's gitignored `ephe/` directory (see
+`ephe/SHA256SUMS` locally); real-file tests print SKIP when a file is
+absent, so CI runs the synthetic part only.
 
-The modern header layout (DE405 and later, which embeds the pointer
-table in header record 2) is **not implemented yet**; `DeFile::open`
-reports a clear error for such files. Adding it is queued work, to be
-validated against a real DE441/de440s binary.
+## Byte map
 
-## Where the pointer table comes from
+Both files — the 1981 DE200 and the 2021 DE440 — use one self-describing
+layout. Records are `NCOEFF` f64 words; the first two records are
+headers, the rest data. Header record 1 (offsets verified on both files):
 
-Old-format binaries do not embed the GROUP 1050 Chebyshev pointer table,
-so it is supplied per-DENUM from the ephemeris' published ASCII header —
-public-domain JPL data (cleanroom-safe; it is data, not code):
+| offset | type | field |
+|-------:|------|-------|
+| 0 | 3 × 84 chars | title lines |
+| 252 | 400 × 6 chars | constant names 1–400 |
+| 2652 | 3 × f64 | SS: start JED, end JED, interval (days) |
+| 2676 | i32 | NCON, number of constants |
+| 2680 | f64 | AU (km) |
+| 2688 | f64 | EMRAT, Earth/Moon mass ratio |
+| 2696 | 12 × 3 × i32 | pointer table columns 1–12 |
+| 2840 | i32 | NUMDE, the DE number |
+| 2844 | 3 × i32 | pointer table column 13 |
+| 2856 | (NCON−400) × 6 chars | constant names 401..NCON (when NCON > 400) |
+| then | 3 × i32, 3 × i32 | pointer table columns 14, 15 |
 
-- `https://ssd.jpl.nasa.gov/ftp/eph/planets/ascii/de200/header.200`
+Header record 2 holds the NCON constant values, DENUM first. A pointer
+triple is (offset, ncoeff, nsubint): the 1-based word offset of the
+column's first coefficient counting the record's two epoch doubles, the
+coefficients per component per subinterval, and subintervals per record.
+A column is absent when ncoeff is 0 (JPL writes the next free offset with
+zero counts).
 
-DE200 rows (offset is 1-based counting the two epoch doubles; bodies
-listed in GROUP 1050 order):
+`NCOEFF` is not stored in the binary; the reader derives it as the last
+word any column occupies, which reproduces the published headers exactly
+(DE200: 826, DE440: 1018). The file must then hold `(records + 2) ×
+NCOEFF × 8` bytes, and the first data record must start at SS.
 
-| body                 | offset | ncoeff | nsubint |
-|----------------------|--------|--------|---------|
-| Mercury              |      3 |     12 |       4 |
-| Venus                |    147 |     12 |       1 |
-| Earth-Moon barycentre|    183 |     15 |       2 |
-| Mars                 |    273 |     10 |       1 |
-| Jupiter              |    303 |      9 |       1 |
-| Saturn               |    330 |      8 |       1 |
-| Uranus               |    354 |      8 |       1 |
-| Neptune              |    378 |      6 |       1 |
-| Pluto                |    396 |      6 |       1 |
-| Moon (geocentric)    |    414 |     12 |       8 |
-| Sun                  |    702 |     15 |       1 |
+| column | content | components | units |
+|-------:|---------|-----------:|-------|
+| 1–9 | Mercury … Pluto (barycentric; 3 = Earth-Moon barycentre) | 3 | km, km/day |
+| 10 | Moon, geocentric | 3 | km, km/day |
+| 11 | Sun, barycentric | 3 | km, km/day |
+| 12 | nutations Δψ, Δε (IAU 1980) | 2 | rad, rad/day |
+| 13 | lunar mantle librations (Euler angles) | 3 | rad, rad/day |
+| 14 | lunar mantle angular velocity | 3 | rad/day |
+| 15 | TT−TDB at the geocentre | 1 | s |
 
-The table is gapless — each offset is exactly the previous offset plus
-`ncoeff × nsubint × 3` — which doubles as a self-consistency check.
+Pointer tables as read from the binaries, matching the published ASCII
+headers:
 
-## Geometry and evaluation
+| column | DE200 | DE440 |
+|--------|-------|-------|
+| Mercury | 3/12/4 | 3/14/4 |
+| Venus | 147/12/1 | 171/10/2 |
+| EMB | 183/15/2 | 231/13/2 |
+| Mars | 273/10/1 | 309/11/1 |
+| Jupiter | 303/9/1 | 342/8/1 |
+| Saturn | 330/8/1 | 366/7/1 |
+| Uranus | 354/8/1 | 387/6/1 |
+| Neptune | 378/6/1 | 405/6/1 |
+| Pluto | 396/6/1 | 423/6/1 |
+| Moon | 414/12/8 | 441/13/8 |
+| Sun | 702/15/1 | 753/11/2 |
+| Nutations | 747/10/4 | 819/10/4 |
+| Librations | — | 899/10/4 |
+| Mantle ω, TT−TDB | — | — |
 
-For a target at time *t*: record `j = floor((t - SS) / NN)`;
-subinterval `s` of width `NN / nsubint` days inside the record; normalised
-argument `τ = 2(t - t_sub_start)/width - 1`. Within a subinterval the
-layout is component-major (`x`, `y`, `z` blocks of `ncoeff`
-coefficients). Position is `Σ c_k T_k(τ)`, velocity is
-`Σ c_k k U_{k-1}(τ) · 2/width` — i.e. **km and km/day** for this file
-(old DE200 units differ from the modern AU / AU-day convention; callers
-convert with the file's own `AU` constant).
+Either byte order is accepted: the reader probes little-endian first,
+then byte-swapped, and accepts the order under which the header is
+plausible, DENUM matches NUMDE, and the first data record starts at SS.
 
-The reader decodes records lazily and caches the most recent one; the
-record length is not self-described in old-format files, so `open()`
-matches the file against the built-in per-DENUM specs (geometry sanity
-plus DENUM identity) before trusting it.
+### Correction to the first reader increment
+
+The first increment (9b97337) treated `lnxm1600p2170.200` as an
+"old-format" file without an embedded pointer table, supplied the table
+from `header.200`, and labelled column 12 a libration block absent from
+the file. All three were wrong: the binary embeds the full table at the
+offsets above, column 12 holds DE200's nutations (the block ends exactly
+on word 826), and DE200's planets are barycentric (heliocentric
+positions differ from DE440 by ~1.1 × 10⁶ km; barycentric ones agree to
+~860 km). The separate old-format code path was removed.
+
+## Evaluation
+
+For a target at time *t*: record `j = floor((t − SS) / interval)`;
+subinterval `s` of width `interval / nsubint`; normalised argument
+`τ = 2(t − t_sub_start)/width − 1`. Within a subinterval the layout is
+component-major. Value `Σ c_k T_k(τ)`, rate `Σ c_k k U_{k−1}(τ) · 2/width`.
+
+`DeFile::state(Body, jed, out)` returns a raw column (unused components
+zero). `DeFile::relative_state(Target, Target, jed, out)` composes bodies
+in JPL's customary target numbering (1–11 as above with 3 = Earth, 12 =
+solar-system barycentre, 13 = Earth-Moon barycentre):
+`Earth = EMB − Moon/(1 + EMRAT)`, `Moon = Earth + geocentric Moon`, and
+Earth/Moon/EMB pairs directly from the geocentric Moon column so no
+precision is lost through barycentric magnitudes.
+
+A `DeFile` caches its last record and is not safe for concurrent use.
 
 ## Validation
 
-`tests/test_de.cpp` has two parts:
+`tests/test_de.cpp`:
 
-- **Synthetic** (runs everywhere, CI included): a DE200-layout file is
-  generated with a known degree-3 Chebyshev field; every body is checked
-  at record/subinterval boundaries and the end epoch to 1e-9, plus
-  error paths (missing file, unsupported DENUM, truncation, out-of-range
-  queries, absent bodies).
-- **Real file** (skipped when absent, enabled via `PROMETHEIA_DE200`):
-  header and constants pinned against the known DE200 values; Earth
-  reconstructed as `EMB - Moon/(1+EMRAT)` with Earth-Sun 0.98333 AU at
-  J2000; Moon geocentric distance 402,448.6 km at J2000 — SWE
-  (DE441-derived data) inverts to 402,448.9 km at the same epoch, so the
-  two ephemerides agree to ~0.3 km; polynomial-segment joins below
-  1.5 km across all bodies (measured worst: Mercury 0.80 km); analytic
-  velocities against finite differences to 1e-5; obliquity from Earth's
-  orbital pole 23.439°; heliocentric planet distances in their physical
-  ranges.
+- **Synthetic** (runs everywhere, CI included): a DE-layout file with 450
+  constants, eight-subinterval Moon, nutations, librations, TT−TDB and an
+  absent column, in both byte orders; every column checked at
+  record/subinterval boundaries and the end epoch (exact, |Δ| = 0);
+  composition formulas; error paths (missing file, garbage, DENUM
+  mismatch, truncation mid-record and by a whole record, out-of-range
+  and absent-column queries).
+- **DE440 vs JPL's `testpo.440`**: all 13,201 test points inside the
+  file's coverage — worst |Δ| 1.4 × 10⁻¹⁴ AU (AU/day) for bodies,
+  4 × 10⁻²⁰ rad for nutations, 1.5 × 10⁻¹¹ rad for librations (angles of
+  thousands of radians, so a larger absolute print-noise floor).
+- **DE200 and DE440**: headers and pointer tables pinned against the
+  published ASCII headers; polynomial joins at subinterval and record
+  boundaries ~1–2 mm (each side carried to the boundary with its own
+  velocity from the exactly-rounded probe epochs); nutation columns
+  against our IAU 2000A series (≤ 0.009″, the IAU 1980 vs 2000A model
+  difference); Moon geocentric distance 402,448.6 km at J2000 (SWE's
+  DE441-derived value: 402,448.9 km); heliocentric planet distances;
+  obliquity from Earth's orbital pole 23.439°.
+- **DE200 vs DE440**: geocentric directions at 1900, 2000, 2026, 2100
+  agree to ≤ 2.14″ for the Sun, Moon and planets (Neptune worst, Moon
+  1.49″); Pluto 18″ — the 1981 fit predates much of its astrometry.

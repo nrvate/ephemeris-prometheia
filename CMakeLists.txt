@@ -16,6 +16,7 @@ add_library(prometheia
   src/catalog.cpp
   src/cbor.cpp
   src/de.cpp
+  src/spk.cpp
   src/frames.cpp
   src/kepler.cpp
   src/time.cpp)
@@ -30,6 +31,8 @@ if(PROMETHEIA_SANITIZE)
 endif()
 
 enable_testing()
+# Real-data tests look for JPL files under ephe/ (gitignored) by default.
+add_compile_definitions(PROMETHEIA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_executable(test_cbor tests/test_cbor.cpp)
 target_link_libraries(test_cbor PRIVATE prometheia)
 add_test(NAME cbor COMMAND test_cbor)
@@ -57,6 +60,10 @@ add_test(NAME radau COMMAND test_radau)
 add_executable(test_de tests/test_de.cpp)
 target_link_libraries(test_de PRIVATE prometheia)
 add_test(NAME de COMMAND test_de)
+
+add_executable(test_spk tests/test_spk.cpp)
+target_link_libraries(test_spk PRIVATE prometheia)
+add_test(NAME spk COMMAND test_spk)
 
 add_executable(test_time tests/test_time.cpp)
 target_link_libraries(test_time PRIVATE prometheia)
