@@ -183,6 +183,64 @@ catalogs by priority — newer wins, older answers remain available beneath.
 No rebake of the 1.56M-object base catalog is ever required to correct one
 orbit. (Overlay mechanics land with the engine, M4.)
 
+## Freshness: catching orbit updates in hours or days
+
+SBDB is a **living database, not a release train**: JPL's orbit-determination
+pipelines fold in new astrometry continuously (observations flow
+observatory → MPC daily batches → JPL; solutions refresh within hours for
+active objects), and SBDB exposes **no change feed, webhook, or
+modified-since filter** (verified against the filter docs 2026-09-16).
+Freshness is therefore *our* mechanism, and the tiered machinery below is
+**implemented in `prometheia-fetch`** as a first-class intended use case.
+
+**Three observing tiers, each sized to its patience:**
+
+1. **Hot subset (hourly, tiny):** the objects a deployment actually cares
+   about, swept by class with full precision — a few hundred KB per run.
+
+   ```sh
+   sbdb_fetch.py --out-dir hot-cen --kinds a --sb-class CEN,TJN
+   sbdb_fetch.py --out-dir hot-named --kinds a --fields <fields> --sb-class ...
+   ```
+
+2. **Delta sweep (daily):** a slim identity sweep of *all* bodies —
+   `kind,spkid,orbit_id` only, ~2 MB per 50k page — diffed against the
+   previous slim run. `orbit_id` is the orbit-solution identifier; a moved
+   value means a new solution for that body, and only those bodies are
+   re-fetched, one request each via the single-object endpoint
+   (capped by `--max-delta`; beyond the cap the tool demands a full pull).
+   Output is an **overlay catalog** in the standard 21-column layout, so
+   the unmodified converter turns it into a stackable `.epm`.
+
+   ```sh
+   sbdb_fetch.py --slim --out-dir slim-20260916 --page-size 200000
+   sbdb_fetch.py --slim --out-dir slim-20260917 --delta-prev slim-20260916 \
+                 --delta-out overlay-20260917
+   prometheia-convert overlay-20260917 -o sbdb-delta-20260917.epm
+   ```
+
+   Delta-run characteristics, measured on the smoke test: 1 slim sweep
+   (~32 pages at 200k/page) + 1 request per changed body. A quiet day
+   touches dozens of orbits; a busy one, a few thousand.
+
+   Format nuance learned in the smoke test: the query API reports
+   `orbit_id` as e.g. `48` / `JPL 74` while the single-object API reports
+   `74` — the diff compares sweep-to-sweep only, so the inconsistency
+   never crosses a comparison. The single-object `kind` is a subtype code
+   (`an`/`au`/`cn`/`cu` = numbered/unnumbered asteroid/comet); the
+   converter classifies by leading letter.
+
+3. **Consolidated base (weekly/monthly):** the full 33-page pull as the
+   authoritative base catalog; tiers 1–2 produce small overlay catalogs
+   that stack on top by priority until the next base.
+
+**Nightly CI releases — the noted idea (not built).** The pipeline is
+headless and resumable, so a scheduled CI job could run tier 2 nightly and
+publish the overlay as a release asset (`sbdb-delta-YYYYMMDD.epm` +
+sha256), tier 3 weekly/monthly. Etiquette binds CI like any other runner:
+sequential, delay-bearing, announcing itself. Deliberately parked until
+someone actually wants the cadence.
+
 ## Distribution: releases when the data changes
 
 SBDB orbit solutions change continuously, so catalogs are **published as

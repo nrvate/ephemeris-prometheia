@@ -104,8 +104,12 @@ ParseOutcome parse_row(const std::vector<std::string>& cols, const FieldMap& fm,
 
   catalog::Record r;
   r.spkid = spkid;
+  // kind column: query API gives bare "a"/"c"; the single-object API
+  // (delta overlays) gives subtypes "an"/"au"/"cn"/"cu". Classify by the
+  // leading letter.
   const std::string& kind = col("kind");
-  r.body_class = kind == "c" ? catalog::BodyClass::Comet : catalog::BodyClass::Asteroid;
+  r.body_class = (!kind.empty() && kind[0] == 'c') ? catalog::BodyClass::Comet
+                                                  : catalog::BodyClass::Asteroid;
   r.epoch_jtdb = parse_double_or(epoch_s, 0.0);
   r.a_au = parse_double_or(a_s, 0.0);
   r.e = parse_double_or(e_s, 0.0);
