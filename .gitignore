@@ -8,3 +8,7 @@ sbdb-raw*/
 *.so
 .cache/
 compile_commands.json
+full-fetch.log
+slim-*/
+slim-prev/
+overlay-test*/

@@ -14,7 +14,8 @@ pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 
 add_library(prometheia
   src/catalog.cpp
-  src/cbor.cpp)
+  src/cbor.cpp
+  src/kepler.cpp)
 target_include_directories(prometheia PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(prometheia PUBLIC PkgConfig::ZSTD)
 target_compile_options(prometheia PRIVATE -Wall -Wextra -Werror)
@@ -33,6 +34,14 @@ add_test(NAME cbor COMMAND test_cbor)
 add_executable(test_catalog tests/test_catalog.cpp)
 target_link_libraries(test_catalog PRIVATE prometheia)
 add_test(NAME catalog COMMAND test_catalog)
+
+add_executable(test_kepler tests/test_kepler.cpp)
+target_link_libraries(test_kepler PRIVATE prometheia)
+add_test(NAME kepler COMMAND test_kepler)
+
+add_executable(test_integrator tests/test_integrator.cpp)
+target_link_libraries(test_integrator PRIVATE prometheia)
+add_test(NAME integrator COMMAND test_integrator)
 
 add_executable(prometheia-convert tools/convert/convert_main.cpp)
 target_link_libraries(prometheia-convert PRIVATE prometheia)
