@@ -17,24 +17,35 @@ application). The ephemeris *data* it ingests is US-government public domain
 
 ## Status
 
-Milestone 1 (of 6) complete:
+Milestones 0–2 of 6 complete (2026-09-16):
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
-  axis; ~25 bytes/record at scale. Spec: [docs/FORMAT.md](docs/FORMAT.md).
+  axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
+  catalog (136.7 MB vs the 48 GB of equivalent `.se1` files). Spec:
+  [docs/FORMAT.md](docs/FORMAT.md).
 - **Ingest pipeline** — resumable, strictly-sequential, rate-limited bulk
-  pull from the JPL SBDB Query API → EPM1. Server etiquette is policy:
-  [docs/DESIGN.md](docs/DESIGN.md).
+  pull from the JPL SBDB Query API → EPM1, plus freshness machinery: slim
+  identity sweeps, `orbit_id` delta overlays, hot-subset sweeps. Server
+  etiquette is policy: [docs/DESIGN.md](docs/DESIGN.md), details in
+  [docs/INGESTION.md](docs/INGESTION.md).
+- **Mechanics core** — Kepler engine (elliptic + hyperbolic, closed-form
+  propagation as the test oracle), adaptive DP5(4) and an IAS15-class
+  Radau-15 collocation integrator (constants derived from the Jacobi
+  recurrence, verified against the published paper), cubic-Hermite
+  perturber trajectory tables, heliocentric N-body force model, windowed
+  memo cache.
+- **Measured on real data** (`prometheia-bench`, 100-body SBDB fixture,
+  Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
+  warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
+  Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
 - **Tools** — `prometheia-fetch` (Python), `prometheia-convert`,
-  `prometheia-info`.
-- Verified end-to-end on real data: first 100 numbered asteroids from SBDB
-  (Ceres…), full precision, element sigmas, H/G, diameters.
+  `prometheia-info`, `prometheia-bench`. Six test suites, clean under
+  ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
-decision record: [docs/DESIGN.md](docs/DESIGN.md). Container byte spec:
-[docs/FORMAT.md](docs/FORMAT.md). Data pipeline in full detail:
-[docs/INGESTION.md](docs/INGESTION.md). Roadmap: integrator core
-(M2), DE binary reader + time/frames (M3), engine API + ayanamsas (M4),
-validation gates (M5), transports (M6).
+decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: DE binary
+reader + time/frames (M3), engine API + ayanamsas (M4), validation gates
+(M5), transports (M6).
 
 ## Build
 

@@ -115,15 +115,26 @@ tool and script in this repo, and for anyone running them:
 
 - **M0** — bootstrap: repo, CMake, GPL, CI, docs. *(done)*
 - **M1** — EPM1 container + SBDB ingest pipeline + tools. *(done)*
-- **M2** — integrator core (IAS15-class adaptive, published paper), force
-  model against a splined perturber table, memo cache, benchmark harness.
-- **M3** — DE binary reader; time scales (TDB/TT/UTC/UT1, ΔT, leap seconds);
-  IAU 2006/2000A precession-nutation; ICRF → ecliptic/equatorial/topocentric.
-- **M4** — engine API (`prometheia::Engine`), catalog stack overlay, calc()
-  with flags/sigma/provenance, ayanamsa layer, C ABI shim, `ephem` CLI.
+- **M2** — mechanics core. *(done 2026-09-16, three increments)*
+  - Increment 1: Kepler engine + adaptive DP5(4) with FSAL (25a1fa6).
+  - Increment 2: cubic-Hermite perturber tables, heliocentric force
+    model, WindowMemo, benchmark harness (4908ea1).
+  - Increment 3: Radau-15, the IAS15-class collocation integrator, with
+    constants derived from theory and verified against the paper
+    (1ef6d5c).
+  - Increment 4 (parked): Everhart's triangular b-sequence in place of
+    the monomial Vandermonde solve — better conditioning, fewer
+    corrector iterations, lower noise floor.
+- **M3** — DE binary reader; time scales (TDB/TT/UTC/UT1, ΔT, leap
+  seconds); IAU 2006/2000A precession-nutation; ICRF →
+  ecliptic/equatorial/topocentric. Test corpus: de200.eph on hand.
+- **M4** — engine API (`prometheia::Engine`), catalog stack overlay,
+  calc() with flags/sigma/provenance, pdes→spkid secondary index,
+  ayanamsa layer, C ABI shim, `ephem` CLI.
 - **M5** — validation gates: Horizons-sampled corpus, per-tier precision
-  thresholds, numeric cross-check against installed Swiss Ephemeris as an
-  output-only oracle.
+  thresholds, full-catalog bench run (the ~3.5 min/core extrapolation
+  must be measured), numeric cross-check against installed Swiss
+  Ephemeris as an output-only oracle.
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 
