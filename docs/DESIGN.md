@@ -136,6 +136,12 @@ tool and script in this repo, and for anyone running them:
     SWE's DE441-derived value to ~0.3 km at J2000). The modern
     DE405+-era header layout (pointer table embedded in header record
     2) is the next slice, to be validated against a real DE441/de440s.
+  - Increment 2 (done 2026-09-16): time scales (`prometheia::time`,
+    docs/TIME.md) — Hinnant exact calendar↔JD; the USNO leap-second
+    table with UTC↔TAI↔TT including correct 23:59:60 labeling on both
+    directions; TT↔TDB via the Circular 179 truncated series (~10 µs
+    class); pluggable Delta T with the Espenak–Meeus polynomials as
+    default (ΔT(J2000) = 63.88 s vs 63.83 observed).
 - **M4** — engine API (`prometheia::Engine`), catalog stack overlay,
   calc() with flags/sigma/provenance, pdes→spkid secondary index,
   ayanamsa layer, C ABI shim, `ephem` CLI.

@@ -16,7 +16,8 @@ add_library(prometheia
   src/catalog.cpp
   src/cbor.cpp
   src/de.cpp
-  src/kepler.cpp)
+  src/kepler.cpp
+  src/time.cpp)
 target_include_directories(prometheia PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(prometheia PUBLIC PkgConfig::ZSTD)
 target_compile_options(prometheia PRIVATE -Wall -Wextra -Werror)
@@ -55,6 +56,10 @@ add_test(NAME radau COMMAND test_radau)
 add_executable(test_de tests/test_de.cpp)
 target_link_libraries(test_de PRIVATE prometheia)
 add_test(NAME de COMMAND test_de)
+
+add_executable(test_time tests/test_time.cpp)
+target_link_libraries(test_time PRIVATE prometheia)
+add_test(NAME time COMMAND test_time)
 
 add_executable(prometheia-bench tools/bench/bench_main.cpp)
 target_link_libraries(prometheia-bench PRIVATE prometheia)

@@ -1,0 +1,325 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// Time-scale conversions. Sources and accuracy notes: docs/TIME.md.
+#include "prometheia/time.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <string>
+
+namespace prometheia::time {
+namespace {
+
+// ---------------------------------------------------------------------------
+// Civil-date arithmetic: Hinnant's exact algorithms (proleptic Gregorian),
+// integer division truncating toward zero as in C++.
+// ---------------------------------------------------------------------------
+
+// Days since 1970-01-01 of the given civil date.
+int64_t days_from_civil(int y, int m, int d) {
+    y -= m <= 2;
+    const int64_t era = (y >= 0 ? int64_t(y) : int64_t(y) - 399) / 400;
+    const int64_t yoe = int64_t(y) - era * 400; // [0, 399]
+    const int64_t doy = (153 * int64_t(m + (m > 2 ? -3 : 9)) + 2) / 5 + int64_t(d) - 1;
+    const int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    return era * 146097 + doe - 719468;
+}
+
+void civil_from_days(int64_t z, int& y, int& m, int& d) {
+    z += 719468;
+    const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    const int64_t doe = z - era * 146097; // [0, 146096]
+    const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const int64_t yy = yoe + era * 400;
+    const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    const int64_t mp = (5 * doy + 2) / 153;                      // [0, 11]
+    d = int(doy - (153 * mp + 2) / 5 + 1);
+    m = int(mp + (mp < 10 ? 3 : -9));
+    y = int(yy + (m <= 2));
+}
+
+// JD at 00:00 of 1970-01-01.
+constexpr double kJd1970 = 2440587.5;
+
+bool is_valid_date(int y, int m, int d) {
+    if (m < 1 || m > 12 || d < 1 || y == 0)
+        return false; // year 0 does not exist
+    static const int kMonthLen[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    const bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    return d <= (m == 2 && leap ? 29 : kMonthLen[m - 1]);
+}
+
+// ---------------------------------------------------------------------------
+// Leap seconds: the USNO tai-utc.dat integer-leap entries, 1972 onward.
+// Each entry is the UTC civil date at 00:00 of which the new TAI-UTC
+// offset takes effect, and that offset in whole seconds.
+// ---------------------------------------------------------------------------
+
+struct LeapEntry {
+    int year;
+    int month;
+    int offset; // TAI - UTC in seconds from this date 00:00 UTC
+};
+
+constexpr LeapEntry kLeapTable[] = {
+    {1972, 1, 10}, {1972, 7, 11}, {1973, 1, 12}, {1974, 1, 13}, {1975, 1, 14}, {1976, 1, 15},
+    {1977, 1, 16}, {1978, 1, 17}, {1979, 1, 18}, {1980, 1, 19}, {1981, 7, 20}, {1982, 7, 21},
+    {1983, 7, 22}, {1985, 7, 23}, {1988, 1, 24}, {1990, 1, 25}, {1991, 1, 26}, {1992, 7, 27},
+    {1993, 7, 28}, {1994, 7, 29}, {1996, 1, 30}, {1997, 7, 31}, {1999, 1, 32}, {2006, 1, 33},
+    {2009, 1, 34}, {2012, 7, 35}, {2015, 7, 36}, {2017, 1, 37},
+};
+constexpr int kLeapCount = int(sizeof(kLeapTable) / sizeof(kLeapTable[0]));
+
+// Months since year 0 for table comparisons (month 1-based).
+int64_t month_index(int year, int month) {
+    return int64_t(year) * 12 + (month - 1);
+}
+
+// JD(TT) of 00:00 UTC on the entry's effective date.
+double leap_effective_jd_tt(const LeapEntry& e) {
+    return jd_from_civil(e.year, e.month, 1.0) + (double(e.offset) + kTtMinusTaiSeconds) / 86400.0;
+}
+
+} // namespace
+
+double jd_from_civil(int year, int month, double day) {
+    return double(days_from_civil(year, month, 1)) + kJd1970 + (day - 1.0);
+}
+
+Civil civil_from_jd(double jd) {
+    const double days_since_1970 = jd - kJd1970;
+    const int64_t whole = int64_t(std::floor(days_since_1970));
+    const double frac = days_since_1970 - double(whole);
+    int y, m, d;
+    civil_from_days(whole, y, m, d);
+    return Civil{y, m, double(d) + frac};
+}
+
+double jd_from_ymdhms(int year, int month, int day, int hour, int minute, double second) {
+    const double day_fraction = (double(hour) * 3600.0 + double(minute) * 60.0 + second) / 86400.0;
+    return jd_from_civil(year, month, double(day) + day_fraction);
+}
+
+double tai_minus_utc(int year, int month) {
+    const int64_t idx = month_index(year, month);
+    const LeapEntry* best = nullptr;
+    for (const LeapEntry& e : kLeapTable) {
+        if (month_index(e.year, e.month) <= idx)
+            best = &e;
+    }
+    return best == nullptr ? 0.0 : double(best->offset);
+}
+
+Result<double> utc_to_tt(int year, int month, int day, int hour, int minute, double second) {
+    const auto bad = [&](const char* why) {
+        return make_error(ErrorCode::ArgumentError, std::string("utc_to_tt: ") + why);
+    };
+    if (!is_valid_date(year, month, day))
+        return bad("invalid calendar date");
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return bad("hour/minute out of range");
+    }
+    if (!std::isfinite(second) || second < 0.0 || second > 61.0) {
+        return bad("second out of range");
+    }
+    if (month_index(year, month) < month_index(kLeapTable[0].year, kLeapTable[0].month)) {
+        return bad("UTC before 1972-01-01 (the integer-leap era) is not supported; "
+                   "supply JD(TT) directly for earlier epochs");
+    }
+    const double sec_of_day = double(hour) * 3600.0 + double(minute) * 60.0 + second;
+    if (sec_of_day > 86401.0)
+        return bad("second beyond a leap second");
+
+    // The table is keyed by calendar month of the UTC day: the leap second
+    // 23:59:60 belongs to the day before the new offset's effective date,
+    // so the offset in effect comes from the day's own month.
+    const int offset = int(tai_minus_utc(year, month));
+    if (sec_of_day >= 86400.0) {
+        const int64_t next = month_index(year, month) + 1;
+        bool leap_day = false;
+        for (const LeapEntry& e : kLeapTable) {
+            if (month_index(e.year, e.month) == next && e.offset == offset + 1) {
+                leap_day = true;
+            }
+        }
+        if (!leap_day)
+            return bad("no leap second at this date");
+    }
+    const double jd_tt = jd_from_civil(year, month, double(day)) +
+                         (sec_of_day + double(offset) + kTtMinusTaiSeconds) / 86400.0;
+    return jd_tt;
+}
+
+Result<Utc> tt_to_utc(double jd_tt) {
+    const auto bad = [&](const char* why) {
+        return make_error(ErrorCode::ArgumentError, std::string("tt_to_utc: ") + why);
+    };
+    if (!std::isfinite(jd_tt))
+        return bad("jd_tt is not finite");
+    if (jd_tt < leap_effective_jd_tt(kLeapTable[0])) {
+        return bad("jd_tt before 1972-01-01 00:00:00 UTC");
+    }
+
+    // Offset in effect: the table instants are in TT, so compare jd_tt
+    // directly (no intermediate subtraction) - the exact-midnight case is
+    // then exact, since callers typically build jd_tt the same way.
+    const LeapEntry* in_effect = &kLeapTable[0];
+    const LeapEntry* next = nullptr;
+    for (int i = 0; i < kLeapCount; ++i) {
+        if (jd_tt >= leap_effective_jd_tt(kLeapTable[i])) {
+            in_effect = &kLeapTable[i];
+            next = i + 1 < kLeapCount ? &kLeapTable[i + 1] : nullptr;
+        }
+    }
+
+    // Nominal UTC: TAI minus the offset in effect. JD doubles quantize at
+    // ~40 us near the present epoch, so snap the rendered seconds to
+    // 0.1 ms and roll overflow into the next day.
+    const double jd_utc = tai_from_tt(jd_tt) - double(in_effect->offset) / 86400.0;
+    const double days_since_1970 = jd_utc - kJd1970;
+    int64_t whole = int64_t(std::floor(days_since_1970));
+    double sec_of_day = (days_since_1970 - double(whole)) * 86400.0;
+    sec_of_day = std::round(sec_of_day * 1e4) / 1e4;
+    if (sec_of_day >= 86400.0) {
+        sec_of_day = 0.0;
+        ++whole;
+    }
+
+    // During the final second before a positive leap takes effect, the
+    // nominal UTC lands in [0 s, 1 s) of the *next* day; that second is
+    // the leap second 23:59:60.x of the day before. The 0.1 ms slack
+    // absorbs the quantization of both comparison operands.
+    if (next != nullptr && next->offset == in_effect->offset + 1 &&
+        jd_tt >= leap_effective_jd_tt(*next) - (1.0 + 1e-4) / 86400.0 && sec_of_day < 1.0 + 1e-3) {
+        int y, m, d;
+        civil_from_days(whole - 1, y, m, d);
+        Utc out;
+        out.tai_minus_utc = double(in_effect->offset);
+        out.year = y;
+        out.month = m;
+        out.day = d;
+        out.hour = 23;
+        out.minute = 59;
+        out.second = std::min(60.0 + sec_of_day, 61.0);
+        return out;
+    }
+
+    int y, m, d;
+    civil_from_days(whole, y, m, d);
+    Utc out;
+    out.tai_minus_utc = double(in_effect->offset);
+    out.year = y;
+    out.month = m;
+    out.day = d;
+    out.hour = int(sec_of_day / 3600.0);
+    out.minute = int((sec_of_day - double(out.hour) * 3600.0) / 60.0);
+    out.second = sec_of_day - double(out.hour) * 3600.0 - double(out.minute) * 60.0;
+    return out;
+}
+
+double tdb_minus_tt(double jd_tt) {
+    // Truncated Fairhead-Bretagnon series, USNO Circular 179 eq. (2.6):
+    // coefficients in seconds, arguments in radians, T = Julian
+    // centuries of TT from J2000. Maximum error ~10 us over 1600-2200.
+    const double T = (jd_tt - 2451545.0) / 36525.0;
+    return 0.001657 * std::sin(628.3076 * T + 6.2401) + 0.000022 * std::sin(575.3385 * T + 4.2970) +
+           0.000014 * std::sin(1256.6152 * T + 6.1969) +
+           0.000005 * std::sin(606.9777 * T + 4.0212) + 0.000005 * std::sin(52.9691 * T + 0.4444) +
+           0.000002 * std::sin(21.3299 * T + 5.5431) +
+           0.000010 * T * std::sin(628.3076 * T + 4.2490);
+}
+
+double EspenakMeeusDeltaT::delta_t_seconds(double jd_tt) const {
+    // Piecewise polynomials, coefficients verbatim from
+    // eclipse.gsfc.nasa.gov/SEhelp/deltatpoly2004.html. Decimal year
+    // y = year + (month - 0.5)/12 (the day within the month is neglected;
+    // dT changes by milliseconds per day at most).
+    const Civil c = civil_from_jd(jd_tt);
+    const double y = double(c.year) + (double(c.month) - 0.5) / 12.0;
+    if (y < -500.0) {
+        const double u = (y - 1820.0) / 100.0;
+        return -20.0 + 32.0 * u * u;
+    }
+    if (y <= 500.0) {
+        const double u = y / 100.0;
+        return 10583.6 +
+               u * (-1014.41 +
+                    u * (33.78311 + u * (-5.952053 +
+                                         u * (-0.1798452 + u * (0.022174192 + u * 0.0090316521)))));
+    }
+    if (y <= 1600.0) {
+        const double u = (y - 1000.0) / 100.0;
+        return 1574.2 +
+               u * (-556.01 +
+                    u * (71.23472 + u * (0.319781 + u * (-0.8503463 +
+                                                         u * (-0.005050998 + u * 0.0083572073)))));
+    }
+    if (y <= 1700.0) {
+        const double t = y - 1600.0;
+        return 120.0 + t * (-0.9808 + t * (-0.01532 + t / 7129.0));
+    }
+    if (y <= 1800.0) {
+        const double t = y - 1700.0;
+        return 8.83 + t * (0.1603 + t * (-0.0059285 + t * (0.00013336 - t / 1174000.0)));
+    }
+    if (y <= 1860.0) {
+        const double t = y - 1800.0;
+        return 13.72 +
+               t * (-0.332447 +
+                    t * (0.0068612 +
+                         t * (0.0041116 +
+                              t * (-0.00037436 + t * (0.0000121272 +
+                                                      t * (-0.0000001699 + t * 0.000000000875))))));
+    }
+    if (y <= 1900.0) {
+        const double t = y - 1860.0;
+        return 7.62 + t * (0.5737 +
+                           t * (-0.251754 + t * (0.01680668 + t * (-0.0004473624 + t / 233174.0))));
+    }
+    if (y <= 1920.0) {
+        const double t = y - 1900.0;
+        return -2.79 + t * (1.494119 + t * (-0.0598939 + t * (0.0061966 - t * 0.000197)));
+    }
+    if (y <= 1941.0) {
+        const double t = y - 1920.0;
+        return 21.20 + t * (0.84493 + t * (-0.076100 + t * 0.0020936));
+    }
+    if (y <= 1961.0) {
+        const double t = y - 1950.0;
+        return 29.07 + t * (0.407 + t * (-1.0 / 233.0 + t / 2547.0));
+    }
+    if (y <= 1986.0) {
+        const double t = y - 1975.0;
+        return 45.45 + t * (1.067 + t * (-1.0 / 260.0 - t / 718.0));
+    }
+    if (y <= 2005.0) {
+        const double t = y - 2000.0;
+        return 63.86 + t * (0.3345 + t * (-0.060374 +
+                                          t * (0.0017275 + t * (0.000651814 + t * 0.00002373599))));
+    }
+    if (y <= 2050.0) {
+        const double t = y - 2000.0;
+        return 62.92 + t * (0.32217 + t * 0.005589);
+    }
+    if (y <= 2150.0) {
+        const double u = (y - 1820.0) / 100.0;
+        return -20.0 + 32.0 * u * u - 0.5628 * (2150.0 - y);
+    }
+    const double u = (y - 1820.0) / 100.0;
+    return -20.0 + 32.0 * u * u;
+}
+
+double delta_t(double jd_tt) {
+    static const EspenakMeeusDeltaT model;
+    return model.delta_t_seconds(jd_tt);
+}
+
+double jd_tt_from_ut1(double jd_ut1) {
+    // Delta T varies by milliseconds per day; one refinement step lands
+    // the inverse far below any other error term in the chain.
+    const double jd_tt = jd_ut1 + delta_t(jd_ut1) / 86400.0;
+    return jd_ut1 + delta_t(jd_tt) / 86400.0;
+}
+
+} // namespace prometheia::time
