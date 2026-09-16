@@ -21,6 +21,9 @@ namespace prometheia {
 // A force model is any callable with signature
 //   void accel(const double y[6], double t, double dydt[6])
 // where dydt[0..2] = velocity, dydt[3..5] = acceleration(y, t).
+// CONTRACT: y and dydt must not alias — implementations commonly write
+// dydt[0..2] (the velocity copy) before evaluating the acceleration from
+// y[0..2].
 
 // Optional per-accepted-step sink (memo cache construction). Called with
 // the accepted (t, y, dydt) after each successful step.
