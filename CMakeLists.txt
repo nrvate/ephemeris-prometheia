@@ -43,6 +43,13 @@ add_executable(test_integrator tests/test_integrator.cpp)
 target_link_libraries(test_integrator PRIVATE prometheia)
 add_test(NAME integrator COMMAND test_integrator)
 
+add_executable(test_mechanics tests/test_mechanics.cpp)
+target_link_libraries(test_mechanics PRIVATE prometheia)
+add_test(NAME mechanics COMMAND test_mechanics)
+
+add_executable(prometheia-bench tools/bench/bench_main.cpp)
+target_link_libraries(prometheia-bench PRIVATE prometheia)
+
 add_executable(prometheia-convert tools/convert/convert_main.cpp)
 target_link_libraries(prometheia-convert PRIVATE prometheia)
 

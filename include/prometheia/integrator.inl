@@ -36,9 +36,10 @@ constexpr double kB4[7] = {5179.0 / 57600.0, 0.0, 7571.0 / 16695.0, 393.0 / 640.
 
 }  // namespace dp54
 
-template <typename Force>
+template <typename Force, typename Sink>
 Result<void> integrate_dp54(double* y, double t0, double t1, Force&& accel,
-                            const IntegrateOptions& opts, IntegrateStats* stats) {
+                            const IntegrateOptions& opts, IntegrateStats* stats,
+                            Sink&& sink) {
   if (t1 == t0) return {};
   if (opts.rtol <= 0.0 || !std::isfinite(t0) || !std::isfinite(t1)) {
     return make_error(ErrorCode::ArgumentError, "bad integration bounds/tolerance");
@@ -104,6 +105,7 @@ Result<void> integrate_dp54(double* y, double t0, double t1, Force&& accel,
       // FSAL: kB5 == kA[6], so k[6] is the derivative at the accepted
       // (t+h, y) — reuse it as the next step's first stage.
       for (int i = 0; i < 6; ++i) k[0][i] = k[6][i];
+      sink(t, y, k[0]);
 
       double factor = (err == 0.0) ? 5.0 : 0.9 * std::pow(1.0 / err, 0.2);
       factor = std::clamp(factor, 0.2, 5.0);

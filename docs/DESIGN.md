@@ -48,9 +48,12 @@ no code read or reused — see Cleanroom policy):
 1. **Paradigm: store initial conditions, integrate on demand.** Memoize
    integrated windows; steady-state evaluation cost reaches parity with
    baked-file evaluation (~100 ns class); cold cost is a one-time
-   millisecond-class integration per object per window. Numbers are
-   engineering targets to be burned down by the M2 benchmark harness before
-   they are repeated in user-facing docs.
+   millisecond-class integration per object per window. **Measured
+   2026-09-16** (`prometheia-bench`, 100-body real-SBDB fixture, Jupiter +
+   Saturn perturbers, DP5(4) increment): cold 79 bodies ±1 yr = 10.6 ms
+   total (0.134 ms/body); warm memoized evaluation = 18 ns; full 100-body
+   10-yr arc = 69 ms. Full-catalog ±1 yr extrapolates to ~3.5 min/core.
+   Re-measure at every integrator increment; these numbers gate docs.
 2. **Planetary provider: read JPL DE binaries directly (v1).** The DE binary
    format is public, documented JPL material; we write our own cleanroom
    reader. Planets/Moon are the one place baked data has an accuracy

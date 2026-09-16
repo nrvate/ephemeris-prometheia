@@ -22,6 +22,12 @@ namespace prometheia {
 //   void accel(const double y[6], double t, double dydt[6])
 // where dydt[0..2] = velocity, dydt[3..5] = acceleration(y, t).
 
+// Optional per-accepted-step sink (memo cache construction). Called with
+// the accepted (t, y, dydt) after each successful step.
+struct NoSink {
+  void operator()(double, const double*, const double*) const {}
+};
+
 struct IntegrateStats {
   uint64_t steps = 0;
   uint64_t accel_evals = 0;
@@ -38,9 +44,10 @@ struct IntegrateOptions {
 
 // Integrates y over [t0, t1] with the given force model. On success y holds
 // the final state. Throws nothing; reports via Result.
-template <typename Force>
+template <typename Force, typename Sink = NoSink>
 Result<void> integrate_dp54(double* y, double t0, double t1, Force&& accel,
-                            const IntegrateOptions& opts, IntegrateStats* stats);
+                            const IntegrateOptions& opts, IntegrateStats* stats,
+                            Sink&& sink = Sink{});
 
 }  // namespace prometheia
 
