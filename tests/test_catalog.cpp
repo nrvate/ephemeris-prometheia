@@ -368,4 +368,34 @@ TEST(medium_scale_and_size) {
   std::filesystem::remove(path);
 }
 
+TEST(real_data_fixture) {
+  // Committed 100-body catalog built from the real SBDB pull (Ceres..100).
+  // Guards the reader against real-world data the synthetic tests cannot:
+  // full-precision elements, actual sigma magnitudes, genuine name pool.
+  const std::string path =
+      (std::filesystem::path(__FILE__).parent_path() / "data" /
+       "sample-100.epm")
+          .string();
+  auto r = Reader::open(path);
+  CHECK(r.ok());
+  if (!r.ok()) return;
+  catalog::Reader& reader = r.value();
+  CHECK(reader.record_count() == 100);
+
+  // Ceres: spkid 20000001, full-precision elements from SBDB 2026-09-16.
+  auto rec = reader.lookup(20000001);
+  CHECK(rec.ok());
+  if (rec.ok()) {
+    CHECK(rec.value().epoch_jtdb == 2461200.5);
+    CHECK(rec.value().a_au == 2.765552595034094);
+    CHECK(rec.value().e == 0.07969229514816586);
+    CHECK(rec.value().body_class == BodyClass::Asteroid);
+    CHECK(rec.value().has(RecordFlags::kSigmas) &&
+          rec.value().has(RecordFlags::kHg) &&
+          rec.value().has(RecordFlags::kDiameter));
+  }
+  auto fe = reader.for_each([](const Record&, const Names&) {});
+  CHECK(fe.ok());
+}
+
 int main() { return ptest::run_all(); }

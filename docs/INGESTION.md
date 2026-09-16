@@ -183,6 +183,32 @@ catalogs by priority — newer wins, older answers remain available beneath.
 No rebake of the 1.56M-object base catalog is ever required to correct one
 orbit. (Overlay mechanics land with the engine, M4.)
 
+## Distribution: releases when the data changes
+
+SBDB orbit solutions change continuously, so catalogs are **published as
+tagged GitHub release assets, not repo-tree files**:
+
+- One asset per catalog build: `sbdb-full-YYYYMMDD.epm` plus a `.sha256`
+  sidecar (the swisseph-fork release pattern: SHA256SUMS, nothing binary in
+  the tree). Release assets allow 2 GB each; the full catalog is ~40 MB.
+- Each release is immutable and pinned — downstreams can reproduce any
+  historical answer by pinning the tag. Provenance travels inside the
+  container's CBOR metadata (source, pull window, SBDB count).
+- The release cadence is "when the data changes" — typically after any
+  significant SBDB refresh worth adopting. A release is always produced by
+  the committed `sbdb_fetch.py` + `prometheia-convert` of its own tag, so
+  the pipeline that made a catalog ships with it.
+- The **only** data file in the repo tree is
+  `tests/data/sample-100.epm` (~10 KB, the first 100 numbered asteroids):
+  a fixture so CI exercises the reader against real JPL full-precision
+  data, not just synthetic records. Rebuild it only when refreshing the
+  fixture intentionally (its Ceres elements are pinned in
+  `test_catalog.cpp`).
+- The container is already chunked-zstd with its own index — **never**
+  re-bucket or re-compress catalogs for distribution; that would break
+  single-file random access and re-introduce the per-file juggling this
+  project exists to eliminate.
+
 ## Future ingestion paths (tracked, not yet built)
 
 | milestone | ingestion | notes |
