@@ -1,0 +1,9 @@
+build/
+build-*/
+*.epm
+sbdb-raw*/
+*.o
+*.a
+*.so
+.cache/
+compile_commands.json

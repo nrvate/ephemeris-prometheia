@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev pkg-config
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev pkg-config
+      - name: Configure (ASan+UBSan, Debug)
+        run: >
+          cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug
+          -DPROMETHEIA_SANITIZE=ON
+      - name: Build
+        run: cmake --build build-asan -j"$(nproc)"
+      - name: Test
+        run: ctest --test-dir build-asan --output-on-failure
+
+  formatting:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-14
+      - name: Check formatting
+        run: |
+          find include src tests tools -name '*.cpp' -o -name '*.hpp' | \
+            xargs clang-format-14 --dry-run -Werror
