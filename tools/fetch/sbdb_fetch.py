@@ -138,7 +138,8 @@ def main() -> int:
             rows = doc.get("data", [])
             total = int(doc.get("count", 0))
             print(f"kind {kind}: rows {limit_from}..{limit_from + len(rows)} "
-                  f"of {total}")            if not rows and limit_from == 0:
+                  f"of {total}")
+            if not rows and limit_from == 0:
                 print(f"kind {kind}: no data", file=sys.stderr)
                 break
             if rows:
