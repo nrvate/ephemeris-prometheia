@@ -110,6 +110,34 @@ Engine* engine() {
     return e.get();
 }
 
+// The same engine plus JPL's SB441-N16 asteroid perturbers
+// (PROMETHEIA_SB441, default ephe/sb441-n16.bsp; 616 MB, not in the tree),
+// or nullptr when the kernel or DE440 is absent.
+Engine* engine_sb441() {
+    static std::unique_ptr<Engine> e;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        const std::string kernel =
+            env_or("PROMETHEIA_SB441", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/sb441-n16.bsp");
+        if (access(kernel.c_str(), F_OK) != 0 || !engine()) {
+            std::printf("  SKIP: %s not present\n", kernel.c_str());
+            return nullptr;
+        }
+        const std::string de = env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) +
+                                                              "/ephe/linux_p1550p2650.440");
+        auto opened = Engine::open(de);
+        if (!opened.ok())
+            return nullptr;
+        e = std::make_unique<Engine>(std::move(opened).value());
+        const std::string data = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/";
+        if (!e->add_catalog(data + "sample-100.epm").ok() ||
+            !e->add_catalog(data + "covariance-7.epm").ok() || !e->add_perturbers(kernel).ok())
+            e.reset();
+    }
+    return e.get();
+}
+
 double separation_arcsec(double lon1, double lat1, double lon2, double lat2) {
     const double a1 = lon1 * kDeg, b1 = lat1 * kDeg, a2 = lon2 * kDeg, b2 = lat2 * kDeg;
     const double u[3] = {std::cos(b1) * std::cos(a1), std::cos(b1) * std::sin(a1), std::sin(b1)};
@@ -327,6 +355,25 @@ TEST_CASE("horizons_small_bodies") {
     seed_km.print("small bodies heliocentric, element epoch", "km");
 }
 
+// With JPL's 16 asteroid perturbers (as Horizons integrates), within 10 years
+// of the element epoch; skipped without the SB441-N16 kernel.
+TEST_CASE("horizons_small_bodies_sb441") {
+    Engine* e = engine_sb441();
+    if (!e)
+        return;
+    Worst at_epoch, ten_years;
+    for (const HorizonsObs& h : kHorizonsObs) {
+        const double years = std::fabs(h.jd_tt - kSmallEpoch) / 365.25;
+        if (!is_small(h) || years > 10.5)
+            continue;
+        const double sep = small_body_offset_arcsec(*e, h, nullptr);
+        (years < 1.0 ? at_epoch : ten_years).add(sep, h);
+        CHECK(sep < (years < 1.0 ? 0.005 : 0.01));
+    }
+    at_epoch.print("SB441: small bodies astrometric, element epoch", "\"");
+    ten_years.print("SB441: small bodies astrometric, +-10 years", "\"");
+}
+
 // sigma_arcsec (the propagated full JPL covariance) against Horizons' own
 // 3-sigma plane-of-sky uncertainty, within 10 years of the element epoch.
 // POS_3sigma is the root-sum-square of the error ellipse's semi-axes while
@@ -366,19 +413,22 @@ TEST_CASE("horizons_small_bodies_long_arc_report" * doctest::skip()) {
     Engine* e = engine();
     if (!e)
         return;
-    std::printf("  %-16s %6s %12s %14s %14s\n", "request", "years", "astrometric", "3-sigma ours",
-                "3-sigma JPL");
+    Engine* p = engine_sb441(); // optional column
+    std::printf("  %-16s %6s %12s %12s %14s %14s\n", "request", "years", "astrometric",
+                "with SB441", "3-sigma ours", "3-sigma JPL");
     for (const HorizonsObs& h : kHorizonsObs) {
         if (!is_small(h))
             continue;
         double ours3 = kNa;
         const double sep = small_body_offset_arcsec(*e, h, &ours3);
-        std::printf("  %-16s %+6.0f %11.4f\" %13.4f\" %13.3f\"\n", h.request,
-                    (h.jd_tt - kSmallEpoch) / 365.25, sep, ours3, h.pos_3s);
+        const double sep_p = p ? small_body_offset_arcsec(*p, h, nullptr) : kNa;
+        std::printf("  %-16s %+6.0f %11.4f\" %11.4f\" %13.4f\" %13.3f\"\n", h.request,
+                    (h.jd_tt - kSmallEpoch) / 365.25, sep, sep_p, ours3, h.pos_3s);
     }
     for (const HorizonsVec& v : kHorizonsVec)
-        std::printf("  %-16s %+6.0f %12.1f km heliocentric\n", v.request,
-                    (v.jd_tdb - kSmallEpoch) / 365.25, heliocentric_km(*e, v));
+        std::printf("  %-16s %+6.0f %12.1f km %12.1f km heliocentric (without / with SB441)\n",
+                    v.request, (v.jd_tdb - kSmallEpoch) / 365.25, heliocentric_km(*e, v),
+                    p ? heliocentric_km(*p, v) : kNa);
 }
 
 } // namespace

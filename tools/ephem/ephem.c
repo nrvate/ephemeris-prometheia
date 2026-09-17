@@ -53,6 +53,7 @@ typedef struct config {
     const char* ephemeris;
     const char* catalogs[MAX_CATALOGS];
     int n_catalogs;
+    const char* perturbers;
     const char* bodies[MAX_BODIES];
     int n_bodies;
 
@@ -290,6 +291,8 @@ static void print_help(void) {
            "  -e, --ephemeris FILE   planetary ephemeris (default: $PROMETHEIA_EPHEMERIS)\n"
            "  -c, --catalog FILE     add an EPM1 catalog; repeatable, later ones win\n"
            "                         ($PROMETHEIA_CATALOGS, ':'-separated, is added first)\n"
+           "  -p, --perturbers FILE  asteroid perturber kernel, e.g. JPL sb441-n16.bsp\n"
+           "                         (default: $PROMETHEIA_PERTURBERS)\n"
            "\n"
            "Time (default: now):\n"
            "  -t, --time WHEN        YYYY-MM-DD[THH:MM[:SS.s]] or 'now'; UTC unless --scale\n"
@@ -429,6 +432,10 @@ static int parse_args(int argc, char** argv, config* c) {
             if (c->n_catalogs == MAX_CATALOGS)
                 return usage_error("too many catalogs (limit %s)", "32");
             c->catalogs[c->n_catalogs++] = v;
+        } else if (is_opt(&a, "-p", "--perturbers")) {
+            if (!(v = value_of(&a)))
+                return EXIT_USAGE;
+            c->perturbers = v;
         } else if (is_opt(&a, "-t", "--time")) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;
@@ -851,6 +858,14 @@ int main(int argc, char** argv) {
             prometheia_engine_close(eng);
             return EXIT_USAGE;
         }
+    }
+    if (!c.perturbers)
+        c.perturbers = getenv("PROMETHEIA_PERTURBERS");
+    if (c.perturbers && *c.perturbers &&
+        prometheia_engine_add_perturbers(eng, c.perturbers, &err) != PROMETHEIA_OK) {
+        fprintf(stderr, "%s: perturbers %s: %s\n", g_program, c.perturbers, err.message);
+        prometheia_engine_close(eng);
+        return EXIT_USAGE;
     }
     dt.fixed = c.have_delta_t;
     dt.seconds = c.delta_t;

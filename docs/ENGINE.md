@@ -190,8 +190,22 @@ not indexed (address those by their NAIF IDs).
   post-Newtonian (Schwarzschild, PPN β = γ = 1) term in test-particle form,
   μ/(c²r³)[(4μ/r − v²) **r** + 4(**r**·**v**) **v**], relative to the Sun:
   the relativistic perihelion advance (tested against the closed form
-  6πμ/(c²a(1−e²)) per orbit to 1 part in 10⁴). No asteroid perturbers yet
-  ([VALIDATION.md](VALIDATION.md)).
+  6πμ/(c²a(1−e²)) per orbit to 1 part in 10⁴).
+- **Asteroid perturbers** (`add_perturbers(path)`, optional): an SPK
+  kernel of heliocentric numbered-asteroid segments (JPL's
+  `sb441-n16.bsp`: Ceres, Pallas, Juno, Vesta, Iris, Hygiea, Eunomia,
+  Psyche, Euphrosyne, Europa, Cybele, Sylvia, Thisbe, Camilla, Davida,
+  Interamnia — what Horizons integrates with). Each body with a known mass
+  (the DE file's `MAnnnn` constant, else the DE440 values built in) is
+  sampled into the perturber tables like a planet, its barycentric state
+  being the kernel's heliocentric one plus the ephemeris's Sun. A catalog
+  body never perturbs itself (its SBDB SPK-ID 20000000 + n matches the
+  kernel's 2000000 + n). The kernel's own trajectories are not used as
+  answers: they come from 2021 orbit solutions and measured 1–125 km off
+  Horizons' current ones near the present, while integrating the current
+  catalog elements with the kernel as perturbers stays within ~5 km there
+  and gains 20–500× at ±100 yr ([VALIDATION.md](VALIDATION.md)). Twelve
+  more perturbers make integration ~2× slower.
 - **Memo:** one M2 `WindowMemo` per body — year windows of integrated
   samples, warm evaluations are spline reads. The integration error is
   ~1e-8 AU over ±26 yr (0.001″); practical accuracy is set by the

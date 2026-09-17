@@ -30,8 +30,9 @@ constexpr double kDay = 86400.0;
 
 struct LinearBody {
     int id;
-    double p[3]; // km at et = 0
-    double v[3]; // km/s
+    double p[3];    // km at et = 0
+    double v[3];    // km/s
+    int center = 0; // NAIF id of the segment's center
 };
 
 // Sun, Earth and Jupiter-system barycentre, all wrt the barycentre.
@@ -60,11 +61,11 @@ struct Writer {
     void pad_to(size_t n) { out.resize(n, '\0'); }
 };
 
-std::string write_linear_spk(const fs::path& path) {
+std::string write_linear_spk(const fs::path& path, const std::vector<LinearBody>& bodies) {
     constexpr int kFirstWord = 3 * 1024 / 8 + 1;
     Writer data;
     std::vector<std::pair<int, int>> addr;
-    for (const LinearBody& b : kBodies) {
+    for (const LinearBody& b : bodies) {
         const int begin = kFirstWord + int(data.out.size() / 8);
         // One type-3 record, degree 1: x(tau) = c0 + c1 tau, tau = et / R.
         data.f64(0.0);       // MID
@@ -99,19 +100,19 @@ std::string write_linear_spk(const fs::path& path) {
     // Summary record.
     f.f64(0.0);
     f.f64(0.0);
-    f.f64(double(std::size(kBodies)));
-    for (size_t i = 0; i < std::size(kBodies); ++i) {
+    f.f64(double(bodies.size()));
+    for (size_t i = 0; i < bodies.size(); ++i) {
         f.f64(-kHalfSpan);
         f.f64(kHalfSpan);
-        f.i32(kBodies[i].id);
-        f.i32(0);
+        f.i32(bodies[i].id);
+        f.i32(bodies[i].center);
         f.i32(1);
         f.i32(3);
         f.i32(addr[i].first);
         f.i32(addr[i].second);
     }
     f.pad_to(2048);
-    for (const LinearBody& b : kBodies)
+    for (const LinearBody& b : bodies)
         f.text("BODY " + std::to_string(b.id), 40);
     f.pad_to(3072);
     f.out += data.out;
@@ -120,6 +121,10 @@ std::string write_linear_spk(const fs::path& path) {
     std::fwrite(f.out.data(), 1, f.out.size(), fp);
     std::fclose(fp);
     return path.string();
+}
+
+std::string write_linear_spk(const fs::path& path) {
+    return write_linear_spk(path, std::vector<LinearBody>(std::begin(kBodies), std::end(kBodies)));
 }
 
 struct TempFile {

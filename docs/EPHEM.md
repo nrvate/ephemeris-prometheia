@@ -39,6 +39,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 
 **Data**
 - `-e FILE` or `$PROMETHEIA_EPHEMERIS` names the planetary ephemeris: a DE binary or an SPK kernel, detected by content.
+- `-p FILE` or `$PROMETHEIA_PERTURBERS` adds an asteroid perturber kernel (JPL's `sb441-n16.bsp`) to the small-body force model; see [ENGINE.md](ENGINE.md).
 - `-c FILE` adds an EPM1 catalog and can be repeated. Catalogs in `$PROMETHEIA_CATALOGS` (colon-separated) load first, and later catalogs win.
 
 **Time** (default: now)

@@ -129,6 +129,7 @@ TEST_CASE("c_api_open_errors") {
     CHECK(prometheia_calc_ut(nullptr, 10, kJ2000, nullptr, &res, &err) ==
           PROMETHEIA_ERROR_ARGUMENT);
     CHECK(prometheia_engine_add_catalog(nullptr, "x", &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_engine_add_perturbers(nullptr, "x", &err) == PROMETHEIA_ERROR_ARGUMENT);
     int body = 7;
     CHECK(prometheia_engine_lookup(nullptr, "x", &body, &err) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(body == 0);
@@ -347,6 +348,11 @@ TEST_CASE("c_api_catalog_and_lookup") {
     CHECK(err.code == PROMETHEIA_ERROR_NOT_FOUND);
     CHECK(prometheia_engine_add_catalog(c.e, "/nonexistent/c.epm", &err) == PROMETHEIA_ERROR_IO);
     CHECK(prometheia_engine_add_catalog(c.e, nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_engine_add_perturbers(c.e, nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_engine_add_perturbers(c.e, "/nonexistent/sb.bsp", &err) ==
+          PROMETHEIA_ERROR_IO);
+    CHECK(prometheia_engine_add_perturbers(c.e, tf.path.c_str(), &err) ==
+          PROMETHEIA_ERROR_FORMAT); // a planetary kernel carries no asteroids
     CHECK(prometheia_engine_lookup(c.e, nullptr, &body, &err) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(prometheia_engine_lookup(c.e, "Ceres", nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
 

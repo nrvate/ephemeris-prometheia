@@ -33,6 +33,10 @@ constexpr double kTwoPi = 6.283185307179586476925286766559;
 constexpr double kJ2000 = 2451545.0;
 // Earth rotation rate in rad per UT1 day (the ERA rate, Circular 179).
 constexpr double kEarthRotationRadPerDay = kTwoPi * 1.00273781191135448;
+// SBDB SPK-IDs of numbered asteroids are 20000000 + number; older NAIF
+// kernels (JPL's SB441-N16) use 2000000 + number.
+constexpr long kSpkidNumberedBase = 20000000;
+constexpr long kOldSpkidNumberedBase = 2000000;
 // Central-difference half step for rates (days).
 constexpr double kSpeedStepDays = 1e-3;
 
@@ -82,6 +86,8 @@ double gm_or_builtin(const Source* s, int id) {
     case 9:
         return gm::kPluto;
     }
+    if (id > kSpkidNumberedBase && id < kSpkidNumberedBase + 1000000)
+        return gm::asteroid(int(id - kSpkidNumberedBase));
     return 0.0;
 }
 
@@ -177,6 +183,12 @@ public:
         case 9:
             return c("GM9");
         }
+        // Asteroid masses the DE integration used: MA0001, MA0002, ...
+        if (id > kSpkidNumberedBase && id < kSpkidNumberedBase + 10000) {
+            char name[8];
+            std::snprintf(name, sizeof name, "MA%04d", int(id - kSpkidNumberedBase));
+            return c(name);
+        }
         return std::nullopt;
     }
 
@@ -203,6 +215,55 @@ public:
 
 private:
     spk::SpkFile file_;
+};
+
+// Asteroid perturber kernel (JPL SB441-N16 and similar): heliocentric SPK
+// segments for numbered asteroids under old-style ids (2000000 + number),
+// answered under the SBDB SPK-ID (20000000 + number) as barycentric states
+// by adding the main ephemeris's Sun.
+class AsteroidSource final : public Source {
+public:
+    AsteroidSource(spk::SpkFile f, Source* main) : file_(std::move(f)), main_(main) {
+        description = "asteroid perturbers";
+        if (!file_.internal_name().empty())
+            description += " (" + file_.internal_name() + ")";
+        for (const spk::Segment& seg : file_.segments()) {
+            const long num = long(seg.target) - kOldSpkidNumberedBase;
+            if (seg.center == body::kSun && num > 0 && num < 1000000 &&
+                std::find(bodies_.begin(), bodies_.end(), int(kSpkidNumberedBase + num)) ==
+                    bodies_.end())
+                bodies_.push_back(int(kSpkidNumberedBase + num));
+        }
+    }
+
+    // SBDB SPK-IDs of the bodies the kernel carries.
+    const std::vector<int>& bodies() const { return bodies_; }
+
+    bool has(int id) const {
+        return std::find(bodies_.begin(), bodies_.end(), id) != bodies_.end();
+    }
+
+    Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
+        if (!has(id))
+            return make_error(ErrorCode::NotFound,
+                              "body " + std::to_string(id) + " is not in " + description);
+        const int kid = int(id - kSpkidNumberedBase + kOldSpkidNumberedBase);
+        if (auto r = file_.state(kid, body::kSun, jd_tdb, out); !r)
+            return r;
+        double sun[6];
+        if (auto r = main_->barycentric(body::kSun, jd_tdb, sun); !r)
+            return r;
+        for (int i = 0; i < 6; ++i)
+            out[i] += sun[i];
+        return {};
+    }
+
+    std::optional<double> gm_au3(int id) const override { return main_->gm_au3(id); }
+
+private:
+    spk::SpkFile file_;
+    Source* main_;
+    std::vector<int> bodies_;
 };
 
 // ---------------------------------------------------------------------------
@@ -268,6 +329,26 @@ class PerturberSet final : public PerturberStates {
 public:
     void attach(Source* s) { source_ = s; }
 
+    // Adds the asteroid masses of a perturber kernel (after the Sun and
+    // planets) and drops every table built so far; they rebuild lazily.
+    void attach_asteroids(Source* s, std::vector<int> ids) {
+        asteroid_source_ = s;
+        asteroid_ids_ = std::move(ids);
+        reset();
+    }
+
+    void reset() {
+        built_ = false;
+        ok_ = true;
+        error_.clear();
+        sun_index_ = -1;
+        lo_ = hi_ = 0.0;
+        ids_.clear();
+        sources_.clear();
+        mus_.clear();
+        grid_.clear();
+    }
+
     // PerturberStates. ensure() builds the table on first use and then
     // extends coverage; a failure (no masses at all, or the ephemeris
     // does not cover the epoch) is sticky and makes every later state
@@ -321,6 +402,12 @@ public:
     const double* mus() const override { return mus_.data(); }
     bool ok() const override { return ok_; }
     long sun_index() const override { return sun_index_; }
+    long index_of(long id) const override {
+        for (size_t i = 0; i < ids_.size(); ++i)
+            if (ids_[i] == id)
+                return long(i);
+        return -1;
+    }
 
 private:
     static constexpr double kBlockDays = 365.25;
@@ -341,7 +428,19 @@ private:
                 if (id == body::kSun)
                     sun_index_ = long(ids_.size());
                 ids_.push_back(id);
+                sources_.push_back(source_);
                 mus_.push_back(gm_or_builtin(source_, id));
+            }
+        }
+        if (asteroid_source_ && sun_index_ >= 0) {
+            for (int id : asteroid_ids_) {
+                double st[6];
+                const double mu = gm_or_builtin(asteroid_source_, id);
+                if (mu > 0.0 && asteroid_source_->barycentric(id, t, st).ok()) {
+                    ids_.push_back(id);
+                    sources_.push_back(asteroid_source_);
+                    mus_.push_back(mu);
+                }
             }
         }
         if (ids_.empty()) {
@@ -369,7 +468,7 @@ private:
             for (int i = 0; i <= n; ++i) {
                 const double tt = from + step * double(i);
                 double st[6];
-                auto r = source_->barycentric(ids_[b], tt, st);
+                auto r = sources_[b]->barycentric(ids_[b], tt, st);
                 if (!r) {
                     fail(r.error().message);
                     return;
@@ -481,6 +580,9 @@ private:
     std::string error_;
     double lo_ = 0.0, hi_ = 0.0;
     std::vector<int> ids_;         // NAIF ids of the masses, table order
+    std::vector<Source*> sources_; // where each mass's states come from
+    Source* asteroid_source_ = nullptr;
+    std::vector<int> asteroid_ids_;
     std::vector<TrajSample> grid_; // rows of ids_.size() samples, ascending epochs
     std::vector<double> mus_;
 
@@ -565,7 +667,8 @@ public:
         std::unique_ptr<WindowMemo<BarycentricForce>> plus, minus;
     };
 
-    explicit SigmaTracks(std::vector<Column> columns) : columns_(std::move(columns)) {}
+    SigmaTracks(std::unique_ptr<BarycentricForce> force, std::vector<Column> columns)
+        : force_(std::move(force)), columns_(std::move(columns)) {}
 
     bool empty() const { return columns_.empty(); }
 
@@ -598,13 +701,25 @@ public:
     }
 
 private:
+    std::unique_ptr<BarycentricForce> force_; // the columns' memos integrate with it
     std::vector<Column> columns_;
 };
 
 } // namespace
 
+// Where a body's state came from, for provenance and uncertainty.
+enum Origin { kFromEphemeris = 0, kFromCatalog = 1 };
+
+// One integrated catalog body: its own force model (which leaves the body
+// itself out when it is one of the perturbing masses) and trajectory memo.
+struct SmallBody {
+    std::unique_ptr<BarycentricForce> force;
+    std::unique_ptr<WindowMemo<BarycentricForce>> memo;
+};
+
 struct Engine::Impl {
     std::unique_ptr<Source> source;
+    std::unique_ptr<AsteroidSource> asteroids; // optional asteroid perturber kernel
     const time::DeltaTModel* delta_t = nullptr;
     time::ObservedDeltaT default_delta_t;
     double bias[9];
@@ -617,14 +732,31 @@ struct Engine::Impl {
     // the barycentric force model and memoized per body.
     std::vector<std::unique_ptr<catalog::Reader>> catalogs;
     PerturberSet perturbers;
-    BarycentricForce force{&perturbers};
-    std::unordered_map<uint64_t, std::unique_ptr<WindowMemo<BarycentricForce>>> small_bodies;
+    std::unordered_map<uint64_t, SmallBody> small_bodies;
     std::unordered_map<uint64_t, std::unique_ptr<SigmaTracks>> sigma_tracks;
     std::string overlay_source_; // provenance for catalog bodies
+    std::string perturber_note_; // appended when asteroid perturbers are loaded
 
     // Designations and proper names of every loaded catalog, lowercased
     // ASCII, merged newest-wins; values are the SPK-IDs calc() takes.
     std::unordered_map<std::string, uint64_t> name_index;
+
+    // Provenance of catalog answers: the ephemeris, the catalog stack (newest
+    // first) and, when loaded, the asteroid perturbers.
+    void refresh_overlay_source() {
+        if (catalogs.empty()) {
+            overlay_source_.clear();
+            return;
+        }
+        std::string counts;
+        for (size_t i = catalogs.size(); i-- > 0;) {
+            if (!counts.empty())
+                counts += ", ";
+            counts += std::to_string(catalogs[i]->record_count());
+        }
+        overlay_source_ =
+            source->description + " + EPM1 catalog(s) [" + counts + " bodies]" + perturber_note_;
+    }
 
     double delta_t_seconds(double jd_tt) const {
         return (delta_t ? delta_t : &default_delta_t)->delta_t_seconds(jd_tt);
@@ -704,18 +836,26 @@ struct Engine::Impl {
     // Body state dispatch: the planetary ephemeris first; a body it does
     // not know is looked up in the catalog overlay (small bodies, by
     // SPK-ID). out is barycentric km, km/day either way.
-    Result<void> body_barycentric(int id, double jd_tdb, double out[6], bool* from_catalog) {
+    Result<void> body_barycentric(int id, double jd_tdb, double out[6], int* origin) {
         auto r = source->barycentric(id, jd_tdb, out);
         if (r.ok()) {
-            if (from_catalog)
-                *from_catalog = false;
+            if (origin)
+                *origin = kFromEphemeris;
             return r;
         }
         if (r.error().code != ErrorCode::NotFound)
             return r;
-        if (from_catalog)
-            *from_catalog = true;
+        if (origin)
+            *origin = kFromCatalog;
         return small_body_state(id, jd_tdb, out);
+    }
+
+    // A force model for integrating body `id`: every mass but the body.
+    std::unique_ptr<BarycentricForce> force_for(int id) {
+        auto f = std::make_unique<BarycentricForce>();
+        f->perturbers = &perturbers;
+        f->exclude_id = id;
+        return f;
     }
 
     // Newest-catalog-wins record lookup for a body the planetary
@@ -742,17 +882,17 @@ struct Engine::Impl {
         const catalog::Record& rec = *recr.value();
 
         auto& slot = small_bodies[uint64_t(id)];
-        if (!slot) {
+        if (!slot.memo) {
             auto built = build_small_body(rec);
             if (!built)
                 return built.error();
             slot = std::move(built).value();
         }
-        const State s = slot->at(jd_tdb);
+        const State s = slot.memo->at(jd_tdb);
         if (!perturbers.ok())
             return make_error(ErrorCode::ArgumentError, perturbers.error());
-        if (!std::isfinite(s.pos.x) || !std::isfinite(s.vel.x) || jd_tdb < slot->coverage_lo() ||
-            jd_tdb > slot->coverage_hi())
+        if (!std::isfinite(s.pos.x) || !std::isfinite(s.vel.x) ||
+            jd_tdb < slot.memo->coverage_lo() || jd_tdb > slot.memo->coverage_hi())
             return make_error(ErrorCode::ArgumentError,
                               "integration failed for body " + std::to_string(id));
         const double p[3] = {s.pos.x, s.pos.y, s.pos.z};
@@ -800,16 +940,17 @@ struct Engine::Impl {
 
     // The memo that integrates one catalog body, seeded at the record's
     // epoch (TDB) from the record's osculating elements.
-    Result<std::unique_ptr<WindowMemo<BarycentricForce>>>
-    build_small_body(const catalog::Record& rec) {
+    Result<SmallBody> build_small_body(const catalog::Record& rec) {
         const Elements el{rec.a_au,     rec.e,        rec.inc_rad,
                           rec.node_rad, rec.argp_rad, rec.mean_anom_rad};
         auto seed = seed_from_elements(el, rec.epoch_jtdb);
         if (!seed)
             return seed.error();
-        auto memo = std::make_unique<WindowMemo<BarycentricForce>>(&force, IntegrateOptions{});
-        memo->set_seed(seed.value(), rec.epoch_jtdb);
-        return memo;
+        SmallBody b;
+        b.force = force_for(int(rec.spkid));
+        b.memo = std::make_unique<WindowMemo<BarycentricForce>>(b.force.get(), IntegrateOptions{});
+        b.memo->set_seed(seed.value(), rec.epoch_jtdb);
+        return b;
     }
 
     // The perturbed trajectories behind sigma_arcsec, built lazily on the
@@ -827,6 +968,7 @@ struct Engine::Impl {
     Result<std::unique_ptr<SigmaTracks>> build_sigma_tracks(const catalog::Record& rec) {
         static constexpr double kMinSeedStepAu = 1e-7;
         std::vector<SigmaTracks::Column> columns;
+        auto track_force = force_for(int(rec.spkid));
         const double mu = gm_or_builtin(source.get(), body::kSun);
         const double t0 = rec.cov_epoch_jtdb;
         const double* x0 = rec.cov_elements;
@@ -893,14 +1035,14 @@ struct Engine::Impl {
                 auto seed = seed_from_elements(*el, t0);
                 if (!seed)
                     return seed.error();
-                auto memo =
-                    std::make_unique<WindowMemo<BarycentricForce>>(&force, IntegrateOptions{});
+                auto memo = std::make_unique<WindowMemo<BarycentricForce>>(track_force.get(),
+                                                                           IntegrateOptions{});
                 memo->set_seed(seed.value(), t0);
                 (sign > 0 ? col.plus : col.minus) = std::move(memo);
             }
             columns.push_back(std::move(col));
         }
-        return std::make_unique<SigmaTracks>(std::move(columns));
+        return std::make_unique<SigmaTracks>(std::move(track_force), std::move(columns));
     }
 
     // 1-sigma sky-plane uncertainty of a catalog body (arcsec), or
@@ -940,7 +1082,7 @@ struct Engine::Impl {
 
         // Line of sight and distance, ICRF (the covariance's frame).
         double body[6], obs[6];
-        if (!small_body_state(id, t_ret, body).ok())
+        if (!body_barycentric(id, t_ret, body, nullptr).ok())
             return std::nullopt;
         if (!observer(o, jd_tt, jd_tdb, obs).ok())
             return std::nullopt;
@@ -1017,11 +1159,11 @@ struct Engine::Impl {
     // with its exact rounding error recovered (TwoSum) and applied through
     // the velocity: a JD double near the present only resolves ~40 us,
     // which would otherwise put ~1 m of noise into every retarded position.
-    Result<void> retarded(int id, double jd_tdb, double tau, double out[6], bool* from_catalog) {
+    Result<void> retarded(int id, double jd_tdb, double tau, double out[6], int* origin) {
         const double s = jd_tdb - tau;
         const double bp = s - jd_tdb;
         const double err = (jd_tdb - (s - bp)) + (-tau - bp);
-        auto r = body_barycentric(id, s, out, from_catalog);
+        auto r = body_barycentric(id, s, out, origin);
         if (!r)
             return r;
         for (int i = 0; i < 3; ++i)
@@ -1031,7 +1173,7 @@ struct Engine::Impl {
 
     // Observer->body vector in the output frame (km), for one TT epoch.
     Result<void> vector_at(int id, double jd_tt, const CalcOptions& o, double out[3], double& tau,
-                           bool& from_catalog) {
+                           int& origin) {
         const double jd_tdb = time::tdb_from_tt(jd_tt);
         double obs[6];
         auto r = observer(o, jd_tt, jd_tdb, obs);
@@ -1041,7 +1183,7 @@ struct Engine::Impl {
         double tgt[6];
         double p[3];
         tau = 0.0;
-        r = retarded(id, jd_tdb, 0.0, tgt, &from_catalog);
+        r = retarded(id, jd_tdb, 0.0, tgt, &origin);
         if (!r)
             return r;
         for (int i = 0; i < 3; ++i)
@@ -1207,8 +1349,8 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
 
     CalcResult res;
     double v[3], tau = 0.0;
-    bool from_catalog = false;
-    auto r = impl_->vector_at(id, jd_tt, o, v, tau, from_catalog);
+    int origin = kFromEphemeris;
+    auto r = impl_->vector_at(id, jd_tt, o, v, tau, origin);
     if (!r)
         return r.error();
 
@@ -1218,11 +1360,11 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
     if (o.speed) {
         const double tp = jd_tt + kSpeedStepDays, tm = jd_tt - kSpeedStepDays;
         double vp[3], vm[3], unused_tau;
-        bool unused_cat;
-        r = impl_->vector_at(id, tp, o, vp, unused_tau, unused_cat);
+        int unused_origin;
+        r = impl_->vector_at(id, tp, o, vp, unused_tau, unused_origin);
         if (!r)
             return r.error();
-        r = impl_->vector_at(id, tm, o, vm, unused_tau, unused_cat);
+        r = impl_->vector_at(id, tm, o, vm, unused_tau, unused_origin);
         if (!r)
             return r.error();
         const double span = (tp - tm) * kAuKm; // actual, rounded, step
@@ -1250,7 +1392,7 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
         pos.dist_speed = (x[0] * dx[0] + x[1] * dx[1] + x[2] * dx[2]) / rr;
     }
 
-    res.provenance.source = from_catalog && !impl_->overlay_source_.empty()
+    res.provenance.source = origin == kFromCatalog && !impl_->overlay_source_.empty()
                                 ? std::string_view(impl_->overlay_source_)
                                 : std::string_view(impl_->source->description);
     res.provenance.denum = impl_->source->denum;
@@ -1261,7 +1403,7 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
             return s.error();
         res.ayanamsa_deg = s.value();
     }
-    if (from_catalog && o.sigma)
+    if (origin != kFromEphemeris && o.sigma)
         res.sigma_arcsec = impl_->sigma_arcsec(id, o, jd_tt, tau);
     return res;
 }
@@ -1302,14 +1444,36 @@ Result<void> Engine::add_catalog(const std::string& path) {
     // The new catalog wins for any name an older one also carries.
     for (auto& kv : names)
         impl_->name_index[std::move(kv.first)] = kv.second;
-    std::string counts;
-    for (size_t i = impl_->catalogs.size(); i-- > 0;) {
-        if (!counts.empty())
-            counts += ", ";
-        counts += std::to_string(impl_->catalogs[i]->record_count());
-    }
-    impl_->overlay_source_ =
-        impl_->source->description + " + EPM1 catalog(s) [" + counts + " bodies]";
+    impl_->refresh_overlay_source();
+    return {};
+}
+
+Result<void> Engine::add_perturbers(const std::string& path) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    auto f = spk::SpkFile::open(path);
+    if (!f)
+        return f.error();
+    auto src = std::make_unique<AsteroidSource>(std::move(f).value(), impl_->source.get());
+    if (src->bodies().empty())
+        return make_error(ErrorCode::FormatError,
+                          path + " carries no heliocentric numbered-asteroid segments");
+    std::vector<int> massive;
+    for (int id : src->bodies())
+        if (gm_or_builtin(src.get(), id) > 0.0)
+            massive.push_back(id);
+    if (massive.empty())
+        return make_error(ErrorCode::FormatError,
+                          path + ": no body with a known mass (DE MAnnnn constant or built-in)");
+    const size_t n_massive = massive.size();
+    impl_->asteroids = std::move(src);
+    impl_->perturbers.attach_asteroids(impl_->asteroids.get(), std::move(massive));
+    impl_->perturber_note_ =
+        " + " + std::to_string(n_massive) + " " + impl_->asteroids->description;
+    impl_->refresh_overlay_source();
+    // Every trajectory integrated so far lacked these masses.
+    impl_->small_bodies.clear();
+    impl_->sigma_tracks.clear();
     return {};
 }
 

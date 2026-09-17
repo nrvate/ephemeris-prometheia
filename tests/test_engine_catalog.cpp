@@ -15,6 +15,7 @@
 // file seas_18.se1 (output-only oracle), so the residuals measure the
 // integration, the seeding and the frame conventions.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -770,6 +771,138 @@ TEST_CASE("sigma_newest_catalog_rescales") {
     CHECK(ratio < 10.01);
     // The elements did not change: same position as before.
     CHECK(second.value().pos.dist_au == first.value().pos.dist_au);
+}
+
+// ---------------------------------------------------------------------------
+// Asteroid perturber kernels (add_perturbers).
+// ---------------------------------------------------------------------------
+
+// The engine's masses plus an asteroid perturber kernel, read per evaluation
+// for an independent integration: kernel asteroids are heliocentric, so the
+// main kernel's Sun is added. `exclude` leaves one id out (the body itself).
+struct KernelPlusAsteroids : PerturberStates {
+    KernelPlusAsteroids(spk::SpkFile main, spk::SpkFile ast, int asteroid_kernel_id, double mu,
+                        long exclude)
+        : main_(std::move(main)), ast_(std::move(ast)), ast_id_(asteroid_kernel_id) {
+        ids_ = {10, 399, 5};
+        mus_ = {gm::kSun, gm::kEarth, gm::kJupiter};
+        if (exclude != 20000000L + (asteroid_kernel_id - 2000000L)) {
+            ids_.push_back(asteroid_kernel_id);
+            mus_.push_back(mu);
+        }
+    }
+    void ensure(double) override {}
+    void state(size_t i, double t, double out[6]) override {
+        if (ids_[i] == ast_id_) {
+            double sun[6];
+            bad = bad || !ast_.state(ast_id_, 10, t, out).ok() || !main_.state(10, 0, t, sun).ok();
+            for (int k = 0; k < 6; ++k)
+                out[k] = (out[k] + sun[k]) / kAuKm;
+            return;
+        }
+        bad = bad || !main_.state(ids_[i], 0, t, out).ok();
+        for (int k = 0; k < 6; ++k)
+            out[k] /= kAuKm;
+    }
+    size_t count() const override { return ids_.size(); }
+    const double* mus() const override { return mus_.data(); }
+    bool ok() const override { return !bad; }
+    long sun_index() const override { return 0; }
+
+    spk::SpkFile main_, ast_;
+    int ast_id_;
+    std::vector<int> ids_;
+    std::vector<double> mus_;
+    bool bad = false;
+};
+
+TEST_CASE("perturber_kernel_matches_independent_integration") {
+    TempFile tf_kernel("pert-k");
+    TempFile tf_ast("pert-a");
+    TempFile tf_cat("pert-c");
+    Engine e = open_synthetic(tf_kernel);
+
+    // Two catalog bodies on the same orbit: 20000002 (not in the perturber
+    // kernel) and 20000001, which the kernel carries as 2000001 (Ceres'
+    // mass): the second must leave itself out.
+    const int kAstKernelId = 2000001;
+    auto body_helio = elements_to_state(gm::kSun, kEls);
+    REQUIRE(body_helio.ok());
+    const double ce = std::cos(kJplEclipticObliquity), se = std::sin(kJplEclipticObliquity);
+    const double m[9] = {1, 0, 0, 0, ce, se, 0, -se, ce};
+    const double rh[3] = {body_helio.value().pos.x, body_helio.value().pos.y,
+                          body_helio.value().pos.z};
+    // The asteroid sits 0.02 AU from the bodies' epoch position (ICRF,
+    // heliocentric), nearly at rest: km-scale pulls over a few hundred days.
+    synth::LinearBody ast{kAstKernelId, {}, {0.001, -0.002, 0.0005}, 10};
+    const double et0 = synth::et_of_tdb(kEpoch);
+    for (int i = 0; i < 3; ++i) {
+        const double icrf = m[i] * rh[0] + m[3 + i] * rh[1] + m[6 + i] * rh[2];
+        ast.p[i] = (icrf + 0.02 * (i == 2 ? 1.0 : 0.0)) * kAuKm - ast.v[i] * et0;
+    }
+    synth::write_linear_spk(tf_ast.path, {ast});
+
+    // Error paths first: nothing to add from a planetary kernel or a
+    // missing file.
+    auto not_asteroids = e.add_perturbers(tf_kernel.path.string());
+    CHECK(!not_asteroids.ok());
+    CHECK(not_asteroids.error().code == ErrorCode::FormatError);
+    CHECK(e.add_perturbers("/nonexistent/sb.bsp").error().code == ErrorCode::IoError);
+
+    {
+        auto w = catalog::Writer::create(tf_cat.path.string(), catalog::WriterOptions{});
+        REQUIRE(w.ok());
+        catalog::Record r1 = make_record(kEls.a);
+        r1.spkid = 20000001;
+        catalog::Record r2 = make_record(kEls.a);
+        r2.spkid = 20000002;
+        CHECK(w.value().add(r1, "1").ok());
+        CHECK(w.value().add(r2, "2").ok());
+        CHECK(w.value().finish(CborValue::make_map()).ok());
+    }
+    CHECK(e.add_catalog(tf_cat.path.string()).ok());
+    const double t = kEpoch + 400.0;
+    auto before = e.calc(20000002, t, bary_geom_icrf());
+    REQUIRE(before.ok());
+
+    CHECK(e.add_perturbers(tf_ast.path.string()).ok());
+    auto self = e.calc(20000001, t, bary_geom_icrf());
+    auto other = e.calc(20000002, t, bary_geom_icrf());
+    REQUIRE(self.ok());
+    REQUIRE(other.ok());
+    CHECK(std::string(other.value().provenance.source).find("asteroid perturbers") !=
+          std::string::npos);
+
+    auto oracle = [&](long body_id) {
+        auto main = spk::SpkFile::open(tf_kernel.path.string());
+        auto astf = spk::SpkFile::open(tf_ast.path.string());
+        REQUIRE(main.ok());
+        REQUIRE(astf.ok());
+        KernelPlusAsteroids pert(std::move(main).value(), std::move(astf).value(), kAstKernelId,
+                                 gm::asteroid(1), body_id);
+        BarycentricForce force{&pert};
+        State seed = oracle_seed(pert.main_, kEls);
+        double y[6];
+        to_array(seed, y);
+        IntegrateStats stats;
+        CHECK(integrate_dp54(y, kEpoch, t, force, IntegrateOptions{}, &stats).ok());
+        CHECK(pert.ok());
+        return std::array<double, 3>{y[0], y[1], y[2]};
+    };
+    const auto expect_other = oracle(20000002);
+    const auto expect_self = oracle(20000001);
+    double d_other = 0.0, d_self = 0.0, pull = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        d_other += std::pow(other.value().pos.xyz_au[i] - expect_other[i], 2);
+        d_self += std::pow(self.value().pos.xyz_au[i] - expect_self[i], 2);
+        pull += std::pow(other.value().pos.xyz_au[i] - before.value().pos.xyz_au[i], 2);
+    }
+    std::printf("  asteroid pull %.3g AU; engine vs oracle: perturbed %.3g AU, "
+                "self-excluded %.3g AU\n",
+                std::sqrt(pull), std::sqrt(d_other), std::sqrt(d_self));
+    CHECK(std::sqrt(pull) > 1e-7);    // the kernel's mass acts
+    CHECK(std::sqrt(d_other) < 1e-8); // and exactly as the oracle integrates it
+    CHECK(std::sqrt(d_self) < 1e-8);  // the body never perturbs itself
 }
 
 TEST_CASE("lookup_pdes_name_case") {

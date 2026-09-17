@@ -82,8 +82,26 @@ it agrees with Horizons to ≤ 21 km, 0.0005″, since planets dominate out ther
 
 With the Sun's post-Newtonian term (added after the first measurement), the
 rms fell from 0.066″ to 0.041″ at ±10 yr and from 0.22″ to 0.17″ at ±25 yr.
-Beyond that, the missing asteroid perturbers dominate, and the 50- and
-100-year rms did not move (0.88″ and 2.9″ before).
+Beyond that, the missing asteroid perturbers dominated.
+
+**With JPL's asteroid perturbers** (`add_perturbers("sb441-n16.bsp")`, the
+16 masses Horizons integrates with):
+
+| span from element epoch | astrometric, max over 7 bodies | heliocentric, typical | gate |
+|---|---:|---:|---:|
+| 0 | 0.0016″ | 0.1–4 km | 0.005″ |
+| ±10 yr | **0.0053″** (was 0.12″) | 0–13 km | 0.01″ |
+| ±25 yr | 0.019″ (was 0.39″) | 1–25 km | report |
+| ±50 yr | 0.024″ (was 2.5″) | 1–60 km | report |
+| ±100 yr | 0.071″ (was 8.7″) | 13–154 km (Hygiea 27,814 → 49 km, Pallas 8,644 → 49 km) | report |
+
+Serving the 16 kernel bodies straight from the kernel was also measured and
+rejected: its trajectories come from 2021 solutions, 1–125 km off Horizons
+near the present (Pallas 42 km, Cybele 125 km at the epoch), while
+integrating the current catalog elements with the other 15 as perturbers is
+within 5 km there. The gate `horizons_small_bodies_sb441` (0.13 s) runs when
+`ephe/sb441-n16.bsp` (or `$PROMETHEIA_SB441`) is present and SKIPs
+otherwise; the long-arc report prints both columns.
 
 - **Frame fix at the element epoch:** the first measurement showed 40–100 km
   here. SBDB elements are in **JPL's J2000 ecliptic**: the ICRF rotated by the

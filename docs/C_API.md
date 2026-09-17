@@ -17,6 +17,7 @@ if (prometheia_engine_open("ephe/linux_p1550p2650.440", &eph, &err) != PROMETHEI
     return 1;
 }
 prometheia_engine_add_catalog(eph, "sbdb.epm", &err);   /* optional: small bodies */
+prometheia_engine_add_perturbers(eph, "sb441-n16.bsp", &err); /* optional: asteroid masses */
 
 double jd_tt;
 prometheia_utc_to_tt(2026, 9, 16, 12, 0, 0.0, &jd_tt, &err);

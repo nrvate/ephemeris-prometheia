@@ -196,6 +196,19 @@ public:
     // positions and uncertainties cached so far are invalidated.
     Result<void> add_catalog(const std::string& catalog_path);
 
+    // Adds an asteroid perturber kernel (a NAIF SPK file of heliocentric
+    // segments for numbered asteroids under ids 2000000 + number, such as
+    // JPL's sb441-n16.bsp). Every body with a known mass — the DE file's
+    // MAnnnn constant, or the built-in DE440 table for the SB441-N16 set —
+    // joins the force model for catalog bodies; a body never perturbs itself
+    // (the SBDB SPK-ID 20000000 + number is matched). The kernel's bodies are
+    // still integrated from the catalog's current elements: the kernel's own
+    // trajectories come from older orbit solutions (measured tens of km off
+    // the current ones near the present). Replaces an earlier perturber
+    // kernel and invalidates the integrated trajectories and uncertainty
+    // tracks.
+    Result<void> add_perturbers(const std::string& spk_path);
+
     // Resolves a small body by its primary designation or proper name —
     // "1", "Ceres", "ceres" — to its SPK-ID, the integer calc() takes.
     // Matching is ASCII-case-insensitive. The index is built from the

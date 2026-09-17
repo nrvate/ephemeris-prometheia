@@ -98,8 +98,9 @@ decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0–M3 done
 catalog overlay with sigma and name lookup, sidereal ayanamshas, C
 ABI, `ephem` CLI); M5 in progress (JPL Horizons corpus: planets to
 6 µas, small bodies 0.04″ rms within 10 years with the Sun's relativistic
-term, uncertainties matching JPL's from on-demand covariances, see
-[docs/VALIDATION.md](docs/VALIDATION.md); asteroid perturbers next); then
+term, 0.005″ with JPL's asteroid perturbers, uncertainties matching JPL's
+from on-demand covariances, see [docs/VALIDATION.md](docs/VALIDATION.md));
+then
 transports (M6).
 
 ## Build

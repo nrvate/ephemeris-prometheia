@@ -190,6 +190,15 @@ PROMETHEIA_API prometheia_status prometheia_engine_add_catalog(prometheia_engine
                                                                const char* catalog_path,
                                                                prometheia_error* err);
 
+/*
+ * Adds an asteroid perturber kernel (e.g. JPL's sb441-n16.bsp): its
+ * numbered asteroids with known masses perturb every catalog body (never
+ * itself). Invalidates cached small-body trajectories.
+ */
+PROMETHEIA_API prometheia_status prometheia_engine_add_perturbers(prometheia_engine* engine,
+                                                                  const char* spk_path,
+                                                                  prometheia_error* err);
+
 /* Resolves a designation or proper name ("1", "Ceres"; ASCII
  * case-insensitive) to the SPK-ID calc takes. */
 PROMETHEIA_API prometheia_status prometheia_engine_lookup(const prometheia_engine* engine,

@@ -250,6 +250,18 @@ prometheia_status prometheia_engine_add_catalog(prometheia_engine* engine, const
     });
 }
 
+prometheia_status prometheia_engine_add_perturbers(prometheia_engine* engine, const char* path,
+                                                   prometheia_error* err) {
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!path)
+        return argument(err, "perturber kernel path is NULL");
+    return guarded(err, [&] {
+        auto r = engine->engine.add_perturbers(path);
+        return r ? succeed(err) : report(err, r.error());
+    });
+}
+
 prometheia_status prometheia_engine_lookup(const prometheia_engine* engine, const char* name,
                                            int* body, prometheia_error* err) {
     if (body)

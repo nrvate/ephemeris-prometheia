@@ -269,6 +269,14 @@ tool and script in this repo, and for anyone running them:
     3σ for six asteroids and the TNO Rumina over ±100 yr: ratio
     1.00–1.05 typically, within the [1, √2] ellipse-convention band
     (was 10–1000× too large).
+  - Increment 5 (done 2026-09-17): asteroid perturbers.
+    `Engine::add_perturbers` (C ABI, `ephem -p`) loads JPL's SB441-N16
+    kernel (downloaded once to `ephe/`, 616 MB): the 16 masses (DE440
+    `MAnnnn`) join the force model, self-excluded per body. Against
+    Horizons, worst small-body error ±10 yr 0.12″ → 0.0053″, ±100 yr
+    8.7″ → 0.071″. Serving the 16 from the kernel was measured worse near
+    the present (older solutions) and not adopted. Next: trim the kernel to
+    the DE440 span for releases.
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 

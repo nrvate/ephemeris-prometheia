@@ -77,6 +77,47 @@ inline constexpr double kEmrat = 81.3005682214972154;
 inline constexpr double kEarth = kEarthMoonBary * kEmrat / (1.0 + kEmrat);
 inline constexpr double kMoon = kEarthMoonBary / (1.0 + kEmrat);
 
+// The asteroid perturbers of JPL's SB441-N16 kernel (IOM 392R-21-005): GMs
+// as published in the DE440 header (MA0001, ...), AU^3/day^2, by number;
+// 0 for any other body.
+inline double asteroid(int number) {
+    switch (number) {
+    case 1:
+        return 1.396451812308107e-13; // Ceres
+    case 2:
+        return 3.04711463300432e-14; // Pallas
+    case 3:
+        return 4.282343967799501e-15; // Juno
+    case 4:
+        return 3.8548000225257904e-14; // Vesta
+    case 7:
+        return 2.5416014973471498e-15; // Iris
+    case 10:
+        return 1.254253076164081e-14; // Hygiea
+    case 15:
+        return 4.5107799051436795e-15; // Eunomia
+    case 16:
+        return 3.5445002842488978e-15; // Psyche
+    case 31:
+        return 2.4067012218937576e-15; // Euphrosyne
+    case 52:
+        return 5.982431526486984e-15; // Europa
+    case 65:
+        return 2.0917175955133682e-15; // Cybele
+    case 87:
+        return 4.834560654610552e-15; // Sylvia
+    case 88:
+        return 2.6529436610356353e-15; // Thisbe
+    case 107:
+        return 3.219139207587859e-15; // Camilla
+    case 511:
+        return 8.683625349228654e-15; // Davida
+    case 704:
+        return 6.311034342087889e-15; // Interamnia
+    }
+    return 0.0;
+}
+
 } // namespace gm
 
 // Barycentric states of the perturbing masses, indexed 0..count()-1.
@@ -110,6 +151,9 @@ struct PerturberStates {
     // Index of the Sun among the perturbers (the source of the relativistic
     // term), or -1 when it is absent or not yet known.
     virtual long sun_index() const { return -1; }
+    // Index of the perturber with this NAIF/SPK id, or -1: lets a body that
+    // is itself one of the perturbing masses leave itself out.
+    virtual long index_of(long) const { return -1; }
 };
 
 // Speed of light in AU/day (IAU 2012 AU, exact c).
@@ -128,6 +172,7 @@ inline constexpr double kLightAuPerDay = 299792.458 * 86400.0 / 149597870.7;
 struct BarycentricForce {
     PerturberStates* perturbers = nullptr; // not owned
     bool relativity = true;                // the Sun's post-Newtonian term
+    long exclude_id = -1;                  // the integrated body's own id: never perturbs itself
 
     void operator()(const double y[6], double t, double dydt[6]) {
         dydt[0] = y[3];
@@ -143,6 +188,7 @@ struct BarycentricForce {
         const size_t n = perturbers->count();
         const double* mu = perturbers->mus();
         const long sun = relativity ? perturbers->sun_index() : -1;
+        const long self = exclude_id >= 0 ? perturbers->index_of(exclude_id) : -1;
         double buffer[6 * 32];
         std::vector<double> large;
         double* all = buffer;
@@ -153,6 +199,8 @@ struct BarycentricForce {
         perturbers->states(t, all);
         double ax = 0.0, ay = 0.0, az = 0.0;
         for (size_t i = 0; i < n; ++i) {
+            if (long(i) == self)
+                continue;
             const double* ps = all + 6 * i;
             const double dx = ps[0] - y[0], dy = ps[1] - y[1], dz = ps[2] - y[2];
             const double d2 = dx * dx + dy * dy + dz * dz;

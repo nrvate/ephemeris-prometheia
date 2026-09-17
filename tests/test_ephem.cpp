@@ -49,8 +49,9 @@ std::string slurp(const std::string& path) {
 // needed) and an environment prefix.
 Run ephem(const std::string& args, const std::string& env = "") {
     TempFile err_file("ephem-stderr");
-    const std::string cmd = "env -u PROMETHEIA_EPHEMERIS -u PROMETHEIA_CATALOGS " + env + " " +
-                            EPHEM_BIN + " " + args + " 2>" + err_file.path.string();
+    const std::string cmd =
+        "env -u PROMETHEIA_EPHEMERIS -u PROMETHEIA_CATALOGS -u PROMETHEIA_PERTURBERS " + env + " " +
+        EPHEM_BIN + " " + args + " 2>" + err_file.path.string();
     Run r;
     if (FILE* p = popen(cmd.c_str(), "r")) {
         char buf[4096];
@@ -379,6 +380,11 @@ TEST_CASE("ephem_errors_and_status") {
     Run r = ephem("-e /nonexistent/kernel.bsp sun");
     CHECK(r.status == 2);
     CHECK(r.err.find("cannot open") != std::string::npos);
+    r = ephem(k.arg + " -p /nonexistent/sb441.bsp sun");
+    CHECK(r.status == 2);
+    CHECK(r.err.find("perturbers") != std::string::npos);
+    r = ephem(k.arg + " -p " + k.file.path.string() + " sun"); // planets only: no asteroids
+    CHECK(r.status == 2);
     r = ephem(k.arg + " -c /nonexistent/cat.epm sun");
     CHECK(r.status == 2);
     CHECK(r.err.find("catalog") != std::string::npos);
