@@ -67,6 +67,28 @@ answer, and a different account of which corrections it applied. The test
 pins the large intermediate as well as the total for exactly this reason: it
 is what tells the two routes apart.
 
+### Asking for a proper subset of the corrections
+
+It follows that an **astrometric** orbit point of a geocentric body — light
+time on, aberration and deflection off, the standard catalogue place — is not
+a quantity two implementations will agree on, even when they agree on the
+apparent place to a fraction of a milliarcsecond.
+
+Here that request returns a lunar node 19.105″ from the apparent one, because
+the barycentric retardation is left standing with nothing to cancel it. An
+engine retarding the point geocentrically returns one a few milliarcseconds
+from its apparent place. Both are self-consistent; both have applied light
+time and nothing else; they disagree by 19″.
+
+So for a geocentric body, light time and the observer-velocity term are not
+independently meaningful. Ask for all three corrections or for none, and the
+answer is well defined. Ask for a proper subset and what you get is an
+intermediate of one particular route through the computation, which is worth
+having for debugging and is not worth comparing against another library. This
+is a property of the quantity, not a defect in either implementation — but it
+is the kind of thing that surfaces two layers away as a wrong number, so it
+is written down here rather than left to be rediscovered.
+
 ## How it is computed
 
 `orbit_point_vector_at` in `src/engine.cpp` mirrors `vector_at`, the body
