@@ -166,9 +166,14 @@ Always answered per object, never as an ERROR:
   with `iflag` bit 33, names the observing body by its wire body id,
   resolved through the wire map like any object. A center without an
   entry, or a center together with an observer flag, fails the objects.
-- **Unsupported for now:** fixed stars, nodes and apsides, any bit or mode
-  without a wire-map entry, and bodies neither the ephemeris nor a loaded
-  catalog has.
+- **Nodes and apsides** (object kind 2): point 1–4 is the ascending node,
+  descending node, perihelion or aphelion, and method 1 osculating or 0 mean.
+  The body is a wire body id. The engine's `calc_orbit_point` answers it
+  (docs/ENGINE.md, "Nodes and apsides"), in the request's observer, frame,
+  flags and zodiac. The metadata name is the body's with " asc. node",
+  " desc. node", " perihelion" or " aphelion" appended.
+- **Unsupported for now:** fixed stars, any bit or mode without a wire-map
+  entry, and bodies neither the ephemeris nor a loaded catalog has.
 - **Return flag:** the request's low 32 bits of `iflag` for an object with at
   least one computed row.
 - **WELCOME:** reports Swiss Ephemeris version 0.

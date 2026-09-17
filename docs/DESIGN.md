@@ -336,6 +336,9 @@ tool and script in this repo, and for anyone running them:
   - Increment 5 (done 2026-09-17): planet-centred positions:
     `Center::Body` and `center_body` (C ABI 4, `ephem --center mars`),
     served for the request's center field.
+  - Increment 6 (done 2026-09-17): osculating nodes and apsides
+    (`Engine::calc_orbit_point`, `prometheia_calc_orbit_point`,
+    `ephem --orbit-point`, prometheiad object kind 2).
 
 ## Cleanroom policy
 

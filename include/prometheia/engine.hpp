@@ -105,6 +105,21 @@ enum class Precession : int {
     Vondrak2011 = 1,
 };
 
+// A point of a body's orbit, for Engine::calc_orbit_point.
+enum class OrbitPoint {
+    AscendingNode,  // where the orbit crosses the ecliptic northward
+    DescendingNode, // ... southward
+    Perihelion,     // the nearest point (perigee for the Moon)
+    Aphelion,       // the farthest point (apogee); elliptic orbits only
+};
+
+// Which orbit: the osculating one of the body's state at the instant, or
+// the mean one (docs/ENGINE.md, "Nodes and apsides").
+enum class OrbitElements {
+    Mean,
+    Osculating,
+};
+
 struct CalcOptions {
     Center center = Center::Geocentric;
     Frame frame = Frame::TrueOfDate;
@@ -245,6 +260,20 @@ public:
 
     // Same, at a UT1 Julian date, converted with the Delta T model.
     Result<CalcResult> calc_ut(int body, double jd_ut1, const CalcOptions& opts = {});
+
+    // A node or apsis of `body`'s orbit, as a point in space seen by the
+    // options' observer in the options' frame (docs/ENGINE.md, "Nodes and
+    // apsides"). The orbit is heliocentric, or geocentric for the Moon, and
+    // the ecliptic is that of the output frame (the mean ecliptic of date
+    // for the date frames, of J2000 for J2000 and ICRF). The point is
+    // geometric: light time, deflection and aberration do not apply to it.
+    // Rates are central differences, as for calc(); sigma is never set.
+    // ArgumentError where the point is undefined (nodes of an orbit in the
+    // ecliptic, apsides of a circular orbit, the aphelion of an open one).
+    Result<CalcResult> calc_orbit_point(int body, OrbitPoint point, OrbitElements elements,
+                                        double jd_tt, const CalcOptions& opts = {});
+    Result<CalcResult> calc_orbit_point_ut(int body, OrbitPoint point, OrbitElements elements,
+                                           double jd_ut1, const CalcOptions& opts = {});
 
     // Delta T model for UT inputs and topocentric Earth rotation. Not
     // owned; nullptr restores the default (time::ObservedDeltaT).

@@ -182,6 +182,23 @@ prometheia_status calc_common(prometheia_engine* engine, int body, double jd,
     });
 }
 
+bool orbit_selectors(int point, int elements, prometheia_result* result, prometheia_error* err,
+                     prometheia_status& status) {
+    if (point < PROMETHEIA_ORBIT_ASCENDING_NODE || point > PROMETHEIA_ORBIT_APHELION) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        status = argument(err, "orbit point out of range");
+        return false;
+    }
+    if (elements != PROMETHEIA_ELEMENTS_MEAN && elements != PROMETHEIA_ELEMENTS_OSCULATING) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        status = argument(err, "orbit elements out of range");
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 extern "C" {
@@ -302,6 +319,35 @@ prometheia_status prometheia_calc_ut(prometheia_engine* engine, int body, double
     return calc_common(
         engine, body, jd_ut1, opts, result, err,
         [](Engine& e, int b, double jd, const CalcOptions& o) { return e.calc_ut(b, jd, o); });
+}
+
+prometheia_status prometheia_calc_orbit_point(prometheia_engine* engine, int body, int point,
+                                              int elements, double jd_tt,
+                                              const prometheia_options* opts,
+                                              prometheia_result* result, prometheia_error* err) {
+    prometheia_status status = PROMETHEIA_OK;
+    if (!orbit_selectors(point, elements, result, err, status))
+        return status;
+    return calc_common(engine, body, jd_tt, opts, result, err,
+                       [point, elements](Engine& e, int b, double jd, const CalcOptions& o) {
+                           return e.calc_orbit_point(b, static_cast<OrbitPoint>(point),
+                                                     static_cast<OrbitElements>(elements), jd, o);
+                       });
+}
+
+prometheia_status prometheia_calc_orbit_point_ut(prometheia_engine* engine, int body, int point,
+                                                 int elements, double jd_ut1,
+                                                 const prometheia_options* opts,
+                                                 prometheia_result* result, prometheia_error* err) {
+    prometheia_status status = PROMETHEIA_OK;
+    if (!orbit_selectors(point, elements, result, err, status))
+        return status;
+    return calc_common(engine, body, jd_ut1, opts, result, err,
+                       [point, elements](Engine& e, int b, double jd, const CalcOptions& o) {
+                           return e.calc_orbit_point_ut(b, static_cast<OrbitPoint>(point),
+                                                        static_cast<OrbitElements>(elements), jd,
+                                                        o);
+                       });
 }
 
 void prometheia_engine_set_delta_t(prometheia_engine* engine, prometheia_delta_t_fn fn,

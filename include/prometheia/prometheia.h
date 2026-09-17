@@ -227,6 +227,30 @@ PROMETHEIA_API prometheia_status prometheia_calc_ut(prometheia_engine* engine, i
                                                     prometheia_error* err);
 
 /*
+ * A node or apsis of a body's orbit as a point in space, seen with the
+ * options' observer and frame (docs/ENGINE.md, "Nodes and apsides"): the
+ * heliocentric orbit (geocentric for the Moon) on the output frame's
+ * ecliptic; geometric, no light time or aberration; rates by central
+ * differences. PROMETHEIA_ERROR_ARGUMENT where the point is undefined.
+ */
+#define PROMETHEIA_ORBIT_ASCENDING_NODE 0
+#define PROMETHEIA_ORBIT_DESCENDING_NODE 1
+#define PROMETHEIA_ORBIT_PERIHELION 2
+#define PROMETHEIA_ORBIT_APHELION 3
+
+#define PROMETHEIA_ELEMENTS_MEAN 0
+#define PROMETHEIA_ELEMENTS_OSCULATING 1
+
+PROMETHEIA_API prometheia_status prometheia_calc_orbit_point(prometheia_engine* engine, int body,
+                                                             int point, int elements, double jd_tt,
+                                                             const prometheia_options* opts,
+                                                             prometheia_result* result,
+                                                             prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_calc_orbit_point_ut(
+    prometheia_engine* engine, int body, int point, int elements, double jd_ut1,
+    const prometheia_options* opts, prometheia_result* result, prometheia_error* err);
+
+/*
  * Delta T = TT - UT1 in seconds as a function of JD(TT), for calc_ut and
  * topocentric Earth rotation. user is passed through untouched and must
  * outlive its use. fn NULL restores the default (observed USNO Delta T).

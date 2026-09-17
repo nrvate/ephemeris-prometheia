@@ -1216,7 +1216,7 @@ struct Engine::Impl {
             return std::nullopt;
         if (!observer(o, jd_tt, jd_tdb, obs).ok())
             return std::nullopt;
-        double u[3];
+        double u[3] = {0.0, 0.0, 0.0};
         for (int i = 0; i < 3; ++i)
             u[i] = (body[i] - obs[i]) / kAuKm;
         const double d = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
@@ -1360,6 +1360,192 @@ struct Engine::Impl {
         if (o.aberration)
             apparent::aberration(p, obs + 3, p);
 
+        return to_output(jd_tt, o, p, out);
+    }
+
+    // The ecliptic an orbit point is defined on: the output frame's (mean
+    // ecliptic of date for the date frames, of J2000 otherwise), as a
+    // rotation from ICRF.
+    void orbit_ecliptic(double jd_tt, const CalcOptions& o, double m[9]) {
+        switch (o.frame) {
+        case Frame::ICRF:
+            rot1(eps_j2000, m);
+            return;
+        case Frame::J2000: {
+            double e[9];
+            rot1(eps_j2000, e);
+            matmul(e, bias, m);
+            return;
+        }
+        case Frame::MeanOfDate:
+        case Frame::TrueOfDate: {
+            const EpochFrames& f = frames_at(jd_tt, false, o.precession);
+            double e[9];
+            rot1(f.eps_mean, e);
+            matmul(e, f.pb, m);
+            return;
+        }
+        }
+    }
+
+    // Barycentric position (km, ICRF) of a node or apsis of body `id`.
+    Result<void> orbit_point(int id, OrbitPoint point, OrbitElements elements, double jd_tt,
+                             double jd_tdb, const CalcOptions& o, double out[3]) {
+        if (elements == OrbitElements::Mean)
+            return mean_orbit_point(id, point, jd_tt, jd_tdb, o, out);
+        if (id == body::kSun || id == body::kSolarSystemBary)
+            return make_error(ErrorCode::ArgumentError, "the Sun has no heliocentric orbit");
+        const int center = id == body::kMoon ? body::kEarth : body::kSun;
+        double b[6], c[6];
+        auto r = body_barycentric(id, jd_tdb, b, nullptr);
+        if (!r)
+            return r;
+        r = center == body::kSun ? sun_at(jd_tdb, c) : source->barycentric(center, jd_tdb, c);
+        if (!r)
+            return r;
+        const double au3 = kAuKm * kAuKm * kAuKm;
+        const double mu =
+            (gm_or_builtin(source.get(), center) + gm_or_builtin(source.get(), id)) * au3;
+        double m[9];
+        orbit_ecliptic(jd_tt, o, m);
+        double rel[3], vel[3], x[3], v[3];
+        for (int i = 0; i < 3; ++i) {
+            rel[i] = b[i] - c[i];
+            vel[i] = b[3 + i] - c[3 + i];
+        }
+        apply(m, rel, x);
+        apply(m, vel, v);
+        const double h[3] = {x[1] * v[2] - x[2] * v[1], x[2] * v[0] - x[0] * v[2],
+                             x[0] * v[1] - x[1] * v[0]};
+        const double h2 = h[0] * h[0] + h[1] * h[1] + h[2] * h[2];
+        const double rn = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+        if (!(mu > 0.0) || !(h2 > 0.0) || !(rn > 0.0))
+            return make_error(ErrorCode::ArgumentError, "no orbit (degenerate state)");
+        const double vxh[3] = {v[1] * h[2] - v[2] * h[1], v[2] * h[0] - v[0] * h[2],
+                               v[0] * h[1] - v[1] * h[0]};
+        double ev[3];
+        for (int i = 0; i < 3; ++i)
+            ev[i] = vxh[i] / mu - x[i] / rn;
+        const double semi_latus = h2 / mu;
+        double u[3] = {0.0, 0.0, 0.0};
+        switch (point) {
+        case OrbitPoint::AscendingNode:
+        case OrbitPoint::DescendingNode: {
+            // The node line: z x h, toward the ascending node.
+            const double nn = std::hypot(h[0], h[1]);
+            if (!(nn > 1e-12 * std::sqrt(h2)))
+                return make_error(ErrorCode::ArgumentError,
+                                  "the orbit lies in the ecliptic: nodes are undefined");
+            const double sign = point == OrbitPoint::AscendingNode ? 1.0 : -1.0;
+            u[0] = -sign * h[1] / nn;
+            u[1] = sign * h[0] / nn;
+            u[2] = 0.0;
+            break;
+        }
+        case OrbitPoint::Perihelion:
+        case OrbitPoint::Aphelion: {
+            const double e = std::sqrt(ev[0] * ev[0] + ev[1] * ev[1] + ev[2] * ev[2]);
+            if (!(e > 1e-12))
+                return make_error(ErrorCode::ArgumentError,
+                                  "the orbit is circular: apsides are undefined");
+            if (point == OrbitPoint::Aphelion && !(e < 1.0))
+                return make_error(ErrorCode::ArgumentError,
+                                  "the orbit is open: the aphelion is undefined");
+            const double sign = point == OrbitPoint::Perihelion ? 1.0 : -1.0;
+            for (int i = 0; i < 3; ++i)
+                u[i] = sign * ev[i] / e;
+            break;
+        }
+        }
+        // r = p / (1 + e cos nu), with e cos nu = e . u along direction u.
+        const double denom = 1.0 + (ev[0] * u[0] + ev[1] * u[1] + ev[2] * u[2]);
+        if (!(denom > 1e-12))
+            return make_error(ErrorCode::ArgumentError, "the open orbit does not reach this node");
+        const double dist = semi_latus / denom;
+        double pe[3], pi[3];
+        for (int i = 0; i < 3; ++i)
+            pe[i] = dist * u[i];
+        apply_transpose(m, pe, pi);
+        for (int i = 0; i < 3; ++i)
+            out[i] = c[i] + pi[i];
+        return {};
+    }
+
+    Result<void> mean_orbit_point(int, OrbitPoint, double, double, const CalcOptions&, double[3]) {
+        return make_error(ErrorCode::NotFound, "mean elements are not available yet");
+    }
+
+    // Observer -> orbit point vector in the output frame (km).
+    Result<void> orbit_point_vector_at(int id, OrbitPoint point, OrbitElements elements,
+                                       double jd_tt, const CalcOptions& o, double out[3]) {
+        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        double obs[6], pt[3];
+        auto r = observer(o, jd_tt, jd_tdb, obs);
+        if (!r)
+            return r;
+        r = orbit_point(id, point, elements, jd_tt, jd_tdb, o, pt);
+        if (!r)
+            return r;
+        const double p[3] = {pt[0] - obs[0], pt[1] - obs[1], pt[2] - obs[2]};
+        return to_output(jd_tt, o, p, out);
+    }
+
+    // Spherical coordinates and rates from a vector and its central
+    // difference; vec(jd, out, tau) fills one output-frame vector (km).
+    template <typename VectorFn>
+    Result<void> position(double jd_tt, const CalcOptions& o, double& tau, VectorFn&& vec,
+                          Position& pos) {
+        double v[3];
+        auto r = vec(jd_tt, v, tau);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            pos.xyz_au[i] = v[i] / kAuKm;
+        if (o.speed) {
+            const double tp = jd_tt + kSpeedStepDays, tm = jd_tt - kSpeedStepDays;
+            // The stencil starts its light-time solve from the centre's tau.
+            double vp[3], vm[3], tau_p = tau, tau_m = tau;
+            r = vec(tp, vp, tau_p);
+            if (!r)
+                return r;
+            r = vec(tm, vm, tau_m);
+            if (!r)
+                return r;
+            const double span = (tp - tm) * kAuKm; // actual, rounded, step
+            for (int i = 0; i < 3; ++i)
+                pos.vel_au_day[i] = (vp[i] - vm[i]) / span;
+        }
+        const double* x = pos.xyz_au;
+        const double* dx = pos.vel_au_day;
+        const double rho2 = x[0] * x[0] + x[1] * x[1];
+        const double r2 = rho2 + x[2] * x[2];
+        const double rho = std::sqrt(rho2), rr = std::sqrt(r2);
+        double lon = std::atan2(x[1], x[0]) * kRad2Deg;
+        if (lon < 0.0)
+            lon += 360.0;
+        if (lon >= 360.0)
+            lon -= 360.0;
+        pos.lon_deg = lon;
+        pos.lat_deg = std::atan2(x[2], rho) * kRad2Deg;
+        pos.dist_au = rr;
+        if (o.speed && rho > 0.0) {
+            pos.lon_speed = (x[0] * dx[1] - x[1] * dx[0]) / rho2 * kRad2Deg;
+            pos.lat_speed =
+                (dx[2] * rho2 - x[2] * (x[0] * dx[0] + x[1] * dx[1])) / (r2 * rho) * kRad2Deg;
+            pos.dist_speed = (x[0] * dx[0] + x[1] * dx[1] + x[2] * dx[2]) / rr;
+        }
+        return {};
+    }
+
+    double ut1_to_tt(double jd_ut1) const {
+        // Delta T is a function of TT; one fixed-point pass is ample
+        // (dDeltaT/dt is ~1e-8, so the argument error is sub-microsecond).
+        const double jd_tt = jd_ut1 + delta_t_seconds(jd_ut1) / 86400.0;
+        return jd_ut1 + delta_t_seconds(jd_tt) / 86400.0;
+    }
+
+    // An ICRF vector (km) into the requested output frame and zodiac.
+    Result<void> to_output(double jd_tt, const CalcOptions& o, const double p[3], double out[3]) {
         const bool need_nut = o.frame == Frame::TrueOfDate;
         double m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
         switch (o.frame) {
@@ -1491,50 +1677,20 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
         return make_error(ErrorCode::ArgumentError, "body is the observer (center body)");
 
     CalcResult res;
-    double v[3], tau = 0.0;
+    double tau = 0.0;
     int origin = kFromEphemeris;
-    auto r = impl_->vector_at(id, jd_tt, o, v, tau, origin);
+    bool first = true;
+    auto r = impl_->position(
+        jd_tt, o, tau,
+        [&](double jd, double out[3], double& t) -> Result<void> {
+            int stencil_origin;
+            auto v = impl_->vector_at(id, jd, o, out, t, first ? origin : stencil_origin);
+            first = false;
+            return v;
+        },
+        res.pos);
     if (!r)
         return r.error();
-
-    Position& pos = res.pos;
-    for (int i = 0; i < 3; ++i)
-        pos.xyz_au[i] = v[i] / kAuKm;
-    if (o.speed) {
-        const double tp = jd_tt + kSpeedStepDays, tm = jd_tt - kSpeedStepDays;
-        // The stencil starts its light-time solve from the centre's tau.
-        double vp[3], vm[3], tau_p = tau, tau_m = tau;
-        int unused_origin;
-        r = impl_->vector_at(id, tp, o, vp, tau_p, unused_origin);
-        if (!r)
-            return r.error();
-        r = impl_->vector_at(id, tm, o, vm, tau_m, unused_origin);
-        if (!r)
-            return r.error();
-        const double span = (tp - tm) * kAuKm; // actual, rounded, step
-        for (int i = 0; i < 3; ++i)
-            pos.vel_au_day[i] = (vp[i] - vm[i]) / span;
-    }
-
-    const double* x = pos.xyz_au;
-    const double* dx = pos.vel_au_day;
-    const double rho2 = x[0] * x[0] + x[1] * x[1];
-    const double r2 = rho2 + x[2] * x[2];
-    const double rho = std::sqrt(rho2), rr = std::sqrt(r2);
-    double lon = std::atan2(x[1], x[0]) * kRad2Deg;
-    if (lon < 0.0)
-        lon += 360.0;
-    if (lon >= 360.0)
-        lon -= 360.0;
-    pos.lon_deg = lon;
-    pos.lat_deg = std::atan2(x[2], rho) * kRad2Deg;
-    pos.dist_au = rr;
-    if (o.speed && rho > 0.0) {
-        pos.lon_speed = (x[0] * dx[1] - x[1] * dx[0]) / rho2 * kRad2Deg;
-        pos.lat_speed =
-            (dx[2] * rho2 - x[2] * (x[0] * dx[0] + x[1] * dx[1])) / (r2 * rho) * kRad2Deg;
-        pos.dist_speed = (x[0] * dx[0] + x[1] * dx[1] + x[2] * dx[2]) / rr;
-    }
 
     res.provenance.source = origin == kFromCatalog && !impl_->overlay_source_.empty()
                                 ? std::string_view(impl_->overlay_source_)
@@ -1645,11 +1801,44 @@ Result<int> Engine::lookup(std::string_view name) const {
 Result<CalcResult> Engine::calc_ut(int id, double jd_ut1, const CalcOptions& o) {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");
-    // Delta T is a function of TT; one fixed-point pass is ample (dDeltaT/dt
-    // is ~1e-8, so the argument error is sub-microsecond).
-    double jd_tt = jd_ut1 + impl_->delta_t_seconds(jd_ut1) / 86400.0;
-    jd_tt = jd_ut1 + impl_->delta_t_seconds(jd_tt) / 86400.0;
-    return calc(id, jd_tt, o);
+    return calc(id, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitElements elements,
+                                            double jd_tt, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite time");
+    if (int(point) < 0 || int(point) > int(OrbitPoint::Aphelion) || int(elements) < 0 ||
+        int(elements) > int(OrbitElements::Osculating))
+        return make_error(ErrorCode::ArgumentError, "unknown orbit point or elements");
+    CalcResult res;
+    double tau = 0.0;
+    auto r = impl_->position(
+        jd_tt, o, tau,
+        [&](double jd, double out[3], double&) {
+            return impl_->orbit_point_vector_at(id, point, elements, jd, o, out);
+        },
+        res.pos);
+    if (!r)
+        return r.error();
+    res.provenance.source = impl_->source->description;
+    res.provenance.denum = impl_->source->denum;
+    if (o.sidereal != SiderealMode::Tropical) {
+        auto s = impl_->sidereal_shift(o, jd_tt);
+        if (!s)
+            return s.error();
+        res.ayanamsa_deg = s.value();
+    }
+    return res;
+}
+
+Result<CalcResult> Engine::calc_orbit_point_ut(int id, OrbitPoint point, OrbitElements elements,
+                                               double jd_ut1, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc_orbit_point(id, point, elements, impl_->ut1_to_tt(jd_ut1), o);
 }
 
 void Engine::set_delta_t_model(const time::DeltaTModel* model) {

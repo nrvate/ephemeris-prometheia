@@ -70,6 +70,8 @@ typedef struct config {
     int dms;
     int have_delta_t;
     double delta_t;
+    int orbit_point; /* PROMETHEIA_ORBIT_*, or -1 for the bodies themselves */
+    int orbit_elements;
     prometheia_options opts;
 } config;
 
@@ -311,6 +313,8 @@ static void print_help(void) {
            "      --equatorial       right ascension/declination instead of ecliptic\n"
            "      --sidereal MODE    fagan-bradley (fb), lahiri, user:JD:DEG, tropical\n"
            "      --precession MODEL iau2006 (default) or vondrak2011 (long-term)\n"
+           "      --orbit-point P[:mean|:osc]  asc, desc, peri or apo of each body's\n"
+           "                         orbit instead of the body (osculating by default)\n"
            "\n"
            "Corrections (default: apparent place, with rates):\n"
            "      --astrometric      light time only\n"
@@ -518,6 +522,28 @@ static int parse_args(int argc, char** argv, config* c) {
                 c->opts.precession = PROMETHEIA_PRECESSION_VONDRAK2011;
             else
                 return usage_error("unknown precession model '%s' (iau2006, vondrak2011)", v);
+        } else if (is_opt(&a, NULL, "--orbit-point")) {
+            static const char* const point_names[] = {"asc", "desc", "peri", "apo"};
+            static const int point_values[] = {
+                PROMETHEIA_ORBIT_ASCENDING_NODE, PROMETHEIA_ORBIT_DESCENDING_NODE,
+                PROMETHEIA_ORBIT_PERIHELION, PROMETHEIA_ORBIT_APHELION};
+            char buf[32];
+            char* colon;
+            if (!(v = value_of(&a)))
+                return EXIT_USAGE;
+            if (strlen(v) >= sizeof buf)
+                return usage_error("unknown orbit point '%s'", v);
+            strcpy(buf, v);
+            c->orbit_elements = PROMETHEIA_ELEMENTS_OSCULATING;
+            if ((colon = strchr(buf, ':')) != NULL) {
+                *colon = '\0';
+                if (equals_nocase(colon + 1, "mean"))
+                    c->orbit_elements = PROMETHEIA_ELEMENTS_MEAN;
+                else if (!equals_nocase(colon + 1, "osc"))
+                    return usage_error("unknown orbit elements '%s' (mean, osc)", colon + 1);
+            }
+            if (!parse_keyword(buf, point_names, point_values, 4, &c->orbit_point))
+                return usage_error("unknown orbit point '%s' (asc, desc, peri, apo)", buf);
         } else if (is_opt(&a, NULL, "--sidereal")) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;
@@ -861,6 +887,7 @@ int main(int argc, char** argv) {
 
     memset(&c, 0, sizeof c);
     prometheia_options_init(&c.opts);
+    c.orbit_point = -1;
     c.count = 1;
     c.step_days = 1.0;
     c.format = FORMAT_TABLE;
@@ -1011,8 +1038,14 @@ int main(int argc, char** argv) {
         for (i = 0; i < n_bodies; ++i) {
             prometheia_result r;
             const prometheia_status s =
-                c.scale == SCALE_UT1 ? prometheia_calc_ut(eng, bodies[i].id, t, &c.opts, &r, &err)
-                                     : prometheia_calc(eng, bodies[i].id, t, &c.opts, &r, &err);
+                c.orbit_point >= 0
+                    ? (c.scale == SCALE_UT1
+                           ? prometheia_calc_orbit_point_ut(eng, bodies[i].id, c.orbit_point,
+                                                            c.orbit_elements, t, &c.opts, &r, &err)
+                           : prometheia_calc_orbit_point(eng, bodies[i].id, c.orbit_point,
+                                                         c.orbit_elements, t, &c.opts, &r, &err))
+                : c.scale == SCALE_UT1 ? prometheia_calc_ut(eng, bodies[i].id, t, &c.opts, &r, &err)
+                                       : prometheia_calc(eng, bodies[i].id, t, &c.opts, &r, &err);
             if (s != PROMETHEIA_OK) {
                 fprintf(stderr, "%s: %s at JD %.6f TT: %s\n", g_program, bodies[i].label, jd_tt,
                         err.message);

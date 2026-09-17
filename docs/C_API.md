@@ -36,8 +36,19 @@ if (prometheia_engine_lookup(eph, "Ceres", &ceres, &err) == PROMETHEIA_OK &&
     (r.flags & PROMETHEIA_HAS_SIGMA)) /* catalog record carries a covariance */
     printf("Ceres sigma %.3f\"\n", r.sigma_arcsec);
 
+/* The Moon's osculating ascending node, and positions seen from Mars. */
+prometheia_calc_orbit_point(eph, PROMETHEIA_MOON, PROMETHEIA_ORBIT_ASCENDING_NODE,
+                            PROMETHEIA_ELEMENTS_OSCULATING, jd_tt, NULL, &r, &err);
+opts.center = PROMETHEIA_CENTER_BODY;
+opts.center_body = PROMETHEIA_MARS;
+prometheia_calc(eph, PROMETHEIA_EARTH, jd_tt, &opts, &r, &err);
+
 prometheia_engine_close(eph);
 ```
+
+`prometheia_calc_orbit_point` and `_ut` wrap `Engine::calc_orbit_point`
+([ENGINE.md](ENGINE.md), "Nodes and apsides"). An orbit point or elements
+selector out of range is `PROMETHEIA_ERROR_ARGUMENT`.
 
 ## Conventions
 

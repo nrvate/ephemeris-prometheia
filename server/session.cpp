@@ -204,6 +204,9 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
     struct Object {
         std::string why; // set: every row fails with this reason
         int naif_id = 0;
+        bool orbit_point = false; // a node or apsis of naif_id
+        OrbitPoint point = OrbitPoint::AscendingNode;
+        OrbitElements elements = OrbitElements::Osculating;
         std::string name, first_error;
         bool any_ok = false;
     };
@@ -218,13 +221,24 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
         std::optional<WireBody> body;
         if (obj.kind == eph::kObjStar) {
             t.why = "fixed stars are not supported";
-        } else if (obj.kind == eph::kObjNodAps) {
-            t.why = "nodes and apsides are not supported";
         } else if (!(body = map_.body(obj.id))) {
             t.why = "body " + std::to_string(obj.id) + " has no wire-map entry";
         } else {
             t.naif_id = body->naif_id;
             t.name = body->name.empty() ? "SPK-ID " + std::to_string(body->naif_id) : body->name;
+            if (obj.kind == eph::kObjNodAps) {
+                // parseRequest has checked point 1-4 and method 0-1.
+                static constexpr OrbitPoint kPoints[] = {
+                    OrbitPoint::AscendingNode, OrbitPoint::DescendingNode, OrbitPoint::Perihelion,
+                    OrbitPoint::Aphelion};
+                static constexpr const char* kSuffix[] = {" asc. node", " desc. node",
+                                                          " perihelion", " aphelion"};
+                t.orbit_point = true;
+                t.point = kPoints[obj.point - eph::kPntNorthNode];
+                t.elements =
+                    obj.method == eph::kNodOscu ? OrbitElements::Osculating : OrbitElements::Mean;
+                t.name += kSuffix[obj.point - eph::kPntNorthNode];
+            }
         }
     }
 
@@ -241,8 +255,13 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
                 fill_nan(row);
                 continue;
             }
-            auto res = plan.time_tt ? engine_.calc(t.naif_id, jd, plan.opts)
-                                    : engine_.calc_ut(t.naif_id, jd, plan.opts);
+            auto res = t.orbit_point
+                           ? (plan.time_tt ? engine_.calc_orbit_point(t.naif_id, t.point,
+                                                                      t.elements, jd, plan.opts)
+                                           : engine_.calc_orbit_point_ut(t.naif_id, t.point,
+                                                                         t.elements, jd, plan.opts))
+                           : (plan.time_tt ? engine_.calc(t.naif_id, jd, plan.opts)
+                                           : engine_.calc_ut(t.naif_id, jd, plan.opts));
             if (!res) {
                 fill_nan(row);
                 if (t.first_error.empty()) {

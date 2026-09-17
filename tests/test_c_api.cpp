@@ -177,6 +177,7 @@ TEST_CASE("c_api_matches_engine_bit_for_bit") {
         {5, 0, 1, 0, 1, 1, 1, 1, 1},      // Lahiri, J2000 ecliptic
         {5, 0, 3, 0, 255, 1, 1, 1, 1},    // user-anchored
         {5, 0, 3, 0, -1, 1, 1, 1, 1 + 6}, // any nonzero int is true
+        {399, 4, 1, 0, -1, 1, 1, 1, 1},   // centred on the Jupiter barycentre
     };
     for (const Case& k : cases) {
         prometheia_options co;
@@ -194,6 +195,7 @@ TEST_CASE("c_api_matches_engine_bit_for_bit") {
         co.site_lon_deg = 8.55;
         co.site_lat_deg = 47.37;
         co.site_height_m = 500.0;
+        co.center_body = 5;
 
         CalcOptions o;
         o.center = Center(k.center);
@@ -207,6 +209,7 @@ TEST_CASE("c_api_matches_engine_bit_for_bit") {
         o.aberration = k.aber;
         o.speed = k.speed;
         o.site = {8.55 * kDegToRad, 47.37 * kDegToRad, 500.0};
+        o.center_body = 5;
 
         for (double jd : {kJ2000, 2461300.25}) {
             prometheia_result cr;
@@ -222,6 +225,35 @@ TEST_CASE("c_api_matches_engine_bit_for_bit") {
             if (ru.ok())
                 CHECK(same(cr, ru.value()));
         }
+    }
+
+    // Orbit points go through the same options.
+    for (int point = PROMETHEIA_ORBIT_ASCENDING_NODE; point <= PROMETHEIA_ORBIT_PERIHELION;
+         ++point) {
+        prometheia_result cr;
+        prometheia_options co;
+        prometheia_options_init(&co);
+        const auto rc = prometheia_calc_orbit_point(c.e, 399, point, PROMETHEIA_ELEMENTS_OSCULATING,
+                                                    kJ2000, &co, &cr, &err);
+        auto r =
+            cpp.value().calc_orbit_point(399, OrbitPoint(point), OrbitElements::Osculating, kJ2000);
+        CHECK((rc == PROMETHEIA_OK) == r.ok());
+        if (r.ok())
+            CHECK(same(cr, r.value()));
+        const auto ru = prometheia_calc_orbit_point_ut(
+            c.e, 399, point, PROMETHEIA_ELEMENTS_OSCULATING, kJ2000, &co, &cr, &err);
+        auto rr = cpp.value().calc_orbit_point_ut(399, OrbitPoint(point), OrbitElements::Osculating,
+                                                  kJ2000);
+        CHECK((ru == PROMETHEIA_OK) == rr.ok());
+        if (rr.ok())
+            CHECK(same(cr, rr.value()));
+    }
+    {
+        prometheia_result cr;
+        CHECK(prometheia_calc_orbit_point(c.e, 399, 4, PROMETHEIA_ELEMENTS_OSCULATING, kJ2000,
+                                          nullptr, &cr, &err) == PROMETHEIA_ERROR_ARGUMENT);
+        CHECK(prometheia_calc_orbit_point(c.e, 399, PROMETHEIA_ORBIT_PERIHELION, 2, kJ2000, nullptr,
+                                          &cr, &err) == PROMETHEIA_ERROR_ARGUMENT);
     }
 
     // NULL options = the defaults.

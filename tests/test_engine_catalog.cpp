@@ -1046,4 +1046,61 @@ TEST_CASE("de440_ceres_vs_swetest") {
                 worst_apparent, worst_geometric, worst_dist);
 }
 
+TEST_CASE("de440_ceres_osculating_orbit_points_match_elements") {
+    // At its element epoch Ceres is seeded from the catalog's heliocentric
+    // elements, so its osculating nodes and apsides must reproduce them.
+    // Residuals: the output frame's J2000 ecliptic (IAU 2006 obliquity plus
+    // frame bias) is 0.04" from JPL's, and the engine adds Ceres' own mass.
+    const std::string de = env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) +
+                                                          "/ephe/linux_p1550p2650.440");
+    if (access(de.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s not present\n", de.c_str());
+        return;
+    }
+    const std::string cat = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
+    auto e = Engine::open(de);
+    REQUIRE(e.ok());
+    REQUIRE(e.value().add_catalog(cat).ok());
+    auto reader = catalog::Reader::open(cat);
+    REQUIRE(reader.ok());
+    catalog::Record ceres{};
+    REQUIRE(reader.value()
+                .for_each([&](const catalog::Record& r, const catalog::Names&) {
+                    if (r.spkid == 20000001)
+                        ceres = r;
+                })
+                .ok());
+    REQUIRE(ceres.spkid == 20000001);
+
+    CalcOptions o = CalcOptions::geometric();
+    o.center = Center::Heliocentric;
+    o.frame = Frame::J2000;
+    o.speed = false;
+    const double jd_tt = time::tt_from_tdb(ceres.epoch_jtdb);
+    const auto point = [&](OrbitPoint p) {
+        auto r = e.value().calc_orbit_point(20000001, p, OrbitElements::Osculating, jd_tt, o);
+        REQUIRE_MESSAGE(r.ok(), r.error().message);
+        return r.value().pos;
+    };
+    const double kDeg = 180.0 / 3.14159265358979323846;
+    const auto arcsec = [](double a, double b) {
+        return std::fabs(std::remainder(a - b, 360.0)) * 3600.0;
+    };
+    const Position asc = point(OrbitPoint::AscendingNode);
+    const Position peri = point(OrbitPoint::Perihelion);
+    const Position aph = point(OrbitPoint::Aphelion);
+    CHECK(arcsec(asc.lon_deg, ceres.node_rad * kDeg) < 0.5);
+    // Perihelion direction from the elements.
+    const double w = ceres.argp_rad, i = ceres.inc_rad, node = ceres.node_rad;
+    const double peri_lon = node * kDeg + std::atan2(std::sin(w) * std::cos(i), std::cos(w)) * kDeg;
+    const double peri_lat = std::asin(std::sin(w) * std::sin(i)) * kDeg;
+    CHECK(arcsec(peri.lon_deg, peri_lon) < 0.5);
+    CHECK(std::fabs(peri.lat_deg - peri_lat) * 3600.0 < 0.5);
+    CHECK(std::fabs(peri.dist_au - ceres.a_au * (1.0 - ceres.e)) < 1e-6);
+    CHECK(std::fabs(aph.dist_au - ceres.a_au * (1.0 + ceres.e)) < 1e-6);
+    std::printf("  Ceres node %.3f\" peri %.3f\" q %.2e AU\n",
+                arcsec(asc.lon_deg, ceres.node_rad * kDeg), arcsec(peri.lon_deg, peri_lon),
+                std::fabs(peri.dist_au - ceres.a_au * (1.0 - ceres.e)));
+}
+
 } // namespace

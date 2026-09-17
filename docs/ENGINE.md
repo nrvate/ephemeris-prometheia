@@ -175,6 +175,55 @@ instants):
   for the last three instants, keyed exactly (topocentric entries also on
   ΔT), so bodies at one instant and its stencil read them once.
 
+## Nodes and apsides
+
+`calc_orbit_point(body, point, elements, jd_tt, opts)` (and `_ut`) answers
+a node or apsis of a body's orbit as a point in space. It is seen by the
+options' observer in the options' frame and zodiac, with rates by the same
+central differences as `calc`.
+
+- **The orbit.**
+  - For planets (system barycentres for Mars–Pluto), the Earth, the
+    Earth–Moon barycentre and catalog bodies: heliocentric.
+  - For the Moon: geocentric.
+  - The Sun and the barycentre have none (ArgumentError).
+- **The reference plane:** the output frame's ecliptic, the mean ecliptic of
+  date for the date frames and of J2000 for J2000 and ICRF. A node is where
+  the orbit crosses it.
+- **The point is geometric.** It is not a body, so light time, deflection
+  and aberration do not apply, and `sigma_arcsec` is never set.
+- **Points:**
+  - ascending node, the northward crossing;
+  - descending node;
+  - perihelion (perigee for the Moon);
+  - aphelion (apogee).
+- **Errors (ArgumentError):**
+  - nodes of an orbit lying in the ecliptic;
+  - apsides of a circular orbit;
+  - the aphelion of an open orbit;
+  - a node an open orbit never reaches.
+
+**Osculating** (`OrbitElements::Osculating`): the conic through the body's
+geometric state at the instant, relative to the Sun (Earth for the Moon).
+- **Mass:** μ is the sum of the two masses (the ephemeris' GMs, else
+  built-in values).
+- **Method:** with the state rotated into the reference ecliptic, h = r × v
+  and the eccentricity vector e = v × h / μ − r̂. The ascending node lies
+  along ẑ × h and the perihelion along e. A point in direction û is at
+  distance p / (1 + e·û), with p = |h|² / μ.
+- **Validation:**
+  - Ceres at its catalog element epoch reproduces its SBDB elements: node
+    0.16″ (the output frame's J2000 ecliptic is 0.04″ from JPL's),
+    perihelion direction 0.012″, perihelion distance 1e-9 AU.
+  - Synthetic-kernel tests check the conic's own relations: nodes on the
+    ecliptic and opposite, apsides opposite, (q + Q)/2 equal to vis-viva's a.
+  - Mars on DE440 at 2026-09-17: node 49.48°, perihelion longitude 336.12°,
+    q 1.3813 AU, Q 1.6660 AU (J2000 ecliptic).
+- **Behaviour:** the Moon's osculating perigee swings by degrees a day,
+  which is the physical orbit's behaviour; the mean elements smooth it.
+
+**Mean** (`OrbitElements::Mean`): not yet available (NotFound).
+
 ## Small bodies: the catalog overlay
 
 `add_catalog(path)` stacks EPM1 containers ([FORMAT.md](FORMAT.md));

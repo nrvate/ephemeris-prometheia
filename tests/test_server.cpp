@@ -311,6 +311,7 @@ TEST_CASE("server_request") {
     eph::ObjSpec node = obj(905);
     node.kind = eph::kObjNodAps;
     node.point = eph::kPntNorthNode;
+    node.method = eph::kNodOscu;
     req.objs = {obj(900), obj(905), obj(901), star, node};
     req.iflag = (1u << 2) | (1u << 20);
     req.chunkRows = 3;
@@ -355,8 +356,17 @@ TEST_CASE("server_request") {
     // Unsupported objects fail alone: NaN rows, retFlag -1, the reason.
     CHECK(d.serr[2] == "body 901 has no wire-map entry");
     CHECK(d.serr[3] == "fixed stars are not supported");
-    CHECK(d.serr[4] == "nodes and apsides are not supported");
-    for (uint32_t o = 2; o < 5; ++o) {
+    // The node object (osculating ascending node of wire body 905).
+    CHECK(d.ret[4] == int32_t(req.iflag));
+    CHECK(d.name[4] == "SPK-ID 5 asc. node");
+    for (uint32_t r = 0; r < n_time; ++r) {
+        const auto res = check.calc_orbit_point_ut(5, OrbitPoint::AscendingNode,
+                                                   OrbitElements::Osculating, jd + r * 0.25, opts);
+        REQUIRE(res.ok());
+        CHECK(d.cols[(4 * n_time + r) * 6] == res.value().pos.lon_deg);
+        CHECK(d.cols[(4 * n_time + r) * 6 + 3] == res.value().pos.lon_speed);
+    }
+    for (uint32_t o = 2; o < 4; ++o) {
         CHECK(d.ret[o] == -1);
         CHECK(d.name[o].empty());
         for (size_t k = 0; k < n_time * 6; ++k) {

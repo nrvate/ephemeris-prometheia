@@ -417,6 +417,66 @@ TEST_CASE("engine_synthetic_centers_and_errors") {
     fs::remove(junk);
 }
 
+TEST_CASE("engine_orbit_points_geometry") {
+    // Properties any conic satisfies, on the synthetic kernel (the Earth's
+    // straight-line "orbit" around the Sun is still an osculating conic).
+    TempFile tf("engine-orbit");
+    Engine e = open_synthetic(tf);
+    const double jd = 2451600.5;
+    CalcOptions o = CalcOptions::geometric();
+    o.center = Center::Heliocentric;
+    o.frame = Frame::J2000;
+    o.speed = false;
+    const auto at = [&](OrbitPoint point) {
+        auto r = e.calc_orbit_point(body::kEarth, point, OrbitElements::Osculating, jd, o);
+        REQUIRE_MESSAGE(r.ok(), r.error().message);
+        return r.value();
+    };
+    const CalcResult asc = at(OrbitPoint::AscendingNode), desc = at(OrbitPoint::DescendingNode);
+    // Nodes sit on the ecliptic, opposite each other as seen from the Sun.
+    CHECK(std::fabs(asc.pos.lat_deg) < 1e-9);
+    CHECK(std::fabs(desc.pos.lat_deg) < 1e-9);
+    CHECK(std::fabs(std::fmod(desc.pos.lon_deg - asc.pos.lon_deg + 720.0, 360.0) - 180.0) < 1e-9);
+    const CalcResult peri = at(OrbitPoint::Perihelion);
+    // The body's own state and the conic through it: vis-viva gives a, the
+    // apsides give q and Q, and they must agree.
+    CalcOptions os = o;
+    os.speed = true;
+    const auto state = e.calc(body::kEarth, jd, os);
+    REQUIRE(state.ok());
+    const double* x = state.value().pos.xyz_au;
+    const double* v = state.value().pos.vel_au_day;
+    const double r = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+    const double v2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    const double mu = 2.9591220828559115e-04 + 8.887692445125634e-10; // GM Sun + Earth, AU^3/d^2
+    const double a = 1.0 / (2.0 / r - v2 / mu);
+    if (a > 0.0) {
+        const CalcResult aph = at(OrbitPoint::Aphelion);
+        CHECK(std::fabs((peri.pos.dist_au + aph.pos.dist_au) / 2.0 - a) < 1e-9 * a);
+        const double dot = peri.pos.xyz_au[0] * aph.pos.xyz_au[0] +
+                           peri.pos.xyz_au[1] * aph.pos.xyz_au[1] +
+                           peri.pos.xyz_au[2] * aph.pos.xyz_au[2];
+        CHECK(std::fabs(dot / (peri.pos.dist_au * aph.pos.dist_au) + 1.0) < 1e-12);
+    } else {
+        CHECK(
+            e.calc_orbit_point(body::kEarth, OrbitPoint::Aphelion, OrbitElements::Osculating, jd, o)
+                .error()
+                .code == ErrorCode::ArgumentError);
+    }
+    CHECK(peri.pos.dist_au <= r + 1e-12);
+    CHECK(!peri.sigma_arcsec.has_value());
+
+    // Errors: the Sun has no heliocentric orbit; not open.
+    CHECK(e.calc_orbit_point(body::kSun, OrbitPoint::Perihelion, OrbitElements::Osculating, jd, o)
+              .error()
+              .code == ErrorCode::ArgumentError);
+    Engine closed;
+    CHECK(
+        !closed
+             .calc_orbit_point(body::kEarth, OrbitPoint::Perihelion, OrbitElements::Osculating, jd)
+             .ok());
+}
+
 TEST_CASE("engine_calc_ut_uses_delta_t") {
     TempFile tf("engine-ut");
     Engine e = open_synthetic(tf);
