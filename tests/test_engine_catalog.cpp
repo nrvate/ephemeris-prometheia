@@ -665,6 +665,52 @@ TEST(sigma_newest_catalog_rescales) {
     CHECK(second.value().pos.dist_au == first.value().pos.dist_au);
 }
 
+TEST(lookup_pdes_name_case) {
+    TempFile tf_kernel("lkp-1-k");
+    TempFile tf_cat("lkp-1-c");
+    Engine e = open_synthetic(tf_kernel);
+
+    // Before any catalog: nothing answers (NotFound, not a machinery
+    // error).
+    auto none = e.lookup("Testbody");
+    CHECK(!none.ok() && none.error().code == ErrorCode::NotFound);
+
+    CHECK(e.add_catalog(write_catalog(tf_cat, kEls.a)).ok());
+    const std::string pdes = std::to_string(kSpkid);
+    for (const char* q : {pdes.c_str(), "Testbody", "testbody", "TESTBODY"}) {
+        auto id = e.lookup(q);
+        CHECK(id.ok() && id.value() == int(kSpkid));
+    }
+    auto miss = e.lookup("No such name");
+    CHECK(!miss.ok() && miss.error().code == ErrorCode::NotFound);
+
+    // The name resolves to a body calc() answers identically.
+    const double t = kEpoch + 200.0;
+    auto by_id = e.calc(int(kSpkid), t, bary_geom_icrf());
+    auto by_name = e.calc(e.lookup("testbody").value(), t, bary_geom_icrf());
+    CHECK(by_id.ok() && by_name.ok());
+    CHECK(by_name.value().pos.lon_deg == by_id.value().pos.lon_deg);
+    CHECK(by_name.value().pos.lat_deg == by_id.value().pos.lat_deg);
+    CHECK(by_name.value().pos.dist_au == by_id.value().pos.dist_au);
+}
+
+TEST(lookup_newest_catalog_wins) {
+    TempFile tf_kernel("lkp-2-k");
+    TempFile tf_a("lkp-2-a");
+    TempFile tf_b("lkp-2-b");
+    Engine e = open_synthetic(tf_kernel);
+
+    CHECK(e.add_catalog(write_catalog(tf_a, kEls.a, kSpkid)).ok());
+    CHECK(e.add_catalog(write_catalog(tf_b, kEls.a + 0.01, kSpkid + 1)).ok());
+    // Both records carry the proper name "Testbody": the newest
+    // catalog answers it.
+    auto id = e.lookup("Testbody");
+    CHECK(id.ok() && id.value() == int(kSpkid + 1));
+    // The older catalog's designation still resolves.
+    auto old = e.lookup(std::to_string(kSpkid));
+    CHECK(old.ok() && old.value() == int(kSpkid));
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -705,6 +751,13 @@ TEST(de440_ceres_vs_swetest) {
     CHECK(e.value()
               .add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm")
               .ok());
+
+    // The name index on real data: SBDB's designation "1" and the proper
+    // name "Ceres" both answer the fixture's SPK-ID.
+    auto by_name = e.value().lookup("Ceres");
+    CHECK(by_name.ok() && by_name.value() == kCatalogFixtures[0].spkid);
+    auto by_pdes = e.value().lookup("1");
+    CHECK(by_pdes.ok() && by_pdes.value() == kCatalogFixtures[0].spkid);
 
     double worst_apparent = 0.0, worst_geometric = 0.0, worst_dist = 0.0, worst_sigma = 0.0;
     for (const CatalogFixture& f : kCatalogFixtures) {

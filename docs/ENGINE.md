@@ -114,6 +114,13 @@ SPK-ID, the catalog's key) through on-demand integration. Several
 catalogs may be stacked; the newest wins for a given body, and adding
 one invalidates the memoized trajectories.
 
+Each catalog's primary designations and proper names are indexed as it
+loads (the load streams and CRC-verifies the whole container):
+`Engine::lookup(name)` — `lookup("Ceres")`, `lookup("1")`,
+`lookup("ceres")`, ASCII-case-insensitive — returns the SPK-ID to feed
+`calc`. A shared name is answered by the newest catalog; planets are
+not indexed (address those by their NAIF IDs).
+
 - **Seed:** the record's osculating elements (heliocentric, ecliptic
   and equinox of J2000, TDB epoch) become a Cartesian state, rotated
   to ICRF by (R1(ε̄₀)·B)ᵀ and translated by the Sun's barycentric state

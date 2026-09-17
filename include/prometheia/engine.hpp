@@ -168,6 +168,15 @@ public:
     // positions and uncertainties cached so far are invalidated.
     Result<void> add_catalog(const std::string& catalog_path);
 
+    // Resolves a small body by its primary designation or proper name —
+    // "1", "Ceres", "ceres" — to its SPK-ID, the integer calc() takes.
+    // Matching is ASCII-case-insensitive. The index is built from the
+    // catalogs added with add_catalog(); when several of them carry the
+    // same name, the newest one wins. NotFound when no loaded catalog
+    // answers the name (planets are not indexed; address those by their
+    // NAIF IDs directly).
+    Result<int> lookup(std::string_view name) const;
+
     // Position of `body` at a TT Julian date.
     Result<CalcResult> calc(int body, double jd_tt, const CalcOptions& opts = {});
 

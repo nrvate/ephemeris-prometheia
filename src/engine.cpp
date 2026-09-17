@@ -529,6 +529,10 @@ struct Engine::Impl {
     std::unordered_map<uint64_t, std::unique_ptr<SigmaTracks>> sigma_tracks;
     std::string overlay_source_; // provenance for catalog bodies
 
+    // Designations and proper names of every loaded catalog, lowercased
+    // ASCII, merged newest-wins; values are the SPK-IDs calc() takes.
+    std::unordered_map<std::string, uint64_t> name_index;
+
     double delta_t_seconds(double jd_tt) const {
         return (delta_t ? delta_t : &default_delta_t)->delta_t_seconds(jd_tt);
     }
@@ -1060,12 +1064,36 @@ Result<void> Engine::add_catalog(const std::string& path) {
     auto r = catalog::Reader::open(path);
     if (!r)
         return r.error();
+
+    // Index the new catalog's names (this streams and CRC-verifies the
+    // whole container) before it is owned by the engine, so a corrupt
+    // file fails add_catalog cleanly.
+    std::unordered_map<std::string, uint64_t> names;
+    auto fe = r.value().for_each([&](const catalog::Record& rec, const catalog::Names& n) {
+        auto put = [&](std::string_view s) {
+            if (s.empty())
+                return;
+            std::string key(s);
+            for (char& c : key)
+                if (c >= 'A' && c <= 'Z')
+                    c += 'a' - 'A';
+            names[std::move(key)] = rec.spkid;
+        };
+        put(n.pdes);
+        put(n.name);
+    });
+    if (!fe)
+        return fe.error();
+
     impl_->catalogs.push_back(std::make_unique<catalog::Reader>(std::move(r).value()));
     // A newer catalog may carry revised elements for bodies already
     // integrated: drop the memoized trajectories and uncertainty tracks,
     // they rebuild lazily.
     impl_->small_bodies.clear();
     impl_->sigma_tracks.clear();
+    // The new catalog wins for any name an older one also carries.
+    for (auto& kv : names)
+        impl_->name_index[std::move(kv.first)] = kv.second;
     std::string counts;
     for (size_t i = impl_->catalogs.size(); i-- > 0;) {
         if (!counts.empty())
@@ -1075,6 +1103,19 @@ Result<void> Engine::add_catalog(const std::string& path) {
     impl_->overlay_source_ =
         impl_->source->description + " + EPM1 catalog(s) [" + counts + " bodies]";
     return {};
+}
+
+Result<int> Engine::lookup(std::string_view name) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    std::string key(name);
+    for (char& c : key)
+        if (c >= 'A' && c <= 'Z')
+            c += 'a' - 'A';
+    auto it = impl_->name_index.find(key);
+    if (it == impl_->name_index.end())
+        return make_error(ErrorCode::NotFound, "no loaded catalog answers '" + key + "'");
+    return int(it->second);
 }
 
 Result<CalcResult> Engine::calc_ut(int id, double jd_ut1, const CalcOptions& o) {
