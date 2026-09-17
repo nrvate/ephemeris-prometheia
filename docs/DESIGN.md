@@ -184,8 +184,28 @@ tool and script in this repo, and for anyone running them:
     Earth rotation from UT). The leap-second table is now generated too.
     `tools/gen/gen_earth_orientation.py` refreshes both at every release
     (INGESTION.md).
-  - Next: catalog overlay (small bodies integrated from EPM1 elements
-    with DE perturbers, sigma), ayanamsas, C ABI shim, `ephem` CLI.
+  - Increment 3 (done 2026-09-16): the catalog overlay. `add_catalog()`
+    stacks EPM1 containers (newest wins; invalidates memoized
+    trajectories); small bodies answer `calc()` under their SPK-ID
+    through on-demand integration in a barycentric point-mass field
+    built from the engine's own ephemeris (cubic-Hermite perturber
+    tables, extended lazily); `sigma_arcsec` propagates the records'
+    element sigmas to the sky plane (per-element finite-difference
+    tracks, honest absence semantics); `Engine::lookup(name)` resolves
+    pdes/proper names case-insensitively (newest catalog wins). Ceres
+    vs swetest on the same DE440 with SWE's own asteroid file: 0.19″ —
+    the SBDB-vs-SWE source-elements difference; our own integration
+    contributes 0.001″ over ±26 yr.
+  - Increment 4 (done 2026-09-16): sidereal output — Fagan/Bradley,
+    Lahiri and user-anchored ayanamshas (published anchor + IAU 2006
+    general precession p_A; the true ayanamsha adds nutation in
+    longitude), applied as a longitude rotation of the output ecliptic
+    (of-date frames; a fixed zero point for J2000/ICRF); reported in
+    `CalcResult::ayanamsa_deg`. Against swetest `-ay/-sid` on the same
+    DE440: ayanamshas 0.0026″ over 1800–2200, positions 0.0034″; two
+    measured deliberate differences (SWE's sidereal RA/Dec is not
+    shifted at all; its sidereal J2000 output is an of-date hybrid).
+  - Next: C ABI shim, `ephem` CLI.
 - **M5** — validation gates: Horizons-sampled corpus, per-tier precision
   thresholds, full-catalog bench run (the ~3.5 min/core extrapolation
   must be measured), numeric cross-check against installed Swiss

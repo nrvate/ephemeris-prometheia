@@ -17,7 +17,9 @@ application). The ephemeris *data* it ingests is US-government public domain
 
 ## Status
 
-Milestones 0–3 of 6 complete, M4 under way (2026-09-16):
+Milestones 0–3 of 6 complete; M4 nearly done — catalog overlay,
+uncertainties, name lookup and sidereal ayanamshas shipped
+(2026-09-16):
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
@@ -61,19 +63,32 @@ Milestones 0–3 of 6 complete, M4 under way (2026-09-16):
   on the same DE440 file to 0.0001″ in the J2000 frame (Moon 0.001″;
   0.003″ in date frames, their precession model). ~6 µs per position. Details and the
   understood differences: [docs/ENGINE.md](docs/ENGINE.md).
+- **Small bodies and sidereal output (M4)** — `add_catalog()` stacks
+  EPM1 containers; catalog bodies answer `calc()` through on-demand
+  integration (barycentric point-mass field sampled from the engine's
+  own ephemeris, windowed memo per body, newest catalog wins), carry
+  `sigma_arcsec` propagated from the SBDB element sigmas, and resolve
+  by designation or proper name through `Engine::lookup`. Sidereal
+  zodiacs (Fagan/Bradley, Lahiri, user-anchored ayanamshas) shift
+  ecliptic longitudes by the anchor + IAU 2006 precession (+ nutation).
+  Against swetest on the same DE440: Ceres 0.19″ (the source-elements
+  difference; our integration 0.001″), ayanamshas 0.0026″ over
+  1800–2200, sidereal positions 0.0034″. Details:
+  [docs/ENGINE.md](docs/ENGINE.md), [docs/FORMAT.md](docs/FORMAT.md).
 - **Measured on real data** (`prometheia-bench`, 100-body SBDB fixture,
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
 - **Tools** — `prometheia-fetch` (Python), `prometheia-convert`,
-  `prometheia-info`, `prometheia-bench`. Eleven test suites, clean under
+  `prometheia-info`, `prometheia-bench`. Twelve test suites, clean under
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
-decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0-M3 done
-(DE + SPK readers, time scales, frames); M4 in progress (engine core with
-apparent place done; next: catalog overlay for small bodies, ayanamsas,
-C ABI, `ephem` CLI); then validation gates (M5), transports (M6).
+decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0–M3 done
+(DE + SPK readers, time scales, frames); M4 nearly done (engine,
+catalog overlay with sigma and name lookup, sidereal ayanamshas;
+remaining: C ABI shim, `ephem` CLI); then validation gates (M5),
+transports (M6).
 
 ## Build
 
