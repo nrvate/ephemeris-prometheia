@@ -280,6 +280,7 @@ def parse_request(r, request_id):
     max_degree_hint = r.u8()
     r.u32()  # chunkRows: a hint, any value
     seg_target = r.f32("segTargetErrArcsec")
+    r.u32()  # deadlineMs: advisory, outside the cache key; any value
     if precision > 1:
         raise Malformed(f"precision {precision}")
     if priority > 1:
@@ -367,14 +368,17 @@ def parse_meta(r, n_obj):
         err_code = r.u16()
         r.u8()           # sourceIdx
         meta_flags = r.u8()
+        corr_applied = r.u8()   # §3.4: after metaFlags; three low bits used
         r.i32()          # resolvedNaif
         r.u32()          # firstFailedRow
         r.str8("meta name")
         r.str8("meta errText")
         # §3.1, the answering direction: an unknown per-object error code means
         # the object failed for an unknown reason, and unknown META flag bits
-        # are ignored. Neither is malformed.
-        _ = (err_code, meta_flags)
+        # are ignored. Neither is malformed. corrApplied: the five low spares
+        # are specified zero and the high bits are reserved; clients ignore
+        # them, so neither reading refuses.
+        _ = (err_code, meta_flags, corr_applied)
 
 
 def parse_data(r):
@@ -387,13 +391,15 @@ def parse_data(r):
     n_obj = r.u16()
     columns = r.u32()
     if precision > 1:
-        raise Malformed(f"precision {precision}")
-    # §3.1: unknown bits in an answer's flag fields are ignored.
+        # A registry value this build does not know (§3.1) — unsupported,
+        # though refused, because the row width changes with it.
+        raise Unsupported(f"precision {precision}")
+    # §3.1: unknown bits in an answer's flag fields are ignored — except the
+    # column bits: an unadvertised one changes the row width, so the message
+    # cannot be read at all. The verdict is still unsupported (registry
+    # growth), the taxonomy the codec uses.
     if columns & ~0x0F:
-        # The exception to the answering direction's tolerance (§3.1): an
-        # unadvertised column bit changes the row width, so the message cannot
-        # be read at all.
-        raise Malformed(f"columnsPresent {columns:#010x} are not in A.10")
+        raise Unsupported(f"columnsPresent {columns:#010x} are not in A.10")
     if i_time + n_rows > total_rows:
         raise Malformed("this chunk's rows run past totalRows")
     if chunk_index == 0 and not chunk_flags & 0x04:
@@ -518,42 +524,60 @@ def parse_payload(version, mtype, request_id, payload):
     elif mtype == 8:
         r.done("CANCEL")
     elif mtype == 9:
+        # Batched LOOKUP (f84d208): one message, many queries in order;
+        # maxMatches is the budget for the whole answer.
         max_matches = r.u16()
         flags = r.u8()
-        r.zero(1, "LOOKUP reserved")
-        r.str8("query")
+        n_queries = r.u8()
+        queries = []
+        for _ in range(n_queries):
+            queries.append(r.str8("query"))
         r.tlv(set(), "LOOKUP TLV")
         r.done("LOOKUP")
+        if n_queries == 0:
+            raise Malformed("LOOKUP with no queries")
         if max_matches == 0:
             raise Malformed("maxMatches is 0")
         if flags & ~0x07:
             raise Malformed(f"LOOKUP flags {flags:#04x}")
+        for q in queries:
+            if not q:
+                raise Malformed("empty LOOKUP query")
     elif mtype == 10:
-        n = r.u16()
+        # One answer list per LOOKUP query, in the order asked; a shared
+        # source table; each match length-delimited so an unknown kind can
+        # be skipped without costing the matches after it.
+        n_queries = r.u8()
         flags = r.u8()
         n_sources = r.u8()
         for _ in range(n_sources):
             r.str8("source")
-        for _ in range(n):
-            quality = r.u8()
-            r.u8()  # sourceIdx
-            match_len = r.u16()
-            end = r.i + match_len
-            if end > len(r.d):
-                raise Malformed("MATCH matchLen runs past the message")
-            _ = quality  # an unknown quality is tolerated (§3.1)
-            try:
-                parse_object(r, 1)
-                r.str8("canonicalName")
-                r.str8("designation")
-                r.time("validMin")
-                r.time("validMax")
-            except Unsupported:
-                # A kind this client cannot ask for: skip it by its length.
-                r.i = end
-                continue
-            if r.i != end:
-                raise Malformed(f"MATCH matchLen {match_len} disagrees with a match "
+        if n_queries == 0:
+            raise Malformed("LOOKUP_RESULT with no queries")
+        for _ in range(n_queries):
+            count = r.u16()
+            for _ in range(count):
+                quality = r.u8()
+                source_idx = r.u8()
+                match_len = r.u16()
+                end = r.i + match_len
+                if end > len(r.d):
+                    raise Malformed("MATCH matchLen runs past the message")
+                if source_idx >= n_sources:
+                    raise Malformed("match names a source not in the table")
+                _ = quality  # an unknown quality is tolerated (§3.1)
+                try:
+                    parse_object(r, 1)
+                    r.str8("canonicalName")
+                    r.str8("designation")
+                    r.time("validMin")
+                    r.time("validMax")
+                except Unsupported:
+                    # A kind this client cannot ask for: skip it by its length.
+                    r.i = end
+                    continue
+                if r.i != end:
+                    raise Malformed(f"MATCH matchLen {match_len} disagrees with a match "
                                 f"this reader can read ({r.i - (end - match_len)} bytes)")
         r.done("LOOKUP_RESULT")
         # Unknown LOOKUP_RESULT flag bits are ignored (§3.1).
