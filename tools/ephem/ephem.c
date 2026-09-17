@@ -304,7 +304,8 @@ static void print_help(void) {
            "      --delta-t SECONDS  fixed TT-UT1 instead of the observed USNO model\n"
            "\n"
            "Observer and frame:\n"
-           "      --center geo|topo|helio|bary   (default geo)\n"
+           "      --center geo|topo|helio|bary|BODY  (default geo); BODY is a built-in\n"
+           "                         name or NAIF ID: positions seen from that body\n"
            "      --site LON,LAT[,H] geodetic degrees east/north, metres; implies topo\n"
            "      --frame true|mean|j2000|icrf   equinox of date (default true)\n"
            "      --equatorial       right ascension/declination instead of ecliptic\n"
@@ -476,8 +477,26 @@ static int parse_args(int argc, char** argv, config* c) {
         } else if (is_opt(&a, NULL, "--center")) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;
-            if (!parse_keyword(v, center_names, center_values, 8, &c->opts.center))
-                return usage_error("unknown center '%s' (geo, topo, helio, bary)", v);
+            if (!parse_keyword(v, center_names, center_values, 8, &c->opts.center)) {
+                /* A body: a built-in name or a NAIF ID. */
+                size_t k;
+                long id = 0;
+                int found = 0;
+                for (k = 0; k < sizeof kNamedBodies / sizeof kNamedBodies[0]; ++k) {
+                    if (equals_nocase(v, kNamedBodies[k].name)) {
+                        c->opts.center_body = kNamedBodies[k].id;
+                        found = 1;
+                    }
+                }
+                if (!found && all_digits(v) && parse_long(v, &id) && id <= 2147483647L) {
+                    c->opts.center_body = (int)id;
+                    found = 1;
+                }
+                if (!found)
+                    return usage_error(
+                        "unknown center '%s' (geo, topo, helio, bary, a body name or NAIF ID)", v);
+                c->opts.center = PROMETHEIA_CENTER_BODY;
+            }
             center_given = 1;
         } else if (is_opt(&a, NULL, "--site")) {
             if (!(v = value_of(&a)))
@@ -637,6 +656,8 @@ static const char* center_text(int center) {
         return "heliocentric";
     case PROMETHEIA_CENTER_BARYCENTRIC:
         return "barycentric";
+    case PROMETHEIA_CENTER_BODY:
+        return "body-centred";
     default:
         return "geocentric";
     }

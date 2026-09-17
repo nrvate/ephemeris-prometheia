@@ -91,7 +91,7 @@ prometheia_status guarded(prometheia_error* err, F&& f) {
 
 // C options -> CalcOptions, rejecting out-of-range selector fields.
 prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometheia_error* err) {
-    if (c.center < PROMETHEIA_CENTER_GEOCENTRIC || c.center > PROMETHEIA_CENTER_BARYCENTRIC) {
+    if (c.center < PROMETHEIA_CENTER_GEOCENTRIC || c.center > PROMETHEIA_CENTER_BODY) {
         return argument(err, "options: center out of range");
     }
     if (c.frame < PROMETHEIA_FRAME_ICRF || c.frame > PROMETHEIA_FRAME_TRUE_OF_DATE) {
@@ -127,6 +127,7 @@ prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometh
     o.site.lon_rad = c.site_lon_deg * kDegToRad;
     o.site.lat_rad = c.site_lat_deg * kDegToRad;
     o.site.height_m = c.site_height_m;
+    o.center_body = c.center_body;
     return PROMETHEIA_OK;
 }
 
@@ -213,6 +214,7 @@ void prometheia_options_init(prometheia_options* opts) {
     opts->site_lon_deg = d.site.lon_rad / kDegToRad;
     opts->site_lat_deg = d.site.lat_rad / kDegToRad;
     opts->site_height_m = d.site.height_m;
+    opts->center_body = d.center_body;
 }
 
 prometheia_status prometheia_engine_open(const char* path, prometheia_engine** out,

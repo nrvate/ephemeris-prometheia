@@ -162,9 +162,13 @@ coordinates):
 
 Always answered per object, never as an ERROR:
 
-- **Unsupported for now:** fixed stars, nodes and apsides, planet-centred
-  positions (a nonzero center or `iflag` bit 33), any bit or mode without a
-  wire-map entry, and bodies neither the ephemeris nor a loaded catalog has.
+- **Planet-centred positions:** a nonzero request `center`, or center 0
+  with `iflag` bit 33, names the observing body by its wire body id,
+  resolved through the wire map like any object. A center without an
+  entry, or a center together with an observer flag, fails the objects.
+- **Unsupported for now:** fixed stars, nodes and apsides, any bit or mode
+  without a wire-map entry, and bodies neither the ephemeris nor a loaded
+  catalog has.
 - **Return flag:** the request's low 32 bits of `iflag` for an object with at
   least one computed row.
 - **WELCOME:** reports Swiss Ephemeris version 0.

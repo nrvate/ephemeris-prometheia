@@ -28,9 +28,15 @@ Plan plan_of(const eph::Request& req, const WireMap& map) {
     p.opts.sigma = false;
     p.opts.speed = true; // the columns always carry rates
     p.time_tt = (req.iflag & eph::kIflagTimeTT) != 0;
-    if (req.center != 0 || (req.iflag & eph::kIflagCenter)) {
-        p.why = "planet-centred positions are not supported";
-        return p;
+    // A central body: a nonzero center, or center 0 with kIflagCenter. Its
+    // number is a wire body id like any object's.
+    const bool centred = req.center != 0 || (req.iflag & eph::kIflagCenter);
+    std::optional<WireBody> center_body;
+    if (centred) {
+        if (req.center < 0 || !(center_body = map.body(uint32_t(req.center)))) {
+            p.why = "center " + std::to_string(req.center) + " has no wire-map entry";
+            return p;
+        }
     }
     bool helio = false, bary = false, topo = false, sidereal = false;
     bool j2000 = false, icrs = false, no_nutation = false;
@@ -90,14 +96,18 @@ Plan plan_of(const eph::Request& req, const WireMap& map) {
             break;
         }
     }
-    if (int(helio) + int(bary) + int(topo) > 1) {
-        p.why = "more than one observer (heliocentric, barycentric, topocentric)";
+    if (int(helio) + int(bary) + int(topo) + int(centred) > 1) {
+        p.why = "more than one observer (helio, bary, topo, center)";
         return p;
     }
-    p.opts.center = helio  ? Center::Heliocentric
-                    : bary ? Center::Barycentric
-                    : topo ? Center::Topocentric
-                           : Center::Geocentric;
+    p.opts.center = helio     ? Center::Heliocentric
+                    : bary    ? Center::Barycentric
+                    : topo    ? Center::Topocentric
+                    : centred ? Center::Body
+                              : Center::Geocentric;
+    if (centred) {
+        p.opts.center_body = center_body->naif_id;
+    }
     if (topo) {
         p.opts.site.lon_rad = req.topoLon * kDeg2Rad;
         p.opts.site.lat_rad = req.topoLat * kDeg2Rad;

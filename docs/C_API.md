@@ -89,7 +89,7 @@ prometheia_engine_close(eph);
 
 ## ABI stability
 
-`PROMETHEIA_ABI_VERSION` (currently 3; version 2 added `prometheia_options.sigma`, version 3 `prometheia_options.precession`) names the struct layouts and
+`PROMETHEIA_ABI_VERSION` (currently 4; version 2 added `prometheia_options.sigma`, version 3 `prometheia_options.precession`, version 4 `PROMETHEIA_CENTER_BODY` and `prometheia_options.center_body`) names the struct layouts and
 function signatures. Any change to them bumps the version, and bindings
 can compare against `prometheia_abi_version()` at load time. Before 1.0,
 expect the version to move as the engine grows (houses, fixed stars,

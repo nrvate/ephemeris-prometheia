@@ -356,6 +356,41 @@ TEST_CASE("engine_synthetic_centers_and_errors") {
     CHECK(norm3(dd) > 6350.0);
     CHECK(norm3(dd) < 6380.0);
 
+    // Body-centred: from the Sun and from the Earth it is exactly the
+    // heliocentric and geocentric answer; from Jupiter the geometric vector
+    // is Earth - Jupiter.
+    {
+        CalcOptions ob = o;
+        ob.center = Center::Body;
+        ob.center_body = body::kSun;
+        const auto from_sun = e.calc(body::kEarth, jd_tt, ob);
+        REQUIRE(from_sun.ok());
+        for (int i = 0; i < 3; ++i)
+            CHECK(from_sun.value().pos.xyz_au[i] == h.value().pos.xyz_au[i]);
+        CalcOptions geo = CalcOptions::apparent();
+        ob = geo;
+        ob.center = Center::Body;
+        ob.center_body = body::kEarth;
+        const auto a = e.calc(body::kJupiter, jd_tt, geo), b = e.calc(body::kJupiter, jd_tt, ob);
+        REQUIRE(a.ok());
+        REQUIRE(b.ok());
+        CHECK(a.value().pos.lon_deg == b.value().pos.lon_deg);
+        CHECK(a.value().pos.lat_deg == b.value().pos.lat_deg);
+        CHECK(a.value().pos.lon_speed == b.value().pos.lon_speed);
+        ob = o;
+        ob.center = Center::Body;
+        ob.center_body = body::kJupiter;
+        const auto j = e.calc(body::kEarth, jd_tt, ob);
+        REQUIRE(j.ok());
+        double jup[6];
+        linear_state(kBodies[2], et, jup);
+        for (int i = 0; i < 3; ++i)
+            CHECK(std::fabs(j.value().pos.xyz_au[i] * kAuKm - (g[i] - jup[i])) < 1e-6);
+        CHECK(e.calc(body::kJupiter, jd_tt, ob).error().code == ErrorCode::ArgumentError);
+        ob.center_body = body::kMars; // not in the synthetic kernel
+        CHECK(e.calc(body::kEarth, jd_tt, ob).error().code == ErrorCode::NotFound);
+    }
+
     // Errors.
     o.center = Center::Geocentric;
     CHECK(e.calc(body::kEarth, jd_tt, o).error().code == ErrorCode::ArgumentError);

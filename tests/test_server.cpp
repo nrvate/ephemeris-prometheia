@@ -464,13 +464,31 @@ TEST_CASE("server_flags") {
         CHECK(d.ret[0] == -1);
         CHECK(d.serr[0] == "iflag bit 3 has no wire-map entry");
     }
+    SUBCASE("planet-centred through the request's center") {
+        CalcOptions o;
+        o.center = Center::Body;
+        o.center_body = 10;
+        eph::Request req = base_request(jd, 1);
+        req.objs = {obj(905)};
+        req.center = 900; // the Sun, by its wire id
+        CHECK(s.on_message(request(req, 300), true));
+        const Data d = join(drain(s), 1, 1);
+        CHECK(d.ret[0] >= 0);
+        CHECK(d.cols[0] == engine(o).lon_deg);
+        // Center 0 with the flag bit is wire body 0, which this map lacks;
+        // a center together with an observer flag is a conflict.
+        req.center = 900;
+        req.iflag = 1u << 11;
+        CHECK(s.on_message(request(req, 301), true));
+        CHECK(join(drain(s), 1, 1).serr[0] == "more than one observer (helio, bary, topo, center)");
+    }
     SUBCASE("TT rows") {
         CHECK(one(eph::kIflagTimeTT).cols[0] == engine(CalcOptions{}, true).lon_deg);
     }
     SUBCASE("unsupported combinations fail the objects") {
         CHECK(one((1u << 11) | (1u << 13)).serr[0] ==
-              "more than one observer (heliocentric, barycentric, topocentric)");
-        CHECK(one(eph::kIflagCenter).serr[0] == "planet-centred positions are not supported");
+              "more than one observer (helio, bary, topo, center)");
+        CHECK(one(eph::kIflagCenter).serr[0] == "center 0 has no wire-map entry");
     }
 }
 

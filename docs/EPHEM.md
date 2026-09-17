@@ -52,7 +52,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 - `--delta-t SECONDS` replaces the observed USNO ΔT with a fixed value. It affects UT1 input and topocentric Earth rotation, and is useful for matching other programs.
 
 **Observer, frame, corrections**
-- `--center geo|topo|helio|bary`.
+- `--center geo|topo|helio|bary|BODY`: BODY is a built-in name (`mars`) or a NAIF ID, and positions are seen from that body's centre with light time, deflection and aberration for an observer moving with it.
 - `--site LON,LAT[,H]`: geodetic degrees east and north, metres above WGS84. It implies `topo`.
 - `--frame true|mean|j2000|icrf`, `--equatorial`.
 - `--precession iau2006|vondrak2011`: the long-term model for epochs centuries or more from J2000.

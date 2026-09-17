@@ -112,7 +112,11 @@ output by 3.7″ and 0.14″ — more than any model difference over ±200 yr.
 For a TT epoch *t*:
 
 1. **Observer** barycentric state at TDB(*t*): the Earth, the Sun, the
-   barycentre (zero), or for topocentric the Earth plus the WGS84 site
+   barycentre (zero), any body (`Center::Body` with
+   `CalcOptions::center_body`: a planet-centred observer, from the
+   ephemeris or a catalog, moving with the body; the Sun's gravitational
+   deflection is skipped only when that body is the Sun or the
+   barycentre), or for topocentric the Earth plus the WGS84 site
    rotated by GAST (UT1 from the ΔT model) into the true equator of date
    and carried to ICRF by (N·P·B)ᵀ, with site velocity ω × r (ω = the ERA
    rate, 2π · 1.00273781191135448 rad/day). Polar motion is neglected

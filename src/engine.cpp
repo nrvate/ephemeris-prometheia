@@ -857,6 +857,7 @@ struct Engine::Impl {
         Center center = Center::Geocentric;
         Precession precession = Precession::IAU2006;
         frames::GeoSite site{};
+        int center_body = 0;
         double delta_t = 0.0; // topocentric: the UT1 the site was rotated with
         double state[6];
     };
@@ -898,6 +899,7 @@ struct Engine::Impl {
         const double dt = topo ? delta_t_seconds(jd_tt) : 0.0;
         for (const ObserverMemo& m : observer_memo) {
             if (m.valid && m.jd_tt == jd_tt && m.center == o.center &&
+                (o.center != Center::Body || m.center_body == o.center_body) &&
                 (!topo || (m.precession == o.precession && m.site.lon_rad == o.site.lon_rad &&
                            m.site.lat_rad == o.site.lat_rad && m.site.height_m == o.site.height_m &&
                            m.delta_t == dt))) {
@@ -915,6 +917,7 @@ struct Engine::Impl {
         m.center = o.center;
         m.precession = o.precession;
         m.site = o.site;
+        m.center_body = o.center_body;
         m.delta_t = dt;
         std::memcpy(m.state, out, sizeof m.state);
         return {};
@@ -932,6 +935,8 @@ struct Engine::Impl {
             return sun_at(jd_tdb, out);
         case Center::Geocentric:
             return source->barycentric(body::kEarth, jd_tdb, out);
+        case Center::Body:
+            return body_barycentric(o.center_body, jd_tdb, out, nullptr);
         case Center::Topocentric: {
             auto r = source->barycentric(body::kEarth, jd_tdb, out);
             if (!r)
@@ -1340,7 +1345,9 @@ struct Engine::Impl {
         }
 
         const bool observer_is_sun_or_bary =
-            o.center == Center::Heliocentric || o.center == Center::Barycentric;
+            o.center == Center::Heliocentric || o.center == Center::Barycentric ||
+            (o.center == Center::Body &&
+             (o.center_body == body::kSun || o.center_body == body::kSolarSystemBary));
         if (o.deflection && !observer_is_sun_or_bary && id != body::kSun) {
             double sun[6];
             r = sun_at(jd_tdb, sun);
@@ -1480,6 +1487,8 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
         return make_error(ErrorCode::ArgumentError, "body is the observer (Sun)");
     if (o.center == Center::Barycentric && id == body::kSolarSystemBary)
         return make_error(ErrorCode::ArgumentError, "body is the observer (barycentre)");
+    if (o.center == Center::Body && id == o.center_body)
+        return make_error(ErrorCode::ArgumentError, "body is the observer (center body)");
 
     CalcResult res;
     double v[3], tau = 0.0;

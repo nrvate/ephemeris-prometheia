@@ -66,6 +66,7 @@ enum class Center {
     Topocentric,  // a site on the WGS84 ellipsoid (CalcOptions::site)
     Heliocentric, // the Sun's centre
     Barycentric,  // the solar-system barycentre
+    Body,         // the centre of CalcOptions::center_body (planet-centred)
 };
 
 // Reference frame of the output.
@@ -118,6 +119,10 @@ struct CalcOptions {
     bool speed = true;                  // compute daily rates (3x the work)
     bool sigma = true;                  // catalog bodies: sigma_arcsec (12 extra integrations)
     frames::GeoSite site{};             // Center::Topocentric only
+    // Center::Body only: the observing body's NAIF ID / SPK-ID, answered like
+    // any body (ephemeris or catalog). Light time, deflection and
+    // aberration are applied for an observer there, moving with the body.
+    int center_body = body::kSun;
 
     // Presets. apparent(): what an observer sees, in the true equinox of
     // date. astrometric(): light time only (ICRF-style catalogue place).

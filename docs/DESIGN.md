@@ -330,6 +330,12 @@ tool and script in this repo, and for anyone running them:
     - Refusing a port already served.
     Remaining: zstd, the extra-columns extension (needs Astrolog's
     specification), and the Astrolog wire map.
+  - Increment 4 (done 2026-09-17): speed. Nutation interpolation, Newton
+    light time, per-instant memos, time-major server loop. 55 → 2.95 µs per
+    position with rates; the 100,000-cell request 5.6 → 0.29 s.
+  - Increment 5 (done 2026-09-17): planet-centred positions:
+    `Center::Body` and `center_body` (C ABI 4, `ephem --center mars`),
+    served for the request's center field.
 
 ## Cleanroom policy
 

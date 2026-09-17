@@ -40,7 +40,7 @@ extern "C" {
 #define PROMETHEIA_API
 #endif
 
-#define PROMETHEIA_ABI_VERSION 3
+#define PROMETHEIA_ABI_VERSION 4
 
 /* ---- Status and errors ------------------------------------------------ */
 
@@ -88,6 +88,7 @@ PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION *
 #define PROMETHEIA_CENTER_TOPOCENTRIC 1
 #define PROMETHEIA_CENTER_HELIOCENTRIC 2
 #define PROMETHEIA_CENTER_BARYCENTRIC 3
+#define PROMETHEIA_CENTER_BODY 4 /* the body prometheia_options.center_body */
 
 #define PROMETHEIA_FRAME_ICRF 0
 #define PROMETHEIA_FRAME_J2000 1
@@ -129,6 +130,9 @@ typedef struct prometheia_options {
     double site_lon_deg; /* geodetic longitude, east positive */
     double site_lat_deg; /* geodetic latitude */
     double site_height_m;
+    /* PROMETHEIA_CENTER_BODY: the observing body's NAIF ID / SPK-ID
+     * (default the Sun). ABI version 4. */
+    int center_body;
 } prometheia_options;
 
 /* Apparent place, geocentric, true ecliptic and equinox of date, rates on. */
