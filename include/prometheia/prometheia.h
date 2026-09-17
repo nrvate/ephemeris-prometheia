@@ -150,7 +150,7 @@ typedef struct prometheia_result {
     double vel_au_day[3];
     double light_time_days; /* tau applied (0 without light time) */
     /* 1-sigma direction uncertainty on the sky, arcsec (catalog bodies
-     * whose record carries element sigmas; see engine.hpp). */
+     * whose record carries a full covariance; see engine.hpp). */
     double sigma_arcsec;
     /* The longitude shift applied for a sidereal request, degrees. */
     double ayanamsa_deg;

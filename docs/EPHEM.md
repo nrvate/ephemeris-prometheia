@@ -65,7 +65,7 @@ The option meanings, models and accuracy are the engine's: see [ENGINE.md](ENGIN
 - The header carries the ephemeris, the options in words, and the instant with its ΔT.
 - A series adds UTC and JD (TT) columns to every row.
 - `--dms` prints angles as degrees, minutes and seconds, or hours, minutes and seconds for RA.
-- Catalog bodies with element sigmas show their 1σ direction uncertainty.
+- Catalog bodies whose record carries a full orbit covariance show their 1σ direction uncertainty.
 
 `-f csv` and `-f json` are for programs. Each has one row per body per instant, with every double printed to 17 significant digits so it round-trips exactly:
 
@@ -79,7 +79,7 @@ The option meanings, models and accuracy are the engine's: see [ENGINE.md](ENGIN
 | `…_speed` | per day (zero with `--no-speed`) |
 | `x_au y_au z_au`, `vx…` | the rectangular vector in the output frame (JSON: `xyz_au`, `vel_au_day`) |
 | `light_time_days` | τ applied |
-| `sigma_arcsec` | empty/`null` unless the catalog record carries sigmas |
+| `sigma_arcsec` | empty/`null` unless the catalog record carries a full covariance |
 | `ayanamsa_deg` | empty/`null` unless sidereal |
 | `source` | provenance (the ephemeris, plus the catalog overlay for small bodies) |
 

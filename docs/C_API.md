@@ -32,7 +32,7 @@ if (prometheia_calc(eph, PROMETHEIA_MOON, jd_tt, &opts, &r, &err) == PROMETHEIA_
 int ceres;
 if (prometheia_engine_lookup(eph, "Ceres", &ceres, &err) == PROMETHEIA_OK &&
     prometheia_calc(eph, ceres, jd_tt, NULL, &r, &err) == PROMETHEIA_OK &&
-    (r.flags & PROMETHEIA_HAS_SIGMA))
+    (r.flags & PROMETHEIA_HAS_SIGMA)) /* catalog record carries a covariance */
     printf("Ceres sigma %.3f\"\n", r.sigma_arcsec);
 
 prometheia_engine_close(eph);

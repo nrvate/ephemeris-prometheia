@@ -270,14 +270,14 @@ constexpr double kJplEclipticObliquity = 84381.448 / 3600.0 * 3.1415926535897932
 // heliocentric state in JPL's J2000 ecliptic, rotated to ICRF by the
 // transpose of R1(84381.448"), then translated by the Sun's barycentric
 // state.
-State oracle_seed(spk::SpkFile& file, const Elements& els) {
+State oracle_seed(spk::SpkFile& file, const Elements& els, double epoch = kEpoch) {
     auto helio = elements_to_state(gm::kSun, els);
     CHECK(helio.ok());
     const double c = std::cos(kJplEclipticObliquity), s = std::sin(kJplEclipticObliquity);
     const double m[9] = {1, 0, 0, 0, c, s, 0, -s, c};
 
     double sun[6];
-    CHECK(file.state(10, 0, kEpoch, sun).ok());
+    CHECK(file.state(10, 0, epoch, sun).ok());
     State out;
     const double rh[3] = {helio.value().pos.x, helio.value().pos.y, helio.value().pos.z};
     const double vh[3] = {helio.value().vel.x, helio.value().vel.y, helio.value().vel.z};
@@ -479,173 +479,232 @@ double sky_sigma_arcsec(const double cov[6], const double u_unit[3], double dist
            (180.0 / 3.14159265358979323846) * 3600.0;
 }
 
+constexpr double kPi = 3.14159265358979323846;
+
+// Osculating elements at TDB JD t -> JPL cometary {e, q, tp, node, peri, i}
+// (elliptic; tp is the perihelion passage nearest before or after t).
+void to_cometary(const Elements& el, double t, double out[6]) {
+    const double n = std::sqrt(gm::kSun / (el.a * el.a * el.a));
+    out[0] = el.e;
+    out[1] = el.a * (1.0 - el.e);
+    out[2] = t - std::remainder(el.mean_anom, 2.0 * kPi) / n;
+    out[3] = el.node;
+    out[4] = el.argp;
+    out[5] = el.inc;
+}
+
+// Adds a covariance block to r: epoch t, cometary elements of `el` at t,
+// and the full symmetric 6x6 matrix c.
+void set_covariance(catalog::Record& r, const Elements& el, double t, const double c[6][6]) {
+    r.flags |= catalog::RecordFlags::kCovariance;
+    r.cov_epoch_jtdb = t;
+    to_cometary(el, t, r.cov_elements);
+    for (int i = 0; i < 6; ++i)
+        for (int j = i; j < 6; ++j)
+            r.covariance[catalog::packed_index(i, j)] = c[i][j];
+}
+
+// A covariance with the given standard deviations and correlations
+// rho_ij = rho^|i-j| (sign alternating): positive definite for |rho| < 1.
+void correlated(const double sd[6], double rho, double c[6][6]) {
+    for (int i = 0; i < 6; ++i)
+        for (int j = 0; j < 6; ++j) {
+            const int k = std::abs(i - j);
+            c[i][j] = sd[i] * sd[j] * std::pow(rho, k) * ((i + j) % 2 ? -1.0 : 1.0) *
+                      ((i - j) % 2 ? -1.0 : 1.0);
+        }
+}
+
 TEST_CASE("sigma_absent_zero_and_planetary") {
     TempFile tf_kernel("sig-0-k");
     TempFile tf_cat("sig-0-c");
     Engine e = open_synthetic(tf_kernel);
 
-    // No sigmas published: honestly absent, position unaffected.
-    catalog::Record none = make_record(kEls.a);
-    none.flags = 0;
-    CHECK(e.add_catalog(write_record(tf_cat, none)).ok());
+    // Element sigmas without a covariance: uncorrelated summaries give no
+    // calibrated answer, so sigma is absent; the position is unaffected.
+    catalog::Record plain = make_record(kEls.a); // kSigmas set
+    CHECK(e.add_catalog(write_record(tf_cat, plain)).ok());
     auto res = e.calc(int(kSpkid), kEpoch + 10.0, CalcOptions::geometric());
-    CHECK(res.ok());
+    REQUIRE(res.ok());
     CHECK(!res.value().sigma_arcsec.has_value());
 
-    // Sigmas present but all zero: exactly zero, not absent.
+    // A covariance of zeros: exactly zero, not absent.
     catalog::Record zero = make_record(kEls.a);
-    for (double& s : zero.sigmas)
-        s = 0.0;
+    const double c0[6][6] = {};
+    set_covariance(zero, kEls, kEpoch, c0);
     CHECK(e.add_catalog(write_record(tf_cat, zero)).ok());
     res = e.calc(int(kSpkid), kEpoch + 10.0, CalcOptions::geometric());
-    CHECK(res.ok());
-    CHECK(res.value().sigma_arcsec.has_value());
+    REQUIRE(res.ok());
+    REQUIRE(res.value().sigma_arcsec.has_value());
     CHECK(*res.value().sigma_arcsec == 0.0);
 
     // The planetary ephemeris publishes no covariance: absent.
     auto earth = e.calc(body::kEarth, kEpoch + 10.0, bary_geom_icrf());
-    CHECK(earth.ok());
+    REQUIRE(earth.ok());
     CHECK(!earth.value().sigma_arcsec.has_value());
 }
 
-TEST_CASE("sigma_circle_analytic_epoch") {
-    TempFile tf_kernel("sig-circ-k");
-    TempFile tf_cat("sig-circ-c");
+TEST_CASE("sigma_tp_analytic_at_covariance_epoch") {
+    TempFile tf_kernel("sig-tp-k");
+    TempFile tf_cat("sig-tp-c");
     Engine e = open_synthetic(tf_kernel);
 
-    // An exact circle (e = 0), sigma_M only: the covariance is rank one,
-    // c = dr/dM = a * (unit tangent of the heliocentric circle), so
-    // sigma = sigma_M * |u x c| / |r_bary| in arcsec — closed form. The
-    // cross product with the (barycentric) line of sight u is what the
-    // sky-plane projection leaves of c; u and c are built here from the
-    // same pieces oracle_seed uses.
-    catalog::Record r;
-    r.spkid = kSpkid;
-    r.epoch_jtdb = kEpoch;
-    r.a_au = 2.0;
-    r.e = 0.0;
-    r.inc_rad = r.node_rad = r.argp_rad = 0.0;
-    r.mean_anom_rad = 1.0471975511965976; // pi/3
-    r.flags = catalog::RecordFlags::kSigmas;
-    for (double& s : r.sigmas)
-        s = 0.0;
-    r.sigmas[5] = 1e-6;
+    // Only the perihelion time is uncertain: dM = -n dtp moves the body
+    // along its velocity, dr = -v sigma_tp, so at the covariance epoch the
+    // direction uncertainty is sigma_tp |u x v| / |r_bary| — closed form.
+    const Elements el{2.2, 0.1, 0.2, 0.7, 1.1, 1.3};
+    catalog::Record r = make_record(el.a);
+    r.e = el.e;
+    r.inc_rad = el.inc;
+    r.node_rad = el.node;
+    r.argp_rad = el.argp;
+    r.mean_anom_rad = el.mean_anom;
+    const double sigma_tp = 1e-3; // days
+    double c[6][6] = {};
+    c[2][2] = sigma_tp * sigma_tp;
+    set_covariance(r, el, kEpoch, c);
     CHECK(e.add_catalog(write_record(tf_cat, r)).ok());
 
-    const Elements circ{r.a_au, r.e, r.inc_rad, r.node_rad, r.argp_rad, r.mean_anom_rad};
-    const double h = 1e-6; // the engine's step: sigma above its floor
-    Elements ep = circ, em = circ;
-    ep.mean_anom += h;
-    em.mean_anom -= h;
-    auto sp = elements_to_state(gm::kSun, ep);
-    auto sm = elements_to_state(gm::kSun, em);
-    CHECK(sp.ok());
-    CHECK(sm.ok());
-    const double c_ecl[3] = {(sp.value().pos.x - sm.value().pos.x) / (2 * h),
-                             (sp.value().pos.y - sm.value().pos.y) / (2 * h),
-                             (sp.value().pos.z - sm.value().pos.z) / (2 * h)};
-
-    // Rotate c into ICRF by m^T and build the barycentric line of sight
-    // from the seed construction (r_bary = m^T r_helio + sun).
+    auto helio = elements_to_state(gm::kSun, el);
+    REQUIRE(helio.ok());
     const double ce = std::cos(kJplEclipticObliquity), se = std::sin(kJplEclipticObliquity);
     const double m[9] = {1, 0, 0, 0, ce, se, 0, -se, ce};
-    double c[3], rbar[3];
-    auto helio = elements_to_state(gm::kSun, circ);
-    CHECK(helio.ok());
-    const double rh[3] = {helio.value().pos.x, helio.value().pos.y, helio.value().pos.z};
-    auto sunres = e.calc(body::kSun, kEpoch, bary_geom_icrf()); // kernel Sun, ICRF AU
-    CHECK(sunres.ok());
+    auto sunres = e.calc(body::kSun, kEpoch, bary_geom_icrf());
+    REQUIRE(sunres.ok());
     const double* sun_au = sunres.value().pos.xyz_au;
+    const double rh[3] = {helio.value().pos.x, helio.value().pos.y, helio.value().pos.z};
+    const double vh[3] = {helio.value().vel.x, helio.value().vel.y, helio.value().vel.z};
+    double v[3], rbar[3];
     for (int i = 0; i < 3; ++i) {
-        c[i] = m[i] * c_ecl[0] + m[3 + i] * c_ecl[1] + m[6 + i] * c_ecl[2];
+        v[i] = m[i] * vh[0] + m[3 + i] * vh[1] + m[6 + i] * vh[2];
         rbar[i] = m[i] * rh[0] + m[3 + i] * rh[1] + m[6 + i] * rh[2] + sun_au[i];
     }
     const double d = std::sqrt(rbar[0] * rbar[0] + rbar[1] * rbar[1] + rbar[2] * rbar[2]);
-    const double cx[3] = {rbar[1] * c[2] - rbar[2] * c[1], rbar[2] * c[0] - rbar[0] * c[2],
-                          rbar[0] * c[1] - rbar[1] * c[0]};
-    const double uc = std::sqrt(cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]) / d;
-    const double expect = h * uc / d * (180.0 / 3.14159265358979323846) * 3600.0;
+    const double cx[3] = {rbar[1] * v[2] - rbar[2] * v[1], rbar[2] * v[0] - rbar[0] * v[2],
+                          rbar[0] * v[1] - rbar[1] * v[0]};
+    const double expect = sigma_tp * std::sqrt(cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]) / d /
+                          d * (180.0 / kPi) * 3600.0;
 
     auto res = e.calc(int(kSpkid), kEpoch, bary_geom_icrf());
-    CHECK(res.ok());
-    CHECK(res.value().sigma_arcsec.has_value());
-    std::printf("  circle at epoch: %.6f\" (analytic %.6f\")\n", *res.value().sigma_arcsec, expect);
-    CHECK(std::fabs(*res.value().sigma_arcsec - expect) < 1e-5 * expect);
+    REQUIRE(res.ok());
+    REQUIRE(res.value().sigma_arcsec.has_value());
+    std::printf("  tp-only at the covariance epoch: %.6f\" (analytic %.6f\")\n",
+                *res.value().sigma_arcsec, expect);
+    CHECK(std::fabs(*res.value().sigma_arcsec - expect) < 1e-4 * expect);
 }
 
-TEST_CASE("sigma_matches_independent_fd") {
+TEST_CASE("sigma_matches_independent_jcjt") {
     TempFile tf_kernel("sig-ind-k");
     TempFile tf_cat("sig-ind-c");
     Engine e = open_synthetic(tf_kernel);
 
-    // Two non-degenerate columns; both sigmas sit above the engine's FD
-    // floor, so its difference step is the sigma itself.
-    const double sig_a = 1e-5, sig_argp = 1e-5;
+    // A fully correlated covariance published at its own epoch, 300 days
+    // before the record's element epoch. The oracle does not decompose it:
+    // it builds J column by column (a finite difference per cometary
+    // element, each track integrated from the covariance epoch against the
+    // kernel read per evaluation) and forms J C J^T explicitly.
+    const double t_cov = kEpoch - 300.0;
+    const double sd[6] = {2e-6, 3e-6, 2e-3, 1e-6, 4e-6, 1e-6};
+    double c[6][6];
+    correlated(sd, 0.6, c);
     catalog::Record r = make_record(kEls.a);
-    for (double& s : r.sigmas)
-        s = 0.0;
-    r.sigmas[0] = sig_a;
-    r.sigmas[4] = sig_argp;
+    set_covariance(r, kEls, t_cov, c);
     CHECK(e.add_catalog(write_record(tf_cat, r)).ok());
 
     auto spk = spk::SpkFile::open(tf_kernel.path.string());
-    CHECK(spk.ok());
+    REQUIRE(spk.ok());
     KernelPerturbers pert(std::move(spk).value());
     BarycentricForce force{&pert};
+    const double* x0 = r.cov_elements;
 
-    const double els0[6] = {kEls.a, kEls.e, kEls.inc, kEls.node, kEls.argp, kEls.mean_anom};
-    const int cols[2] = {0, 4};
-    const double sigs[2] = {sig_a, sig_argp};
+    auto elements_of = [&](const double x[6]) {
+        const double a = x[1] / (1.0 - x[0]);
+        const double n = std::sqrt(gm::kSun / (a * a * a));
+        return Elements{a, x[0], x[5], x[3], x[4], std::remainder(n * (t_cov - x[2]), 2 * kPi)};
+    };
 
-    for (double dt : {400.25, -800.5}) {
+    for (double dt : {0.0, 700.25, -900.5}) {
         const double t = kEpoch + dt;
         auto res = e.calc(int(kSpkid), t, bary_geom_icrf());
-        CHECK(res.ok());
-        CHECK(res.value().sigma_arcsec.has_value());
+        REQUIRE(res.ok());
+        REQUIRE(res.value().sigma_arcsec.has_value());
 
-        // Independent columns: propagate each perturbed seed with a
-        // free-running dp54 against the kernel read per evaluation.
-        double cov[6] = {0, 0, 0, 0, 0, 0};
-        for (int ci = 0; ci < 2; ++ci) {
-            const int k = cols[ci];
-            const double s = sigs[ci];
+        double jac[3][6];
+        for (int k = 0; k < 6; ++k) {
+            const double h = 3.0 * sd[k];
             double rp[3], rm[3];
             for (int sign : {+1, -1}) {
-                double els[6];
+                double x[6];
                 for (int i = 0; i < 6; ++i)
-                    els[i] = els0[i];
-                els[k] += sign * s;
-                const State seed = oracle_seed(
-                    pert.file_, Elements{els[0], els[1], els[2], els[3], els[4], els[5]});
+                    x[i] = x0[i];
+                x[k] += sign * h;
+                const State seed = oracle_seed(pert.file_, elements_of(x), t_cov);
                 double y[6];
                 to_array(seed, y);
                 IntegrateStats stats;
-                CHECK(integrate_dp54(y, kEpoch, t, force, IntegrateOptions{}, &stats).ok());
-                CHECK(pert.ok());
+                CHECK(integrate_dp54(y, t_cov, t, force, IntegrateOptions{}, &stats).ok());
                 for (int i = 0; i < 3; ++i)
                     (sign > 0 ? rp : rm)[i] = y[i];
             }
-            const double d[3] = {(rp[0] - rm[0]) / (2 * s), (rp[1] - rm[1]) / (2 * s),
-                                 (rp[2] - rm[2]) / (2 * s)};
-            cov[0] += s * s * d[0] * d[0];
-            cov[1] += s * s * d[0] * d[1];
-            cov[2] += s * s * d[0] * d[2];
-            cov[3] += s * s * d[1] * d[1];
-            cov[4] += s * s * d[1] * d[2];
-            cov[5] += s * s * d[2] * d[2];
+            for (int i = 0; i < 3; ++i)
+                jac[i][k] = (rp[i] - rm[i]) / (2.0 * h);
         }
-        // Barycentric geometric: xyz_au is the ICRF position, the line
-        // of sight is its direction and length.
+        double full[3][3] = {};
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                for (int a = 0; a < 6; ++a)
+                    for (int b = 0; b < 6; ++b)
+                        full[i][j] += jac[i][a] * c[a][b] * jac[j][b];
+        const double cov[6] = {full[0][0], full[0][1], full[0][2],
+                               full[1][1], full[1][2], full[2][2]};
         double u[3] = {res.value().pos.xyz_au[0], res.value().pos.xyz_au[1],
                        res.value().pos.xyz_au[2]};
         const double n = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
         for (double& x : u)
             x /= n;
         const double expect = sky_sigma_arcsec(cov, u, n);
-        std::printf("  dt=%+g: engine %.6f\", oracle %.6f\"\n", dt, *res.value().sigma_arcsec,
-                    expect);
-        CHECK(std::fabs(*res.value().sigma_arcsec - expect) < 1e-3 * expect);
+        std::printf("  dt=%+g: engine %.6f\", oracle J C J^T %.6f\"\n", dt,
+                    *res.value().sigma_arcsec, expect);
+        CHECK(std::fabs(*res.value().sigma_arcsec - expect) < 2e-3 * expect);
     }
+}
+
+TEST_CASE("sigma_correlations_matter") {
+    TempFile tf_kernel("sig-corr-k");
+    TempFile tf_a("sig-corr-a");
+    TempFile tf_b("sig-corr-b");
+    Engine e = open_synthetic(tf_kernel);
+
+    // Nearly coplanar orbit: node and argument of perihelion are each poorly
+    // known, but their sum (the longitude of perihelion) is well known — the
+    // variances alone overstate the uncertainty, the anticorrelation
+    // removes it.
+    const Elements el{2.5, 0.2, 0.01, 0.7, 1.1, 1.3};
+    catalog::Record r = make_record(el.a);
+    r.e = el.e;
+    r.inc_rad = el.inc;
+    r.node_rad = el.node;
+    r.argp_rad = el.argp;
+    r.mean_anom_rad = el.mean_anom;
+    const double sd = 1e-4, t = kEpoch + 500.0;
+    double c[6][6] = {};
+    c[3][3] = c[4][4] = sd * sd;
+    set_covariance(r, el, kEpoch, c);
+    CHECK(e.add_catalog(write_record(tf_a, r)).ok());
+    auto independent = e.calc(int(kSpkid), t, bary_geom_icrf());
+
+    c[3][4] = c[4][3] = -0.99999 * sd * sd;
+    set_covariance(r, el, kEpoch, c);
+    CHECK(e.add_catalog(write_record(tf_b, r)).ok());
+    auto correlated_res = e.calc(int(kSpkid), t, bary_geom_icrf());
+    REQUIRE(independent.ok());
+    REQUIRE(correlated_res.ok());
+    REQUIRE(independent.value().sigma_arcsec.has_value());
+    REQUIRE(correlated_res.value().sigma_arcsec.has_value());
+    const double si = *independent.value().sigma_arcsec;
+    const double sc = *correlated_res.value().sigma_arcsec;
+    std::printf("  uncorrelated %.4f\", anticorrelated node/peri %.4f\"\n", si, sc);
+    CHECK(sc < 0.05 * si);
 }
 
 TEST_CASE("sigma_growth_symmetry") {
@@ -653,20 +712,20 @@ TEST_CASE("sigma_growth_symmetry") {
     TempFile tf_cat("sig-grw-c");
     Engine e = open_synthetic(tf_kernel);
 
-    // A sigma_a-only record: the along-track spread grows ~linearly in
-    // |t - epoch| (mean-motion offset), so the uncertainty away from the
-    // epoch dwarfs the epoch value, near-symmetrically in time.
+    // Perihelion distance only (e fixed): the semimajor axis and so the
+    // mean motion are uncertain, and the along-track spread grows ~linearly
+    // in |t - epoch|, near-symmetrically in time.
     catalog::Record r = make_record(kEls.a);
-    for (double& s : r.sigmas)
-        s = 0.0;
-    r.sigmas[0] = 1e-6;
+    double c[6][6] = {};
+    c[1][1] = 1e-6 * 1e-6;
+    set_covariance(r, kEls, kEpoch, c);
     CHECK(e.add_catalog(write_record(tf_cat, r)).ok());
 
     auto at = [&](double t) {
         auto res = e.calc(int(kSpkid), t, bary_geom_icrf());
         CHECK(res.ok());
         CHECK(res.value().sigma_arcsec.has_value());
-        return *res.value().sigma_arcsec;
+        return res.value().sigma_arcsec.value_or(0.0);
     };
     const double s0 = at(kEpoch), sp = at(kEpoch + 2000.0), sm = at(kEpoch - 2000.0);
     std::printf("  epoch %.4f\", +2000d %.4f\", -2000d %.4f\"\n", s0, sp, sm);
@@ -682,29 +741,33 @@ TEST_CASE("sigma_newest_catalog_rescales") {
     TempFile tf_b("sig-nc-b");
     Engine e = open_synthetic(tf_kernel);
 
-    // Same elements, ten times the sigma_M: the cached tracks are
+    // Same elements, the covariance times 100: the cached tracks are
     // invalidated by add_catalog and rebuilt, and the (linear) answer
     // scales by ten.
+    const double sd[6] = {1e-6, 1e-6, 1e-3, 1e-6, 1e-6, 1e-6};
+    double c[6][6];
+    correlated(sd, 0.3, c);
     catalog::Record r = make_record(kEls.a);
-    for (double& s : r.sigmas)
-        s = 0.0;
-    r.sigmas[5] = 1e-5;
+    set_covariance(r, kEls, kEpoch, c);
     CHECK(e.add_catalog(write_record(tf_a, r)).ok());
     const double t = kEpoch + 300.0;
     auto first = e.calc(int(kSpkid), t, bary_geom_icrf());
-    CHECK(first.ok());
-    CHECK(first.value().sigma_arcsec.has_value());
+    REQUIRE(first.ok());
+    REQUIRE(first.value().sigma_arcsec.has_value());
 
-    r.sigmas[5] = 1e-4;
+    for (auto& row : c)
+        for (double& x : row)
+            x *= 100.0;
+    set_covariance(r, kEls, kEpoch, c);
     CHECK(e.add_catalog(write_record(tf_b, r)).ok());
     auto second = e.calc(int(kSpkid), t, bary_geom_icrf());
-    CHECK(second.ok());
-    CHECK(second.value().sigma_arcsec.has_value());
+    REQUIRE(second.ok());
+    REQUIRE(second.value().sigma_arcsec.has_value());
 
     const double ratio = *second.value().sigma_arcsec / *first.value().sigma_arcsec;
-    std::printf("  sigma ratio after 10x sigma_M: %.6f\n", ratio);
-    CHECK(ratio > 9.9);
-    CHECK(ratio < 10.1);
+    std::printf("  sigma ratio after 100x covariance: %.6f\n", ratio);
+    CHECK(ratio > 9.99);
+    CHECK(ratio < 10.01);
     // The elements did not change: same position as before.
     CHECK(second.value().pos.dist_au == first.value().pos.dist_au);
 }
@@ -807,7 +870,7 @@ TEST_CASE("de440_ceres_vs_swetest") {
     auto by_pdes = e.value().lookup("1");
     CHECK((by_pdes.ok() && by_pdes.value() == kCatalogFixtures[0].spkid));
 
-    double worst_apparent = 0.0, worst_geometric = 0.0, worst_dist = 0.0, worst_sigma = 0.0;
+    double worst_apparent = 0.0, worst_geometric = 0.0, worst_dist = 0.0;
     for (const CatalogFixture& f : kCatalogFixtures) {
         auto app = e.value().calc(f.spkid, f.jd_tt, CalcOptions::apparent());
         CHECK(app.ok());
@@ -818,14 +881,9 @@ TEST_CASE("de440_ceres_vs_swetest") {
         if (!app.ok() || !geo.ok())
             continue;
 
-        // The Ceres record carries SBDB sigmas: a real, small number
-        // (order milliarcsec), published at every epoch.
-        CHECK(app.value().sigma_arcsec.has_value());
-        const double sig = *app.value().sigma_arcsec;
-        CHECK(std::isfinite(sig));
-        CHECK(sig > 0.0);
-        CHECK(sig < 0.05);
-        worst_sigma = std::max(worst_sigma, sig);
+        // The sample catalog carries SBDB's element sigmas but no
+        // covariance: no calibrated uncertainty, so none is reported.
+        CHECK(!app.value().sigma_arcsec.has_value());
 
         // Great-circle separation in arcsec.
         auto sep = [](double lon1, double lat1, double lon2, double lat2) {
@@ -851,9 +909,8 @@ TEST_CASE("de440_ceres_vs_swetest") {
         CHECK(worst_apparent < kCatalogGateArcsec);
         CHECK(worst_dist < 1e-5);
     }
-    std::printf("  Ceres vs swetest/DE440: apparent %.4f\", geometric J2000 %.4f\", dist %.2e AU, "
-                "sigma %.4f\"\n",
-                worst_apparent, worst_geometric, worst_dist, worst_sigma);
+    std::printf("  Ceres vs swetest/DE440: apparent %.4f\", geometric J2000 %.4f\", dist %.2e AU\n",
+                worst_apparent, worst_geometric, worst_dist);
 }
 
 } // namespace

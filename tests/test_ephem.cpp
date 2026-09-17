@@ -304,7 +304,7 @@ TEST_CASE("ephem_catalog_bodies") {
     CHECK(rows.size() == 3);
     for (const CsvRow& row : rows) {
         CHECK(row.id == 20000001);
-        CHECK(row.has_sigma);
+        CHECK(!row.has_sigma); // element sigmas only, no covariance
         CHECK(want.ok());
         CHECK(same(row, want.value()));
     }

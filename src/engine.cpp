@@ -498,11 +498,70 @@ public:
 // extra integrations. Element uncertainties are uncorrelated (the catalog
 // stores one sigma per element), so the covariance is the sum of rank-one
 // terms sigma_k^2 c_k c_k^T with c_k = dr/d(element_k).
+// JPL cometary elements {e, q [AU], tp [JD TDB], node, peri, i [rad]} at TDB
+// JD t -> osculating Elements {a, e, i, node, argp, M}: a = q / (1 - e)
+// (negative when hyperbolic), M = n (t - tp) with n = sqrt(mu / |a|^3).
+std::optional<Elements> cometary_to_elements(double mu, const double c[6], double t) {
+    const double e = c[0], q = c[1];
+    if (!(q > 0.0) || !(e >= 0.0) || e == 1.0 || !std::isfinite(c[2]))
+        return std::nullopt;
+    const double a = q / (1.0 - e);
+    const double n = std::sqrt(mu / std::fabs(a * a * a));
+    double m = n * (t - c[2]);
+    if (e < 1.0)
+        m = std::remainder(m, 2.0 * 3.14159265358979323846);
+    return Elements{a, e, c[5], c[3], c[4], m};
+}
+
+// Eigen-decomposition of a real symmetric n x n matrix (n <= 6) by cyclic
+// Jacobi rotations: a is destroyed; values w[k] with unit eigenvectors in
+// the columns of v (v[i][k]).
+void symmetric_eigen(double a[6][6], int n, double w[6], double v[6][6]) {
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            v[i][j] = i == j ? 1.0 : 0.0;
+    for (int sweep = 0; sweep < 60; ++sweep) {
+        double off = 0.0;
+        for (int i = 0; i < n; ++i)
+            for (int j = i + 1; j < n; ++j)
+                off += a[i][j] * a[i][j];
+        if (off < 1e-30)
+            break;
+        for (int p = 0; p < n; ++p) {
+            for (int q = p + 1; q < n; ++q) {
+                if (a[p][q] == 0.0)
+                    continue;
+                const double theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+                const double t = (theta >= 0.0 ? 1.0 : -1.0) /
+                                 (std::fabs(theta) + std::sqrt(theta * theta + 1.0));
+                const double c = 1.0 / std::sqrt(t * t + 1.0), s = t * c;
+                for (int k = 0; k < n; ++k) {
+                    const double akp = a[k][p], akq = a[k][q];
+                    a[k][p] = c * akp - s * akq;
+                    a[k][q] = s * akp + c * akq;
+                }
+                for (int k = 0; k < n; ++k) {
+                    const double apk = a[p][k], aqk = a[q][k];
+                    a[p][k] = c * apk - s * aqk;
+                    a[q][k] = s * apk + c * aqk;
+                }
+                for (int k = 0; k < n; ++k) {
+                    const double vkp = v[k][p], vkq = v[k][q];
+                    v[k][p] = c * vkp - s * vkq;
+                    v[k][q] = s * vkp + c * vkq;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < n; ++i)
+        w[i] = a[i][i];
+}
+
 class SigmaTracks {
 public:
     struct Column {
-        double sigma; // 1-sigma of the element (catalog units)
-        double h;     // finite-difference step used for it
+        double sigma; // 1-sigma along the column's direction (unit scale)
+        double h;     // finite-difference step taken along it
         std::unique_ptr<WindowMemo<BarycentricForce>> plus, minus;
     };
 
@@ -754,51 +813,89 @@ struct Engine::Impl {
     }
 
     // The perturbed trajectories behind sigma_arcsec, built lazily on the
-    // first query that needs them. FD steps are the element sigmas —
-    // which also probes the propagation's nonlinearity at the 1-sigma
-    // scale — with a relative floor against double-precision noise,
-    // capped at half the distance to the singular element values
-    // (a -> 0, e -> 1). A zero-sigma element contributes no column.
+    // first query that needs them, from the record's full covariance C (at
+    // its own epoch, in cometary elements). C is scaled to a correlation
+    // matrix (element variances span ~1e-23 to ~1e-2), decomposed into
+    // principal axes, and each axis with a positive eigenvalue becomes one
+    // column: seeds at the nominal cometary elements +- s * v_k, where v_k
+    // is the axis scaled to one sigma, integrated in their own memos. The
+    // columns' outer products sum to J C J^T (J = d position / d elements)
+    // exactly in the linear regime. The step s is 1 (the one-sigma point),
+    // raised when that moves the seed by less than kMinSeedStepAu (double
+    // and integrator noise) and lowered to keep e on its side of 0 and 1
+    // and q positive.
     Result<std::unique_ptr<SigmaTracks>> build_sigma_tracks(const catalog::Record& rec) {
+        static constexpr double kMinSeedStepAu = 1e-7;
         std::vector<SigmaTracks::Column> columns;
-        if (!rec.has(catalog::RecordFlags::kSigmas))
-            return std::make_unique<SigmaTracks>(std::move(columns));
-        const double el0[6] = {rec.a_au,     rec.e,        rec.inc_rad,
-                               rec.node_rad, rec.argp_rad, rec.mean_anom_rad};
+        const double mu = gm_or_builtin(source.get(), body::kSun);
+        const double t0 = rec.cov_epoch_jtdb;
+        const double* x0 = rec.cov_elements;
+        auto nominal = cometary_to_elements(mu, x0, t0);
+        if (!nominal)
+            return make_error(ErrorCode::ArgumentError, "invalid covariance elements");
+        auto nominal_state = elements_to_state(mu, *nominal);
+        if (!nominal_state)
+            return nominal_state.error();
+
+        double d[6], r[6][6], w[6], axes[6][6];
+        for (int i = 0; i < 6; ++i)
+            d[i] = std::sqrt(std::max(0.0, rec.covariance[catalog::packed_index(i, i)]));
+        for (int i = 0; i < 6; ++i)
+            for (int j = 0; j < 6; ++j)
+                r[i][j] = d[i] > 0.0 && d[j] > 0.0
+                              ? rec.covariance[catalog::packed_index(i, j)] / (d[i] * d[j])
+                              : 0.0;
+        symmetric_eigen(r, 6, w, axes);
+        const double w_max = std::max({w[0], w[1], w[2], w[3], w[4], w[5], 0.0});
+
         for (int k = 0; k < 6; ++k) {
-            const double s = rec.sigmas[k];
-            if (!(s > 0.0))
+            if (!(w[k] > 1e-14 * w_max))
                 continue;
-            const double scale = k == 0 ? std::fabs(el0[0]) : 1.0;
-            double h = std::max(s, 1e-8 * scale);
-            if (k == 0)
-                h = std::min(h, 0.5 * std::fabs(el0[0])); // a away from 0
-            if (k == 1) {
-                // e strictly between its singular values on both sides:
-                // elliptic records stay elliptic, hyperbolic stay hyperbolic.
-                if (el0[1] < 1.0)
-                    h = std::min(h, 0.5 * std::min(el0[1], 1.0 - el0[1]));
-                else
-                    h = std::min(h, 0.5 * (el0[1] - 1.0));
+            double v[6];
+            for (int i = 0; i < 6; ++i)
+                v[i] = d[i] * axes[i][k] * std::sqrt(w[k]);
+
+            // Seed displacement of the one-sigma point (two-body, at t0).
+            double s = 1.0;
+            {
+                double x[6];
+                for (int i = 0; i < 6; ++i)
+                    x[i] = x0[i] + v[i];
+                auto el = cometary_to_elements(mu, x, t0);
+                auto st = el ? elements_to_state(mu, *el) : Result<State>(State{});
+                if (el && st.ok()) {
+                    const Vec3 dr = st.value().pos - nominal_state.value().pos;
+                    const double moved = std::sqrt(dr.x * dr.x + dr.y * dr.y + dr.z * dr.z);
+                    if (moved > 0.0 && moved < kMinSeedStepAu)
+                        s = kMinSeedStepAu / moved;
+                }
             }
-            if (!(h > 0.0))
-                continue; // degenerate record (e.g. an exact circle with sigma_e)
+            const double e0 = x0[0], q0 = x0[1];
+            if (v[0] != 0.0)
+                s = std::min(s, 0.5 * (e0 < 1.0 ? std::min(e0, 1.0 - e0) : e0 - 1.0) /
+                                    std::fabs(v[0]));
+            if (v[1] != 0.0)
+                s = std::min(s, 0.5 * q0 / std::fabs(v[1]));
+            if (!(s > 0.0))
+                continue; // degenerate (e.g. an exact circle with variance in e)
 
             SigmaTracks::Column col;
-            col.sigma = s;
-            col.h = h;
+            col.sigma = 1.0;
+            col.h = s;
             for (int sign : {+1, -1}) {
-                double p[6];
+                double x[6];
                 for (int i = 0; i < 6; ++i)
-                    p[i] = el0[i];
-                p[k] += sign * h;
-                const Elements el{p[0], p[1], p[2], p[3], p[4], p[5]};
-                auto seed = seed_from_elements(el, rec.epoch_jtdb);
+                    x[i] = x0[i] + sign * s * v[i];
+                auto el = cometary_to_elements(mu, x, t0);
+                if (!el)
+                    return make_error(ErrorCode::ArgumentError,
+                                      "covariance step left the element domain");
+                auto seed = seed_from_elements(*el, t0);
                 if (!seed)
                     return seed.error();
                 auto memo =
                     std::make_unique<WindowMemo<BarycentricForce>>(&force, IntegrateOptions{});
-                memo->set_seed(seed.value(), rec.epoch_jtdb);
+                memo->set_seed(seed.value(), t0);
                 (sign > 0 ? col.plus : col.minus) = std::move(memo);
             }
             columns.push_back(std::move(col));
@@ -807,9 +904,9 @@ struct Engine::Impl {
     }
 
     // 1-sigma sky-plane uncertainty of a catalog body (arcsec), or
-    // nullopt when the record publishes no sigmas, publishes only zeros
-    // that degenerate away, or the perturbed tracks failed to reach the
-    // epoch. The barycentric position covariance at the retarded epoch is
+    // nullopt when the record carries no covariance or the perturbed
+    // tracks failed to reach the epoch; exactly zero for an all-zero
+    // covariance. The barycentric position covariance at the retarded epoch is
     // projected on the plane perpendicular to the observer->body line;
     // the square root of the larger eigenvalue of the projected 2x2
     // covariance, divided by the observer->body distance, is the
@@ -822,8 +919,8 @@ struct Engine::Impl {
         if (!recr.ok() || !recr.value())
             return std::nullopt;
         const catalog::Record rec = *recr.value();
-        if (!rec.has(catalog::RecordFlags::kSigmas))
-            return std::nullopt;
+        if (!rec.has(catalog::RecordFlags::kCovariance))
+            return std::nullopt; // element sigmas alone are uncorrelated: no calibrated answer
 
         auto& tracks = sigma_tracks[uint64_t(id)];
         if (!tracks) {
@@ -833,7 +930,7 @@ struct Engine::Impl {
             tracks = std::move(built).value();
         }
         if (tracks->empty())
-            return 0.0; // sigmas present but every one is zero
+            return 0.0; // covariance present but zero
 
         const double jd_tdb = time::tdb_from_tt(jd_tt);
         const double t_ret = jd_tdb - tau;

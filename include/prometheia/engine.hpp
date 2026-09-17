@@ -152,13 +152,14 @@ struct CalcResult {
     // arcsec: the square root of the larger eigenvalue of the position
     // covariance projected on the plane perpendicular to the
     // observer->body line, divided by the observer->body distance. The
-    // covariance is propagated from the catalog record's 1-sigma element
-    // uncertainties (treated as uncorrelated) through the same
-    // integration that produces the position; the observer is exact.
-    // Present (>= 0, zero when every published sigma is zero) only for
-    // catalog bodies whose record carries element sigmas — otherwise
-    // absent: the planetary ephemeris publishes no covariance, and a
-    // record without sigmas claims none. Eigenvalues survive the frame
+    // covariance is the orbit solution's full element covariance (the
+    // record's kCovariance block, at its own epoch) propagated through the
+    // same integration that produces the position; the observer is exact.
+    // Present (>= 0, zero for an all-zero covariance) only for catalog
+    // bodies whose record carries a covariance — otherwise absent: the
+    // planetary ephemeris publishes none, and per-element sigmas alone are
+    // uncorrelated summaries that would overstate it 10-1000x (measured
+    // against JPL Horizons), so they are not used. Eigenvalues survive the frame
     // rotations, so this is frame-independent and ignores the
     // light-optics corrections (deflection, aberration).
     std::optional<double> sigma_arcsec;
@@ -189,7 +190,7 @@ public:
     // point-mass force field built from the engine's own ephemeris
     // (Sun plus Mercury..Pluto at their system barycentres; Earth and
     // Moon split from the Earth-Moon barycentre), memoized per body.
-    // Records carrying element sigmas also answer CalcResult::
+    // Records carrying a full covariance also answer CalcResult::
     // sigma_arcsec. May be called more than once; the newest catalog
     // wins when several carry the same body, and any small-body
     // positions and uncertainties cached so far are invalidated.

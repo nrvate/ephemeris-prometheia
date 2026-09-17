@@ -11,6 +11,7 @@
 #include <cstring>
 #include <string>
 
+#include <prometheia/catalog.hpp>
 #include <prometheia/engine.hpp>
 #include <prometheia/prometheia.h>
 #include <prometheia/prometheia.hpp>
@@ -361,9 +362,40 @@ TEST_CASE("c_api_catalog_and_lookup") {
     auto r = cpp.value().calc(20000001, jd);
     CHECK(r.ok());
     CHECK(same(res, r.value()));
-    CHECK((res.flags & PROMETHEIA_HAS_SIGMA));
-    CHECK(res.sigma_arcsec >= 0.0);
+    CHECK(!(res.flags & PROMETHEIA_HAS_SIGMA)); // element sigmas only, no covariance
     CHECK(std::string(res.source).find("EPM1") != std::string::npos);
+
+    // An overlay carrying a covariance for Ceres: the flag and value cross
+    // the boundary like the C++ optional.
+    auto reader = catalog::Reader::open(catalog);
+    REQUIRE(reader.ok());
+    auto ceres = reader.value().lookup(20000001);
+    REQUIRE(ceres.ok());
+    catalog::Record rec = ceres.value();
+    rec.flags |= catalog::RecordFlags::kCovariance;
+    rec.cov_epoch_jtdb = rec.epoch_jtdb;
+    const double a = rec.a_au, n = std::sqrt(0.295912208284119561e-3 / (a * a * a));
+    const double cel[6] = {rec.e,        a * (1.0 - rec.e), rec.epoch_jtdb - rec.mean_anom_rad / n,
+                           rec.node_rad, rec.argp_rad,      rec.inc_rad};
+    for (int i = 0; i < 6; ++i) {
+        rec.cov_elements[i] = cel[i];
+        rec.covariance[catalog::packed_index(i, i)] = i == 2 ? 1e-6 : 1e-14;
+    }
+    TempFile overlay("capi-cov");
+    {
+        auto w = catalog::Writer::create(overlay.path.string(), catalog::WriterOptions{});
+        REQUIRE(w.ok());
+        CHECK(w.value().add(rec, "1", "Ceres").ok());
+        CHECK(w.value().finish(CborValue::make_map()).ok());
+    }
+    CHECK(prometheia_engine_add_catalog(c.e, overlay.path.c_str(), &err) == PROMETHEIA_OK);
+    CHECK(cpp.value().add_catalog(overlay.path.string()).ok());
+    CHECK(prometheia_calc(c.e, 20000001, jd, nullptr, &res, &err) == PROMETHEIA_OK);
+    r = cpp.value().calc(20000001, jd);
+    REQUIRE(r.ok());
+    CHECK(same(res, r.value()));
+    CHECK((res.flags & PROMETHEIA_HAS_SIGMA));
+    CHECK(res.sigma_arcsec > 0.0);
 }
 
 TEST_CASE("c_api_time_helpers") {
