@@ -1477,6 +1477,13 @@ Result<void> Engine::add_perturbers(const std::string& path) {
     return {};
 }
 
+void Engine::release_small_bodies() {
+    if (!impl_)
+        return;
+    impl_->small_bodies.clear();
+    impl_->sigma_tracks.clear();
+}
+
 Result<int> Engine::lookup(std::string_view name) const {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");

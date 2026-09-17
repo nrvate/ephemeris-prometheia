@@ -209,6 +209,13 @@ public:
     // tracks.
     Result<void> add_perturbers(const std::string& spk_path);
 
+    // Drops every memoized small-body trajectory and uncertainty track (they
+    // rebuild on the next query that needs them). Integrated trajectories are
+    // kept for the engine's lifetime otherwise — a few kilobytes per body per
+    // year of coverage — so a long-running process or a whole-catalog sweep
+    // calls this to bound memory. The perturber tables are kept.
+    void release_small_bodies();
+
     // Resolves a small body by its primary designation or proper name —
     // "1", "Ceres", "ceres" — to its SPK-ID, the integer calc() takes.
     // Matching is ASCII-case-insensitive. The index is built from the

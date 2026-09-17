@@ -278,6 +278,17 @@ tool and script in this repo, and for anyone running them:
     the present (older solutions) and not adopted. `spk::write_spk`,
     `spk::trim_segments` and `prometheia-spk-trim` cut the kernel to the
     DE440 span for releases: 645.7 → 41.8 MB, bit-identical inside.
+  - Increment 6 (done 2026-09-17): the full-catalog benchmark
+    (`prometheia-catalog-bench`). Every one of the 1,566,773 SBDB bodies
+    answers a geocentric astrometric query one year past its element
+    epoch (so each integrates a year): 285 s wall on 10 threads, 1.58 ms
+    per body per core (~41 core-minutes), peak 2.5 GB; with the SB441-N16
+    perturbers 373 s, 2.22 ms, 2.8 GB; zero failures. The first attempt
+    was killed out of memory at 800k bodies — memoized trajectories are
+    kept for an engine's lifetime — hence `Engine::release_small_bodies()`
+    for long-running processes and sweeps. Engine setup with the full
+    catalog is 4–5 s and ~250 MB per engine, dominated by building the
+    name index (a candidate for lazy construction).
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 

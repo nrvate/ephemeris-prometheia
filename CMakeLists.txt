@@ -81,6 +81,10 @@ prometheia_test(horizons tests/test_horizons.cpp)
 add_executable(prometheia-bench tools/bench/bench_main.cpp)
 target_link_libraries(prometheia-bench PRIVATE prometheia)
 
+find_package(Threads REQUIRED)
+add_executable(prometheia-catalog-bench tools/bench/catalog_bench_main.cpp)
+target_link_libraries(prometheia-catalog-bench PRIVATE prometheia Threads::Threads)
+
 add_executable(prometheia-convert tools/convert/convert_main.cpp)
 target_link_libraries(prometheia-convert PRIVATE prometheia)
 

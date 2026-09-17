@@ -84,6 +84,10 @@ Milestones 0–4 of 6 complete (2026-09-16):
   seconds, TT or UT1 input, series, topocentric/helio/barycentric,
   every frame, sidereal zodiacs; table, CSV or JSON output. Written in
   C99 over the C interface. Details: [docs/EPHEM.md](docs/EPHEM.md).
+- **Whole catalog** (`prometheia-catalog-bench`, 1,566,773 SBDB bodies,
+  each queried one year past its element epoch, 10 threads on a shared
+  12-core machine): 285 s wall, 1.58 ms per body per core, 2.5 GB peak;
+  with JPL's 16 asteroid perturbers 373 s, 2.22 ms, 2.8 GB. No failures.
 - **Measured on real data** (`prometheia-bench`, 100-body SBDB fixture,
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
