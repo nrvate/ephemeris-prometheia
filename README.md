@@ -94,7 +94,8 @@ Milestones 0–4 of 6 complete (2026-09-16):
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
 - **Tools** — `ephem`, `prometheia-fetch` (Python), `prometheia-convert`, `prometheia-spk-trim`,
-  `prometheia-info`, `prometheia-bench`. Sixteen test suites (a ~20 s local gate, `tools/gate.sh`), clean under
+  `prometheia-info`, `prometheia-bench`; `prometheiad` and `prometheia-wire-client`
+  ([docs/SERVER.md](docs/SERVER.md)). Seventeen test suites (a ~20 s local gate, `tools/gate.sh`), clean under
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full

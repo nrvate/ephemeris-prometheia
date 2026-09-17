@@ -315,6 +315,11 @@ tool and script in this repo, and for anyone running them:
     WELCOME negotiation, REQUEST limits, chunked f64/f32 DATA, per-object
     NaN failures, a per-loop result cache, and the wire-map parser. Tested
     socket-free.
+  - Increment 2 (done 2026-09-17): the WebSocket head. uWebSockets v20.80.0
+    and uSockets (vendored at Astrolog's pins, with Astrolog's partial-write
+    patch) run one event loop and one engine per thread on a shared port.
+    `prometheiad`, the reference client `prometheia-wire-client`, and an
+    in-process socket round-trip test (0.15 s).
 
 ## Cleanroom policy
 

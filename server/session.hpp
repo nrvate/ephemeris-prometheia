@@ -2,7 +2,7 @@
 //
 // The protocol core of prometheiad: Astrolog's ephemeris protocol (version 3,
 // third_party/ephproto/ephproto.h) as a byte-in, message-out state machine
-// with no sockets in it. The WebSocket head (prometheiad_main.cpp) feeds
+// with no sockets in it. The WebSocket head (ws_server.cpp) feeds
 // each binary message to Session::on_message and sends what Session::next
 // hands back while the socket is not backed up; the tests drive the same
 // calls directly.
@@ -96,6 +96,9 @@ public:
     // The next whole message to send, if any: control replies first, then
     // the DATA chunks of computed answers in request order.
     bool next(std::vector<uint8_t>& out);
+
+    // Whether next() has anything to hand out.
+    bool pending() const { return !control_.empty() || !streams_.empty(); }
 
     // The session's protocol version: fixed by the first HELLO, 0 before.
     uint8_t version() const { return version_; }

@@ -89,10 +89,36 @@ target_compile_options(prometheia_server PRIVATE -Wall -Wextra -Werror)
 prometheia_test(server tests/test_server.cpp)
 target_link_libraries(test_server PRIVATE prometheia_server)
 
+# The WebSocket head: uWebSockets + uSockets (third_party, Apache-2.0),
+# built without TLS and without zlib (compression is off).
+file(GLOB USOCKETS_SOURCES third_party/uSockets/src/*.c third_party/uSockets/src/eventing/*.c)
+add_library(usockets STATIC ${USOCKETS_SOURCES})
+target_include_directories(usockets SYSTEM PUBLIC third_party/uSockets/src)
+target_compile_definitions(usockets PUBLIC LIBUS_NO_SSL)
+set_target_properties(usockets PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
+target_compile_options(usockets PRIVATE -w)
+
+find_package(Threads REQUIRED)
+add_library(prometheia_ws STATIC server/ws_server.cpp server/ws_client.cpp)
+target_include_directories(prometheia_ws SYSTEM PRIVATE third_party/uWebSockets/src)
+target_compile_definitions(prometheia_ws PRIVATE UWS_NO_ZLIB)
+target_link_libraries(prometheia_ws PUBLIC prometheia_server usockets Threads::Threads)
+target_compile_options(prometheia_ws PRIVATE -Wall -Wextra -Werror)
+
+add_executable(prometheiad server/prometheiad_main.cpp)
+target_link_libraries(prometheiad PRIVATE prometheia_ws)
+target_compile_options(prometheiad PRIVATE -Wall -Wextra -Werror)
+
+add_executable(prometheia-wire-client server/wire_client_main.cpp)
+target_link_libraries(prometheia-wire-client PRIVATE prometheia_ws)
+target_compile_options(prometheia-wire-client PRIVATE -Wall -Wextra -Werror)
+
+prometheia_test(prometheiad tests/test_prometheiad.cpp)
+target_link_libraries(test_prometheiad PRIVATE prometheia_ws)
+
 add_executable(prometheia-bench tools/bench/bench_main.cpp)
 target_link_libraries(prometheia-bench PRIVATE prometheia)
 
-find_package(Threads REQUIRED)
 add_executable(prometheia-catalog-bench tools/bench/catalog_bench_main.cpp)
 target_link_libraries(prometheia-catalog-bench PRIVATE prometheia Threads::Threads)
 
@@ -117,6 +143,7 @@ add_dependencies(test_ephem ephem)
 # Install: the library, the public headers (C++ and C), the tools and a
 # pkg-config file. `cmake --install build --prefix /usr/local`.
 install(TARGETS prometheia ephem prometheia-info prometheia-convert prometheia-spk-trim
+  prometheiad prometheia-wire-client
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

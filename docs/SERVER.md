@@ -12,6 +12,34 @@ point at it the way it points at Astrolog's own server (`astrolog-ephd`).
 - **Transport.** Binary WebSocket frames, one protocol message per frame. The
   default port is 47190 (`eph::kDefaultPort`).
 
+## Running it
+
+```sh
+prometheiad --ephemeris ephe/linux_p1550p2650.440 \
+            --catalog sbdb.epm --perturbers ephe/sb441-n16-de440span.bsp \
+            --wire-map astrolog.wiremap --port 47190
+```
+
+- **Options.**
+  - `--threads N`: the number of event loops (default: one per hardware
+    thread). Each loop opens its own engine.
+  - `--bind ADDR`: the listen address.
+  - `--max-cells N`: the per-request bound WELCOME advertises.
+  - `--cache-mb N`: the result cache per loop.
+  - `--verbose`: log each connection.
+- **Stopping.** SIGINT or SIGTERM closes the listeners and every connection.
+- **Reference client.** `prometheia-wire-client --port 47190 --obj 0 --jd
+  2461300.5 --count 3` sends HELLO and one REQUEST, and prints each object's
+  metadata and one line per row. `--help` lists the options.
+
+## Licence of the binary
+
+uWebSockets and uSockets are Apache-2.0. Apache-2.0 is compatible with
+GPL version 3 but not with version 2, so `prometheiad` and
+`prometheia-wire-client`, which link them, are distributable under
+GPL-3.0-or-later terms. The library, `ephem` and the other tools do not link
+them and stay GPL-2.0-or-later.
+
 ## The protocol in brief
 
 - **Envelope.** Every message starts with a 16-byte little-endian envelope:
@@ -95,6 +123,35 @@ come from Astrolog's specification, written outside this cleanroom.
 
 ## Server internals
 
+`server/ws_server.{hpp,cpp}` is the WebSocket head:
+
+- **Event loops.** One uWebSockets event loop per thread, each with its own
+  engine and `LoopContext`, all listening on one port through `SO_REUSEPORT`.
+  The kernel balances the accepts. For `--port 0` a free port is chosen
+  first, because uSockets enables port sharing only on a nonzero port.
+- **Messages.**
+  - Each binary message goes to the connection's `Session`.
+  - Replies are sent while less than 4 MiB is buffered; the rest follow from
+    the drain callback.
+  - uWebSockets' own backpressure limit is off, because past it uWebSockets
+    silently drops sends, ERRORs included.
+  - After a closing error the connection ends once the error is sent.
+- **Heartbeats.** WebSocket protocol pings, with a 30-second idle timeout.
+- **Build.** No compression, TLS or HTTP routes.
+
+`server/ws_client.{hpp,cpp}` is a small blocking WebSocket client (masking,
+fragment reassembly, answering pings) behind `prometheia-wire-client` and
+`tests/test_prometheiad.cpp`. That test runs two loops on the synthetic
+kernel in-process and covers, in about 0.15 s:
+
+- the upgrade and a 1,200-row answer in three chunks, checked against the
+  engine;
+- PING, with six simultaneous clients;
+- closing after REQUEST-before-HELLO;
+- `stop()` closing live connections.
+
+### The protocol core
+
 `server/session.{hpp,cpp}` is the protocol core, with no sockets in it:
 
 - **`Session`** takes one WebSocket message at a time (`on_message`) and hands
@@ -128,3 +185,5 @@ kernel (wire-map numbers invented for the test), in about 10 ms. It covers:
   limits (ERROR 6). HELLO's token is accepted and ignored.
 - **Other features:** zstd payloads, and the planned negotiated extra columns
   (sigma, ayanamsha).
+- **Operations:** TLS, the `/healthz`, `/readyz` and `/metrics` routes, and
+  connection caps (Astrolog's server has all of these).
