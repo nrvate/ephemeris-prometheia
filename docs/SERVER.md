@@ -409,6 +409,46 @@ dataset, the object and the profile, with the rung and cell index appended as
 raw bytes. `segcache.cpp` knows nothing about any wire format, and the fitter
 under it knows nothing about the lattice (docs/SEGMENTS.md).
 
+## What the answer says it applied
+
+An object's metadata carries `corrApplied`: the corrections this server's
+engine actually applied to that object, as opposed to the ones the request
+asked for. Agreed with the Astrolog project for version 4 and not yet
+implemented here; the byte sits after `metaFlags` in the per-object metadata,
+three bits used and five reserved, and a client must ignore the high ones.
+
+It reports **structural** availability — the corrections the engine is able to
+apply for this kind of object and this observer. A bit is clear when the
+engine cannot apply that correction here at all. It stays set when the
+correction's own model ran and contributed nothing, because a deflection term
+that returns zero for a body far from the Sun has still been applied; the
+alternative reading would make the field vary with the sky, and a per-object
+field that answers a per-row question reads as stable without being so.
+
+This replaces a per-kind mask on the correction capability. The narrowing that
+motivated it does not fall along kinds: measured on Saturn at J2000, the
+observer-velocity term is 0.0000" for an observer at the barycentre, 0.0107"
+at the Sun, 10.4372" geocentric and 8.7706" centred on Jupiter. An engine that
+forces it off is therefore exactly right in one case, harmless in another and
+8.8" wrong in a third — a split by observer, not by kind, and one no capability
+bit was going to express. Reporting it per object costs a byte and needs no
+round trip.
+
+**It is a diagnostic, not a gate.** `corrApplied` explains a difference; it
+does not predict one, and equality of it is neither necessary nor sufficient
+for two answers to agree. Both halves of that are live between this server and
+the Astrolog one: our lunar orbit points agree to 0.0002" while reporting
+different `corrApplied`, because what is one correction in one frame is a
+cancelling pair in another; and our mean nodes differ by up to 0.025" with
+identical `corrApplied`, because our mean-element fits are different fits. A
+conformance harness must not filter comparisons on it.
+
+Orbit points are the worked example, and `docs/ORBIT-POINTS.md` has the
+measurements. The short version: corrections on an orbit point are
+interoperable applied in full or not at all. A proper subset is well defined
+only within one implementation, and a client must not compare such an answer
+across servers.
+
 ## Not implemented
 
 - **zstd payloads.** Reserved in the envelope, advertised by no one.
