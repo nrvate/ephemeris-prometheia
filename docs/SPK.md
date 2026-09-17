@@ -100,3 +100,30 @@ concurrent use.
   native binary at 9,008 states over 1850–2149 (Moon/Earth, Earth/Sun,
   Mercury, Venus, Mars, Jupiter, Pluto, Sun) — worst |Δposition| 4.1 cm,
   |Δvelocity| 2.4 × 10⁻⁶ km/day: the same ephemeris in two containers.
+
+## Writing and trimming
+
+`spk::write_spk(path, internal_name, comments, segments)` writes a
+little-endian DAF/SPK file of type 2/3 segments (`spk::WriteSegment`: the
+summary fields plus the raw records), with the comment area in NAIF's
+convention (NUL line separators, EOT terminator, 1000 characters per
+record) and summary/name records chained 25 summaries each.
+`SpkFile::segment_records()` and `SpkFile::comments()` read the raw
+records and the comment text back.
+
+`spk::trim_segments(file, et0, et1)` keeps, per type 2/3 segment, the whole
+records covering [et0, et1], copied verbatim, with the directory's initial
+epoch and the coverage narrowed to them; states inside the span are
+bit-identical. `prometheia-spk-trim <in> <out> --from <JD> --to <JD>` wraps
+it and prepends a provenance line to the original comments.
+
+- **Test** (`tests/test_spk.cpp`, `spk_writer_roundtrip_and_trim`): a type-2
+  (degree 5) and a type-3 (degree 2, offset half a record) segment of 12
+  records each with arbitrary coefficients round-trip exactly (metadata,
+  records, a 1500-character comment); trimmed to 3.25–7.5 records, every
+  state sampled inside matches the original bit for bit, epochs outside are
+  refused, and an empty span or segment list is an error.
+- **Real kernel:** JPL's `sb441-n16.bsp` (645.7 MB, −8000 … +9000) trimmed to
+  the DE440 span (JD 2287184.5 … 2688976.5) is 41.8 MB (16 of 64 segments);
+  200,000 random states over the span agree bit for bit with the original,
+  and the Horizons small-body gate gives identical numbers on either file.

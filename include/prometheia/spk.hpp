@@ -99,6 +99,15 @@ public:
     }
     Result<void> state_et(int target, int center, double et, double out[6]) const;
 
+    // The raw words of `count` consecutive records of a type 2/3 segment,
+    // starting at record `first` (0-based), in native byte order.
+    Result<std::vector<double>> segment_records(size_t segment, uint64_t first,
+                                                uint64_t count) const;
+
+    // The DAF comment area as text (NAIF's NUL line separators as newlines,
+    // up to the EOT terminator); empty when the file has none.
+    Result<std::string> comments() const;
+
 private:
     // Segment giving `body` relative to its parent at et, or -1.
     long find_segment(int body, double et) const;
@@ -110,11 +119,35 @@ private:
     std::string internal_name_;
     std::string path_;
     bool swap_ = false;
+    int32_t forward_ = 0; // first summary record: comments fill records 2 .. forward_ - 1
     mutable std::ifstream file_;
     // One cached record per segment: index into segments_ -> record.
     mutable std::vector<uint64_t> cached_index_;
     mutable std::vector<std::vector<double>> cached_record_;
 };
+
+// A type 2/3 segment to write: the summary and the raw records
+// (record_words words each: MID, RADIUS, then the Chebyshev coefficients).
+struct WriteSegment {
+    std::string name; // up to 40 characters
+    int target = 0, center = 0, frame = 1, type = 2;
+    double start_et = 0.0, end_et = 0.0;    // coverage
+    double init_et = 0.0, interval_s = 0.0; // first record start, record length
+    int record_words = 0;
+    std::vector<double> records; // record_count * record_words words
+};
+
+// Writes a little-endian DAF/SPK file holding the given type 2/3 segments,
+// with `comments` (newline-separated text, may be empty) in the comment
+// area. Readable by SpkFile and by NAIF's toolkit.
+Result<void> write_spk(const std::string& path, const std::string& internal_name,
+                       const std::string& comments, const std::vector<WriteSegment>& segments);
+
+// The type 2/3 segments of `file` cut down to whole records covering the TDB
+// seconds [et0, et1]; segments outside the span are dropped. The kept
+// records are copied verbatim, so states inside the span are bit-identical.
+// Segments of other types that overlap the span are an error.
+Result<std::vector<WriteSegment>> trim_segments(const SpkFile& file, double et0, double et1);
 
 } // namespace prometheia::spk
 

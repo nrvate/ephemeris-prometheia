@@ -275,8 +275,9 @@ tool and script in this repo, and for anyone running them:
     `MAnnnn`) join the force model, self-excluded per body. Against
     Horizons, worst small-body error ±10 yr 0.12″ → 0.0053″, ±100 yr
     8.7″ → 0.071″. Serving the 16 from the kernel was measured worse near
-    the present (older solutions) and not adopted. Next: trim the kernel to
-    the DE440 span for releases.
+    the present (older solutions) and not adopted. `spk::write_spk`,
+    `spk::trim_segments` and `prometheia-spk-trim` cut the kernel to the
+    DE440 span for releases: 645.7 → 41.8 MB, bit-identical inside.
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 

@@ -175,6 +175,29 @@ python3 tools/fetch/sbdb_fetch.py --out-dir sbdb-raw-100 --kinds a \
 Measured: 100 bodies, 9,919 bytes total (99 B/body is fixed-overhead
 dominated at this size; steady-state is ~25 B/record at 50k scale).
 
+## Asteroid perturber kernel
+
+The small-body force model can include JPL's 16 most massive main-belt
+asteroids (docs/ENGINE.md, `add_perturbers`). Their trajectories come from
+JPL's SB441-N16 kernel, a US-government work:
+
+```sh
+# once, 616 MB, sequential single download (announce it; see Etiquette)
+curl -f -A 'prometheia-fetch/0.1.0' -o ephe/sb441-n16.bsp \
+  https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/sb441-n16.bsp
+# the DE440 span only: 41.8 MB, bit-identical inside it
+./build/prometheia-spk-trim ephe/sb441-n16.bsp ephe/sb441-n16-de440span.bsp \
+  --from 2287184.5 --to 2688976.5
+```
+
+- The kernel carries no masses; the engine takes them from the DE file's
+  `MAnnnn` constants (DE440 carries all 16) or its built-in DE440 table.
+  JPL documents the set in IOM 392R-21-005 (Farnocchia 2021).
+- Releases ship the trimmed kernel as an asset beside the catalogs, with its
+  SHA-256 (the full kernel: 919d612c…fd90; the DE440-span cut:
+  a31b839a…2376). It changes only when JPL publishes a new perturber
+  set.
+
 ## Orbit covariance: on demand
 
 The bulk SBDB query returns per-element sigmas only, and those are

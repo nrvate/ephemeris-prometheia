@@ -88,7 +88,7 @@ Milestones 0–4 of 6 complete (2026-09-16):
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
-- **Tools** — `ephem`, `prometheia-fetch` (Python), `prometheia-convert`,
+- **Tools** — `ephem`, `prometheia-fetch` (Python), `prometheia-convert`, `prometheia-spk-trim`,
   `prometheia-info`, `prometheia-bench`. Fourteen test suites, clean under
   ASan/UBSan/LeakSan.
 

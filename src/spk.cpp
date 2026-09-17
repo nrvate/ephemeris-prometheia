@@ -132,6 +132,7 @@ Result<SpkFile> SpkFile::open(const std::string& path) {
     }
     out.swap_ = swap;
     out.internal_name_ = trimmed(fr + kIfnOffset, 60);
+    out.forward_ = i32_at(fr + kForwardOffset, swap);
 
     const size_t summary_words = size_t(nd) + size_t((ni + 1) / 2); // 5
     const size_t summary_bytes = summary_words * kWordBytes;
@@ -282,6 +283,203 @@ Result<void> SpkFile::segment_state_et(size_t index, double et, double out[6]) c
         }
     }
     return {};
+}
+
+Result<std::vector<double>> SpkFile::segment_records(size_t index, uint64_t first,
+                                                     uint64_t count) const {
+    if (index >= segments_.size())
+        return make_error(ErrorCode::ArgumentError, "segment index out of range");
+    const Segment& seg = segments_[index];
+    if (seg.type != 2 && seg.type != 3)
+        return make_error(ErrorCode::FormatError,
+                          "SPK segment type " + std::to_string(seg.type) + " has no records");
+    if (first > seg.record_count || count > seg.record_count - first)
+        return make_error(ErrorCode::ArgumentError, "record range outside the segment");
+    std::vector<double> words;
+    if (count == 0)
+        return words;
+    Result<void> r = read_words(seg.begin_word + first * uint64_t(seg.record_words),
+                                size_t(count) * size_t(seg.record_words), words);
+    if (!r.ok())
+        return r.error();
+    return words;
+}
+
+Result<std::string> SpkFile::comments() const {
+    std::string text;
+    for (int32_t rec = 2; rec < forward_; ++rec) {
+        char buf[kRecordBytes];
+        if (!read_at(file_, uint64_t(rec - 1) * kRecordBytes, buf, kRecordBytes))
+            return make_error(ErrorCode::CorruptionError, "truncated DAF comment record");
+        for (size_t i = 0; i < 1000; ++i) { // 1000 characters per comment record
+            if (buf[i] == '\x04')
+                return text;
+            text.push_back(buf[i] == '\0' ? '\n' : buf[i]);
+        }
+    }
+    return text;
+}
+
+namespace {
+
+void put_le64(std::string& out, uint64_t v) {
+    for (int i = 0; i < 8; ++i)
+        out.push_back(char((v >> (8 * i)) & 0xFF));
+}
+void put_f64le(std::string& out, double v) {
+    put_le64(out, std::bit_cast<uint64_t>(v));
+}
+void put_i32le(std::string& out, int32_t v) {
+    const uint32_t u = uint32_t(v);
+    for (int i = 0; i < 4; ++i)
+        out.push_back(char((u >> (8 * i)) & 0xFF));
+}
+void put_text(std::string& out, const std::string& s, size_t n) {
+    std::string t = s.substr(0, n);
+    t.resize(n, ' ');
+    out += t;
+}
+void pad_record(std::string& out) {
+    out.resize((out.size() + kRecordBytes - 1) / kRecordBytes * kRecordBytes, '\0');
+}
+
+} // namespace
+
+Result<void> write_spk(const std::string& path, const std::string& internal_name,
+                       const std::string& comments, const std::vector<WriteSegment>& segments) {
+    constexpr size_t kPerSummaryRecord = 25; // (1024 - 3 * 8) / 40
+    if (segments.empty())
+        return make_error(ErrorCode::ArgumentError, "no segments to write");
+    for (const WriteSegment& s : segments) {
+        const int components = s.type == 2 ? 3 : (s.type == 3 ? 6 : 0);
+        if (components == 0 || s.record_words < 2 + components ||
+            (s.record_words - 2) % components != 0 || s.records.empty() ||
+            s.records.size() % size_t(s.record_words) != 0 || !(s.interval_s > 0.0) ||
+            !(s.end_et >= s.start_et))
+            return make_error(ErrorCode::ArgumentError,
+                              "invalid type 2/3 segment for target " + std::to_string(s.target));
+    }
+
+    // Comment area: NUL line separators, EOT terminator, 1000 chars/record.
+    std::string comment_bytes;
+    if (!comments.empty()) {
+        for (char c : comments)
+            comment_bytes.push_back(c == '\n' ? '\0' : c);
+        comment_bytes.push_back('\x04');
+    }
+    const size_t comment_records = (comment_bytes.size() + 999) / 1000;
+    const size_t summary_records = (segments.size() + kPerSummaryRecord - 1) / kPerSummaryRecord;
+    const size_t forward = 2 + comment_records;
+    const size_t data_record = forward + 2 * summary_records;
+
+    // Data words: every segment's records followed by its 4-word directory.
+    std::vector<std::pair<uint64_t, uint64_t>> addresses;
+    uint64_t word = uint64_t(data_record - 1) * (kRecordBytes / kWordBytes) + 1;
+    std::string data;
+    for (const WriteSegment& s : segments) {
+        const uint64_t begin = word;
+        for (double v : s.records)
+            put_f64le(data, v);
+        put_f64le(data, s.init_et);
+        put_f64le(data, s.interval_s);
+        put_f64le(data, double(s.record_words));
+        put_f64le(data, double(s.records.size() / size_t(s.record_words)));
+        word += uint64_t(s.records.size()) + 4;
+        addresses.emplace_back(begin, word - 1);
+    }
+    if (word - 1 > uint64_t(INT32_MAX))
+        return make_error(ErrorCode::ArgumentError, "SPK file too large for DAF addresses");
+
+    std::string out;
+    out += "DAF/SPK ";
+    put_i32le(out, 2);
+    put_i32le(out, 6);
+    put_text(out, internal_name, 60);
+    put_i32le(out, int32_t(forward));
+    put_i32le(out, int32_t(forward + 2 * (summary_records - 1)));
+    put_i32le(out, int32_t(word));
+    out += "LTL-IEEE";
+    out.resize(kFtpOffset, '\0');
+    out.append(kFtpString, kFtpBytes);
+    pad_record(out);
+
+    for (size_t r = 0; r < comment_records; ++r) {
+        std::string rec = comment_bytes.substr(r * 1000, 1000);
+        rec.resize(kRecordBytes, '\0');
+        out += rec;
+    }
+    for (size_t r = 0; r < summary_records; ++r) {
+        const size_t first = r * kPerSummaryRecord;
+        const size_t count = std::min(kPerSummaryRecord, segments.size() - first);
+        const size_t this_record = forward + 2 * r;
+        put_f64le(out, r + 1 < summary_records ? double(this_record + 2) : 0.0);
+        put_f64le(out, r > 0 ? double(this_record - 2) : 0.0);
+        put_f64le(out, double(count));
+        std::string names;
+        for (size_t k = first; k < first + count; ++k) {
+            const WriteSegment& s = segments[k];
+            put_f64le(out, s.start_et);
+            put_f64le(out, s.end_et);
+            put_i32le(out, s.target);
+            put_i32le(out, s.center);
+            put_i32le(out, s.frame);
+            put_i32le(out, s.type);
+            put_i32le(out, int32_t(addresses[k].first));
+            put_i32le(out, int32_t(addresses[k].second));
+            put_text(names, s.name, 40);
+        }
+        pad_record(out);
+        names.resize(kRecordBytes, ' ');
+        out += names;
+    }
+    out += data;
+    pad_record(out);
+
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f)
+        return make_error(ErrorCode::IoError, "cannot create '" + path + "'");
+    f.write(out.data(), std::streamsize(out.size()));
+    if (!f)
+        return make_error(ErrorCode::IoError, "write failed for '" + path + "'");
+    return {};
+}
+
+Result<std::vector<WriteSegment>> trim_segments(const SpkFile& file, double et0, double et1) {
+    if (!(et1 > et0))
+        return make_error(ErrorCode::ArgumentError, "empty trim span");
+    std::vector<WriteSegment> out;
+    const auto& segs = file.segments();
+    for (size_t i = 0; i < segs.size(); ++i) {
+        const Segment& s = segs[i];
+        if (s.end_et < et0 || s.start_et > et1)
+            continue;
+        if (s.type != 2 && s.type != 3)
+            return make_error(ErrorCode::FormatError,
+                              "cannot trim SPK segment type " + std::to_string(s.type));
+        const double k0f = std::floor((et0 - s.init_et) / s.interval_s);
+        const double k1f = std::ceil((et1 - s.init_et) / s.interval_s);
+        const uint64_t k0 = k0f <= 0.0 ? 0 : std::min(uint64_t(k0f), s.record_count);
+        const uint64_t k1 = k1f <= 0.0 ? 0 : std::min(uint64_t(k1f), s.record_count);
+        if (k1 <= k0)
+            continue;
+        auto words = file.segment_records(i, k0, k1 - k0);
+        if (!words.ok())
+            return words.error();
+        WriteSegment w;
+        w.name = s.name;
+        w.target = s.target;
+        w.center = s.center;
+        w.frame = s.frame;
+        w.type = s.type;
+        w.init_et = s.init_et + double(k0) * s.interval_s;
+        w.interval_s = s.interval_s;
+        w.record_words = s.record_words;
+        w.start_et = std::max(s.start_et, w.init_et);
+        w.end_et = std::min(s.end_et, s.init_et + double(k1) * s.interval_s);
+        w.records = std::move(words).value();
+        out.push_back(std::move(w));
+    }
+    return out;
 }
 
 long SpkFile::find_segment(int body, double et) const {

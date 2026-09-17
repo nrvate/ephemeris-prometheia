@@ -427,6 +427,104 @@ const std::string kDe440sPath =
 const std::string kDe440Path =
     env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/linux_p1550p2650.440");
 
+std::string temp_path(const char* tag) {
+    return (fs::temp_directory_path() /
+            ("prometheia-spkw-" + std::string(tag) + "-" + std::to_string(::getpid()) + ".bsp"))
+        .string();
+}
+
+TEST_CASE("spk_writer_roundtrip_and_trim") {
+    // Two multi-record segments with arbitrary coefficients (type 2 degree
+    // 5 for an asteroid about the Sun, type 3 degree 2), written, read back,
+    // then trimmed mid-record: every state inside the kept span must be
+    // bit-identical, and the span must be whole records.
+    const double interval = 16.0 * 86400.0;
+    const int n_records = 12;
+    auto make = [&](int target, int center, int type, int degree, double init, uint32_t seed) {
+        spk::WriteSegment w;
+        w.name = "TEST " + std::to_string(target);
+        w.target = target;
+        w.center = center;
+        w.type = type;
+        w.init_et = init;
+        w.interval_s = interval;
+        const int components = type == 2 ? 3 : 6;
+        w.record_words = 2 + components * (degree + 1);
+        w.start_et = init;
+        w.end_et = init + n_records * interval;
+        uint32_t x = seed;
+        for (int k = 0; k < n_records; ++k) {
+            w.records.push_back(init + (k + 0.5) * interval); // MID
+            w.records.push_back(0.5 * interval);              // RADIUS
+            for (int c = 0; c < w.record_words - 2; ++c) {
+                x = x * 1664525u + 1013904223u;
+                w.records.push_back(1e5 * (double(x) / 4294967296.0 - 0.5));
+            }
+        }
+        return w;
+    };
+    const std::vector<spk::WriteSegment> segs = {make(2000001, 10, 2, 5, -2e8, 7),
+                                                 make(301, 399, 3, 2, -2e8 - 0.5 * interval, 99)};
+    const std::string comment = "line one\nline two: provenance\n" + std::string(1500, 'x');
+    const std::string path = temp_path("writer");
+    REQUIRE(spk::write_spk(path, "WRITER TEST", comment, segs).ok());
+
+    auto f = spk::SpkFile::open(path);
+    REQUIRE(f.ok());
+    CHECK(f.value().internal_name() == "WRITER TEST");
+    auto text = f.value().comments();
+    REQUIRE(text.ok());
+    CHECK(text.value() == comment);
+    REQUIRE(f.value().segments().size() == 2);
+    for (size_t i = 0; i < 2; ++i) {
+        const spk::Segment& s = f.value().segments()[i];
+        CHECK(s.target == segs[i].target);
+        CHECK(s.center == segs[i].center);
+        CHECK(s.type == segs[i].type);
+        CHECK(s.name == segs[i].name);
+        CHECK(s.record_count == uint64_t(n_records));
+        auto words = f.value().segment_records(i, 0, n_records);
+        REQUIRE(words.ok());
+        CHECK(words.value() == segs[i].records);
+    }
+
+    // Trim to [record 3.25, record 7.5]: records 3..7 survive.
+    const double et0 = -2e8 + 3.25 * interval, et1 = -2e8 + 7.5 * interval;
+    auto cut = spk::trim_segments(f.value(), et0, et1);
+    REQUIRE(cut.ok());
+    REQUIRE(cut.value().size() == 2);
+    CHECK(cut.value()[0].records.size() == size_t(5 * cut.value()[0].record_words));
+    CHECK(cut.value()[0].init_et == -2e8 + 3.0 * interval);
+    const std::string trimmed_path = temp_path("trimmed");
+    REQUIRE(spk::write_spk(trimmed_path, "TRIMMED", "", cut.value()).ok());
+    auto g = spk::SpkFile::open(trimmed_path);
+    REQUIRE(g.ok());
+    CHECK(g.value().comments().value().empty());
+    for (double et = et0; et <= et1; et += 0.37 * 86400.0) {
+        double a[6], b[6];
+        REQUIRE(f.value().state_et(2000001, 10, et, a).ok());
+        REQUIRE(g.value().state_et(2000001, 10, et, b).ok());
+        for (int k = 0; k < 6; ++k)
+            CHECK(a[k] == b[k]);
+        REQUIRE(f.value().state_et(301, 399, et, a).ok());
+        REQUIRE(g.value().state_et(301, 399, et, b).ok());
+        for (int k = 0; k < 6; ++k)
+            CHECK(a[k] == b[k]);
+    }
+    double out[6];
+    CHECK(!g.value().state_et(2000001, 10, -2e8 + 1.0 * interval, out).ok());
+    CHECK(!g.value().state_et(2000001, 10, -2e8 + 9.0 * interval, out).ok());
+
+    // Nothing in range, and invalid input.
+    auto none = spk::trim_segments(f.value(), 1e9, 2e9);
+    REQUIRE(none.ok());
+    CHECK(none.value().empty());
+    CHECK(!spk::trim_segments(f.value(), 5.0, 1.0).ok());
+    CHECK(!spk::write_spk(temp_path("empty"), "X", "", {}).ok());
+    std::filesystem::remove(path);
+    std::filesystem::remove(trimmed_path);
+}
+
 TEST_CASE("de440s_real_segments") {
     if (!available(kDe440sPath, "PROMETHEIA_DE440S"))
         return;
