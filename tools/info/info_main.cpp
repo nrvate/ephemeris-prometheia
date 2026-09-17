@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
     std::printf("metadata:\n%s\n", prometheia::cbor_to_debug_string(reader.metadata(), 2).c_str());
 
     uint64_t counts[4] = {0, 0, 0, 0};
-    uint64_t with_sigma = 0, with_hg = 0, with_diameter = 0, with_name = 0;
+    uint64_t with_sigma = 0, with_hg = 0, with_diameter = 0, with_name = 0, with_cov = 0;
     double epoch_min = 1e18, epoch_max = -1e18;
     uint64_t sampled = 0;
     const auto emit_sample = [&](const prometheia::catalog::Record& rec,
@@ -90,6 +90,13 @@ int main(int argc, char** argv) {
             std::printf("    H=%.2f G=%.2f\n", rec.h_mag, rec.g_slope);
         if (rec.has(prometheia::catalog::RecordFlags::kDiameter))
             std::printf("    diameter=%.1f km\n", rec.diameter_km);
+        if (rec.has(prometheia::catalog::RecordFlags::kCovariance)) {
+            using prometheia::catalog::packed_index;
+            std::printf("    covariance at %.1f: sigma e=%.3g q=%.3g AU tp=%.3g d\n",
+                        rec.cov_epoch_jtdb, std::sqrt(rec.covariance[packed_index(0, 0)]),
+                        std::sqrt(rec.covariance[packed_index(1, 1)]),
+                        std::sqrt(rec.covariance[packed_index(2, 2)]));
+        }
     };
 
     if (auto e = reader.for_each(
@@ -104,6 +111,8 @@ int main(int argc, char** argv) {
                     ++with_diameter;
                 if (rec.has(prometheia::catalog::RecordFlags::kHasName))
                     ++with_name;
+                if (rec.has(prometheia::catalog::RecordFlags::kCovariance))
+                    ++with_cov;
                 epoch_min = std::fmin(epoch_min, rec.epoch_jtdb);
                 epoch_max = std::fmax(epoch_max, rec.epoch_jtdb);
                 emit_sample(rec, names);
@@ -117,9 +126,11 @@ int main(int argc, char** argv) {
                 (unsigned long long)counts[0], (unsigned long long)counts[1],
                 (unsigned long long)counts[2], (unsigned long long)counts[3]);
     if (reader.record_count() > 0) {
-        std::printf("field coverage:     sigmas=%llu H/G=%llu diameter=%llu name=%llu\n",
-                    (unsigned long long)with_sigma, (unsigned long long)with_hg,
-                    (unsigned long long)with_diameter, (unsigned long long)with_name);
+        std::printf(
+            "field coverage:     sigmas=%llu H/G=%llu diameter=%llu name=%llu covariance=%llu\n",
+            (unsigned long long)with_sigma, (unsigned long long)with_hg,
+            (unsigned long long)with_diameter, (unsigned long long)with_name,
+            (unsigned long long)with_cov);
         std::printf("epoch range (TDB):  %.1f .. %.1f\n", epoch_min, epoch_max);
     }
     const auto& st = reader.stats();

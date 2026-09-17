@@ -61,6 +61,16 @@ Record expected_for(uint64_t spkid) {
         r.flags = uint8_t(RecordFlags::kSigmas | RecordFlags::kHg);
     } else if (spkid == 20000007) {
         r.body_class = BodyClass::Other;
+    } else if (spkid == 20000004 || spkid == 20000009) {
+        r.flags |= RecordFlags::kCovariance;
+        r.cov_epoch_jtdb = 2458849.5 + double(spkid % 7);
+        const double cel[6] = {0.0768, 2.5564, 2458240.179, 1.4015, 1.2883, 0.1848};
+        for (int i = 0; i < 6; ++i)
+            r.cov_elements[i] = cel[i] + 1e-3 * double(spkid % 10);
+        for (int k = 0; k < 21; ++k)
+            r.covariance[k] = 1e-20 * double(k + 1) * (k % 3 == 1 ? -1.0 : 1.0);
+        for (int i = 0; i < 6; ++i)
+            r.covariance[catalog::packed_index(i, i)] = 1e-18 * double(i + 1);
     }
     if (spkid == 20000001 || spkid == 20000003) {
         r.flags |= RecordFlags::kHasName; // writer derives this for named records
@@ -89,6 +99,13 @@ void expect_records_equal(const Record& a, const Record& b) {
     }
     if (a.has(RecordFlags::kDiameter)) {
         CHECK(a.diameter_km == b.diameter_km);
+    }
+    if (a.has(RecordFlags::kCovariance)) {
+        CHECK(a.cov_epoch_jtdb == b.cov_epoch_jtdb);
+        for (int i = 0; i < 6; ++i)
+            CHECK(a.cov_elements[i] == b.cov_elements[i]);
+        for (int k = 0; k < 21; ++k)
+            CHECK(a.covariance[k] == b.covariance[k]);
     }
     // name_offset is a pool position, not part of the compared payload.
 }
@@ -217,6 +234,24 @@ TEST_CASE("writer_rejects_bad_input") {
     e = writer.add(bad_ae, "6");
     CHECK(!e.ok());
     CHECK(e.error().code == ErrorCode::ArgumentError);
+
+    Record bad_cov = expected_for(20000004);
+    bad_cov.spkid = 20000006;
+    bad_cov.covariance[catalog::packed_index(2, 2)] = -1.0; // negative variance
+    e = writer.add(bad_cov, "6");
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
+    bad_cov = expected_for(20000004);
+    bad_cov.spkid = 20000006;
+    bad_cov.cov_elements[1] = 0.0; // perihelion distance must be positive
+    CHECK(!writer.add(bad_cov, "6").ok());
+    bad_cov.cov_elements[1] = 2.5;
+    bad_cov.covariance[7] = std::nan("");
+    CHECK(!writer.add(bad_cov, "6").ok());
+
+    Record unknown = make_asteroid(20000006);
+    unknown.flags |= uint8_t(1u << 5);
+    CHECK(!writer.add(unknown, "6").ok());
 
     Record hyper = make_asteroid(20000006);
     hyper.body_class = BodyClass::Comet;

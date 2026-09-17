@@ -29,7 +29,7 @@ namespace prometheia::catalog {
 
 inline constexpr uint32_t kMagic = 0x314D5045u; // "EPM1" little-endian
 inline constexpr uint16_t kFormatMajor = 1;
-inline constexpr uint16_t kFormatMinor = 0;
+inline constexpr uint16_t kFormatMinor = 1; // 1.1: kCovariance records
 inline constexpr uint32_t kHeaderSize = 64;
 inline constexpr uint32_t kFooterSize = 48;
 
@@ -45,11 +45,23 @@ enum class BodyClass : uint8_t {
 
 // Record flag bits (byte `flags` in the record).
 struct RecordFlags {
-    static constexpr uint8_t kSigmas = 1u << 0;   // 6 element sigmas present
-    static constexpr uint8_t kHg = 1u << 1;       // H magnitude + G slope present
-    static constexpr uint8_t kDiameter = 1u << 2; // diameter present
-    static constexpr uint8_t kHasName = 1u << 3;  // a proper name follows pdes in the pool
+    static constexpr uint8_t kSigmas = 1u << 0;     // 6 element sigmas present
+    static constexpr uint8_t kHg = 1u << 1;         // H magnitude + G slope present
+    static constexpr uint8_t kDiameter = 1u << 2;   // diameter present
+    static constexpr uint8_t kHasName = 1u << 3;    // a proper name follows pdes in the pool
+    static constexpr uint8_t kCovariance = 1u << 4; // full orbit covariance present (1.1)
 };
+
+// Index of element pair (i, j), 0 <= i <= j < 6, in the packed upper
+// triangle of a symmetric 6x6 matrix (row-major: (0,0), (0,1), .., (5,5)).
+inline constexpr int packed_index(int i, int j) {
+    if (i > j) {
+        const int t = i;
+        i = j;
+        j = t;
+    }
+    return i * 6 - i * (i - 1) / 2 + (j - i);
+}
 
 struct Record {
     uint64_t spkid = 0;
@@ -63,6 +75,14 @@ struct Record {
     double sigmas[6] = {0, 0, 0, 0, 0, 0}; // 1-sigma of {a, e, i, node, argp, M}
     float h_mag = 0.0f, g_slope = 0.0f;
     float diameter_km = 0.0f;
+    // The orbit solution's full covariance (flag kCovariance), as published:
+    // at its own epoch (which need not equal epoch_jtdb) and in cometary
+    // elements {e, q [AU], tp [JD TDB], node [rad], peri [rad], i [rad]},
+    // with the nominal values of those elements at that epoch. Covariance
+    // is the packed upper triangle (packed_index), same units squared.
+    double cov_epoch_jtdb = 0.0;
+    double cov_elements[6] = {0, 0, 0, 0, 0, 0};
+    double covariance[21] = {};
     uint64_t name_offset = 0; // offset into the container's string pool
 
     bool has(uint8_t bit) const { return (flags & bit) != 0; }

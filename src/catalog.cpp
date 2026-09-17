@@ -17,8 +17,9 @@ namespace {
 
 constexpr uint32_t kFlagChunkZstd = kFlagZstd;
 constexpr size_t kIndexEntrySize = 40; // 4x u64, 2x u32
-constexpr uint8_t kKnownFlagMask = uint8_t(RecordFlags::kSigmas | RecordFlags::kHg |
-                                           RecordFlags::kDiameter | RecordFlags::kHasName);
+constexpr uint8_t kKnownFlagMask =
+    uint8_t(RecordFlags::kSigmas | RecordFlags::kHg | RecordFlags::kDiameter |
+            RecordFlags::kHasName | RecordFlags::kCovariance);
 
 bool body_class_valid(uint8_t c) {
     return c == uint8_t(BodyClass::Asteroid) || c == uint8_t(BodyClass::Comet) ||
@@ -57,6 +58,13 @@ void encode_record(std::string& out, const Record& r) {
     }
     if (r.has(RecordFlags::kDiameter))
         put_f32(out, r.diameter_km);
+    if (r.has(RecordFlags::kCovariance)) {
+        put_f64(out, r.cov_epoch_jtdb);
+        for (double v : r.cov_elements)
+            put_f64(out, v);
+        for (double v : r.covariance)
+            put_f64(out, v);
+    }
     put_uvarint(out, r.name_offset);
 }
 
@@ -115,6 +123,18 @@ const char* decode_record(const char* p, const char* end, std::string_view pool,
     if (flags & RecordFlags::kDiameter) {
         if (!(p = get_f32(p, end, r.diameter_km)))
             return fail("truncated diameter");
+    }
+    if (flags & RecordFlags::kCovariance) {
+        if (!(p = get_f64(p, end, r.cov_epoch_jtdb)))
+            return fail("truncated covariance");
+        for (double& v : r.cov_elements) {
+            if (!(p = get_f64(p, end, v)))
+                return fail("truncated covariance");
+        }
+        for (double& v : r.covariance) {
+            if (!(p = get_f64(p, end, v)))
+                return fail("truncated covariance");
+        }
     }
     if (!(p = get_uvarint(p, end, r.name_offset)))
         return fail("truncated name offset");
@@ -220,6 +240,21 @@ Result<void> Writer::add(const Record& r, std::string_view pdes, std::string_vie
     }
     if (r.a_au == 0 || (r.e < 1 && r.a_au <= 0) || (r.e > 1 && r.a_au >= 0)) {
         return make_error(ErrorCode::ArgumentError, "a/e inconsistency (hyperbolic a<0)");
+    }
+    if (r.has(RecordFlags::kCovariance)) {
+        bool ok = std::isfinite(r.cov_epoch_jtdb);
+        for (double v : r.cov_elements)
+            ok = ok && std::isfinite(v);
+        for (double v : r.covariance)
+            ok = ok && std::isfinite(v);
+        for (int i = 0; i < 6; ++i)
+            ok = ok && r.covariance[packed_index(i, i)] >= 0.0;
+        // Cometary elements: e >= 0 and != 1 (as above), perihelion q > 0.
+        ok = ok && r.cov_elements[0] >= 0.0 && r.cov_elements[0] != 1.0 && r.cov_elements[1] > 0.0;
+        if (!ok)
+            return make_error(ErrorCode::ArgumentError,
+                              "covariance block: non-finite value, negative variance, "
+                              "or invalid e/q");
     }
     if (pdes.find('\0') != std::string_view::npos || name.find('\0') != std::string_view::npos) {
         return make_error(ErrorCode::ArgumentError, "NUL in pdes/name");

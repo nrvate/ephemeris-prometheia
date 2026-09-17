@@ -1,4 +1,4 @@
-# EPM1 — the Ephemeris Prometheia catalog container (version 1)
+# EPM1 — the Ephemeris Prometheia catalog container (version 1.1)
 
 **Status:** implemented by `src/catalog.cpp` (writer + reader), exercised by
 `tests/test_catalog.cpp`. This document is the normative spec.
@@ -53,7 +53,7 @@ HTTP Range) can locate the index from the tail alone.
 |----:|------|-------|
 | 0   | u32  | magic, `0x314D5045` ("EPM1" little-endian) |
 | 4   | u16  | format major (1; bump for breaking changes) |
-| 6   | u16  | format minor (0) |
+| 6   | u16  | format minor (1: adds the `kCovariance` record block; readers accept any minor of major 1 and reject unknown record flags) |
 | 8   | u32  | header size in bytes (64) |
 | 12  | u32  | flags: bit 0 = chunks are zstd-compressed |
 | 16  | u64  | record count |
@@ -113,7 +113,8 @@ order:
 | 6 | f32 ×6 | 1-sigma of the six elements, same order — only if flag `kSigmas` |
 | 7 | f32 ×2 | H magnitude, G slope — only if flag `kHg` |
 | 8 | f32 | diameter [km] — only if flag `kDiameter` |
-| 9 | uvarint | name offset into the string pool |
+| 9 | f64 + f64 ×6 + f64 ×21 | covariance block — only if flag `kCovariance` (1.1): covariance epoch (JD TDB); the nominal cometary elements at that epoch {e, q [AU], tp [JD TDB], Ω [rad], ω [rad], i [rad]}; the 6×6 covariance of those elements, packed upper triangle row-major ((0,0), (0,1), …, (5,5)), units squared |
+| 10 | uvarint | name offset into the string pool |
 
 Record flag bits:
 
@@ -123,11 +124,17 @@ Record flag bits:
 - bit 3 `kHasName` — the pool entry continues past the pdes NUL with a proper
   name (derived by the writer from the presence of a name argument; readers
   must not trust it beyond splitting the pool string)
+- bit 4 `kCovariance` (1.1) — the orbit solution's full covariance, as the
+  source publishes it (JPL SBDB `cov=mat`): its own epoch and element basis,
+  so no conversion error enters the container. The six element sigmas
+  (`kSigmas`) are uncorrelated summaries and cannot stand in for it.
 
 **Writer validation** (records failing these are rejected at `add()`):
 strictly ascending spkid; all six elements and epoch finite; `e >= 0` and
 `e != 1`; `a != 0` with sign(a) = sign(1 − e) (elliptic a > 0, hyperbolic
-a < 0); no NUL inside pdes or name; unknown flag bits rejected. Unknown body
+a < 0); no NUL inside pdes or name; unknown flag bits rejected; a covariance block
+must be finite with non-negative variances, cometary `e >= 0`, `e != 1` and
+`q > 0`. Unknown body
 classes are rejected on decode.
 
 **uvarint** is LEB128: 7 payload bits per byte, least significant first,
