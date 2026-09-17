@@ -572,9 +572,11 @@ TEST_CASE("server_cache_budget") {
 }
 
 TEST_CASE("server_ephproto_matches_astrolog") {
-    // Astrolog owns the protocol; third_party/ephproto/ephproto.h is a pinned
-    // copy. With an Astrolog checkout named by $PROMETHEIA_ASTROLOG, the copy
-    // must equal its ephsrv/ephproto.h byte for byte. SKIPs otherwise.
+    // Astrolog owns the protocol; third_party/ephproto/v4/ephproto.h is the
+    // pinned copy of the locked version 4 (the version 3 header stays beside
+    // it only until the migration's delete step). With an Astrolog checkout
+    // named by $PROMETHEIA_ASTROLOG, the copy must equal its
+    // ephsrv/ephproto.h byte for byte. SKIPs otherwise.
     const char* astrolog = std::getenv("PROMETHEIA_ASTROLOG");
     if (!astrolog || !*astrolog) {
         std::printf("  SKIP: PROMETHEIA_ASTROLOG not set\n");
@@ -587,7 +589,7 @@ TEST_CASE("server_ephproto_matches_astrolog") {
     };
     const std::string theirs = slurp(std::string(astrolog) + "/ephsrv/ephproto.h");
     const std::string ours =
-        slurp(std::string(PROMETHEIA_SOURCE_DIR) + "/third_party/ephproto/ephproto.h");
+        slurp(std::string(PROMETHEIA_SOURCE_DIR) + "/third_party/ephproto/v4/ephproto.h");
     CHECK_MESSAGE(ours == theirs,
                   "Astrolog's ephproto.h changed: review it and re-pin (third_party/README.md)");
 }

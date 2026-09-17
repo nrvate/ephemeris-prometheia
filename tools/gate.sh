@@ -37,6 +37,10 @@ step() {
     fi
 }
 
+# The vendored protocol v4 pair must agree by name (instant, no build).
+echo "== registries (protocol v4, by name)"
+step python3 tools/check/ephproto4_registries.py
+
 tests() {
     local log
     log="$(mktemp)"

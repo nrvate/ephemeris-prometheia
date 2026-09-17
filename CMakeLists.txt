@@ -96,6 +96,13 @@ target_link_libraries(test_server PRIVATE prometheia_server)
 prometheia_test(segcache tests/test_segcache.cpp)
 target_link_libraries(test_segcache PRIVATE prometheia_server)
 
+# The protocol v4 conformance pin: Astrolog's fixture set through the
+# vendored codec (tests/test_ephproto4.cpp; env-gated, SKIPs without the
+# fixtures). The v4 header is a separate include dir from the still-live v3.
+prometheia_test(ephproto4 tests/test_ephproto4.cpp)
+target_include_directories(test_ephproto4 SYSTEM PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ephproto/v4)
+
 # The WebSocket head: uWebSockets + uSockets (third_party, Apache-2.0),
 # without zlib (compression is off). With OpenSSL found, uSockets is built
 # with TLS and prometheiad can serve wss:// (PROMETHEIA_TLS).
