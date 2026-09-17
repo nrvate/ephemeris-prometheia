@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "prometheia/stars.hpp"
 #include "session.hpp"
 #include "synthetic_spk.hpp"
 #include "wire_map.hpp"
@@ -355,7 +356,14 @@ TEST_CASE("server_request") {
 
     // Unsupported objects fail alone: NaN rows, retFlag -1, the reason.
     CHECK(d.serr[2] == "body 901 has no wire-map entry");
-    CHECK(d.serr[3] == "fixed stars are not supported");
+    // The star object ("Sirius"): the engine's catalog place.
+    CHECK(d.ret[3] == int32_t(req.iflag));
+    CHECK(d.name[3] == "Sirius");
+    for (uint32_t r = 0; r < n_time; ++r) {
+        const auto res = check.calc_star_ut(stars::find("Sirius").value(), jd + r * 0.25, opts);
+        REQUIRE(res.ok());
+        CHECK(d.cols[(3 * n_time + r) * 6] == res.value().pos.lon_deg);
+    }
     // The node object (osculating ascending node of wire body 905).
     CHECK(d.ret[4] == int32_t(req.iflag));
     CHECK(d.name[4] == "SPK-ID 5 asc. node");
@@ -366,7 +374,7 @@ TEST_CASE("server_request") {
         CHECK(d.cols[(4 * n_time + r) * 6] == res.value().pos.lon_deg);
         CHECK(d.cols[(4 * n_time + r) * 6 + 3] == res.value().pos.lon_speed);
     }
-    for (uint32_t o = 2; o < 4; ++o) {
+    for (uint32_t o = 2; o < 3; ++o) {
         CHECK(d.ret[o] == -1);
         CHECK(d.name[o].empty());
         for (size_t k = 0; k < n_time * 6; ++k) {

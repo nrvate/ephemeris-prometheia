@@ -250,6 +250,89 @@ PROMETHEIA_API prometheia_status prometheia_calc_orbit_point_ut(
     prometheia_engine* engine, int body, int point, int elements, double jd_ut1,
     const prometheia_options* opts, prometheia_result* result, prometheia_error* err);
 
+/* ---- Fixed stars ------------------------------------------------------------
+ *
+ * The compiled-in catalog of naked-eye stars and Messier objects
+ * (docs/STARS.md). Objects are addressed by index, 0 .. prometheia_star_count()-1,
+ * stable within a library release. Strings are UTF-8 and NUL-terminated.
+ */
+
+#define PROMETHEIA_STAR_KIND_STAR 0
+#define PROMETHEIA_STAR_KIND_GALAXY 1
+#define PROMETHEIA_STAR_KIND_GLOBULAR_CLUSTER 2
+#define PROMETHEIA_STAR_KIND_OPEN_CLUSTER 3
+#define PROMETHEIA_STAR_KIND_NEBULA 4
+#define PROMETHEIA_STAR_KIND_PLANETARY_NEBULA 5
+#define PROMETHEIA_STAR_KIND_SUPERNOVA_REMNANT 6
+#define PROMETHEIA_STAR_KIND_ASTERISM 7
+#define PROMETHEIA_STAR_KIND_DOUBLE_STAR 8
+
+#define PROMETHEIA_ASTROMETRY_HIPPARCOS 0
+#define PROMETHEIA_ASTROMETRY_BRIGHT_STAR 1
+#define PROMETHEIA_ASTROMETRY_SIMBAD 2
+
+#define PROMETHEIA_MATCH_EXACT 0
+#define PROMETHEIA_MATCH_ALIAS 1 /* e.g. "Beta Sco" for beta1 Sco */
+#define PROMETHEIA_MATCH_PREFIX 2
+
+typedef struct prometheia_star {
+    int index;
+    int kind;                            /* PROMETHEIA_STAR_KIND_* */
+    int astrometry;                      /* PROMETHEIA_ASTROMETRY_* */
+    int hr, hd, hip, flamsteed, messier; /* 0 where none */
+    int bayer;                           /* Greek letter 1 (alpha) .. 24 (omega), 0 none */
+    int bayer_index;                     /* superscript, 0 none */
+    char constellation[4];               /* IAU abbreviation, "Sco" */
+    char name[64];                       /* display name: IAU name, else a designation */
+    char names[512];            /* every name, IAU first, '|'-separated (truncated to fit) */
+    char bayer_designation[24]; /* "β¹ Sco", empty without one */
+    char spectral_type[24];
+    double vmag; /* NaN where unknown */
+    /* ICRS RA/Dec (deg) at epoch_jyear (Julian year TDB); proper motion in
+     * RA*cos(Dec) and Dec (mas/yr); parallax (mas, <= 0 unknown); radial
+     * velocity (km/s); deep-sky size (arcmin). */
+    double ra_deg, dec_deg, epoch_jyear;
+    double pm_ra_mas_yr, pm_dec_mas_yr, parallax_mas, rv_km_s, size_arcmin;
+} prometheia_star;
+
+typedef struct prometheia_star_match {
+    int index;
+    int quality;      /* PROMETHEIA_MATCH_* */
+    char matched[64]; /* the name or designation that matched */
+} prometheia_star_match;
+
+PROMETHEIA_API int prometheia_star_count(void);
+
+/* The one object a name or designation means ("Graffias", "β¹ Sco",
+ * "Beta Scorpii", "HR 5984", "HIP 78820", "M 45"). NOT_FOUND when nothing
+ * matches; ARGUMENT when several different objects match equally well. */
+PROMETHEIA_API prometheia_status prometheia_star_find(const char* query, int* index,
+                                                      prometheia_error* err);
+
+/* Every object answering to query, best first, into matches (up to max);
+ * with prefix nonzero, names starting with the query too. Returns the number
+ * written (0 on no match or bad arguments). */
+PROMETHEIA_API int prometheia_star_lookup(const char* query, int prefix,
+                                          prometheia_star_match* matches, int max);
+
+PROMETHEIA_API prometheia_status prometheia_star_info(int index, prometheia_star* star,
+                                                      prometheia_error* err);
+
+/* Apparent (or, per options, astrometric) place of a catalog object, as for
+ * prometheia_calc. PROMETHEIA_HAS_SIGMA is never set. */
+PROMETHEIA_API prometheia_status prometheia_calc_star(prometheia_engine* engine, int index,
+                                                      double jd_tt, const prometheia_options* opts,
+                                                      prometheia_result* result,
+                                                      prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_calc_star_ut(prometheia_engine* engine, int index,
+                                                         double jd_ut1,
+                                                         const prometheia_options* opts,
+                                                         prometheia_result* result,
+                                                         prometheia_error* err);
+
+/* The IAU constellation abbreviation containing an ICRS direction (degrees). */
+PROMETHEIA_API const char* prometheia_constellation_at(double ra_deg, double dec_deg);
+
 /*
  * Delta T = TT - UT1 in seconds as a function of JD(TT), for calc_ut and
  * topocentric Earth rotation. user is passed through untouched and must

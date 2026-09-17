@@ -46,6 +46,10 @@ prometheia_calc(eph, PROMETHEIA_EARTH, jd_tt, &opts, &r, &err);
 prometheia_engine_close(eph);
 ```
 
+The fixed-star functions (`prometheia_star_find`, `_lookup`, `_info`,
+`prometheia_calc_star`, `prometheia_constellation_at`) are described in
+[STARS.md](STARS.md).
+
 `prometheia_calc_orbit_point` and `_ut` wrap `Engine::calc_orbit_point`
 ([ENGINE.md](ENGINE.md), "Nodes and apsides"). An orbit point or elements
 selector out of range is `PROMETHEIA_ERROR_ARGUMENT`.

@@ -172,8 +172,12 @@ Always answered per object, never as an ERROR:
   (docs/ENGINE.md, "Nodes and apsides"), in the request's observer, frame,
   flags and zodiac. The metadata name is the body's with " asc. node",
   " desc. node", " perihelion" or " aphelion" appended.
-- **Unsupported for now:** fixed stars, any bit or mode without a wire-map
-  entry, and bodies neither the ephemeris nor a loaded catalog has.
+- **Fixed stars** (object kind 1): the name is looked up in the compiled-in
+  star catalog. Any IAU or traditional name, Bayer, Flamsteed, HR, HD, HIP
+  or Messier designation works (docs/STARS.md). The metadata name is the
+  catalog's display name.
+- **Unsupported for now:** any bit or mode without a wire-map entry, and
+  bodies neither the ephemeris nor a loaded catalog has.
 - **Return flag:** the request's low 32 bits of `iflag` for an object with at
   least one computed row.
 - **WELCOME:** reports Swiss Ephemeris version 0.

@@ -5,7 +5,9 @@
 // prometheia::Engine. No behaviour of its own.
 
 #include "prometheia/prometheia.h"
+#include "prometheia/stars.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <new>
 #include <string>
@@ -156,6 +158,15 @@ void fill(const CalcResult& r, prometheia_result& out) {
     // Provenance strings are std::string members of the engine, so the
     // view's data is NUL-terminated.
     out.source = r.provenance.source.empty() ? "" : r.provenance.source.data();
+}
+
+// NUL-terminated copy, truncated to fit.
+void copy_string(char* dst, size_t cap, std::string_view src) {
+    if (cap == 0)
+        return;
+    const size_t n = std::min(src.size(), cap - 1);
+    std::memcpy(dst, src.data(), n);
+    dst[n] = '\0';
 }
 
 template <typename Call>
@@ -348,6 +359,119 @@ prometheia_status prometheia_calc_orbit_point_ut(prometheia_engine* engine, int 
                                                         static_cast<OrbitElements>(elements), jd,
                                                         o);
                        });
+}
+
+int prometheia_star_count(void) {
+    return static_cast<int>(stars::count());
+}
+
+prometheia_status prometheia_star_find(const char* query, int* index, prometheia_error* err) {
+    if (index)
+        *index = -1;
+    if (!query)
+        return argument(err, "query is NULL");
+    if (!index)
+        return argument(err, "index pointer is NULL");
+    return guarded(err, [&] {
+        auto r = stars::find(query);
+        if (!r)
+            return report(err, r.error());
+        *index = static_cast<int>(r.value());
+        return succeed(err);
+    });
+}
+
+int prometheia_star_lookup(const char* query, int prefix, prometheia_star_match* matches, int max) {
+    if (!query || !matches || max <= 0)
+        return 0;
+    try {
+        const auto found = stars::lookup(query, size_t(max), prefix != 0);
+        for (size_t k = 0; k < found.size(); ++k) {
+            matches[k].index = static_cast<int>(found[k].index);
+            matches[k].quality = static_cast<int>(found[k].quality);
+            copy_string(matches[k].matched, sizeof matches[k].matched, found[k].matched);
+        }
+        return static_cast<int>(found.size());
+    } catch (...) {
+        return 0;
+    }
+}
+
+prometheia_status prometheia_star_info(int index, prometheia_star* star, prometheia_error* err) {
+    if (star)
+        std::memset(star, 0, sizeof *star);
+    if (!star)
+        return argument(err, "star is NULL");
+    if (index < 0 || size_t(index) >= stars::count())
+        return report(err, PROMETHEIA_ERROR_NOT_FOUND, "no catalog star with that index");
+    return guarded(err, [&] {
+        const stars::Object& o = stars::at(size_t(index));
+        star->index = index;
+        star->kind = static_cast<int>(o.kind);
+        star->astrometry = static_cast<int>(o.astrometry);
+        star->hr = o.hr;
+        star->hd = o.hd;
+        star->hip = o.hip;
+        star->flamsteed = o.flamsteed;
+        star->messier = o.messier;
+        star->bayer = o.bayer;
+        star->bayer_index = o.bayer_index;
+        copy_string(star->constellation, sizeof star->constellation, o.constellation);
+        copy_string(star->name, sizeof star->name, o.name());
+        std::string names;
+        for (std::string_view n : o.names) {
+            if (names.size() + n.size() + 1 >= sizeof star->names)
+                break;
+            names += (names.empty() ? "" : "|") + std::string(n);
+        }
+        copy_string(star->names, sizeof star->names, names);
+        copy_string(star->bayer_designation, sizeof star->bayer_designation, o.bayer_designation());
+        copy_string(star->spectral_type, sizeof star->spectral_type, o.spectral_type);
+        star->vmag = o.vmag;
+        star->ra_deg = o.ra_deg;
+        star->dec_deg = o.dec_deg;
+        star->epoch_jyear = o.epoch_jyear;
+        star->pm_ra_mas_yr = o.pm_ra_mas_yr;
+        star->pm_dec_mas_yr = o.pm_dec_mas_yr;
+        star->parallax_mas = o.parallax_mas;
+        star->rv_km_s = o.rv_km_s;
+        star->size_arcmin = o.size_arcmin;
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_calc_star(prometheia_engine* engine, int index, double jd_tt,
+                                       const prometheia_options* opts, prometheia_result* result,
+                                       prometheia_error* err) {
+    if (index < 0) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        return report(err, PROMETHEIA_ERROR_NOT_FOUND, "no catalog star with that index");
+    }
+    return calc_common(engine, index, jd_tt, opts, result, err,
+                       [](Engine& e, int i, double jd, const CalcOptions& o) {
+                           return e.calc_star(size_t(i), jd, o);
+                       });
+}
+
+prometheia_status prometheia_calc_star_ut(prometheia_engine* engine, int index, double jd_ut1,
+                                          const prometheia_options* opts, prometheia_result* result,
+                                          prometheia_error* err) {
+    if (index < 0) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        return report(err, PROMETHEIA_ERROR_NOT_FOUND, "no catalog star with that index");
+    }
+    return calc_common(engine, index, jd_ut1, opts, result, err,
+                       [](Engine& e, int i, double jd, const CalcOptions& o) {
+                           return e.calc_star_ut(size_t(i), jd, o);
+                       });
+}
+
+const char* prometheia_constellation_at(double ra_deg, double dec_deg) {
+    const std::string_view c = stars::constellation_at(ra_deg, dec_deg);
+    // The views point into NUL-terminated string literals.
+    return c.empty() ? "" : c.data();
 }
 
 void prometheia_engine_set_delta_t(prometheia_engine* engine, prometheia_delta_t_fn fn,

@@ -15,6 +15,7 @@
 #include <prometheia/engine.hpp>
 #include <prometheia/prometheia.h>
 #include <prometheia/prometheia.hpp>
+#include <prometheia/stars.hpp>
 #include <prometheia/time.hpp>
 
 #include "synthetic_spk.hpp"
@@ -475,6 +476,50 @@ TEST_CASE("c_api_time_helpers") {
 
     CHECK(prometheia_delta_t(kJ2000) == time::delta_t(kJ2000));
     CHECK(prometheia_tdb_minus_tt(2461300.25) == time::tdb_minus_tt(2461300.25));
+}
+
+TEST_CASE("c_api_stars_match_engine") {
+    TempFile tf("capi-stars");
+    synth::write_linear_spk(tf.path);
+    auto cpp = Engine::open(tf.path.string());
+    REQUIRE(cpp.ok());
+    CHandle c;
+    prometheia_error err;
+    REQUIRE(prometheia_engine_open(tf.path.c_str(), &c.e, &err) == PROMETHEIA_OK);
+    CHECK(prometheia_star_count() == int(stars::count()));
+    for (const char* q : {"Sirius", "Polaris", "M 31", "Barnard's Star", "HR 230"}) {
+        int index = -1;
+        REQUIRE(prometheia_star_find(q, &index, &err) == PROMETHEIA_OK);
+        CHECK(size_t(index) == stars::find(q).value());
+        prometheia_options co;
+        prometheia_options_init(&co);
+        co.coords = PROMETHEIA_COORDS_EQUATORIAL;
+        CalcOptions o;
+        o.coords = Coords::Equatorial;
+        prometheia_result cr;
+        CHECK(prometheia_calc_star(c.e, index, kJ2000 + 1234.5, &co, &cr, &err) == PROMETHEIA_OK);
+        auto r = cpp.value().calc_star(size_t(index), kJ2000 + 1234.5, o);
+        REQUIRE(r.ok());
+        CHECK(same(cr, r.value()));
+        CHECK(prometheia_calc_star_ut(c.e, index, kJ2000, &co, &cr, &err) == PROMETHEIA_OK);
+        auto ru = cpp.value().calc_star_ut(size_t(index), kJ2000, o);
+        REQUIRE(ru.ok());
+        CHECK(same(cr, ru.value()));
+    }
+    prometheia_star info;
+    CHECK(prometheia_star_info(-1, &info, &err) == PROMETHEIA_ERROR_NOT_FOUND);
+    CHECK(prometheia_star_info(prometheia_star_count(), &info, &err) == PROMETHEIA_ERROR_NOT_FOUND);
+    CHECK(prometheia_star_info(0, nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    prometheia_result cr;
+    CHECK(prometheia_calc_star(c.e, -3, kJ2000, nullptr, &cr, &err) == PROMETHEIA_ERROR_NOT_FOUND);
+    CHECK(prometheia_calc_star(c.e, prometheia_star_count(), kJ2000, nullptr, &cr, &err) ==
+          PROMETHEIA_ERROR_NOT_FOUND);
+    int index = 0;
+    CHECK(prometheia_star_find(nullptr, &index, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_star_lookup("Alg", 1, nullptr, 4) == 0);
+    prometheia_star_match m[8];
+    CHECK(prometheia_star_lookup("Alg", 1, m, 8) >= 4);
+    CHECK(m[0].quality == PROMETHEIA_MATCH_PREFIX);
 }
 
 TEST_CASE("c_api_from_c") {

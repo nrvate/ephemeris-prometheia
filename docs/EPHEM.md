@@ -52,6 +52,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 - `--delta-t SECONDS` replaces the observed USNO ΔT with a fixed value. It affects UT1 input and topocentric Earth rotation, and is useful for matching other programs.
 
 **Observer, frame, corrections**
+- `star:NAME` as a body: a fixed star or Messier object by any name or designation (docs/STARS.md).
 - `--orbit-point asc|desc|peri|apo[:mean|:osc]`: a node or apsis of each body's orbit instead of the body (osculating unless `:mean`; docs/ENGINE.md, "Nodes and apsides").
 - `--center geo|topo|helio|bary|BODY`: BODY is a built-in name (`mars`) or a NAIF ID, and positions are seen from that body's centre with light time, deflection and aberration for an observer moving with it.
 - `--site LON,LAT[,H]`: geodetic degrees east and north, metres above WGS84. It implies `topo`.

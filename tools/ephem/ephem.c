@@ -76,8 +76,9 @@ typedef struct config {
 } config;
 
 typedef struct body_ref {
-    int id;
-    const char* label;
+    int id;   /* NAIF ID / SPK-ID, or the catalog star index when star */
+    int star; /* nonzero: a fixed star or deep-sky object */
+    char label[64];
 } body_ref;
 
 /* ---- Small utilities ------------------------------------------------- */
@@ -288,6 +289,8 @@ static void print_help(void) {
            "  INTEGER        a NAIF ID / SPK-ID (Mars..Pluto IDs 4-9 are system barycentres)\n"
            "  NAME           a catalog name or designation (Ceres, \"2004 MN4\")\n"
            "  @TEXT          force a catalog lookup (@1 is Ceres; plain 1 is NAIF 1)\n"
+           "  star:NAME      a fixed star or Messier object by name or designation\n"
+           "                 (star:Graffias, \"star:Beta Scorpii\", star:HR5984, star:M45)\n"
            "\n"
            "Data:\n"
            "  -e, --ephemeris FILE   planetary ephemeris (default: $PROMETHEIA_EPHEMERIS)\n"
@@ -941,7 +944,21 @@ int main(int argc, char** argv) {
         const char* s = c.bodies[i];
         body_ref b;
         size_t k;
-        b.label = s;
+        b.star = 0;
+        snprintf(b.label, sizeof b.label, "%s", s);
+        if (strncmp(s, "star:", 5) == 0) {
+            prometheia_star info;
+            if (prometheia_star_find(s + 5, &b.id, &err) != PROMETHEIA_OK ||
+                prometheia_star_info(b.id, &info, &err) != PROMETHEIA_OK) {
+                fprintf(stderr, "%s: unknown star '%s': %s\n", g_program, s + 5, err.message);
+                p.errors++;
+                continue;
+            }
+            b.star = 1;
+            snprintf(b.label, sizeof b.label, "%s", info.name);
+            bodies[n_bodies++] = b;
+            continue;
+        }
         if (all_digits(s)) {
             long id;
             if (!parse_long(s, &id) || id < -2147483647L || id > 2147483647L) {
@@ -952,7 +969,7 @@ int main(int argc, char** argv) {
             b.id = (int)id;
             for (k = 0; k < sizeof kNamedBodies / sizeof kNamedBodies[0]; ++k)
                 if (kNamedBodies[k].id == b.id)
-                    b.label = kNamedBodies[k].label;
+                    snprintf(b.label, sizeof b.label, "%s", kNamedBodies[k].label);
             bodies[n_bodies++] = b;
             continue;
         }
@@ -961,7 +978,7 @@ int main(int argc, char** argv) {
             for (k = 0; k < sizeof kNamedBodies / sizeof kNamedBodies[0]; ++k) {
                 if (equals_nocase(s, kNamedBodies[k].name)) {
                     b.id = kNamedBodies[k].id;
-                    b.label = kNamedBodies[k].label;
+                    snprintf(b.label, sizeof b.label, "%s", kNamedBodies[k].label);
                     found = 1;
                 }
             }
@@ -970,7 +987,8 @@ int main(int argc, char** argv) {
                 continue;
             }
         } else {
-            b.label = ++s;
+            ++s;
+            snprintf(b.label, sizeof b.label, "%s", s);
         }
         if (prometheia_engine_lookup(eng, s, &b.id, &err) != PROMETHEIA_OK) {
             fprintf(stderr, "%s: unknown body '%s': %s\n", g_program, s, err.message);
@@ -1038,7 +1056,11 @@ int main(int argc, char** argv) {
         for (i = 0; i < n_bodies; ++i) {
             prometheia_result r;
             const prometheia_status s =
-                c.orbit_point >= 0
+                bodies[i].star
+                    ? (c.scale == SCALE_UT1
+                           ? prometheia_calc_star_ut(eng, bodies[i].id, t, &c.opts, &r, &err)
+                           : prometheia_calc_star(eng, bodies[i].id, t, &c.opts, &r, &err))
+                : c.orbit_point >= 0
                     ? (c.scale == SCALE_UT1
                            ? prometheia_calc_orbit_point_ut(eng, bodies[i].id, c.orbit_point,
                                                             c.orbit_elements, t, &c.opts, &r, &err)

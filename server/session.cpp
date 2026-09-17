@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <limits>
 
+#include "prometheia/stars.hpp"
+
 namespace prometheia::server {
 namespace {
 
@@ -204,6 +206,7 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
     struct Object {
         std::string why; // set: every row fails with this reason
         int naif_id = 0;
+        bool star = false;        // a catalog star; naif_id holds its index
         bool orbit_point = false; // a node or apsis of naif_id
         OrbitPoint point = OrbitPoint::AscendingNode;
         OrbitElements elements = OrbitElements::Osculating;
@@ -220,7 +223,15 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
         }
         std::optional<WireBody> body;
         if (obj.kind == eph::kObjStar) {
-            t.why = "fixed stars are not supported";
+            // Any name or designation the catalog knows (docs/STARS.md).
+            auto found = stars::find(obj.name);
+            if (!found) {
+                t.why = found.error().message;
+            } else {
+                t.star = true;
+                t.naif_id = int(found.value());
+                t.name = stars::at(found.value()).name();
+            }
         } else if (!(body = map_.body(obj.id))) {
             t.why = "body " + std::to_string(obj.id) + " has no wire-map entry";
         } else {
@@ -255,13 +266,16 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
                 fill_nan(row);
                 continue;
             }
-            auto res = t.orbit_point
-                           ? (plan.time_tt ? engine_.calc_orbit_point(t.naif_id, t.point,
-                                                                      t.elements, jd, plan.opts)
-                                           : engine_.calc_orbit_point_ut(t.naif_id, t.point,
-                                                                         t.elements, jd, plan.opts))
-                           : (plan.time_tt ? engine_.calc(t.naif_id, jd, plan.opts)
-                                           : engine_.calc_ut(t.naif_id, jd, plan.opts));
+            auto res =
+                t.star ? (plan.time_tt ? engine_.calc_star(size_t(t.naif_id), jd, plan.opts)
+                                       : engine_.calc_star_ut(size_t(t.naif_id), jd, plan.opts))
+                : t.orbit_point
+                    ? (plan.time_tt
+                           ? engine_.calc_orbit_point(t.naif_id, t.point, t.elements, jd, plan.opts)
+                           : engine_.calc_orbit_point_ut(t.naif_id, t.point, t.elements, jd,
+                                                         plan.opts))
+                    : (plan.time_tt ? engine_.calc(t.naif_id, jd, plan.opts)
+                                    : engine_.calc_ut(t.naif_id, jd, plan.opts));
             if (!res) {
                 fill_nan(row);
                 if (t.first_error.empty()) {

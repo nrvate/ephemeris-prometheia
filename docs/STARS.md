@@ -191,6 +191,21 @@ Right ascension and declination come with `Coords::Equatorial`, ecliptic
 longitude and latitude with `Coords::Ecliptic`, in any frame: ICRF, J2000,
 mean or true of date.
 
+## From C, `ephem` and prometheiad
+
+- **C interface** (`prometheia.h`):
+  - `prometheia_star_count`, `prometheia_star_find`,
+    `prometheia_star_lookup` (graded matches), `prometheia_star_info`;
+  - `prometheia_calc_star` and `prometheia_calc_star_ut`;
+  - `prometheia_constellation_at`.
+  - Answers are bit-identical to the C++ engine (tests/test_c_api.cpp).
+- **`ephem`:** `star:NAME` among the bodies: `ephem star:Graffias
+  "star:Beta Scorpii" star:M45 --equatorial`.
+- **prometheiad:** object kind 1 (a fixed star by name) is answered for any
+  name or designation above, with the request's observer, flags and
+  zodiac. An unknown or ambiguous name fails that object alone, with the
+  reason in its error text.
+
 ## Validation
 
 `tests/test_stars.cpp`:

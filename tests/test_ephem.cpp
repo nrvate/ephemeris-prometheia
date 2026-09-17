@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <prometheia/engine.hpp>
+#include <prometheia/stars.hpp>
 #include <prometheia/time.hpp>
 
 #include "synthetic_spk.hpp"
@@ -319,6 +320,20 @@ TEST_CASE("ephem_catalog_bodies") {
     r = ephem(k.arg + " -j 2460600.5 -f csv ceres", "PROMETHEIA_CATALOGS=:" + cat + ":");
     rows = parse_csv(r.out);
     CHECK((r.status == 0 && rows.size() == 1 && want.ok() && same(rows[0], want.value())));
+}
+
+TEST_CASE("ephem_star_bodies") {
+    Kernel k;
+    Run r = ephem(k.arg + " -j 2451545.0 -f csv star:Graffias 'star:Beta Scorpii' star:M45");
+    auto rows = parse_csv(r.out);
+    CHECK(r.status == 0);
+    REQUIRE(rows.size() == 3);
+    const size_t acrab = stars::find("Acrab").value();
+    CHECK(same(rows[0], k.engine.calc_star(acrab, 2451545.0).value()));
+    CHECK(same(rows[1], k.engine.calc_star(acrab, 2451545.0).value()));
+    CHECK(same(rows[2], k.engine.calc_star(stars::find("M45").value(), 2451545.0).value()));
+    r = ephem(k.arg + " -j 2451545.0 star:Vulcan");
+    CHECK(r.status != 0);
 }
 
 TEST_CASE("ephem_table_and_json") {

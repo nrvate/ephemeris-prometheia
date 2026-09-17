@@ -90,6 +90,31 @@ int prometheia_c_smoke(const char* kernel_path) {
             return 15;
     }
 
+    /* Fixed stars: find by a traditional name, describe, compute. */
+    {
+        int star = -1, n = 0;
+        prometheia_star info;
+        prometheia_star_match matches[4];
+        if (prometheia_star_count() < 9000)
+            return 16;
+        if (prometheia_star_find("Graffias", &star, &err) != PROMETHEIA_OK || star < 0)
+            return 17;
+        if (prometheia_star_info(star, &info, &err) != PROMETHEIA_OK || info.hr != 5984 ||
+            strcmp(info.constellation, "Sco") != 0 || strcmp(info.name, "Acrab") != 0 ||
+            strstr(info.names, "Graffias") == NULL || info.bayer != 2)
+            return 18;
+        n = prometheia_star_lookup("Beta Sco", 0, matches, 4);
+        if (n != 2 || matches[0].index != star || matches[0].quality != PROMETHEIA_MATCH_ALIAS)
+            return 19;
+        if (prometheia_calc_star(engine, star, 2451545.0, NULL, &res, &err) != PROMETHEIA_OK ||
+            !(res.lon_deg > 240.0 && res.lon_deg < 245.0) || res.dist_au < 1e6)
+            return 20;
+        if (prometheia_star_find("Vulcan", &star, &err) != PROMETHEIA_ERROR_NOT_FOUND || star != -1)
+            return 21;
+        if (strcmp(prometheia_constellation_at(83.8, -5.4), "Ori") != 0)
+            return 22;
+    }
+
     prometheia_engine_close(engine);
     prometheia_engine_close(NULL);
     return 0;
