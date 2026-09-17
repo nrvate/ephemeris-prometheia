@@ -5,7 +5,8 @@ is the query surface: one planetary ephemeris in, `calc(body, time,
 options)` out. The correction formulas live in
 `include/prometheia/apparent.hpp` as pure functions; the frame chain is
 [FRAMES.md](FRAMES.md); the ephemeris readers are [DE.md](DE.md) and
-[SPK.md](SPK.md).
+[SPK.md](SPK.md). C callers and bindings use the same engine through
+[C_API.md](C_API.md).
 
 ```cpp
 auto engine = prometheia::Engine::open("ephe/linux_p1550p2650.440").value();

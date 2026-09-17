@@ -18,7 +18,7 @@ application). The ephemeris *data* it ingests is US-government public domain
 ## Status
 
 Milestones 0–3 of 6 complete; M4 nearly done — catalog overlay,
-uncertainties, name lookup and sidereal ayanamshas shipped
+uncertainties, name lookup, sidereal ayanamshas and the C ABI shipped
 (2026-09-16):
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
@@ -75,19 +75,25 @@ uncertainties, name lookup and sidereal ayanamshas shipped
   difference; our integration 0.001″), ayanamshas 0.0026″ over
   1800–2200, sidereal positions 0.0034″. Details:
   [docs/ENGINE.md](docs/ENGINE.md), [docs/FORMAT.md](docs/FORMAT.md).
+- **C interface** — `prometheia/prometheia.h`: opaque engine handle,
+  status codes with an optional caller-owned error struct, validated
+  option selectors, sigma/ayanamsha presence flags, a function-pointer
+  ΔT hook and the time-scale helpers; no exception or global state
+  crosses it. Bit-identical to the C++ engine, tested from strict C99.
+  Details: [docs/C_API.md](docs/C_API.md).
 - **Measured on real data** (`prometheia-bench`, 100-body SBDB fixture,
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
 - **Tools** — `prometheia-fetch` (Python), `prometheia-convert`,
-  `prometheia-info`, `prometheia-bench`. Twelve test suites, clean under
+  `prometheia-info`, `prometheia-bench`. Thirteen test suites, clean under
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
 decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0–M3 done
 (DE + SPK readers, time scales, frames); M4 nearly done (engine,
-catalog overlay with sigma and name lookup, sidereal ayanamshas;
-remaining: C ABI shim, `ephem` CLI); then validation gates (M5),
+catalog overlay with sigma and name lookup, sidereal ayanamshas, C
+ABI; remaining: `ephem` CLI); then validation gates (M5),
 transports (M6).
 
 ## Build

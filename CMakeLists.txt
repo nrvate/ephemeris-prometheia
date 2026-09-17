@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ephemeris-prometheia VERSION 0.1.0 LANGUAGES CXX)
+project(ephemeris-prometheia VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,7 +12,12 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
 add_library(prometheia
+  src/c_api.cpp
   src/catalog.cpp
   src/cbor.cpp
   src/de.cpp
@@ -73,6 +78,14 @@ add_test(NAME engine COMMAND test_engine)
 add_executable(test_engine_catalog tests/test_engine_catalog.cpp)
 target_link_libraries(test_engine_catalog PRIVATE prometheia)
 add_test(NAME engine_catalog COMMAND test_engine_catalog)
+
+# The C interface: C++ checks against the engine, plus a translation unit
+# compiled as strict C99 to prove the header and calling pattern are C.
+add_executable(test_c_api tests/test_c_api.cpp tests/c_api_smoke.c)
+target_link_libraries(test_c_api PRIVATE prometheia m)
+set_source_files_properties(tests/c_api_smoke.c PROPERTIES
+  COMPILE_OPTIONS "-Wall;-Wextra;-pedantic;-Werror")
+add_test(NAME c_api COMMAND test_c_api)
 
 add_executable(test_time tests/test_time.cpp)
 target_link_libraries(test_time PRIVATE prometheia)

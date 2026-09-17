@@ -205,7 +205,14 @@ tool and script in this repo, and for anyone running them:
     DE440: ayanamshas 0.0026″ over 1800–2200, positions 0.0034″; two
     measured deliberate differences (SWE's sidereal RA/Dec is not
     shifted at all; its sidereal J2000 output is an of-date hybrid).
-  - Next: C ABI shim, `ephem` CLI.
+  - Increment 5 (done 2026-09-16): the C ABI (docs/C_API.md) —
+    `include/prometheia/prometheia.h`, opaque engine handle, status codes
+    plus an optional caller-owned error struct (no thread-local or
+    global error state), range-checked `int` selectors, site in degrees,
+    `PROMETHEIA_HAS_*` flags for the optional sigma/ayanamsha, a
+    function-pointer ΔT hook, and the time helpers. Bit-identical to the
+    C++ engine across every option axis; exercised from strict C99.
+  - Next: `ephem` CLI.
 - **M5** — validation gates: Horizons-sampled corpus, per-tier precision
   thresholds, full-catalog bench run (the ~3.5 min/core extrapolation
   must be measured), numeric cross-check against installed Swiss
