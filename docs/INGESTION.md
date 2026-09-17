@@ -7,11 +7,12 @@ produces an `.epm` file. Companion documents: the container byte spec is
 
 ## Principles
 
-1. **JPL-only.** Every ingested byte originates from JPL/Caltech public
-   services — SBDB (orbit solutions), Horizons (validation sampling), DE
-   binaries (planetary truth, M3). All are US-government work: the *data*
-   in a catalog is public domain regardless of the code's GPL license. No
-   MPC data, ever (attribution-only licensing).
+1. **Open sources, no strings attached** ([DESIGN.md](DESIGN.md)
+   decision 5). The small-body catalog pipeline ingests from JPL/Caltech
+   public services: SBDB (orbit solutions), Horizons (validation
+   sampling), DE binaries (planetary truth, M3). These are US-government
+   work, so the *data* in a catalog is public domain regardless of the
+   code's GPL license. MPC data is excluded (attribution conditions).
 2. **One format encoder.** The Python fetcher never writes EPM1; it
    produces a neutral intermediate (`sbdb-raw v1` TSV). Only the C++
    converter encodes the container, so the byte format has exactly one

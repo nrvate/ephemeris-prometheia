@@ -67,11 +67,16 @@ no code read or reused — see Cleanroom policy):
    data has *no* accuracy argument — existing asteroid ephemeris files are
    themselves propagations from older orbit solutions. On-demand integration
    from the freshest SBDB orbit is equal accuracy without the storage.
-5. **Data: JPL-only.** SBDB Query API (bulk elements + sigmas + physical
-   params), Horizons (validation sampling), DE binaries. MPC data carries
-   attribution-only/more restrictive terms; excluding it keeps the data
-   story airtight. SBDB's count as of 2026-09-16: **1,564,460 asteroids**,
-   3.7k comets.
+5. **Data: open sources with no strings attached.** Use data that is
+   public domain or freely usable without attribution or redistribution
+   conditions: JPL (SBDB Query API for elements, sigmas and physical
+   params; Horizons for validation sampling; DE binaries), USNO (the
+   leap-second table, Circular 179 constants), and Earth-orientation / ΔT
+   data from USNO or IERS, subject to checking their terms. MPC data is
+   excluded because its terms carry attribution conditions. *(Corrected
+   2026-09-16: earlier drafts said "JPL-only", which narrowed the owner's
+   actual principle.)* SBDB's count as of 2026-09-16: **1,564,460
+   asteroids**, 3.7k comets.
 6. **Format: EPM1** — see [FORMAT.md](FORMAT.md). No Chebyshev, no segments,
    no time axis. CBOR metadata with provenance. Per-chunk zstd + CRC-32.
    The full ingestion pipeline (SBDB request shape, sbdb-raw v1, unit
