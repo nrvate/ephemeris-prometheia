@@ -329,8 +329,9 @@ tool and script in this repo, and for anyone running them:
     - SIGTERM drain.
     - wss:// with SIGHUP certificate reload (OpenSSL, optional at build).
     - Refusing a port already served.
-    Remaining: zstd, the extra-columns extension (needs Astrolog's
-    specification), and the Astrolog wire map.
+    Remaining then: zstd, the extra-columns extension, and the Astrolog
+    wire map — the extension shipped with version 4 (2026-09-18) and the
+    map was deleted with it; zstd stays unimplemented by design.
   - Increment 4 (done 2026-09-17): speed. Nutation interpolation, Newton
     light time, per-instant memos, time-major server loop. 55 → 2.95 µs per
     position with rates; the 100,000-cell request 5.6 → 0.29 s.
