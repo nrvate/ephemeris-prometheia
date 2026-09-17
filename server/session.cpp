@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <limits>
 
-#include "prometheia/stars.hpp"
+#include "objects.hpp"
 
 namespace prometheia::server {
 namespace {
@@ -203,53 +203,24 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
     const auto flags = int32_t(uint32_t(req.iflag & 0xFFFFFFFFu));
 
     // What each object resolves to, and how its rows went.
-    struct Object {
+    struct Slot {
         std::string why; // set: every row fails with this reason
-        int naif_id = 0;
-        bool star = false;        // a catalog star; naif_id holds its index
-        bool orbit_point = false; // a node or apsis of naif_id
-        OrbitPoint point = OrbitPoint::AscendingNode;
-        OrbitElements elements = OrbitElements::Osculating;
-        std::string name, first_error;
+        ResolvedObject obj;
+        std::string first_error;
         bool any_ok = false;
     };
-    std::vector<Object> objects(n_obj);
+    std::vector<Slot> objects(n_obj);
     for (uint32_t o = 0; o < n_obj; ++o) {
-        const eph::ObjSpec& obj = req.objs[o];
-        Object& t = objects[o];
+        Slot& t = objects[o];
         t.why = plan.why;
         if (!t.why.empty()) {
             continue;
         }
-        std::optional<WireBody> body;
-        if (obj.kind == eph::kObjStar) {
-            // Any name or designation the catalog knows (docs/STARS.md).
-            auto found = stars::find(obj.name);
-            if (!found) {
-                t.why = found.error().message;
-            } else {
-                t.star = true;
-                t.naif_id = int(found.value());
-                t.name = stars::at(found.value()).name();
-            }
-        } else if (!(body = map_.body(obj.id))) {
-            t.why = "body " + std::to_string(obj.id) + " has no wire-map entry";
+        auto resolved = resolve_object(req.objs[o], map_);
+        if (!resolved) {
+            t.why = resolved.error().message;
         } else {
-            t.naif_id = body->naif_id;
-            t.name = body->name.empty() ? "SPK-ID " + std::to_string(body->naif_id) : body->name;
-            if (obj.kind == eph::kObjNodAps) {
-                // parseRequest has checked point 1-4 and method 0-1.
-                static constexpr OrbitPoint kPoints[] = {
-                    OrbitPoint::AscendingNode, OrbitPoint::DescendingNode, OrbitPoint::Perihelion,
-                    OrbitPoint::Aphelion};
-                static constexpr const char* kSuffix[] = {" asc. node", " desc. node",
-                                                          " perihelion", " aphelion"};
-                t.orbit_point = true;
-                t.point = kPoints[obj.point - eph::kPntNorthNode];
-                t.elements =
-                    obj.method == eph::kNodOscu ? OrbitElements::Osculating : OrbitElements::Mean;
-                t.name += kSuffix[obj.point - eph::kPntNorthNode];
-            }
+            t.obj = std::move(resolved).value();
         }
     }
 
@@ -260,22 +231,13 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
         // Row r's instant, exactly as Astrolog's client computes it.
         const double jd = req.jdStart + double(uint64_t(r) * uint64_t(req.stepSeconds)) / 86400.0;
         for (uint32_t o = 0; o < n_obj; ++o) {
-            Object& t = objects[o];
+            Slot& t = objects[o];
             double* row = ans->cols.data() + (size_t(o) * n_time + r) * eph::kColsPerObj;
             if (!t.why.empty()) {
                 fill_nan(row);
                 continue;
             }
-            auto res =
-                t.star ? (plan.time_tt ? engine_.calc_star(size_t(t.naif_id), jd, plan.opts)
-                                       : engine_.calc_star_ut(size_t(t.naif_id), jd, plan.opts))
-                : t.orbit_point
-                    ? (plan.time_tt
-                           ? engine_.calc_orbit_point(t.naif_id, t.point, t.elements, jd, plan.opts)
-                           : engine_.calc_orbit_point_ut(t.naif_id, t.point, t.elements, jd,
-                                                         plan.opts))
-                    : (plan.time_tt ? engine_.calc(t.naif_id, jd, plan.opts)
-                                    : engine_.calc_ut(t.naif_id, jd, plan.opts));
+            auto res = calc_at(engine_, t.obj, jd, plan.time_tt, plan.opts);
             if (!res) {
                 fill_nan(row);
                 if (t.first_error.empty()) {
@@ -304,11 +266,11 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
         }
     }
     for (uint32_t o = 0; o < n_obj; ++o) {
-        const Object& t = objects[o];
+        const Slot& t = objects[o];
         const std::string& serr = !t.why.empty() ? t.why : t.first_error;
         eph::writeDataMeta(ans->meta.data() + size_t(o) * eph::kDataMetaSize, t.any_ok ? flags : -1,
                            t.any_ok ? flags : 0, serr.empty() ? nullptr : serr.c_str(),
-                           t.any_ok ? t.name.c_str() : nullptr);
+                           t.any_ok ? t.obj.name.c_str() : nullptr);
     }
     return ans;
 }

@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "objects.hpp"
 #include "prometheia/stars.hpp"
 #include "session.hpp"
 #include "synthetic_spk.hpp"
@@ -713,4 +714,93 @@ TEST_CASE("server_metrics_text") {
     CHECK(text.find(
               "prometheiad_build_info{server=\"prometheiad/0.1.0\",protocol=\"3\",tls=\"0\"} 1") !=
           std::string::npos);
+}
+
+TEST_CASE("server_objects_resolve_once_and_sample_the_same_body") {
+    TempFile tf{"objects"};
+    Engine engine = synth::open_synthetic(tf);
+    const WireMap map = WireMap::parse(kTestMap).value();
+
+    // The wire numbering is resolved away, and what comes back carries the
+    // name the answer's metadata reports.
+    auto sun = resolve_object(obj(900), map);
+    REQUIRE(sun.ok());
+    CHECK(sun.value().kind == ResolvedObject::Kind::Body);
+    CHECK(sun.value().naif_id == 10);
+    CHECK(sun.value().name == "Test Sun");
+
+    eph::ObjSpec star_spec;
+    star_spec.kind = eph::kObjStar;
+    std::strcpy(star_spec.name, "Sirius");
+    auto star = resolve_object(star_spec, map);
+    REQUIRE(star.ok());
+    CHECK(star.value().kind == ResolvedObject::Kind::Star);
+    CHECK(star.value().name == "Sirius");
+
+    eph::ObjSpec node_spec = obj(905);
+    node_spec.kind = eph::kObjNodAps;
+    node_spec.point = eph::kPntNorthNode;
+    node_spec.method = eph::kNodOscu;
+    auto node = resolve_object(node_spec, map);
+    REQUIRE(node.ok());
+    CHECK(node.value().kind == ResolvedObject::Kind::OrbitPoint);
+    CHECK(node.value().naif_id == 5);
+    CHECK(node.value().name == "SPK-ID 5 asc. node");
+
+    // A refusal names no instant, because it is the same for every row.
+    auto missing = resolve_object(obj(123), map);
+    REQUIRE(!missing.ok());
+    CHECK(missing.error().message == "body 123 has no wire-map entry");
+
+    // The sampler is not a second path to the body: it is the row path, in
+    // rectangular form, so the two agree to the bit.
+    const ResolvedObject jupiter = resolve_object(obj(905), map).value();
+    CalcOptions opts;
+    const segments::Sampler sampler = sampler_for(engine, jupiter, opts);
+    for (int i = 0; i < 5; ++i) {
+        const double jd = synth::kJ2000 + i * 3.0;
+        double p[3] = {0, 0, 0}, v[3] = {0, 0, 0};
+        REQUIRE(sampler(jd, p, v).ok());
+        auto row = calc_at(engine, jupiter, jd, true, opts);
+        REQUIRE(row.ok());
+        for (int k = 0; k < 3; ++k) {
+            CHECK(p[k] == row.value().pos.xyz_au[k]);
+            CHECK(v[k] == row.value().pos.vel_au_day[k]);
+        }
+    }
+
+    // And it is what the fitter wants: a lattice cell's worth of it holds to
+    // the residual the fit declares.
+    segments::FitOptions fit_options;
+    fit_options.target_err_arcsec = 0.01;
+    auto report = segments::fit(sampler, synth::kJ2000, synth::kJ2000 + 32.0, fit_options);
+    REQUIRE_MESSAGE(report.ok(), report.error().message);
+    CHECK(report.value().met_target);
+    double worst = 0.0;
+    for (int i = 0; i <= 64; ++i) {
+        const double jd = synth::kJ2000 + i * 0.5;
+        const segments::Segment* seg = nullptr;
+        for (const segments::Segment& s : report.value().segments) {
+            if (jd <= s.mid_jd_tt + s.half_span_days + 1e-9) {
+                seg = &s;
+                break;
+            }
+        }
+        REQUIRE(seg != nullptr);
+        double got[3];
+        seg->position(jd, got);
+        auto want = calc_at(engine, jupiter, jd, true, opts);
+        REQUIRE(want.ok());
+        const double* w = want.value().pos.xyz_au;
+        const double dot = got[0] * w[0] + got[1] * w[1] + got[2] * w[2];
+        const double cx[3] = {got[1] * w[2] - got[2] * w[1], got[2] * w[0] - got[0] * w[2],
+                              got[0] * w[1] - got[1] * w[0]};
+        const double cross = std::sqrt(cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]);
+        worst = std::max(worst, std::atan2(cross, dot) * 180.0 / 3.14159265358979323846 * 3600.0);
+    }
+    CHECK(worst <= fit_options.target_err_arcsec);
+    // The declared residual bounds an outsider's measurement, to the same
+    // slack test_segments allows: the check set is finite, and an instant
+    // between two of its points can sit a hair above what they saw.
+    CHECK(worst <= report.value().worst_err_arcsec * 1.05 + 1e-9);
 }
