@@ -37,7 +37,7 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
   rectangular form. `Provenance` names the ephemeris, DE number and the
   light time applied. `sigma_arcsec` is empty for planets — the DE files
   publish no per-epoch covariance — and is filled by the catalog overlay
-  for small bodies (next increment).
+  for small bodies (a later M4 increment).
 - **Threading:** an `Engine` caches ephemeris records and the frame
   matrices of the last three epochs; it is not safe for concurrent use.
   One engine per thread; there is no global state.
