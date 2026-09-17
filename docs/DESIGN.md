@@ -343,6 +343,13 @@ tool and script in this repo, and for anyone running them:
     from the fundamental arguments. The planets' come from mean elements
     fitted to DE440's own osculating elements
     (`prometheia-gen-mean-elements`, `src/mean_elements.inc`).
+  - Increment 8 (2026-09-17, in progress): fixed stars (docs/STARS.md).
+    - Checksum-pinned acquisition (`tools/fetch/stars_fetch.py`).
+    - A cross-checked generated catalog (the Bright Star Catalogue,
+      Hipparcos, IAU names, curated traditional names checked against Allen
+      1899 and SIMBAD, Messier, constellation boundaries).
+    - `prometheia::stars` lookup, and `Engine::calc_star`, validated
+      against ERFA to 0.15 mas.
 
 ## Cleanroom policy
 

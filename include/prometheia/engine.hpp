@@ -275,6 +275,20 @@ public:
     Result<CalcResult> calc_orbit_point_ut(int body, OrbitPoint point, OrbitElements elements,
                                            double jd_ut1, const CalcOptions& opts = {});
 
+    // A fixed star or deep-sky object of the compiled-in catalog
+    // (prometheia/stars.hpp; find its index with stars::find) as seen by the
+    // options' observer (docs/STARS.md, "Apparent place"). The catalog
+    // position moves along the star's straight-line space motion (proper
+    // motion, parallax, radial velocity) from its catalog epoch; the vector
+    // from the observer (parallax) then takes the Sun's deflection and
+    // aberration as options say, and the output frame and zodiac as for
+    // calc(). light_time does not apply: catalog positions are already
+    // directions of arrival. Distance is the parallax distance in AU, or
+    // kStarNoParallaxAu for objects without a parallax. sigma is never set.
+    static constexpr double kStarNoParallaxAu = 1e10;
+    Result<CalcResult> calc_star(size_t star_index, double jd_tt, const CalcOptions& opts = {});
+    Result<CalcResult> calc_star_ut(size_t star_index, double jd_ut1, const CalcOptions& opts = {});
+
     // Delta T model for UT inputs and topocentric Earth rotation. Not
     // owned; nullptr restores the default (time::ObservedDeltaT).
     void set_delta_t_model(const time::DeltaTModel* model);

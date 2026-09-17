@@ -3,6 +3,7 @@
 // prometheia::Engine: ephemeris sources, the apparent-place pipeline and
 // frame output. See include/prometheia/engine.hpp and docs/ENGINE.md.
 #include "prometheia/engine.hpp"
+#include "prometheia/stars.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1598,6 +1599,67 @@ struct Engine::Impl {
         return to_output(jd_tt, o, p, out);
     }
 
+    // Observer -> catalog object vector in the output frame (km).
+    Result<void> star_vector_at(const stars::Object& star, double jd_tt, const CalcOptions& o,
+                                double out[3]) {
+        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        double obs[6];
+        auto r = observer(o, jd_tt, jd_tdb, obs);
+        if (!r)
+            return r;
+        // Barycentric position at the catalog epoch, and the space velocity:
+        // proper motion across the line of sight at the parallax distance,
+        // radial velocity along it (only with a parallax: without a distance
+        // a velocity along the line of sight has no meaning).
+        const double a = star.ra_deg / kRad2Deg, d = star.dec_deg / kRad2Deg;
+        const double ca = std::cos(a), sa = std::sin(a), cd = std::cos(d), sd = std::sin(d);
+        const double u[3] = {cd * ca, cd * sa, sd};
+        const double east[3] = {-sa, ca, 0.0};
+        const double north[3] = {-sd * ca, -sd * sa, cd};
+        constexpr double kMasPerRad = 206264806.24709636;
+        const bool has_parallax = star.parallax_mas > 0.0;
+        const double dist_au = has_parallax ? kMasPerRad / star.parallax_mas : kStarNoParallaxAu;
+        const double pm_a = star.pm_ra_mas_yr / kMasPerRad / 365.25; // rad/day
+        const double pm_d = star.pm_dec_mas_yr / kMasPerRad / 365.25;
+        const double rv = has_parallax ? star.rv_km_s * 86400.0 / kAuKm : 0.0; // AU/day
+        const double epoch_jd = kJ2000 + (star.epoch_jyear - 2000.0) * 365.25;
+        const double dt = jd_tdb - epoch_jd;
+        double pos[3];
+        for (int i = 0; i < 3; ++i) {
+            const double v = dist_au * (pm_a * east[i] + pm_d * north[i]) + rv * u[i];
+            pos[i] = (dist_au * u[i] + v * dt) * kAuKm;
+        }
+        double p[3] = {pos[0] - obs[0], pos[1] - obs[1], pos[2] - obs[2]};
+        const bool observer_is_sun_or_bary =
+            o.center == Center::Heliocentric || o.center == Center::Barycentric ||
+            (o.center == Center::Body &&
+             (o.center_body == body::kSun || o.center_body == body::kSolarSystemBary));
+        if (o.deflection && !observer_is_sun_or_bary) {
+            double sun[6];
+            r = sun_at(jd_tdb, sun);
+            if (!r)
+                return r;
+            const double sun_to_body[3] = {pos[0] - sun[0], pos[1] - sun[1], pos[2] - sun[2]};
+            const double sun_to_obs[3] = {obs[0] - sun[0], obs[1] - sun[1], obs[2] - sun[2]};
+            // Skip a direction within the solar disc, where the formula's
+            // 1 + q.e denominator vanishes and the star is not visible.
+            const double qn =
+                std::sqrt(sun_to_body[0] * sun_to_body[0] + sun_to_body[1] * sun_to_body[1] +
+                          sun_to_body[2] * sun_to_body[2]);
+            const double en =
+                std::sqrt(sun_to_obs[0] * sun_to_obs[0] + sun_to_obs[1] * sun_to_obs[1] +
+                          sun_to_obs[2] * sun_to_obs[2]);
+            const double qe = (sun_to_body[0] * sun_to_obs[0] + sun_to_body[1] * sun_to_obs[1] +
+                               sun_to_body[2] * sun_to_obs[2]) /
+                              (qn * en);
+            if (1.0 + qe > 1e-9)
+                apparent::light_deflection(p, sun_to_body, sun_to_obs, apparent::kSunGmOverC2Km, p);
+        }
+        if (o.aberration)
+            apparent::aberration(p, obs + 3, p);
+        return to_output(jd_tt, o, p, out);
+    }
+
     // Spherical coordinates and rates from a vector and its central
     // difference; vec(jd, out, tau) fills one output-frame vector (km).
     template <typename VectorFn>
@@ -1940,6 +2002,41 @@ Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitEleme
         res.ayanamsa_deg = s.value();
     }
     return res;
+}
+
+Result<CalcResult> Engine::calc_star(size_t star_index, double jd_tt, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite time");
+    if (star_index >= stars::count())
+        return make_error(ErrorCode::NotFound, "no catalog star " + std::to_string(star_index));
+    const stars::Object& star = stars::at(star_index);
+    CalcResult res;
+    double tau = 0.0;
+    auto r = impl_->position(
+        jd_tt, o, tau,
+        [&](double jd, double out[3], double&) { return impl_->star_vector_at(star, jd, o, out); },
+        res.pos);
+    if (!r)
+        return r.error();
+    static constexpr std::string_view kSources[] = {"Hipparcos new reduction (van Leeuwen 2007)",
+                                                    "Yale Bright Star Catalogue (1991)",
+                                                    "SIMBAD (CDS)"};
+    res.provenance.source = kSources[int(star.astrometry)];
+    if (o.sidereal != SiderealMode::Tropical) {
+        auto s = impl_->sidereal_shift(o, jd_tt);
+        if (!s)
+            return s.error();
+        res.ayanamsa_deg = s.value();
+    }
+    return res;
+}
+
+Result<CalcResult> Engine::calc_star_ut(size_t star_index, double jd_ut1, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc_star(star_index, impl_->ut1_to_tt(jd_ut1), o);
 }
 
 Result<CalcResult> Engine::calc_orbit_point_ut(int id, OrbitPoint point, OrbitElements elements,

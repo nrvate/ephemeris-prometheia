@@ -93,6 +93,12 @@ Milestones 0–4 of 6 complete (2026-09-16):
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
+- **Fixed stars** — the naked-eye sky (9,096 Bright Star Catalogue stars
+  with Hipparcos astrometry, 84 more IAU-named stars) and the 110 Messier
+  objects, found by IAU or traditional name, Bayer, Flamsteed, HR, HD, HIP or
+  Messier designation. Apparent places with space motion, deflection and
+  aberration, validated against ERFA to 0.15 mas.
+  Constellation of any position. [docs/STARS.md](docs/STARS.md).
 - **Nodes and apsides** — osculating and mean ascending/descending nodes,
   perihelia and aphelia (perigee/apogee for the Moon) as points seen from any
   observer; mean planetary elements fitted to DE440 itself. Planet-centred

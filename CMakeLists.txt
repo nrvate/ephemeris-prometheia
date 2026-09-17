@@ -24,6 +24,7 @@ add_library(prometheia
   src/de.cpp
   src/engine.cpp
   src/spk.cpp
+  src/stars.cpp
   src/frames.cpp
   src/kepler.cpp
   src/time.cpp)
@@ -74,6 +75,7 @@ set_source_files_properties(tests/c_api_smoke.c PROPERTIES
 
 prometheia_test(time tests/test_time.cpp)
 prometheia_test(frames tests/test_frames.cpp)
+prometheia_test(stars tests/test_stars.cpp)
 
 # JPL Horizons referee corpus (M5); needs the DE440 binary, SKIPs without it.
 prometheia_test(horizons tests/test_horizons.cpp)
