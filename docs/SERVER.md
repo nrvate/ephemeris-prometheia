@@ -276,7 +276,7 @@ same host:
 - **Caching:** a new connection may land on another loop, which has its own
   cache.
 
-## Protocol version 4 (agreed with Astrolog; §3 locked; not yet implemented here)
+## Protocol version 4 (agreed with Astrolog; §3 locked from both sides; not yet implemented here)
 
 Astrolog is replacing version 3 with **version 4** on its `ephv4` branch: the
 spec and conformance fixtures are `EPHEMERIS_PLUGINS_PLAN.md` and
@@ -353,7 +353,12 @@ the drop's bytes) — **91/91 on the corrApplied drop** (ephv4 `0fbc863`,
 `set-sha256 1c934c7d…` verified independently). **§3 is locked** on that
 verdict; the lock's prose carries two reading-rule recommendations (the
 `maxPayload` zero-check, and unknown precision/column bits being
-unsupported-not-malformed) that move no bytes.
+unsupported-not-malformed) that move no bytes. Astrolog's ack landed the
+same day (ephv4 `cf83dc9`, all their gates green, the set's digest
+unchanged): §3 is locked from both sides, their corrApplied now sends the
+capability set whole instead of intersecting it with the request's mask,
+and no further round is owed on §3 — the remaining work here is our
+migration, below.
 
 **Our migration** (the pass has landed and the fixtures are pinned; step 1
 done — the v4 header and `registries.json` are vendored with checksums at
