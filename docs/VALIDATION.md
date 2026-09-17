@@ -112,6 +112,9 @@ Beyond that, the missing asteroid perturbers dominate, and the 50- and
 - **Heliocentric light time:** ours matches Horizons' Sun-centred astrometric
   positions to 6 µas. SWE's ~1% longer heliocentric light time, up to 0.8″, is
   on SWE's side.
+- **Moon in the J2000 frame:** the 0.0011″ Moon residual against SWE had no
+  explanation. Our geocentric astrometric Moon matches Horizons to < 0.0001″
+  at 1975, 2000 and 2026, so that residual is SWE's as well.
 
 ## Refreshing the corpus
 

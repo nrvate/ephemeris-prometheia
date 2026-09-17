@@ -246,6 +246,18 @@ tool and script in this repo, and for anyone running them:
     Horizons small-body rms: ±10 yr 0.066″ → 0.041″, ±25 yr 0.22″ →
     0.17″; longer arcs await the asteroid perturbers (a maintainer
     decision: JPL's SB441-N16 kernel vs integrating the 16 bodies).
+  - Increment 3 (done 2026-09-17): speed and packaging, all without
+    changing answers except where noted. Perturber tables read through
+    one computed interval and one set of Hermite weights per force
+    evaluation, stored row by row (bit-identical, 2.9×); memo segments
+    start at the segment span (2.4×, memo error 1.1e-9 → 8.9e-11 AU,
+    Horizons residuals ≤ 0.005″ changed); topocentric Earth rotation
+    reuses the epoch's nutation (bit-identical, 102 → 54 µs); `cmake
+    --install` with a relocatable pkg-config file. Gate test time
+    halved (ASan 12 → 6 s).
+  - Open, awaiting maintainer decisions: asteroid perturbers (source of
+    their states), `sigma_arcsec` (full covariance per body vs loose
+    bound), the full-catalog benchmark run (long local CPU job).
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 
