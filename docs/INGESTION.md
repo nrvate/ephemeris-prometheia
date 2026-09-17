@@ -175,6 +175,38 @@ python3 tools/fetch/sbdb_fetch.py --out-dir sbdb-raw-100 --kinds a \
 Measured: 100 bodies, 9,919 bytes total (99 B/body is fixed-overhead
 dominated at this size; steady-state is ~25 B/record at 50k scale).
 
+## Orbit covariance: on demand
+
+The bulk SBDB query returns per-element sigmas only, and those are
+uncorrelated summaries that overstate sky-plane uncertainty 10–1000×
+(docs/VALIDATION.md). The full 6×6 covariance comes from the single-object
+API, one request per body (`sbdb.api?sstr=<des>&cov=mat&full-prec=1`) —
+at SBDB's polite pace far too slow for the whole catalog, so it is fetched
+for the bodies someone asks about:
+
+```sh
+python3 tools/fetch/sbdb_fetch.py --out-dir cov-raw --covariance 1 2 4 145451
+python3 tools/fetch/sbdb_fetch.py --out-dir cov-raw --covariance-file mine.txt
+./build/prometheia-convert cov-raw -o covariance-overlay.epm
+```
+
+- The shard `covariance.tsv` carries the standard 20 columns plus
+  `cov_epoch`, the cometary elements at that epoch (`cov_e`, `cov_q`,
+  `cov_tp`, `cov_om`, `cov_w`, `cov_i`; angles in degrees as delivered)
+  and the packed upper triangle `cov_00 … cov_55` in {e, q, tp, node,
+  peri, i}. Non-gravitational parameters beyond the six (comets) are
+  marginalized by dropping their rows and columns.
+- The converter stores angles in radians (squared terms scaled
+  accordingly) as the EPM1 `kCovariance` block. The overlay stacks on a
+  base catalog like any other (newest wins), so those bodies answer
+  `sigma_arcsec`; bodies without a covariance answer none.
+- Etiquette as for delta refetches: one request at a time, `--delay`
+  (2 s) between them, resumable through `manifest-covariance.json`.
+- Proper names: `sbdb.api` has no bare name field; the row's `name` is
+  derived from `shortname` minus the designation ("1 Ceres" → "Ceres"),
+  matching the bulk query (this also fixed delta overlays, which carried
+  "1 Ceres").
+
 ## Freshness: catalogs are stacked, not rebuilt
 
 Orbit solutions improve constantly, and unnumbered objects change most.
@@ -258,12 +290,15 @@ tagged GitHub release assets, not repo-tree files**:
   significant SBDB refresh worth adopting. A release is always produced by
   the committed `sbdb_fetch.py` + `prometheia-convert` of its own tag, so
   the pipeline that made a catalog ships with it.
-- The **only** data file in the repo tree is
-  `tests/data/sample-100.epm` (~10 KB, the first 100 numbered asteroids):
-  a fixture so the tests exercise the reader against real JPL full-precision
-  data, not just synthetic records. Rebuild it only when refreshing the
-  fixture intentionally (its Ceres elements are pinned in
-  `test_catalog.cpp`).
+- The **only** data files in the repo tree are two small fixtures built
+  by this pipeline: `tests/data/sample-100.epm` (~10 KB, the first 100
+  numbered asteroids), so the tests exercise the reader against real JPL
+  full-precision data, not just synthetic records (its Ceres elements are
+  pinned in `test_catalog.cpp`); and `tests/data/covariance-7.epm` (~3 KB,
+  a covariance overlay for Ceres, Pallas, Vesta, Iris, Hygiea, Cybele and
+  145451 Rumina — the Horizons corpus bodies — from `sbdb_fetch.py
+  --covariance`). Rebuild them only when refreshing a fixture
+  intentionally.
 - The container is already chunked-zstd with its own index — **never**
   re-bucket or re-compress catalogs for distribution; that would break
   single-file random access and re-introduce the per-file juggling this

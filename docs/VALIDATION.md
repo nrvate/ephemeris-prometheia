@@ -5,10 +5,10 @@ in [ENGINE.md](ENGINE.md) show agreement with another implementation. Horizons
 is JPL's own reduction of the same DE ephemerides and SBDB orbits, so it
 separates *our* errors from *model choices*.
 
-- **Corpus:** 37 requests, declared in `tools/fetch/horizons_fetch.py` and
+- **Corpus:** 39 requests, declared in `tools/fetch/horizons_fetch.py` and
   fetched on 2026-09-17, strictly sequentially with 5 s pauses.
   `tools/gen/gen_horizons_corpus.py` turns the responses into
-  `tests/horizons_corpus.inc`: 236 observer rows and 54 vector rows, with
+  `tests/horizons_corpus.inc`: 245 observer rows and 63 vector rows, with
   per-request provenance. Horizons output is a US-government work.
 - **Test:** `tests/test_horizons.cpp`, in the pre-commit gate. It needs the
   DE440 binary under `ephe/` and SKIPs without it. It takes 0.2 s.
@@ -66,8 +66,10 @@ those published offsets are removed:
 
 ### Small bodies
 
-Six numbered asteroids, all from `tests/data/sample-100.epm`: Ceres, Pallas,
-Vesta, Iris, Hygiea and Cybele. Epochs are the element epoch (2026-06-08) and
+Six numbered asteroids, all from `tests/data/sample-100.epm` — Ceres, Pallas,
+Vesta, Iris, Hygiea and Cybele — plus the scattered-disk TNO 145451 Rumina
+(elements and covariance from `tests/data/covariance-7.epm`; within ±100 yr
+it agrees with Horizons to ≤ 21 km, 0.0005″, since planets dominate out there). Epochs are the element epoch (2026-06-08) and
 ±10, 25, 50 and 100 years.
 
 | span from element epoch | astrometric, rms · max over 6 bodies | gate |
@@ -93,12 +95,25 @@ Beyond that, the missing asteroid perturbers dominate, and the 50- and
   act as point masses plus the Sun's relativistic term, with no asteroid
   perturbers. Horizons integrates with the 16 SB441-N16 asteroids. Hygiea's jump between +25 and +50 years is consistent with a
   close approach to one of the big perturbers.
-- **Uncertainties:** propagating SBDB's 1-σ element sigmas as uncorrelated
-  gives `sigma_arcsec` values roughly 10–1000× larger than Horizons' own full-covariance
-  3-σ figures. Ceres: ours 0.04″ against JPL's < 0.0005″. Pallas: 1.8″ against
-  0.014″. The correlations the bulk SBDB query does not return are what
-  constrain these orbits. Treat `sigma_arcsec` as a loose, pessimistic bound,
-  not a calibrated uncertainty.
+- **Uncertainties.**
+  - *The first measurement* propagated SBDB's per-element 1σ sigmas as
+    uncorrelated and gave values roughly 10–1000× larger than Horizons' own
+    full-covariance 3σ figures (Ceres 0.04″ against < 0.0005″, Pallas 1.8″
+    against 0.014″; Rumina a flat 30–60″ against 0.05–8″). The correlations
+    the bulk SBDB query does not return are what constrain these orbits.
+  - *Now* `sigma_arcsec` comes only from JPL's full covariance
+    (fetched on demand, EPM1 `kCovariance`; absent otherwise). With the
+    covariances of the six corpus asteroids and Rumina
+    (`tests/data/covariance-7.epm`), JPL's POS_3sigma divided by our
+    3·`sigma_arcsec` is 1.00–1.05 at most epochs over ±100 years and never
+    outside [0.84, 1.43]. That spread is expected: POS_3sigma is the RSS
+    of both error-ellipse semi-axes, ours the major one (ratio in [1, √2]),
+    and JPL prints 0.001″ steps. Rumina: 7.98″ against 7.985″ at −100 yr,
+    0.04″ against 0.053″ near its observed arc, 6.25″ against 6.251″ at
+    +100 yr. Ceres stays below 0.0005″ on both sides.
+  - *Gate* (`horizons_sigma_calibration`, 0.4 s): all seven bodies within
+    10 years of the element epoch — JPL/ours in [0.97, 1.45] where JPL
+    reports ≥ 0.02″, and consistent within JPL's rounding below.
 - **Running the report:** the long-arc rows and the uncertainty comparison are
   a report case, skipped by default because the ±100-year and sigma
   integrations take ~4 s (Release):
@@ -124,7 +139,7 @@ a new DE, a rebuilt `sample-100.epm`, or a Horizons model change you want to
 track. To refresh:
 
 1. Delete `horizons-raw/`.
-2. Run `tools/fetch/horizons_fetch.py` (37 requests, ~4 minutes; check
+2. Run `tools/fetch/horizons_fetch.py` (39 requests, ~4 minutes; check
    `--list` first).
 3. Run `tools/gen/gen_horizons_corpus.py`.
 4. Re-run the gate and review any moved residual before committing.

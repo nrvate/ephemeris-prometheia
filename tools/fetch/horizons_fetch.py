@@ -72,7 +72,11 @@ FROM_SUN = [("mercury", "199"), ("venus", "299"), ("earth", "399"), ("mars", "4"
 # Numbered asteroids from tests/data/sample-100.epm: the three largest, a
 # high-inclination one, an inner-belt S type and an outer-belt body.
 SMALL_BODIES = [("ceres", "1"), ("pallas", "2"), ("vesta", "4"), ("iris", "7"),
-                ("hygiea", "10"), ("cybele", "65")]
+                ("hygiea", "10"), ("cybele", "65"),
+                # A scattered-disk TNO (a = 92 AU): uncertainty, not dynamics,
+                # is its limit. Not in the sample catalog; its elements and
+                # covariance come from tests/data/covariance-7.epm.
+                ("rumina", "145451")]
 # Topocentric sites: (name, east lon deg, lat deg, height km)
 SITES = {
     "zurich": (8.55, 47.37, 0.5),

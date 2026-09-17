@@ -255,9 +255,20 @@ tool and script in this repo, and for anyone running them:
     reuses the epoch's nutation (bit-identical, 102 → 54 µs); `cmake
     --install` with a relocatable pkg-config file. Gate test time
     halved (ASan 12 → 6 s).
-  - Open, awaiting maintainer decisions: asteroid perturbers (source of
-    their states), `sigma_arcsec` (full covariance per body vs loose
-    bound), the full-catalog benchmark run (long local CPU job).
+  - Decisions (2026-09-17): covariance fetched on demand only;
+    `sigma_arcsec` absent without one; JPL's SB441-N16 perturber kernel
+    now; full-catalog benchmark in the background; Vondrák 2011 precession
+    as an option; nutation interpolation allowed; check SMH 2016 ΔT terms;
+    polar motion stays neglected.
+  - Increment 4 (done 2026-09-17): calibrated `sigma_arcsec`. EPM1 1.1
+    `kCovariance` record block (JPL's 6×6 in cometary elements at its own
+    epoch); the engine propagates it along its principal axes (J·C·Jᵀ,
+    matching an explicit independent oracle to all printed digits) and
+    reports nothing without it; `sbdb_fetch.py --covariance` +
+    `prometheia-convert` build covariance overlays. Against Horizons'
+    3σ for six asteroids and the TNO Rumina over ±100 yr: ratio
+    1.00–1.05 typically, within the [1, √2] ellipse-convention band
+    (was 10–1000× too large).
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 

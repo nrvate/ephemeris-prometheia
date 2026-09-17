@@ -154,6 +154,27 @@ ParseOutcome parse_row(const std::vector<std::string>& cols, const FieldMap& fm,
         }
     }
 
+    // Covariance overlay columns (sbdb_fetch.py --covariance): JPL's full
+    // orbit covariance at its own epoch in cometary elements, angles in
+    // degrees as delivered; stored with angles in radians.
+    const std::string& cov_epoch_s = col("cov_epoch");
+    if (!cov_epoch_s.empty()) {
+        static const char* kCovElementCols[6] = {"cov_e",  "cov_q", "cov_tp",
+                                                 "cov_om", "cov_w", "cov_i"};
+        static constexpr double kScale[6] = {1.0, 1.0, 1.0, kDegToRad, kDegToRad, kDegToRad};
+        r.cov_epoch_jtdb = parse_double_or(cov_epoch_s, NAN);
+        for (int k = 0; k < 6; ++k)
+            r.cov_elements[k] = parse_double_or(col(kCovElementCols[k]), NAN) * kScale[k];
+        for (int i = 0; i < 6; ++i) {
+            for (int j = i; j < 6; ++j) {
+                const std::string name = "cov_" + std::to_string(i) + std::to_string(j);
+                r.covariance[catalog::packed_index(i, j)] =
+                    parse_double_or(col(name.c_str()), NAN) * kScale[i] * kScale[j];
+            }
+        }
+        r.flags |= catalog::RecordFlags::kCovariance;
+    }
+
     out.pdes = col("pdes");
     out.name = col("name");
     out.record = r;

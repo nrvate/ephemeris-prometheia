@@ -24,6 +24,13 @@ Modes:
                          See docs/INGESTION.md, "Freshness".
   --sb-class CEN,TJN   — hot-subset sweeps by SBDB orbit class (composable
                          with --fields / full-prec for tier-1 polling).
+  --covariance DES...  — on-demand full orbit covariance: one sbdb.api
+                         request per designation (cov=mat), written as a
+                         covariance overlay shard (the 20 standard columns
+                         plus the covariance columns) that
+                         prometheia-convert turns into a stackable overlay
+                         .epm whose records answer sigma_arcsec. Also
+                         --covariance-file FILE (one designation per line).
 
 Server etiquette (deliberate policy — do not "optimize" away):
   - Requests are strictly SEQUENTIAL. One request in flight, ever. No
@@ -66,6 +73,13 @@ SLIM_FIELDS = ["spkid", "orbit_id"]
 # Delta rows reuse the sbdb-raw v1 21-column layout exactly, so the C++
 # converter consumes overlay shards with zero changes.
 DELTA_ROW_FIELDS = DEFAULT_FIELDS
+
+# Covariance overlay columns: the covariance epoch, the cometary elements
+# at that epoch (angles in degrees, as delivered), and the packed upper
+# triangle of the 6x6 covariance in {e, q, tp, node, peri, i} (row-major).
+COV_LABELS = ["e", "q", "tp", "node", "peri", "i"]
+COV_FIELDS = (["cov_epoch", "cov_e", "cov_q", "cov_tp", "cov_om", "cov_w", "cov_i"] +
+              [f"cov_{i}{j}" for i in range(6) for j in range(i, 6)])
 
 USER_AGENT = ("prometheia-fetch/0.1.0 "
               "(Ephemeris Prometheia catalog build; strictly sequential, "
@@ -111,13 +125,43 @@ def fetch_page(kind: str, fields: list[str], limit_from: int, page_size: int,
     return doc
 
 
-def fetch_single(spkid: int) -> dict:
-    """One body, full precision, via the single-object endpoint."""
+def fetch_single(spkid, covariance: bool = False) -> dict:
+    """One body, full precision, via the single-object endpoint. `spkid` may
+    be any SBDB search string (designation, number, name)."""
     params = [("sstr", str(spkid)), ("full-prec", "1"), ("phys-par", "True")]
+    if covariance:
+        params.append(("cov", "mat"))
     doc = http_get_json(f"{SINGLE_URL}?{urllib.parse.urlencode(params)}")
     if "code" in doc and doc.get("code") not in (200, None):
         raise RuntimeError(f"SBDB error for {spkid}: {doc.get('message', doc)}")
+    if "object" not in doc:
+        raise RuntimeError(f"SBDB found no unique object for {spkid!r}: "
+                           f"{doc.get('message') or list(doc.keys())}")
     return doc
+
+
+def covariance_cells(doc: dict) -> list[str]:
+    """The COV_FIELDS cells of one sbdb.api response, or empty cells when the
+    orbit publishes no covariance. Extra labels beyond the six elements
+    (non-gravitational parameters) are marginalized by dropping their rows
+    and columns; the six must come first, in COV_LABELS order."""
+    cov = (doc.get("orbit") or {}).get("covariance")
+    if not cov:
+        return [""] * len(COV_FIELDS)
+    labels = cov.get("labels") or []
+    if labels[:6] != COV_LABELS:
+        raise RuntimeError(f"unexpected covariance labels {labels}")
+    values = {e.get("name"): e.get("value") for e in cov.get("elements") or []}
+    cells = [str(cov.get("epoch", ""))]
+    for name in ("e", "q", "tp", "om", "w", "i"):
+        cells.append(str(values.get(name, "")).strip())
+    data = cov.get("data") or []
+    for i in range(6):
+        for j in range(i, 6):
+            cells.append(str(data[i][j]).strip())
+    if any(c == "" for c in cells):
+        raise RuntimeError("incomplete covariance block")
+    return cells
 
 
 def sbdb_single_to_row(doc: dict) -> list[str]:
@@ -152,14 +196,25 @@ def sbdb_single_to_row(doc: dict) -> list[str]:
         v = p.get("value")
         return "" if v is None else str(v)
 
+    # sbdb.api has no bare proper-name field: shortname is "<des> <name>"
+    # ("1 Ceres") or the designation alone ("(2005 RM43)"); the query API's
+    # `name` column is just "Ceres". Derive the same value.
+    des = clean(obj.get("des"))
+    shortname = clean(obj.get("shortname"))
+    proper = ""
+    if shortname.startswith(des + " "):
+        proper = shortname[len(des) + 1:].strip()
+    elif shortname not in (des, f"({des})"):
+        proper = shortname
+
     orbit_class = obj.get("orbit_class")
     if isinstance(orbit_class, dict):
         orbit_class = orbit_class.get("code", "")
     row = [
         clean(obj.get("kind")),
         clean(obj.get("spkid")),
-        clean(obj.get("des")),
-        clean(obj.get("shortname")),
+        des,
+        proper,
         clean(orbit_class),
         clean(orb.get("epoch")),
     ]
@@ -362,6 +417,68 @@ def delta(args) -> int:
     return 0
 
 
+def covariance(args) -> int:
+    """On-demand covariance overlay: one sbdb.api request per designation."""
+    wanted = list(args.covariance)
+    if args.covariance_file:
+        for line in Path(args.covariance_file).read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                wanted.append(line)
+    if not wanted:
+        print("no designations given", file=sys.stderr)
+        return 2
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = out_dir / "manifest-covariance.json"
+    manifest = {"schema": "prometheia-covariance v1", "fetched": {}}
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text())
+    shard = out_dir / "covariance.tsv"
+    if not shard.exists():
+        with shard.open("w", encoding="utf-8", newline="") as fh:
+            fh.write("# fields: kind\t" + "\t".join(DEFAULT_FIELDS + COV_FIELDS) + "\n")
+
+    started = utc_now()
+    fetched = 0
+    for des in wanted:
+        if des in manifest["fetched"]:
+            continue
+        if fetched and args.delay > 0:
+            time.sleep(args.delay)
+        doc = fetch_single(des, covariance=True)
+        fetched += 1
+        row = sbdb_single_to_row(doc) + covariance_cells(doc)
+        with shard.open("a", encoding="utf-8", newline="") as fh:
+            fh.write("\t".join(row) + "\n")
+        orb = doc.get("orbit", {})
+        manifest["fetched"][des] = {
+            "spkid": doc["object"].get("spkid"),
+            "orbit_id": orb.get("orbit_id"),
+            "covariance_epoch": (orb.get("covariance") or {}).get("epoch"),
+            "fetched_at_utc": utc_now(),
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=1))
+        note = "" if orb.get("covariance") else " (no covariance published)"
+        print(f"  {des}: spkid {doc['object'].get('spkid')} orbit {orb.get('orbit_id')}{note}")
+
+    write_provenance(out_dir, {
+        "schema": "prometheia-covariance v1",
+        "source": "JPL SBDB single-object API (sbdb.api), cov=mat",
+        "url": SINGLE_URL,
+        "started_utc": started,
+        "finished_utc": utc_now(),
+        "fields": ",".join(DEFAULT_FIELDS + COV_FIELDS),
+        "kinds": "a,c",
+        "page_size": "1",
+        "pages": str(len(manifest["fetched"])),
+        "count": str(len(manifest["fetched"])),
+        "tool": "prometheia-fetch 0.1.0",
+    })
+    print(f"covariance overlay: {len(manifest['fetched'])} bodies -> {shard}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out-dir", default="sbdb-raw")
@@ -387,7 +504,15 @@ def main() -> int:
     ap.add_argument("--max-delta", type=int, default=1000,
                     help="refetch at most this many changed bodies per delta "
                          "run; beyond it, insist on a full pull (default 1000)")
+    ap.add_argument("--covariance", nargs="*", default=[],
+                    help="designations to fetch full orbit covariance for "
+                         "(one sbdb.api request each)")
+    ap.add_argument("--covariance-file", default="",
+                    help="file of designations, one per line (# comments)")
     args = ap.parse_args()
+
+    if args.covariance or args.covariance_file:
+        return covariance(args)
 
     if args.delta_prev:
         if not args.delta_out:

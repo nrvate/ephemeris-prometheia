@@ -17,3 +17,4 @@ ephe/
 eop-raw/
 __pycache__/
 horizons-raw/
+cov-raw*/

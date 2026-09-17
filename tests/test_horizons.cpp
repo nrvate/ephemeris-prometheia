@@ -84,8 +84,9 @@ std::string env_or(const char* var, const std::string& fallback) {
     return (env && *env) ? std::string(env) : fallback;
 }
 
-// The shared engine (DE440 + the in-tree sample catalog), or nullptr when
-// the DE440 binary is absent.
+// The shared engine (DE440 + the in-tree sample catalog + the covariance
+// overlay for the corpus bodies and Rumina), or nullptr when the DE440
+// binary is absent.
 Engine* engine() {
     static std::unique_ptr<Engine> e;
     static bool tried = false;
@@ -101,7 +102,9 @@ Engine* engine() {
         if (!opened.ok())
             return nullptr;
         e = std::make_unique<Engine>(std::move(opened).value());
-        if (!e->add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm").ok())
+        const std::string data = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/";
+        if (!e->add_catalog(data + "sample-100.epm").ok() ||
+            !e->add_catalog(data + "covariance-7.epm").ok())
             e.reset();
     }
     return e.get();
@@ -322,6 +325,40 @@ TEST_CASE("horizons_small_bodies") {
     at_epoch.print("small bodies astrometric, element epoch", "\"");
     ten_years.print("small bodies astrometric, +-10 years", "\"");
     seed_km.print("small bodies heliocentric, element epoch", "km");
+}
+
+// sigma_arcsec (the propagated full JPL covariance) against Horizons' own
+// 3-sigma plane-of-sky uncertainty, within 10 years of the element epoch.
+// POS_3sigma is the root-sum-square of the error ellipse's semi-axes while
+// sigma_arcsec is the major semi-axis, so JPL / (3 sigma) lies in [1, sqrt 2];
+// JPL prints 0.001" steps, which dominates below ~0.02".
+TEST_CASE("horizons_sigma_calibration") {
+    Engine* e = engine();
+    if (!e)
+        return;
+    Worst worst_ratio;
+    int checked = 0;
+    for (const HorizonsObs& h : kHorizonsObs) {
+        const double years = std::fabs(h.jd_tt - kSmallEpoch) / 365.25;
+        if (!is_small(h) || years > 10.5 || std::isnan(h.pos_3s))
+            continue;
+        CalcOptions o = options_for(h, true);
+        auto r = e->calc(h.body, h.jd_tt, o);
+        REQUIRE(r.ok());
+        REQUIRE(r.value().sigma_arcsec.has_value());
+        const double ours3 = 3.0 * *r.value().sigma_arcsec;
+        CHECK(ours3 <= h.pos_3s + 0.0006);
+        CHECK(ours3 * std::sqrt(2.0) >= h.pos_3s - 0.0006);
+        if (h.pos_3s >= 0.02) {
+            const double ratio = h.pos_3s / ours3;
+            worst_ratio.add(ratio - 1.0, h);
+            CHECK(ratio > 0.97);
+            CHECK(ratio < 1.45);
+        }
+        ++checked;
+    }
+    CHECK(checked == 21); // 7 bodies x 3 epochs
+    worst_ratio.print("JPL pos 3-sigma / ours - 1 (>= 0.02\")", "");
 }
 
 // Report only (seconds: +-100-year integrations and the sigma tracks).
