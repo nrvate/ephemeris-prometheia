@@ -14,7 +14,9 @@
 //   3. Gravitational deflection by the Sun, then relativistic annual
 //      (and diurnal, when topocentric) aberration.
 //   4. ICRF -> frame bias -> IAU 2006 precession -> IAU 2000A nutation
-//      as the requested frame demands, then spherical coordinates.
+//      as the requested frame demands, then spherical coordinates; a
+//      sidereal option then rotates the longitude zero point by the
+//      zodiac's ayanamsha.
 // Rates come from central differences of the whole pipeline (h = 0.001
 // day), so they are rates of the *apparent* coordinates.
 //
@@ -79,15 +81,32 @@ enum class Coords {
     Equatorial, // right ascension, declination
 };
 
+// Sidereal zodiac for the output. Tropical (the default) answers plain
+// positions; the other modes subtract the zodiac's ayanamsha from the
+// ecliptic longitude of date. The integer values of the published
+// modes follow the Swiss Ephemeris command-line numbering (swetest
+// -ay<mode>). User anchors the zodiac at an explicit epoch and value
+// (CalcOptions::sidereal_epoch_jtdb, sidereal_ayanamsa_deg — the MEAN
+// ayanamsha at that TT epoch).
+enum class SiderealMode : int {
+    Tropical = -1,
+    FaganBradley = 0,
+    Lahiri = 1,
+    User = 255,
+};
+
 struct CalcOptions {
     Center center = Center::Geocentric;
     Frame frame = Frame::TrueOfDate;
     Coords coords = Coords::Ecliptic;
-    bool light_time = true; // retarded position of the body
-    bool deflection = true; // Sun's gravitational light bending
-    bool aberration = true; // observer-velocity aberration
-    bool speed = true;      // compute daily rates (3x the work)
-    frames::GeoSite site{}; // Center::Topocentric only
+    SiderealMode sidereal = SiderealMode::Tropical;
+    double sidereal_epoch_jtdb = 0.0;   // SiderealMode::User anchor epoch
+    double sidereal_ayanamsa_deg = 0.0; // SiderealMode::User anchor value
+    bool light_time = true;             // retarded position of the body
+    bool deflection = true;             // Sun's gravitational light bending
+    bool aberration = true;             // observer-velocity aberration
+    bool speed = true;                  // compute daily rates (3x the work)
+    frames::GeoSite site{};             // Center::Topocentric only
 
     // Presets. apparent(): what an observer sees, in the true equinox of
     // date. astrometric(): light time only (ICRF-style catalogue place).
@@ -142,6 +161,13 @@ struct CalcResult {
     // rotations, so this is frame-independent and ignores the
     // light-optics corrections (deflection, aberration).
     std::optional<double> sigma_arcsec;
+
+    // The longitude shift applied for a sidereal output (degrees): the
+    // zodiac's true ayanamsha in the of-date frames, its mean value for
+    // the J2000/ICRF frames (whose ecliptic is the mean ecliptic of
+    // J2000, where the ayanamsha has a fixed value). Absent for a
+    // tropical request.
+    std::optional<double> ayanamsa_deg;
 };
 
 class Engine {

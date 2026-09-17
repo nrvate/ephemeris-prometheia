@@ -21,6 +21,8 @@
 #ifndef PROMETHEIA_FRAMES_HPP
 #define PROMETHEIA_FRAMES_HPP
 
+#include <optional>
+
 namespace prometheia::frames {
 
 // The 14 fundamental arguments (radians, [0, 2pi)): eight planetary mean
@@ -58,6 +60,34 @@ void mean_ecliptic_of_date_matrix(double jd_tt, double m[9]);
 // Ecliptic of date (mean plane) with the true equinox as origin: the
 // classical "apparent longitude" frame.
 void true_ecliptic_of_date_matrix(double jd_tt, double m[9]);
+
+// --- Sidereal zodiacs (ayanamshas) ----------------------------------
+
+// A sidereal zodiac is the ecliptic of date with its longitude origin
+// moved west by the ayanamsha. Published zodiacs anchor the ayanamsha
+// at one epoch; away from it the value grows with the IAU 2006 general
+// precession in longitude (mean), and the true ayanamsha adds the
+// nutation in longitude. Both are measured on the ecliptic of date,
+// the traditional realization (verified against the Swiss Ephemeris
+// output to <= 0.08" over 1600-2400, docs/ENGINE.md).
+struct Ayanamsa {
+    double mean_deg; // precession only
+    double true_deg; // mean + nutation in longitude
+};
+
+// The published zodiacs by their conventional numbering (the Swiss
+// Ephemeris command-line -ay<mode>): 0 Fagan/Bradley, 1 Lahiri.
+// nullopt for any other mode.
+std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt);
+
+// A user-anchored zodiac: the MEAN ayanamsha is ayan0_mean_deg at the
+// TT epoch t0_jtdb (the same convention as the Swiss Ephemeris
+// -sidudef anchor).
+Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt);
+
+// IAU 2006 general precession in longitude from J2000 (degrees): the
+// motion of the mean equinox along the ecliptic of date.
+double precession_in_longitude_deg(double jd_tt);
 
 // --- Sidereal time --------------------------------------------------
 

@@ -39,6 +39,8 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
   light time applied. `sigma_arcsec` is empty for planets — the DE files
   publish no per-epoch covariance — and is filled by the catalog overlay
   for small bodies whose records carry element sigmas (below).
+  `ayanamsa_deg` carries the longitude shift applied for a sidereal
+  request (absent for a tropical one).
 - **Threading:** an `Engine` caches ephemeris records and the frame
   matrices of the last three epochs; it is not safe for concurrent use.
   One engine per thread; there is no global state.
@@ -50,6 +52,7 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
 | `center` | `Geocentric`, `Topocentric` (+ `site`, WGS84), `Heliocentric`, `Barycentric` | geocentric |
 | `frame` | `ICRF`, `J2000` (ICRF + frame bias), `MeanOfDate` (+ IAU 2006 precession), `TrueOfDate` (+ IAU 2000A nutation) | true of date |
 | `coords` | `Ecliptic`, `Equatorial` | ecliptic |
+| `sidereal` | `Tropical`, `FaganBradley`, `Lahiri`, `User` (+ `sidereal_epoch_jtdb`, `sidereal_ayanamsa_deg`) | tropical |
 | `light_time`, `deflection`, `aberration` | independent switches | all on |
 | `speed` | rates by central difference (3× the work) | on |
 
@@ -60,6 +63,46 @@ Ecliptic output in `ICRF` and `J2000` uses the J2000 mean obliquity
 (84381.406″); in the date frames the mean obliquity of date. The true
 ecliptic of date is the mean ecliptic plane with the true equinox — the
 ecliptic does not nutate, only the equinox slides by Δψ ([FRAMES.md](FRAMES.md)).
+
+## Sidereal output (ayanamshas)
+
+`CalcOptions::sidereal` selects a sidereal zodiac for the output:
+`FaganBradley` and `Lahiri` (numbered like swetest's `-ay<mode>`), or
+`User`, anchored at `sidereal_epoch_jtdb` / `sidereal_ayanamsa_deg` —
+the **mean** ayanamsha at that TT epoch, the same convention as
+swetest's `-sidudef`. The ayanamsha at the query epoch is the anchor
+value plus the IAU 2006 general precession in longitude accumulated
+since (mean), plus the nutation in longitude (true), measured on the
+ecliptic of date — the traditional realization
+([FRAMES.md](FRAMES.md)).
+
+Applied to the output:
+
+- the **of-date frames** rotate the ecliptic longitude zero point west
+  by the ayanamsha — the true ayanamsha in the true frames, the mean in
+  the mean frames. Latitude and distance are untouched; the daily rates
+  carry the ayanamsha motion (~50.3″/yr).
+- **ICRF / J2000** output places the zodiac's zero point at its fixed
+  longitude on the mean ecliptic of J2000: one constant offset from the
+  tropical output at every epoch.
+- **equatorial** output is the same longitude rotation about the
+  ecliptic pole: (λ − ayanamsha, β) converted through the frame's
+  obliquity.
+
+`CalcResult::ayanamsa_deg` reports the shift that was applied. Two
+deliberate differences from the Swiss Ephemeris, both measured on its
+output: its sidereal right ascension/declination columns are not
+shifted at all (the ayanamsha reaches only the ecliptic longitude, and
+the positions drop nutation — they are mean-of-date tropical), and its
+sidereal J2000 output subtracts ayanamsha(t) + p_A(t), the of-date
+ayanamsha inside a J2000 frame; ours keeps the fixed zero point.
+
+The anchor instants are the published definitions — Fagan/Bradley,
+1 Jan 1950; Lahiri, 21 Mar 1956 0h TD (the Calendar Reform Committee
+epoch, IAE 1985). The tabulated anchor *values* are the Swiss Ephemeris
+output at those instants: the constants quoted in the literature for
+the same instants (24°02′31.36″ and 23°15′00″.658) differ from its own
+output by 3.7″ and 0.14″ — more than any model difference over ±200 yr.
 
 ## Pipeline
 
@@ -226,6 +269,19 @@ case:
 
 A JPL Horizons corpus (M5) will be the independent referee for the
 topocentric and heliocentric cases.
+
+**Sidereal ayanamshas** (`tests/sidereal_fixtures.inc`, from
+`tools/gen/gen_sidereal_fixtures.py`; swetest `-ay<mode>` and
+`-sid<mode>` on the same DE440, output-only oracle): the ayanamshas
+themselves agree to **0.0026″** over 1800–2200 (0.001″ since 1900 —
+the residual is SWE's long-term precession model against IAU 2006, a
+time-only difference identical for both modes), and apparent sidereal
+positions of the Sun, Moon and planets to **0.0034″**. The synthetic
+tests additionally pin the conventions: sidereal longitude is the
+tropical minus the ayanamsha exactly, the mean frames shift by the mean
+value, equatorial sidereal output is the same rotation about the
+ecliptic pole, and J2000 sidereal keeps one fixed offset from J2000
+tropical.
 
 **Catalog overlay, DE440 against the Swiss Ephemeris asteroid file**
 (`tests/test_engine_catalog.cpp`, `PROMETHEIA_DE440`; fixtures from

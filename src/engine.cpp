@@ -849,6 +849,38 @@ struct Engine::Impl {
         return std::sqrt(std::max(lambda, 0.0)) / d * kRad2Deg * 3600.0;
     }
 
+    // The sidereal zodiac's longitude shift (degrees) for the output
+    // frame at jd_tt: the true ayanamsha in the true ecliptic of date,
+    // the mean ayanamsha in the mean frames, and for the fixed frames
+    // (J2000, ICRF) the zero point's fixed longitude on the mean
+    // ecliptic of J2000. Error for an unknown mode or a non-finite
+    // user anchor.
+    Result<double> sidereal_shift(const CalcOptions& o, double jd_tt) const {
+        std::optional<frames::Ayanamsa> aya;
+        if (o.sidereal == SiderealMode::User) {
+            if (!std::isfinite(o.sidereal_epoch_jtdb) || !std::isfinite(o.sidereal_ayanamsa_deg))
+                return make_error(ErrorCode::ArgumentError, "sidereal User anchor is not finite");
+            aya = frames::ayanamsa_anchored(o.sidereal_epoch_jtdb, o.sidereal_ayanamsa_deg, jd_tt);
+        } else {
+            aya = frames::ayanamsa(int(o.sidereal), jd_tt);
+            if (!aya)
+                return make_error(ErrorCode::ArgumentError, "unknown sidereal mode");
+        }
+        switch (o.frame) {
+        case Frame::TrueOfDate:
+            return aya->true_deg;
+        case Frame::MeanOfDate:
+            return aya->mean_deg;
+        case Frame::J2000:
+        case Frame::ICRF:
+            // The zodiac's zero point has a fixed longitude on the mean
+            // ecliptic of J2000: the ayanamsha less the precession
+            // accumulated since J2000.
+            return aya->mean_deg - frames::precession_in_longitude_deg(jd_tt);
+        }
+        return make_error(ErrorCode::ArgumentError, "unknown frame");
+    }
+
     // Body barycentric position at jd_tdb - tau. The subtraction is done
     // with its exact rounding error recovered (TwoSum) and applied through
     // the velocity: a JD double near the present only resolves ~40 us,
@@ -954,6 +986,44 @@ struct Engine::Impl {
             break;
         }
         }
+        // Sidereal zodiac: rotate the output ecliptic's longitude zero
+        // point west by the ayanamsha (equatorial output: the same
+        // rotation about the ecliptic pole, expressed through the
+        // frame's ecliptic-to-equator obliquity).
+        if (o.sidereal != SiderealMode::Tropical) {
+            auto s = sidereal_shift(o, jd_tt);
+            if (!s)
+                return s.error();
+            double a[9], t[9];
+            // rot3(theta) moves longitudes by -theta, so a positive
+            // ayanamsha rotates the zero point west as required.
+            rot3(s.value() / kRad2Deg, a);
+            if (o.coords == Coords::Ecliptic) {
+                matmul(a, m, m);
+            } else {
+                double eps = 0.0;
+                switch (o.frame) {
+                case Frame::TrueOfDate: {
+                    const EpochFrames& f = frames_at(jd_tt, true);
+                    eps = f.eps_mean + f.deps;
+                    break;
+                }
+                case Frame::MeanOfDate:
+                    eps = frames_at(jd_tt, false).eps_mean;
+                    break;
+                case Frame::J2000:
+                case Frame::ICRF:
+                    eps = eps_j2000;
+                    break;
+                }
+                double b[9];
+                rot1(eps, b);
+                matmul(a, b, t);
+                rot1(-eps, b);
+                matmul(b, t, t);
+                matmul(t, m, m);
+            }
+        }
         apply(m, p, out);
         return {};
     }
@@ -1053,6 +1123,12 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
                                 : std::string_view(impl_->source->description);
     res.provenance.denum = impl_->source->denum;
     res.provenance.light_time_days = tau;
+    if (o.sidereal != SiderealMode::Tropical) {
+        auto s = impl_->sidereal_shift(o, jd_tt);
+        if (!s)
+            return s.error();
+        res.ayanamsa_deg = s.value();
+    }
     if (from_catalog)
         res.sigma_arcsec = impl_->sigma_arcsec(id, o, jd_tt, tau);
     return res;

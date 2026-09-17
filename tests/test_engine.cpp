@@ -79,6 +79,14 @@ double wrap180(double d) {
     return d;
 }
 
+double wrap360(double d) {
+    while (d < 0.0)
+        d += 360.0;
+    while (d >= 360.0)
+        d -= 360.0;
+    return d;
+}
+
 // ---------------------------------------------------------------------------
 // Part A1: primitives.
 // ---------------------------------------------------------------------------
@@ -387,6 +395,127 @@ TEST(engine_calc_ut_uses_delta_t) {
     CHECK(c.ok() && c.value().pos.lon_deg != a.value().pos.lon_deg);
 }
 
+TEST(ayanamsa_functions_consistency) {
+    // The true ayanamsha is the mean plus the nutation in longitude; a
+    // user anchor placed at a mode's mean value reproduces that mode;
+    // the mean rate is the IAU 2006 precession in longitude; unknown
+    // modes are absent.
+    const double t = 2451234.5;
+    for (int mode : {0, 1}) {
+        auto a = frames::ayanamsa(mode, t);
+        CHECK(a.has_value());
+        double dpsi, deps;
+        frames::nutation(t, dpsi, deps);
+        CHECK(std::fabs(a->true_deg - a->mean_deg - dpsi / kDeg2Rad) < 1e-12);
+
+        const double t_ref = 2450600.5;
+        auto ref = frames::ayanamsa(mode, t_ref);
+        auto anchored = frames::ayanamsa_anchored(t_ref, ref->mean_deg, t);
+        CHECK(std::fabs(anchored.mean_deg - a->mean_deg) < 1e-12);
+        CHECK(std::fabs(anchored.true_deg - a->true_deg) < 1e-12);
+    }
+    CHECK(!frames::ayanamsa(7, t).has_value());
+
+    // ~50.29"/yr at J2000, quadratic in T.
+    auto lo = frames::ayanamsa(0, kJ2000 - 1826.25);
+    auto hi = frames::ayanamsa(0, kJ2000 + 1826.25);
+    const double rate_as = (hi->mean_deg - lo->mean_deg) / 10.0 * 3600.0;
+    std::printf("  d(mean ayanamsha)/dt at J2000: %.4f\"/yr\n", rate_as);
+    CHECK(rate_as > 50.27 && rate_as < 50.31);
+}
+
+TEST(sidereal_output_consistency) {
+    TempFile tf("engine-sid");
+    Engine e = open_synthetic(tf);
+    const double t = kJ2000 + 1234.5;
+
+    // Sidereal ecliptic of date = tropical minus the true ayanamsha,
+    // latitude and distance untouched; the reported ayanamsa is the
+    // applied shift; the rates carry the ayanamsha motion.
+    CalcOptions trop = CalcOptions::apparent();
+    CalcOptions sid = trop;
+    sid.sidereal = SiderealMode::Lahiri;
+    auto tr = e.calc(body::kSun, t, trop);
+    auto sd = e.calc(body::kSun, t, sid);
+    CHECK(tr.ok() && sd.ok());
+    auto aya = frames::ayanamsa(1, t);
+    CHECK(sd.value().ayanamsa_deg.has_value());
+    CHECK(std::fabs(*sd.value().ayanamsa_deg - aya->true_deg) < 1e-12);
+    CHECK(std::fabs(sd.value().pos.lon_deg - wrap360(tr.value().pos.lon_deg - aya->true_deg)) <
+          1e-12);
+    // The rotation preserves latitude and distance to rounding.
+    CHECK(std::fabs(sd.value().pos.lat_deg - tr.value().pos.lat_deg) < 1e-12);
+    CHECK(std::fabs(sd.value().pos.dist_au - tr.value().pos.dist_au) <
+          1e-12 * tr.value().pos.dist_au);
+
+    const double h = 0.01;
+    auto am = frames::ayanamsa(1, t - h), ap = frames::ayanamsa(1, t + h);
+    const double daya = (ap->true_deg - am->true_deg) / (2 * h);
+    // The gate allows the nutation curvature between this window and
+    // the engine's +/-0.001 day differencing window.
+    CHECK(std::fabs((tr.value().pos.lon_speed - sd.value().pos.lon_speed) - daya) < 1e-8);
+    CHECK(std::fabs(sd.value().pos.lat_speed - tr.value().pos.lat_speed) < 1e-12);
+
+    // Equatorial sidereal output: the same longitude rotation about
+    // the ecliptic pole, i.e. (lon - ayanamsa, lat) converted with the
+    // true obliquity.
+    CalcOptions sideq = sid;
+    sideq.coords = Coords::Equatorial;
+    auto sq = e.calc(body::kSun, t, sideq);
+    CHECK(sq.ok());
+    double dpsi, deps;
+    frames::nutation(t, dpsi, deps);
+    const double et = frames::mean_obliquity(t) + deps; // radians, true
+    const double lon = sd.value().pos.lon_deg * kDeg2Rad, lat = sd.value().pos.lat_deg * kDeg2Rad;
+    const double ce = std::cos(et), se = std::sin(et);
+    const double x = std::cos(lat) * std::cos(lon), y = std::cos(lat) * std::sin(lon),
+                 z = std::sin(lat);
+    const double ra = std::atan2(y * ce - z * se, x) / kDeg2Rad;
+    const double dec = std::asin(y * se + z * ce) / kDeg2Rad;
+    CHECK(std::fabs(wrap180(sq.value().pos.lon_deg - wrap360(ra))) < 1e-9);
+    CHECK(std::fabs(sq.value().pos.lat_deg - dec) < 1e-9);
+
+    // The mean-of-date frames shift by the mean ayanamsha (no nutation
+    // on either side of the subtraction).
+    CalcOptions mod = trop, mods = trop;
+    mod.frame = mods.frame = Frame::MeanOfDate;
+    mods.sidereal = SiderealMode::Lahiri;
+    auto mm = e.calc(body::kSun, t, mod);
+    auto ms = e.calc(body::kSun, t, mods);
+    CHECK(mm.ok() && ms.ok());
+    CHECK(std::fabs(ms.value().pos.lon_deg - wrap360(mm.value().pos.lon_deg - aya->mean_deg)) <
+          1e-12);
+    CHECK(std::fabs(*ms.value().ayanamsa_deg - aya->mean_deg) < 1e-12);
+
+    // J2000 sidereal keeps one fixed offset from J2000 tropical (the
+    // zodiac's zero point is fixed on the mean ecliptic of J2000).
+    CalcOptions j2 = CalcOptions::geometric();
+    j2.frame = Frame::J2000;
+    CalcOptions j2s = j2;
+    j2s.sidereal = SiderealMode::FaganBradley;
+    j2.speed = j2s.speed = false;
+    double offs0 = 0.0;
+    for (double dt : {0.0, 400.0, -3000.0}) {
+        auto a = e.calc(body::kJupiter, t + dt, j2);
+        auto b = e.calc(body::kJupiter, t + dt, j2s);
+        CHECK(a.ok() && b.ok());
+        CHECK(b.value().ayanamsa_deg.has_value());
+        const double off = wrap180(b.value().pos.lon_deg - a.value().pos.lon_deg);
+        if (dt == 0.0)
+            offs0 = off;
+        CHECK(std::fabs(off - offs0) < 1e-9);
+    }
+
+    // Error paths: unknown mode, non-finite user anchor.
+    CalcOptions bad = trop;
+    bad.sidereal = static_cast<SiderealMode>(7);
+    CHECK(!e.calc(body::kSun, t, bad).ok());
+    bad = trop;
+    bad.sidereal = SiderealMode::User;
+    bad.sidereal_ayanamsa_deg = std::nan("");
+    CHECK(!e.calc(body::kSun, t, bad).ok());
+}
+
 // ---------------------------------------------------------------------------
 // Part B: DE440 against the swetest fixtures.
 // ---------------------------------------------------------------------------
@@ -402,6 +531,7 @@ enum class Mode {
 };
 
 #include "engine_fixtures.inc"
+#include "sidereal_fixtures.inc"
 
 std::string env_or(const char* var, const std::string& fallback) {
     const char* env = std::getenv(var);
@@ -553,6 +683,59 @@ TEST(de440_engine_rates_match_differenced_swetest) {
     CHECK(worst_lon < 5e-6);
     CHECK(worst_lat < 5e-6);
     CHECK(worst_dist < 1e-7);
+}
+
+TEST(de440_sidereal_matches_swetest) {
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    if (!opened)
+        return;
+    Engine e = std::move(opened).value();
+
+    // The ayanamshas themselves: our IAU 2006 p_A + IAU 2000A series
+    // against the -ay<m> output (SWE's precession is its long-term
+    // model; the residual is a time-only difference, identical for both
+    // modes, <= 0.08" over 1800-2200).
+    double worst_ayan = 0.0, worst_ayan_1800 = 0.0;
+    for (const AyanamsaFixture& f : kAyanamsaFixtures) {
+        auto a = frames::ayanamsa(f.mode, f.jd_tt);
+        CHECK(a.has_value());
+        if (!a)
+            continue;
+        const double d = std::fabs(a->true_deg - f.deg) * 3600.0;
+        worst_ayan = std::max(worst_ayan, d);
+        if (f.jd_tt < 2420000.0)
+            worst_ayan_1800 = std::max(worst_ayan_1800, d);
+    }
+    std::printf("  ayanamsha vs -ay<mode>: %.4f\" overall, %.4f\" since 1900\n", worst_ayan,
+                worst_ayan_1800);
+    CHECK(worst_ayan < 0.15);
+    CHECK(worst_ayan_1800 < 0.04);
+
+    // Sidereal apparent positions (the traditional realization:
+    // tropical true-of-date longitude minus the true ayanamsha).
+    double worst_pos = 0.0, worst_moon = 0.0;
+    for (const SiderealFixture& f : kSiderealFixtures) {
+        CalcOptions o = CalcOptions::apparent();
+        o.sidereal = f.mode == 0 ? SiderealMode::FaganBradley : SiderealMode::Lahiri;
+        o.speed = false;
+        auto r = e.calc(f.body, f.jd_tt, o);
+        CHECK(r.ok());
+        if (!r)
+            continue;
+        const double sep = sep_as(r.value().pos.lon_deg, r.value().pos.lat_deg, f.lon, f.lat);
+        if (f.body == body::kMoon)
+            worst_moon = std::max(worst_moon, sep);
+        else
+            worst_pos = std::max(worst_pos, sep);
+    }
+    std::printf("  sidereal positions vs -sid<mode>: Sun/planets %.4f\", Moon %.4f\"\n", worst_pos,
+                worst_moon);
+    // The ayanamsha model difference plus the apparent-place pipeline
+    // (<= 0.005", above).
+    CHECK(worst_pos < 0.2);
+    CHECK(worst_moon < 0.2);
 }
 
 TEST(de440_binary_and_spk_agree_through_engine) {

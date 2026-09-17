@@ -53,6 +53,15 @@ so that `R1(ε)` converts equatorial components to ecliptic components.
   drives the equinox.
 - **Topocentric:** WGS84 geodetic → geocentric, rotated into the
   true-equator-of-date frame by GAST. Polar motion (≤0.3″) neglected.
+- **Ayanamshas** (`ayanamsa`, `ayanamsa_anchored`): the mean ayanamsha
+  is the anchor value plus the IAU 2006 general precession in longitude
+  p_A = 5028.796195″·T + 1.1054348″·T² + … (Capitaine et al. 2003)
+  accumulated since the anchor epoch, measured on the ecliptic of date
+  — the traditional sidereal realization; the true ayanamsha adds Δψ.
+  Anchor instants and values, and the engine-side conventions:
+  [ENGINE.md](ENGINE.md). Against swetest's `-ay<mode>` output the mean
+  series differs only by SWE's precession model: 0.0026″ over
+  1800–2200.
 
 ## Validation
 

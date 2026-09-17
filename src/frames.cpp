@@ -174,6 +174,58 @@ double mean_obliquity(double jd_tt) {
     return as * kAs2Rad;
 }
 
+// --- Sidereal zodiacs ------------------------------------------------
+
+namespace {
+
+constexpr double kRad2Deg = 180.0 / 3.14159265358979323846;
+
+// IAU 2006 general precession in longitude p_A (Capitaine et al. 2003),
+// arcseconds from J2000: the motion of the mean equinox along the
+// ecliptic of date.
+double precession_in_longitude_arcsec(double T) {
+    return 5028.796195 * T + 1.1054348 * T * T + 0.00007964 * T * T * T -
+           0.000023856 * T * T * T * T;
+}
+
+// Published anchors: the TT epoch of the definition and the MEAN
+// ayanamsha there (the true value at the epoch less the nutation in
+// longitude of the series above). The instants follow the published
+// definitions; the values are the Swiss Ephemeris true ayanamsha at
+// those instants (24°02'27.6547" at 1 Jan 1950, 23°15'00.7963" at
+// 21 Mar 1956, both 0:00 TT) — the constants traditionally quoted for
+// the same instants (24°02'31.36" and 23°15'00".658) differ from the
+// Swiss Ephemeris output; see docs/ENGINE.md.
+struct AyanAnchor {
+    double t0_jtdb;
+    double mean0_deg;
+};
+constexpr AyanAnchor kAyanAnchors[] = {
+    {2433282.5, 24.0419327432}, // Fagan/Bradley: 1 Jan 1950
+    {2435553.5, 23.2455606650}, // Lahiri: 21 Mar 1956
+};
+
+} // namespace
+
+double precession_in_longitude_deg(double jd_tt) {
+    return precession_in_longitude_arcsec(centuries(jd_tt)) / 3600.0;
+}
+
+Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt) {
+    const double mean =
+        ayan0_mean_deg + precession_in_longitude_deg(jd_tt) - precession_in_longitude_deg(t0_jtdb);
+    double dpsi, deps;
+    nutation(jd_tt, dpsi, deps);
+    return Ayanamsa{mean, mean + dpsi * kRad2Deg};
+}
+
+std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt) {
+    if (mode < 0 || size_t(mode) >= sizeof kAyanAnchors / sizeof kAyanAnchors[0])
+        return std::nullopt;
+    const AyanAnchor& a = kAyanAnchors[mode];
+    return ayanamsa_anchored(a.t0_jtdb, a.mean0_deg, jd_tt);
+}
+
 void frame_bias_matrix(double m[9]) {
     // B = R1(-eta0) R2(xi0) R3(d_alpha0).
     const double da0 = -0.01460 * kAs2Rad;
