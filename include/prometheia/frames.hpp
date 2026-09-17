@@ -100,6 +100,10 @@ double earth_rotation_angle(double jd_ut1);
 double gmst_rad(double jd_ut1, double jd_tt);
 double equation_of_equinoxes_rad(double jd_tt);
 double gast_rad(double jd_ut1, double jd_tt);
+// The same with the nutation in longitude and mean obliquity of date already
+// in hand (the series is the expensive part), bit-identical to the above.
+double equation_of_equinoxes_rad(double jd_tt, double dpsi, double eps_mean);
+double gast_rad(double jd_ut1, double jd_tt, double dpsi, double eps_mean);
 
 // --- Topocentric helper ---------------------------------------------
 

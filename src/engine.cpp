@@ -622,7 +622,7 @@ struct Engine::Impl {
                 return r;
             const EpochFrames& f = frames_at(jd_tt, true);
             const double jd_ut1 = jd_tt - delta_t_seconds(jd_tt) / 86400.0;
-            const double gast = frames::gast_rad(jd_ut1, jd_tt);
+            const double gast = frames::gast_rad(jd_ut1, jd_tt, f.dpsi, f.eps_mean);
             double site[3];
             frames::observer_geocentric(o.site, gast, site);
             // Site velocity in the true-of-date frame: omega x r about z

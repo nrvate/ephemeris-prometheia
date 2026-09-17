@@ -149,7 +149,9 @@ For a TT epoch *t*:
 
 Cost (`-O2`, DE440): 6 µs per position, 19 µs with rates; a ten-body
 chart at one instant ~0.2 ms (nutation is evaluated once per epoch and
-cached).
+cached, and topocentric Earth rotation reuses it). A topocentric position
+at a fresh epoch costs ~54 µs, ~160 µs with rates — the 1365-term
+nutation series dominates.
 
 ## Small bodies: the catalog overlay
 

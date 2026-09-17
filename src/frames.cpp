@@ -311,17 +311,21 @@ double gmst_rad(double jd_ut1, double jd_tt) {
 }
 
 double equation_of_equinoxes_rad(double jd_tt) {
+    double dpsi, deps;
+    nutation(jd_tt, dpsi, deps);
+    return equation_of_equinoxes_rad(jd_tt, dpsi, mean_obliquity(jd_tt));
+}
+
+double equation_of_equinoxes_rad(double jd_tt, double dpsi, double eps_mean) {
     const double T = centuries(jd_tt);
     double phi[14];
     fundamental_arguments(jd_tt, phi);
     const double& om = phi[13];
     const double& f = phi[11];
     const double& d = phi[12];
-    double dpsi, deps;
-    nutation(jd_tt, dpsi, deps);
     // Circular 179 eq. 2.14, arcseconds.
     const double as =
-        dpsi / kAs2Rad * std::cos(mean_obliquity(jd_tt)) + 0.00264096 * std::sin(om) +
+        dpsi / kAs2Rad * std::cos(eps_mean) + 0.00264096 * std::sin(om) +
         0.00006352 * std::sin(2.0 * om) + 0.00001175 * std::sin(2.0 * f - 2.0 * d + 3.0 * om) +
         0.00001121 * std::sin(2.0 * f - 2.0 * d + om) -
         0.00000455 * std::sin(2.0 * f - 2.0 * d + 2.0 * om) +
@@ -332,6 +336,10 @@ double equation_of_equinoxes_rad(double jd_tt) {
 
 double gast_rad(double jd_ut1, double jd_tt) {
     return gmst_rad(jd_ut1, jd_tt) + equation_of_equinoxes_rad(jd_tt);
+}
+
+double gast_rad(double jd_ut1, double jd_tt, double dpsi, double eps_mean) {
+    return gmst_rad(jd_ut1, jd_tt) + equation_of_equinoxes_rad(jd_tt, dpsi, eps_mean);
 }
 
 void observer_geocentric(const GeoSite& site, double gast, double out[3]) {
