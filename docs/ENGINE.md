@@ -38,7 +38,7 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
   rectangular form. `Provenance` names the ephemeris, DE number and the
   light time applied. `sigma_arcsec` is empty for planets — the DE files
   publish no per-epoch covariance — and is filled by the catalog overlay
-  for small bodies (a later M4 increment).
+  for small bodies whose records carry element sigmas (below).
 - **Threading:** an `Engine` caches ephemeris records and the frame
   matrices of the last three epochs; it is not safe for concurrent use.
   One engine per thread; there is no global state.
@@ -134,9 +134,25 @@ one invalidates the memoized trajectories.
   ~1e-8 AU over ±26 yr (0.001″); practical accuracy is set by the
   catalog's elements. Keplerian singulars (e = 1) are rejected at the
   container, so the engine never sees them.
+- **Uncertainty (`sigma_arcsec`):** records carrying element sigmas
+  (treated as uncorrelated) give `CalcResult::sigma_arcsec`: the
+  square root of the larger eigenvalue of the position covariance
+  projected on the sky plane (perpendicular to the observer→body
+  line), divided by the observer→body distance. The covariance comes
+  from central finite differences of the integrated trajectory — each
+  element stepped by its sigma (floored at 1e-8 of its scale, capped
+  at half the distance to a = 0 and e = 1), both perturbed states
+  carried in their own windowed memos beside the nominal one, so the
+  extra integrations amortize the same way and track the query arcs.
+  The step of one sigma also probes the propagation's nonlinearity at
+  the working scale. Absent for records without sigmas (and for
+  planetary-ephemeris bodies, which publish no covariance); zero when
+  every published sigma is zero; absent, with the position intact,
+  when the perturbed tracks cannot reach the epoch. Eigenvalues are
+  rotation-invariant, so the value is frame-independent and the
+  light-optics corrections never enter.
 - **Provenance:** catalog answers name the overlay
-  ("… + EPM1 catalog(s) […]"), `sigma_arcsec` is filled by a later M4
-  increment.
+  ("… + EPM1 catalog(s) […]").
 - Costs of the query epoch outside the planetary ephemeris's coverage,
   or a body absent everywhere, are errors — never extrapolations.
 
@@ -224,3 +240,15 @@ synthetic CI tests (same file, no data files needed) gate the force
 model against the closed-form two-body solution and the whole overlay
 pipeline against an independent integration of the same force model to
 10⁻⁸ AU, in both time directions.
+
+**sigma_arcsec** (same file): on the synthetic kernel, a rank-one
+sigma_M record on an exact circle reproduces the closed form
+σ_M·|u × (a·tangent)|/|r_bary| to 10⁻⁵ relative, and the engine's
+number matches an independent finite-difference oracle (free-running
+dp54 against the kernel read per evaluation, same projection
+convention) to 10⁻³ at ±400/−800 d; a 10× sigma_M rescales the answer
+by 10.000000; records without sigmas stay absent, all-zero sigmas give
+exactly zero, and a sigma_a-only record shows the physical picture —
+near-zero at the epoch (a radial perturbation projects away) growing
+~linearly along-track to ~1000× by ±2000 d. On DE440, Ceres (SBDB
+sigmas) sits at 0.019″.

@@ -454,6 +454,60 @@ public:
     const std::string& error() const { return error_; }
 };
 
+// ---------------------------------------------------------------------------
+// Small-body uncertainty: element sigmas -> position covariance.
+
+// The record's 1-sigma element uncertainties, propagated to a 3x3
+// barycentric position covariance by central finite differences of the
+// integrated trajectory: element k stepped by h_k, both perturbed states
+// carried in their own windowed memos so repeated queries amortize the
+// extra integrations. Element uncertainties are uncorrelated (the catalog
+// stores one sigma per element), so the covariance is the sum of rank-one
+// terms sigma_k^2 c_k c_k^T with c_k = dr/d(element_k).
+class SigmaTracks {
+public:
+    struct Column {
+        double sigma; // 1-sigma of the element (catalog units)
+        double h;     // finite-difference step used for it
+        std::unique_ptr<WindowMemo<BarycentricForce>> plus, minus;
+    };
+
+    explicit SigmaTracks(std::vector<Column> columns) : columns_(std::move(columns)) {}
+
+    bool empty() const { return columns_.empty(); }
+
+    // Symmetric 3x3 position covariance at TDB JD t, packed xx, xy, xz,
+    // yy, yz, zz, in AU^2. False when any perturbed track failed to
+    // reach t (non-finite state, or coverage that never got there).
+    bool covariance_at(double t, double cov[6]) const {
+        for (int i = 0; i < 6; ++i)
+            cov[i] = 0.0;
+        for (const Column& c : columns_) {
+            const State sp = c.plus->at(t);
+            const State sm = c.minus->at(t);
+            if (!std::isfinite(sp.pos.x) || !std::isfinite(sm.pos.x))
+                return false;
+            if (t < c.plus->coverage_lo() || t > c.plus->coverage_hi() ||
+                t < c.minus->coverage_lo() || t > c.minus->coverage_hi())
+                return false;
+            const double d[3] = {(sp.pos.x - sm.pos.x) / (2.0 * c.h),
+                                 (sp.pos.y - sm.pos.y) / (2.0 * c.h),
+                                 (sp.pos.z - sm.pos.z) / (2.0 * c.h)};
+            const double w = c.sigma * c.sigma;
+            cov[0] += w * d[0] * d[0];
+            cov[1] += w * d[0] * d[1];
+            cov[2] += w * d[0] * d[2];
+            cov[3] += w * d[1] * d[1];
+            cov[4] += w * d[1] * d[2];
+            cov[5] += w * d[2] * d[2];
+        }
+        return true;
+    }
+
+private:
+    std::vector<Column> columns_;
+};
+
 } // namespace
 
 struct Engine::Impl {
@@ -472,6 +526,7 @@ struct Engine::Impl {
     PerturberSet perturbers;
     BarycentricForce force{&perturbers};
     std::unordered_map<uint64_t, std::unique_ptr<WindowMemo<BarycentricForce>>> small_bodies;
+    std::unordered_map<uint64_t, std::unique_ptr<SigmaTracks>> sigma_tracks;
     std::string overlay_source_; // provenance for catalog bodies
 
     double delta_t_seconds(double jd_tt) const {
@@ -566,26 +621,32 @@ struct Engine::Impl {
         return small_body_state(id, jd_tdb, out);
     }
 
-    Result<void> small_body_state(int id, double jd_tdb, double out[6]) {
-        // Newest catalog wins.
-        std::optional<catalog::Record> rec;
+    // Newest-catalog-wins record lookup for a body the planetary
+    // ephemeris does not carry. Engaged only after it returned NotFound.
+    Result<std::optional<catalog::Record>> find_record(int id) {
         for (auto it = catalogs.rbegin(); it != catalogs.rend(); ++it) {
             auto rr = (*it)->lookup(uint64_t(id));
-            if (rr.ok()) {
-                rec = rr.value();
-                break;
-            }
+            if (rr.ok())
+                return std::optional<catalog::Record>(rr.value());
             if (rr.error().code != ErrorCode::NotFound)
                 return rr.error();
         }
-        if (!rec)
+        return std::optional<catalog::Record>();
+    }
+
+    Result<void> small_body_state(int id, double jd_tdb, double out[6]) {
+        auto recr = find_record(id);
+        if (!recr.ok())
+            return recr.error();
+        if (!recr.value())
             return make_error(ErrorCode::NotFound, "body " + std::to_string(id) +
                                                        " is in neither " + source->description +
                                                        " nor the loaded catalog(s)");
+        const catalog::Record& rec = *recr.value();
 
         auto& slot = small_bodies[uint64_t(id)];
         if (!slot) {
-            auto built = build_small_body(*rec);
+            auto built = build_small_body(rec);
             if (!built)
                 return built.error();
             slot = std::move(built).value();
@@ -606,22 +667,19 @@ struct Engine::Impl {
         return {};
     }
 
-    // The memo that integrates one catalog body: elements -> heliocentric
-    // Cartesian state (ecliptic J2000) -> ICRF barycentric seed -> the
-    // barycentric force model, seeded at the record's epoch (TDB).
-    Result<std::unique_ptr<WindowMemo<BarycentricForce>>>
-    build_small_body(const catalog::Record& rec) {
+    // Elements (heliocentric, ecliptic and equinox of J2000, at a TDB
+    // epoch) -> ICRF barycentric seed state (AU, AU/day): elements ->
+    // heliocentric Cartesian in the J2000 ecliptic, rotated by the
+    // transpose of R1(eps0)*B (the matrix of the J2000-ecliptic output
+    // branch of vector_at), then translated by the Sun's barycentric
+    // state at the epoch.
+    Result<State> seed_from_elements(const Elements& el, double epoch_jtdb) {
         const double mu_sun = gm_or_builtin(source.get(), body::kSun);
-        const Elements el{rec.a_au,     rec.e,        rec.inc_rad,
-                          rec.node_rad, rec.argp_rad, rec.mean_anom_rad};
         auto st = elements_to_state(mu_sun, el);
         if (!st)
             return st.error();
         const State helio = st.value();
 
-        // The catalog's angles are measured in the ecliptic and equinox
-        // of J2000. m (as in the J2000-ecliptic branch of vector_at)
-        // maps ICRF to that frame, so the seed is m^T r.
         double m[9];
         rot1(eps_j2000, m);
         matmul(m, bias, m);
@@ -632,17 +690,159 @@ struct Engine::Impl {
         apply_transpose(m, rv, v);
 
         double sun[6];
-        auto rs = source->barycentric(body::kSun, rec.epoch_jtdb, sun);
+        auto rs = source->barycentric(body::kSun, epoch_jtdb, sun);
         if (!rs)
             return rs.error();
 
         State seed;
         seed.pos = Vec3(p[0] + sun[0] / kAuKm, p[1] + sun[1] / kAuKm, p[2] + sun[2] / kAuKm);
         seed.vel = Vec3(v[0] + sun[3] / kAuKm, v[1] + sun[4] / kAuKm, v[2] + sun[5] / kAuKm);
+        return seed;
+    }
 
+    // The memo that integrates one catalog body, seeded at the record's
+    // epoch (TDB) from the record's osculating elements.
+    Result<std::unique_ptr<WindowMemo<BarycentricForce>>>
+    build_small_body(const catalog::Record& rec) {
+        const Elements el{rec.a_au,     rec.e,        rec.inc_rad,
+                          rec.node_rad, rec.argp_rad, rec.mean_anom_rad};
+        auto seed = seed_from_elements(el, rec.epoch_jtdb);
+        if (!seed)
+            return seed.error();
         auto memo = std::make_unique<WindowMemo<BarycentricForce>>(&force, IntegrateOptions{});
-        memo->set_seed(seed, rec.epoch_jtdb);
+        memo->set_seed(seed.value(), rec.epoch_jtdb);
         return memo;
+    }
+
+    // The perturbed trajectories behind sigma_arcsec, built lazily on the
+    // first query that needs them. FD steps are the element sigmas —
+    // which also probes the propagation's nonlinearity at the 1-sigma
+    // scale — with a relative floor against double-precision noise,
+    // capped at half the distance to the singular element values
+    // (a -> 0, e -> 1). A zero-sigma element contributes no column.
+    Result<std::unique_ptr<SigmaTracks>> build_sigma_tracks(const catalog::Record& rec) {
+        std::vector<SigmaTracks::Column> columns;
+        if (!rec.has(catalog::RecordFlags::kSigmas))
+            return std::make_unique<SigmaTracks>(std::move(columns));
+        const double el0[6] = {rec.a_au,     rec.e,        rec.inc_rad,
+                               rec.node_rad, rec.argp_rad, rec.mean_anom_rad};
+        for (int k = 0; k < 6; ++k) {
+            const double s = rec.sigmas[k];
+            if (!(s > 0.0))
+                continue;
+            const double scale = k == 0 ? std::fabs(el0[0]) : 1.0;
+            double h = std::max(s, 1e-8 * scale);
+            if (k == 0)
+                h = std::min(h, 0.5 * std::fabs(el0[0])); // a away from 0
+            if (k == 1) {
+                // e strictly between its singular values on both sides:
+                // elliptic records stay elliptic, hyperbolic stay hyperbolic.
+                if (el0[1] < 1.0)
+                    h = std::min(h, 0.5 * std::min(el0[1], 1.0 - el0[1]));
+                else
+                    h = std::min(h, 0.5 * (el0[1] - 1.0));
+            }
+            if (!(h > 0.0))
+                continue; // degenerate record (e.g. an exact circle with sigma_e)
+
+            SigmaTracks::Column col;
+            col.sigma = s;
+            col.h = h;
+            for (int sign : {+1, -1}) {
+                double p[6];
+                for (int i = 0; i < 6; ++i)
+                    p[i] = el0[i];
+                p[k] += sign * h;
+                const Elements el{p[0], p[1], p[2], p[3], p[4], p[5]};
+                auto seed = seed_from_elements(el, rec.epoch_jtdb);
+                if (!seed)
+                    return seed.error();
+                auto memo =
+                    std::make_unique<WindowMemo<BarycentricForce>>(&force, IntegrateOptions{});
+                memo->set_seed(seed.value(), rec.epoch_jtdb);
+                (sign > 0 ? col.plus : col.minus) = std::move(memo);
+            }
+            columns.push_back(std::move(col));
+        }
+        return std::make_unique<SigmaTracks>(std::move(columns));
+    }
+
+    // 1-sigma sky-plane uncertainty of a catalog body (arcsec), or
+    // nullopt when the record publishes no sigmas, publishes only zeros
+    // that degenerate away, or the perturbed tracks failed to reach the
+    // epoch. The barycentric position covariance at the retarded epoch is
+    // projected on the plane perpendicular to the observer->body line;
+    // the square root of the larger eigenvalue of the projected 2x2
+    // covariance, divided by the observer->body distance, is the
+    // 1-sigma uncertainty of the body's direction. Eigenvalues are
+    // invariant under the (orthogonal) frame rotations, so the output
+    // frame and the light-optics corrections never enter; the observer is
+    // treated as exact.
+    std::optional<double> sigma_arcsec(int id, const CalcOptions& o, double jd_tt, double tau) {
+        auto recr = find_record(id);
+        if (!recr.ok() || !recr.value())
+            return std::nullopt;
+        const catalog::Record rec = *recr.value();
+        if (!rec.has(catalog::RecordFlags::kSigmas))
+            return std::nullopt;
+
+        auto& tracks = sigma_tracks[uint64_t(id)];
+        if (!tracks) {
+            auto built = build_sigma_tracks(rec);
+            if (!built.ok())
+                return std::nullopt;
+            tracks = std::move(built).value();
+        }
+        if (tracks->empty())
+            return 0.0; // sigmas present but every one is zero
+
+        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        const double t_ret = jd_tdb - tau;
+        double cov[6];
+        if (!tracks->covariance_at(t_ret, cov) || !perturbers.ok())
+            return std::nullopt;
+
+        // Line of sight and distance, ICRF (the covariance's frame).
+        double body[6], obs[6];
+        if (!small_body_state(id, t_ret, body).ok())
+            return std::nullopt;
+        if (!observer(o, jd_tt, jd_tdb, obs).ok())
+            return std::nullopt;
+        double u[3];
+        for (int i = 0; i < 3; ++i)
+            u[i] = (body[i] - obs[i]) / kAuKm;
+        const double d = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+        if (!(d > 0.0) || !std::isfinite(d))
+            return std::nullopt;
+        for (double& x : u)
+            x /= d;
+
+        // Tangent-plane basis: the coordinate axis least aligned with the
+        // line of sight, made orthogonal to it.
+        const double au[3] = {std::fabs(u[0]), std::fabs(u[1]), std::fabs(u[2])};
+        double axis[3] = {0.0, 0.0, 0.0};
+        axis[au[0] <= au[1] && au[0] <= au[2] ? 0 : (au[1] <= au[2] ? 1 : 2)] = 1.0;
+        double e1[3] = {u[1] * axis[2] - u[2] * axis[1], u[2] * axis[0] - u[0] * axis[2],
+                        u[0] * axis[1] - u[1] * axis[0]};
+        const double n1 = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+        if (!(n1 > 0.0))
+            return std::nullopt;
+        for (double& x : e1)
+            x /= n1;
+        const double e2[3] = {u[1] * e1[2] - u[2] * e1[1], u[2] * e1[0] - u[0] * e1[2],
+                              u[0] * e1[1] - u[1] * e1[0]};
+
+        // Bilinear form of the packed covariance, then the larger
+        // eigenvalue of the 2x2 projection.
+        auto q = [&](const double a[3], const double b[3]) {
+            return cov[0] * a[0] * b[0] + cov[3] * a[1] * b[1] + cov[5] * a[2] * b[2] +
+                   cov[1] * (a[0] * b[1] + a[1] * b[0]) + cov[2] * (a[0] * b[2] + a[2] * b[0]) +
+                   cov[4] * (a[1] * b[2] + a[2] * b[1]);
+        };
+        const double A = q(e1, e1), B = q(e1, e2), C = q(e2, e2);
+        const double disc = std::sqrt(std::max(0.0, (A - C) * (A - C) + 4.0 * B * B));
+        const double lambda = 0.5 * (A + C + disc);
+        return std::sqrt(std::max(lambda, 0.0)) / d * kRad2Deg * 3600.0;
     }
 
     // Body barycentric position at jd_tdb - tau. The subtraction is done
@@ -849,6 +1049,8 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
                                 : std::string_view(impl_->source->description);
     res.provenance.denum = impl_->source->denum;
     res.provenance.light_time_days = tau;
+    if (from_catalog)
+        res.sigma_arcsec = impl_->sigma_arcsec(id, o, jd_tt, tau);
     return res;
 }
 
@@ -860,8 +1062,10 @@ Result<void> Engine::add_catalog(const std::string& path) {
         return r.error();
     impl_->catalogs.push_back(std::make_unique<catalog::Reader>(std::move(r).value()));
     // A newer catalog may carry revised elements for bodies already
-    // integrated: drop the memoized trajectories, they rebuild lazily.
+    // integrated: drop the memoized trajectories and uncertainty tracks,
+    // they rebuild lazily.
     impl_->small_bodies.clear();
+    impl_->sigma_tracks.clear();
     std::string counts;
     for (size_t i = impl_->catalogs.size(); i-- > 0;) {
         if (!counts.empty())
