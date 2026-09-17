@@ -28,7 +28,8 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
   (499…999) are answered by an ephemeris that has them and are otherwise
   `NotFound` — never substituted.
 - **Time:** `calc` takes JD(TT); `calc_ut` takes JD(UT1) and converts with
-  the engine's `DeltaTModel` (Espenak–Meeus unless set). TDB for the
+  the engine's `DeltaTModel` (observed USNO ΔT, `time::ObservedDeltaT`,
+  unless set; [TIME.md](TIME.md)). TDB for the
   ephemeris argument comes from `time::tdb_from_tt`.
 - **Output** (`Position`): longitude/latitude (ecliptic) or right
   ascension/declination (equatorial) in degrees, distance in AU (IAU 2012
@@ -160,9 +161,10 @@ case:
 - **Heliocentric apparent, up to 0.8″ (Mercury):** SWE's heliocentric
   light time is ~1% larger than the Sun→body distance gives. Geometric
   heliocentric positions agree to 0.0001″.
-- **ΔT:** SWE's ΔT differs from Espenak–Meeus (63.83 vs 63.87 s at 2000,
-  93 vs 203 s at 2100); the topocentric fixtures run with SWE's values
-  through a fixed `DeltaTModel`.
+- **ΔT:** SWE's ΔT differs from ours outside the observed era (68.82 vs
+  69.12 s in 2026-09, 93 vs 203 s at 2100; see [TIME.md](TIME.md)).
+  The topocentric fixtures therefore run with SWE's values through a
+  fixed `DeltaTModel`.
 
 A JPL Horizons corpus (M5) will be the independent referee for the
 topocentric and heliocentric cases.

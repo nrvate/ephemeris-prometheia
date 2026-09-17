@@ -44,7 +44,8 @@ Milestones 0–3 of 6 complete, M4 under way (2026-09-16):
 - **Time scales** — exact proleptic-Gregorian calendar ↔ JD; UTC ↔ TAI ↔
   TT with the USNO leap-second table and correct `23:59:60` labeling in
   both directions; TT ↔ TDB (published truncated series, ~10 µs class);
-  Delta T (TT−UT1) pluggable, Espenak–Meeus default. Sources and
+  Delta T (TT−UT1) pluggable, defaulting to observed USNO values (1657 to
+  the latest month, refreshed each release) with published extrapolation. Sources and
   accuracy notes: [docs/TIME.md](docs/TIME.md).
 - **Frames** — IAU 2006 precession + the complete IAU 2000A nutation
   series (1365 terms, parsed from the public-domain USNO Circular 179),

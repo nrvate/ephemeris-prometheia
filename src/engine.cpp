@@ -159,7 +159,7 @@ struct EpochFrames {
 struct Engine::Impl {
     std::unique_ptr<Source> source;
     const time::DeltaTModel* delta_t = nullptr;
-    time::EspenakMeeusDeltaT default_delta_t;
+    time::ObservedDeltaT default_delta_t;
     double bias[9];
     double eps_j2000 = 0.0;
     EpochFrames cache[3];

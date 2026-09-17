@@ -198,7 +198,8 @@ TEST(time_delta_t) {
     // sampled in early January where the segment argument is smallest.
     // Windows are generous to the model's own class but tight enough to
     // catch a wrong segment or coefficient.
-    auto em = [&](int y) { return delta_t(jd_from_civil(y, 1, 1.0)); };
+    const EspenakMeeusDeltaT model;
+    auto em = [&](int y) { return model.delta_t_seconds(jd_from_civil(y, 1, 1.0)); };
     CHECK(em(2000) > 63.3 && em(2000) < 64.4);       // 63.88 (SWE at J2000: 63.83)
     CHECK(em(1975) > 44.9 && em(1975) < 46.0);       // 45.49
     CHECK(em(1900) > -3.5 && em(1900) < -2.0);       // -2.73
@@ -210,10 +211,9 @@ TEST(time_delta_t) {
     CHECK(em(-500) > 17000.0 && em(-500) < 17400.0); // 17198.7
     CHECK(em(1820) > 11.5 && em(1820) < 12.2);       // 11.87
 
-    // The pluggable interface returns the same model.
-    const EspenakMeeusDeltaT model;
+    // The pluggable interface dispatches to the same model.
     const DeltaTModel& iface = model;
-    CHECK(near(iface.delta_t_seconds(2451545.0), delta_t(2451545.0), 0.0));
+    CHECK(near(iface.delta_t_seconds(2451545.0), model.delta_t_seconds(2451545.0), 0.0));
 
     // UT1 inversion round-trips well below the model's own accuracy. The
     // Espenak-Meeus decimal year has monthly granularity (year + (month -
@@ -222,6 +222,59 @@ TEST(time_delta_t) {
     // any boundary.
     for (int y = 1600; y <= 2150; y += 17) {
         const double jd = jd_from_civil(y, 7, 15.0);
+        const double rt = jd_tt_from_ut1(jd_ut1_from_tt(jd));
+        CHECK(near(rt, jd, 1e-8));
+    }
+}
+
+TEST(time_delta_t_observed) {
+    // USNO samples are reproduced exactly (src/delta_t_table.inc). Pins
+    // are historical values that a release refresh does not change.
+    const ObservedDeltaT obs;
+    CHECK(near(obs.delta_t_seconds(jd_from_civil(1973, 2, 1.0)), 43.4724, 1e-9));
+    CHECK(near(obs.delta_t_seconds(jd_from_civil(2000, 1, 1.0)), 63.8285, 1e-9));
+    CHECK(near(obs.delta_t_seconds(jd_from_civil(2020, 1, 1.0)), 69.3612, 1e-9));
+    CHECK(near(obs.delta_t_seconds(jd_from_civil(1900, 1, 1.0)), -2.70, 1e-9));
+    CHECK(near(obs.delta_t_seconds(jd_from_civil(1700, 1, 1.0)), 21.0, 1e-9));
+    // Linear between monthly samples.
+    const double j0 = jd_from_civil(2000, 1, 1.0), j1 = jd_from_civil(2000, 2, 1.0);
+    CHECK(near(obs.delta_t_seconds(0.5 * (j0 + j1)), 0.5 * (63.8285 + 63.8557), 1e-9));
+    // J2000 noon: SWE reports 63.8289 s.
+    CHECK(near(obs.delta_t_seconds(2451545.0), 63.829, 0.002));
+    // The default convenience function is this model.
+    CHECK(near(delta_t(2461300.5), obs.delta_t_seconds(2461300.5), 0.0));
+
+    // Coverage: 1657 onward, observed within the last year or so.
+    const double first = ObservedDeltaT::table_first_jd();
+    const double last = ObservedDeltaT::table_last_jd();
+    CHECK(near(first, jd_from_civil(1657, 1, 1.0), 1e-6));
+    CHECK(last > jd_from_civil(2026, 1, 1.0));
+
+    // Continuous across both table ends and the extrapolation blends.
+    for (double edge : {first, last}) {
+        CHECK(near(obs.delta_t_seconds(edge - 1e-6), obs.delta_t_seconds(edge), 1e-6));
+    }
+    // (From 1601: Espenak-Meeus itself has a 0.25 s seam at 1600.0 between
+    // its published segments, inside the pre-table blend.)
+    for (double jd = jd_from_civil(1601, 1, 1.0); jd < last + 40000.0; jd += 0.73) {
+        CHECK(near(obs.delta_t_seconds(jd + 0.73), obs.delta_t_seconds(jd), 0.02));
+    }
+
+    // Before the table: Espenak-Meeus a century out (continuous-year
+    // evaluation differs from its mid-month convention by < 1 s there).
+    const EspenakMeeusDeltaT em;
+    const double jd1500 = jd_from_civil(1500, 1, 1.0);
+    CHECK(near(obs.delta_t_seconds(jd1500), em.delta_t_seconds(jd1500), 0.5));
+    // After the table: near-flat at first, then the tidal parabola.
+    const double jd2030 = jd_from_civil(2030, 1, 1.0);
+    CHECK(obs.delta_t_seconds(jd2030) > 66.0 && obs.delta_t_seconds(jd2030) < 73.0);
+    const double jd2300 = jd_from_civil(2300, 1, 1.0);
+    const double u = (2000.0 + (jd2300 - 2451545.0) / 365.25 - 1820.0) / 100.0;
+    CHECK(near(obs.delta_t_seconds(jd2300), -20.0 + 32.0 * u * u, 1e-9));
+
+    // The UT1 inversion round-trips everywhere, including the table ends
+    // (the model is continuous, unlike the Espenak-Meeus segments).
+    for (double jd : {first, last, first + 0.5, last + 0.5, 2451545.0, 2305447.5, 2488069.5}) {
         const double rt = jd_tt_from_ut1(jd_ut1_from_tt(jd));
         CHECK(near(rt, jd, 1e-8));
     }

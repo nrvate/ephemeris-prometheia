@@ -99,17 +99,35 @@ public:
     virtual double delta_t_seconds(double jd_tt) const = 0;
 };
 
-// Default model: the Espenak-Meeus piecewise polynomials (NASA "Five
-// Millennium Canon" dataset, eclipse.gsfc.nasa.gov), covering -500 to
-// +2150 with parabolic extrapolation outside. Modern-era accuracy is
-// a few seconds; plug in an observed table via DeltaTModel if that
-// matters for your use case.
+// The Espenak-Meeus piecewise polynomials (NASA "Five Millennium Canon"
+// dataset, eclipse.gsfc.nasa.gov), covering -500 to +2150 with parabolic
+// extrapolation outside. Modern-era accuracy is seconds: the 2005-2050
+// segment runs ~6 s high in the 2020s. Kept for reproducing results made
+// with it and as the pre-telescopic branch of ObservedDeltaT.
 class EspenakMeeusDeltaT final : public DeltaTModel {
 public:
     double delta_t_seconds(double jd_tt) const override;
 };
 
-// Convenience: the default (Espenak-Meeus) model.
+// Default model: observed Delta T from the USNO series compiled into the
+// library (src/delta_t_table.inc, refreshed at each release by
+// tools/gen/gen_earth_orientation.py): half-yearly 1657-1972, monthly
+// from 1973, linearly interpolated.
+//   - Before the table: Espenak-Meeus, shifted by a continuity offset
+//     that fades out linearly over the preceding century.
+//   - After the table: the trend of its last two years, blended by a
+//     smoothstep over the following century into the Morrison-Stephenson
+//     (2004) long-term parabola -20 + 32 u^2, u = (year - 1820) / 100.
+// Continuous everywhere; see docs/TIME.md for accuracy.
+class ObservedDeltaT final : public DeltaTModel {
+public:
+    double delta_t_seconds(double jd_tt) const override;
+    // Coverage of the observed samples (JD).
+    static double table_first_jd();
+    static double table_last_jd();
+};
+
+// Convenience: the default (ObservedDeltaT) model.
 double delta_t(double jd_tt);
 
 inline double jd_ut1_from_tt(double jd_tt) {

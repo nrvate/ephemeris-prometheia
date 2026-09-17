@@ -150,7 +150,7 @@ public:
     Result<CalcResult> calc_ut(int body, double jd_ut1, const CalcOptions& opts = {});
 
     // Delta T model for UT inputs and topocentric Earth rotation. Not
-    // owned; nullptr restores the default (Espenak-Meeus).
+    // owned; nullptr restores the default (time::ObservedDeltaT).
     void set_delta_t_model(const time::DeltaTModel* model);
 
     // Human-readable description of the loaded ephemeris.

@@ -268,6 +268,47 @@ tagged GitHub release assets, not repo-tree files**:
   single-file random access and re-introduce the per-file juggling this
   project exists to eliminate.
 
+## Release ingestion: Earth-orientation tables
+
+Two small tables that the library needs are compiled into the source
+rather than downloaded at run time, so they go stale between releases.
+Both are refreshed as a step of every release:
+
+- `src/delta_t_table.inc`: observed ΔT (TT − UT1) from USNO,
+  `historic_deltat.data` (1657–1972) and `deltat.data` (monthly, 1973
+  to the latest published month);
+- `src/leap_second_table.inc`: TAI − UTC leap seconds from USNO
+  `tai-utc.dat`.
+
+USNO data is US Government work and in the public domain, which meets
+the no-strings rule (DESIGN.md decision 5). Each generated file records
+the source URLs, their SHA-256 and the retrieval date.
+
+**Before tagging a release:**
+
+```sh
+tools/gen/gen_earth_orientation.py --fetch --raw-dir eop-raw   # 3 sequential requests
+cmake --build build -j && ctest --test-dir build              # tests pin historical values only
+git add src/delta_t_table.inc src/leap_second_table.inc
+git commit -m "data: refresh Delta T and leap seconds (USNO, through YYYY-MM)"
+```
+
+`--check` (without `--fetch`, against a fresh `eop-raw/`) exits 1 when
+the committed tables differ from the sources, so a release checklist can
+gate on it. The retrieval date alone never counts as a change.
+
+The fetch follows the same etiquette as SBDB: one request at a time, a
+3 s pause, a `prometheia-gen/<version>` User-Agent, and backoff-only
+retries. `eop-raw/` is gitignored.
+
+**What a stale table costs:** ΔT beyond the last sample is extrapolated
+(TIME.md). Expect tenths of a second after a year and seconds after a
+decade. Each second of ΔT is 0.55″ of lunar longitude and 15″ of Earth
+rotation for UT inputs. A new leap second missing from the table makes
+UTC conversions after its date wrong by 1 s. IERS announces leap seconds
+about six months ahead in Bulletin C, so a release in that window should
+include it.
+
 ## Future ingestion paths (tracked, not yet built)
 
 | milestone | ingestion | notes |

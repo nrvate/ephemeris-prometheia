@@ -176,6 +176,14 @@ tool and script in this repo, and for anyone running them:
     model), topocentric Moon 0.13″ (SWE rotates the site about the mean
     pole); SWE's printed speeds found inconsistent with its own
     positions, so rates gate against differenced positions.
+  - Increment 2 (done 2026-09-16): observed ΔT. `time::ObservedDeltaT`
+    becomes the default: USNO half-yearly 1657–1972 and monthly
+    1973–present, compiled in, with Espenak–Meeus blended before and the
+    recent trend blended into the Morrison–Stephenson parabola after.
+    Espenak–Meeus had been 6.4 s high in 2026 (3.5″ of Moon, ~96″ of
+    Earth rotation from UT). The leap-second table is now generated too.
+    `tools/gen/gen_earth_orientation.py` refreshes both at every release
+    (INGESTION.md).
   - Next: catalog overlay (small bodies integrated from EPM1 elements
     with DE perturbers, sigma), ayanamsas, C ABI shim, `ephem` CLI.
 - **M5** — validation gates: Horizons-sampled corpus, per-tier precision
