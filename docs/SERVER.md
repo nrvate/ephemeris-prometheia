@@ -242,6 +242,23 @@ kernel (wire-map numbers invented for the test), in about 10 ms. It covers:
 - each flag meaning;
 - per-object failure and cache hits.
 
+## Throughput
+
+Measured 2026-09-17 on DE440, two loops, `prometheia-wire-client` on the
+same host:
+
+- **Workload:** one REQUEST of the Sun, Moon and eight planets at hourly
+  rows, 10,000 rows (100,000 cells, the default bound), apparent geocentric
+  ecliptic with rates.
+- **Result:** 5.6 s of compute, about 56 µs a cell. The rates are central
+  differences, three positions per cell. 9.7 MB of f64 DATA were streamed.
+- **Caching:** a repeat on the same loop is a cache hit and costs no
+  compute. A new connection may land on the other loop, which has its own
+  cache.
+- **Comparison:** Astrolog's plan records 64 bodies × 20,000 rows in 13.7 s
+  on its Swiss Ephemeris server, about 11 µs a cell. So prometheiad is
+  roughly 5× slower per cell on this workload.
+
 ## Not implemented
 
 - **zstd payloads.** Reserved in the envelope, advertised by no one.
