@@ -94,6 +94,9 @@ can compare against `prometheia_abi_version()` at load time. Before 1.0,
 expect the version to move as the engine grows (houses, fixed stars,
 transports). Enumerated values and error codes are only ever appended.
 
+`ephem` ([EPHEM.md](EPHEM.md)) is a complete C99 program written against
+this header alone.
+
 Exported symbols carry default visibility, so a shared build
 (`-DBUILD_SHARED_LIBS=ON`) exports the `prometheia_*` functions.
 

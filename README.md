@@ -17,9 +17,7 @@ application). The ephemeris *data* it ingests is US-government public domain
 
 ## Status
 
-Milestones 0–3 of 6 complete; M4 nearly done — catalog overlay,
-uncertainties, name lookup, sidereal ayanamshas and the C ABI shipped
-(2026-09-16):
+Milestones 0–4 of 6 complete (2026-09-16):
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
@@ -81,19 +79,24 @@ uncertainties, name lookup, sidereal ayanamshas and the C ABI shipped
   ΔT hook and the time-scale helpers; no exception or global state
   crosses it. Bit-identical to the C++ engine, tested from strict C99.
   Details: [docs/C_API.md](docs/C_API.md).
+- **`ephem` CLI** — positions from the command line for planets and
+  catalog bodies (by name, designation or SPK-ID): UTC with leap
+  seconds, TT or UT1 input, series, topocentric/helio/barycentric,
+  every frame, sidereal zodiacs; table, CSV or JSON output. Written in
+  C99 over the C interface. Details: [docs/EPHEM.md](docs/EPHEM.md).
 - **Measured on real data** (`prometheia-bench`, 100-body SBDB fixture,
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
-- **Tools** — `prometheia-fetch` (Python), `prometheia-convert`,
-  `prometheia-info`, `prometheia-bench`. Thirteen test suites, clean under
+- **Tools** — `ephem`, `prometheia-fetch` (Python), `prometheia-convert`,
+  `prometheia-info`, `prometheia-bench`. Fourteen test suites, clean under
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
 decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0–M3 done
-(DE + SPK readers, time scales, frames); M4 nearly done (engine,
+(DE + SPK readers, time scales, frames); M4 done (engine,
 catalog overlay with sigma and name lookup, sidereal ayanamshas, C
-ABI; remaining: `ephem` CLI); then validation gates (M5),
+ABI, `ephem` CLI); then validation gates (M5),
 transports (M6).
 
 ## Build

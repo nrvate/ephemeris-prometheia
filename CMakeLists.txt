@@ -103,3 +103,14 @@ target_link_libraries(prometheia-convert PRIVATE prometheia)
 
 add_executable(prometheia-info tools/info/info_main.cpp)
 target_link_libraries(prometheia-info PRIVATE prometheia)
+
+# ephem: the command-line consumer of the C interface, in strict C99.
+add_executable(ephem tools/ephem/ephem.c)
+target_link_libraries(ephem PRIVATE prometheia m)
+target_compile_options(ephem PRIVATE -Wall -Wextra -pedantic -Werror)
+
+add_executable(test_ephem tests/test_ephem.cpp)
+target_link_libraries(test_ephem PRIVATE prometheia)
+target_compile_definitions(test_ephem PRIVATE EPHEM_BIN="$<TARGET_FILE:ephem>")
+add_dependencies(test_ephem ephem)
+add_test(NAME ephem COMMAND test_ephem)

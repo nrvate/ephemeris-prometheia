@@ -212,7 +212,14 @@ tool and script in this repo, and for anyone running them:
     `PROMETHEIA_HAS_*` flags for the optional sigma/ayanamsha, a
     function-pointer ΔT hook, and the time helpers. Bit-identical to the
     C++ engine across every option axis; exercised from strict C99.
-  - Next: `ephem` CLI.
+  - Increment 6 (done 2026-09-16): `ephem` (docs/EPHEM.md), the CLI —
+    strict C99 over `prometheia.h` only: planets, catalog bodies by name,
+    `@designation` or SPK-ID; UTC (leap seconds), TT, UT1 or JD input,
+    stepped series, fixed ΔT; every engine option; table (optionally
+    sexagesimal), CSV and JSON with round-trip doubles; exit status 0/1/2.
+    Its CSV is bit-identical to the engine for every mapped option
+    (subprocess test).
+  - **M4 complete.**
 - **M5** — validation gates: Horizons-sampled corpus, per-tier precision
   thresholds, full-catalog bench run (the ~3.5 min/core extrapolation
   must be measured), numeric cross-check against installed Swiss
