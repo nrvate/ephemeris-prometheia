@@ -786,8 +786,38 @@ struct Engine::Impl {
         return f;
     }
 
-    static void add_nutation(EpochFrames& f) {
-        frames::nutation(f.jd_tt, f.dpsi, f.deps);
+    // Nutation anchored on a fixed 0.05-day grid: the full 1365-term series
+    // and its analytic rates are summed once per grid node, and any epoch
+    // takes a second-order Taylor step from its nearest node (|dt| <= 0.025
+    // day, ~0.1 uas; tests/test_frames.cpp). The value depends only on the
+    // epoch, never on query history; rate stencils and series of nearby
+    // epochs share nodes.
+    struct NutationNode {
+        double jd = NAN;
+        double n[6];
+    };
+    NutationNode nutation_nodes[4];
+    int nutation_next = 0;
+
+    void nutation_at(double jd_tt, double& dpsi, double& deps) {
+        const double node_jd = std::nearbyint(jd_tt * 20.0) / 20.0;
+        NutationNode* node = nullptr;
+        for (NutationNode& n : nutation_nodes)
+            if (n.jd == node_jd)
+                node = &n;
+        if (!node) {
+            node = &nutation_nodes[nutation_next];
+            nutation_next = (nutation_next + 1) % 4;
+            node->jd = node_jd;
+            frames::nutation_with_rates(node_jd, node->n);
+        }
+        const double dt = jd_tt - node_jd;
+        dpsi = node->n[0] + dt * (node->n[2] + 0.5 * dt * node->n[4]);
+        deps = node->n[1] + dt * (node->n[3] + 0.5 * dt * node->n[5]);
+    }
+
+    void add_nutation(EpochFrames& f) {
+        nutation_at(f.jd_tt, f.dpsi, f.deps);
         // N = R1(-(eps + deps)) R3(-dpsi) R1(eps), docs/FRAMES.md.
         double a[9], b[9], c[9], n[9];
         rot1(-(f.eps_mean + f.deps), a);

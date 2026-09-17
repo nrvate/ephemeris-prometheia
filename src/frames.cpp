@@ -154,6 +154,68 @@ void nutation(double jd_tt, double& dpsi, double& deps) {
     deps = sum_eps * kAs2Rad;
 }
 
+void nutation_with_rates(double jd_tt, double out[6]) {
+    const double T = centuries(jd_tt);
+    double phi[14];
+    fundamental_arguments(jd_tt, phi);
+    // First and second derivatives of the fundamental arguments in
+    // arcsec/century and arcsec/century^2 (the polynomials of
+    // fundamental_arguments differentiated).
+    static const double kPlanetRate[8] = {538101628.688982, 210664136.433548, 129597742.283429,
+                                          68905077.493988,  10925660.377991,  4399609.855732,
+                                          1542481.193933,   786550.320744};
+    double d1[14], d2[14];
+    for (int j = 0; j < 8; ++j) {
+        d1[j] = kPlanetRate[j];
+        d2[j] = 0.0;
+    }
+    d1[8] = 5028.8200 + 2.0 * 1.112022 * T;
+    d2[8] = 2.0 * 1.112022;
+    auto quartic = [&](int j, double b1, double b2, double b3, double b4) {
+        d1[j] = b1 + T * (2.0 * b2 + T * (3.0 * b3 + T * 4.0 * b4));
+        d2[j] = 2.0 * b2 + T * (6.0 * b3 + T * 12.0 * b4);
+    };
+    quartic(9, 1717915923.2178, 31.8792, 0.051635, -0.00024470);
+    quartic(10, 129596581.0481, -0.5532, 0.000136, -0.00001149);
+    quartic(11, 1739527262.8478, -12.7512, -0.001037, 0.00000417);
+    quartic(12, 1602961601.2090, -6.3706, 0.006593, -0.00003169);
+    quartic(13, -6962890.5431, 7.4722, 0.007702, -0.00005939);
+    for (int j = 0; j < 14; ++j) {
+        d1[j] *= kAs2Rad;
+        d2[j] *= kAs2Rad;
+    }
+
+    double psi = 0.0, eps = 0.0, psi1 = 0.0, eps1 = 0.0, psi2 = 0.0, eps2 = 0.0;
+    for (int i = 1365 - 1; i >= 0; --i) {
+        const NutationTerm& t = kNutationTerms[i];
+        double ang = 0.0, w = 0.0, w2 = 0.0; // argument and its rates (rad/cy, rad/cy^2)
+        for (int j = 0; j < 14; ++j) {
+            if (t.m[j] != 0) {
+                ang += double(t.m[j]) * phi[j];
+                w += double(t.m[j]) * d1[j];
+                w2 += double(t.m[j]) * d2[j];
+            }
+        }
+        const double sa = std::sin(ang), ca = std::cos(ang);
+        const double a_psi = t.c[0] + t.c[1] * T, a_eps = t.c[3] + t.c[4] * T;
+        psi += a_psi * sa + t.c[2] * ca;
+        eps += a_eps * ca + t.c[5] * sa;
+        psi1 += t.c[1] * sa + (a_psi * ca - t.c[2] * sa) * w;
+        eps1 += t.c[4] * ca + (-a_eps * sa + t.c[5] * ca) * w;
+        psi2 += 2.0 * t.c[1] * ca * w + a_psi * (-sa * w * w + ca * w2) -
+                t.c[2] * (ca * w * w + sa * w2);
+        eps2 += -2.0 * t.c[4] * sa * w + a_eps * (-ca * w * w - sa * w2) +
+                t.c[5] * (-sa * w * w + ca * w2);
+    }
+    constexpr double kCy = 36525.0;
+    out[0] = psi * kAs2Rad;
+    out[1] = eps * kAs2Rad;
+    out[2] = psi1 * kAs2Rad / kCy;
+    out[3] = eps1 * kAs2Rad / kCy;
+    out[4] = psi2 * kAs2Rad / (kCy * kCy);
+    out[5] = eps2 * kAs2Rad / (kCy * kCy);
+}
+
 void precession_angles(double jd_tt, double& zeta, double& z, double& theta) {
     const double T = centuries(jd_tt);
     // Circular 179 eq. 5.11 (IAU 2006), arcseconds.

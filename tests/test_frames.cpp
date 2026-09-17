@@ -11,6 +11,7 @@
 // ecliptic of date). Measured agreement is 0.0005 arcsec: SWE's default
 // nutation is the 1 mas-class truncated series, we run the full
 // 1365-term IAU 2000A.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -359,4 +360,43 @@ TEST_CASE("ltp_long_range_is_a_rotation") {
         if (std::fabs(cy) <= 40.0)
             CHECK(std::fabs(d) < 5.0);
     }
+}
+
+TEST_CASE("nutation_rates_and_taylor_step") {
+    // The analytic rates reproduce the series itself: the value equals
+    // nutation(), the first and second derivatives match central
+    // differences, and a second-order Taylor step from a node carries the
+    // series within 0.05 day to well under a microarcsecond — what lets the
+    // engine anchor nutation on a 0.1-day grid.
+    const double kMuas = 1e-6 / 206264.80624709636;
+    double worst_step = 0.0, worst_d1 = 0.0, worst_d2 = 0.0;
+    for (int k = 0; k < 40; ++k) {
+        const double jd = 2378496.5 + k * 2711.37; // 1800 .. 2100
+        double n[6];
+        nutation_with_rates(jd, n);
+        double dpsi, deps;
+        nutation(jd, dpsi, deps);
+        CHECK(std::fabs(n[0] - dpsi) < 1e-15);
+        CHECK(std::fabs(n[1] - deps) < 1e-15);
+        const double h = 0.01;
+        double pp, pe, mp, me;
+        nutation(jd + h, pp, pe);
+        nutation(jd - h, mp, me);
+        worst_d1 = std::max(worst_d1, std::fabs((pp - mp) / (2 * h) - n[2]) / kMuas);
+        worst_d2 = std::max(worst_d2, std::fabs((pp - 2 * dpsi + mp) / (h * h) - n[4]) / kMuas);
+        for (double dt : {-0.05, -0.031, -0.01, 0.017, 0.05}) {
+            double ep, ee;
+            nutation(jd + dt, ep, ee);
+            const double tp = n[0] + dt * (n[2] + 0.5 * dt * n[4]);
+            const double te = n[1] + dt * (n[3] + 0.5 * dt * n[5]);
+            worst_step =
+                std::max({worst_step, std::fabs(tp - ep) / kMuas, std::fabs(te - ee) / kMuas});
+        }
+    }
+    std::printf("  Taylor step |dt| <= 0.05 d: %.4f uas; d1 vs central difference %.4f uas/d; "
+                "d2 %.2f uas/d^2\n",
+                worst_step, worst_d1, worst_d2);
+    CHECK(worst_step < 1.0);
+    CHECK(worst_d1 < 1.0);
+    CHECK(worst_d2 < 100.0);
 }

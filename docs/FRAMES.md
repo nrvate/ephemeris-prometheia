@@ -86,6 +86,17 @@ All checks in `tests/test_frames.cpp`:
 - The nutation-shift property (Δψ longitude shift, zero latitude shift)
   is asserted directly at four epochs.
 
+## Nutation rates
+
+`frames::nutation_with_rates` sums the IAU 2000A series together with its
+analytic first and second time derivatives (each term differentiated
+through its linear-in-T amplitudes and the fundamental arguments'
+polynomials). Tests: the value equals `nutation()` to 1e-15 rad, the first
+derivative matches central differences to 0.55 µas/day, and a
+second-order Taylor step of up to 0.05 day reproduces the full series to
+0.68 µas over 1800–2100. The engine uses it to anchor nutation on a
+0.05-day grid (docs/ENGINE.md).
+
 ## Long-term precession (Vondrák, Capitaine & Wallace 2011)
 
 IAU 2006 precession is a set of polynomials fitted near J2000; their errors

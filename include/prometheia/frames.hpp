@@ -33,6 +33,13 @@ void fundamental_arguments(double jd_tt, double phi[14]);
 // radians.
 void nutation(double jd_tt, double& dpsi, double& deps);
 
+// The same series with its first and second time derivatives (radians,
+// radians/day, radians/day^2), evaluated analytically term by term:
+// out = {dpsi, deps, dpsi', deps', dpsi'', deps''}. Lets a caller carry the
+// nutation to nearby epochs by a Taylor step instead of re-summing 1365
+// terms (docs/FRAMES.md).
+void nutation_with_rates(double jd_tt, double out[6]);
+
 // IAU 2006 precession angles zeta, z, theta (radians).
 void precession_angles(double jd_tt, double& zeta, double& z, double& theta);
 
