@@ -16,8 +16,10 @@ Usage:
   ephproto4_fixtures.py --dir ... --verbose      # print every fixture
 """
 import argparse
+import hashlib
 import math
 import os
+import re
 import struct
 import sys
 
@@ -602,12 +604,44 @@ def main():
 
     manifest = os.path.join(args.dir, "MANIFEST.tsv")
     rows = []
+    set_sha = None
     with open(manifest) as f:
         for line in f:
-            if line.startswith("#") or not line.strip():
+            if line.startswith("#"):
+                m = re.match(r"#\s*set-sha256\s+([0-9a-fA-F]{64})\s*$", line)
+                if m:
+                    set_sha = m.group(1).lower()
+                continue
+            if not line.strip():
                 continue
             cells = line.rstrip("\n").split("\t")
             rows.append(cells)
+
+    # The manifest is written last and carries a checksum over the set, so a
+    # directory read while the generator is writing is caught rather than
+    # reported against. Two readings of "the fixtures' bytes" are possible;
+    # accept either and say which matched.
+    def digest(transform):
+        h = hashlib.sha256()
+        for cells in rows:
+            with open(os.path.join(args.dir, cells[0]), "rb") as fh:
+                h.update(transform(fh.read()))
+        return h.hexdigest()
+
+    decoded = digest(lambda raw: bytes.fromhex(raw.decode().replace("\n", "").replace(" ", "")))
+    verbatim = digest(lambda raw: raw)
+    if set_sha is None:
+        print("note: the manifest carries no '# set-sha256' line; the set cannot be "
+              "checked for consistency")
+    elif set_sha == decoded:
+        print(f"set-sha256 matches the decoded message bytes ({set_sha[:16]}…)")
+    elif set_sha == verbatim:
+        print(f"set-sha256 matches the hex files verbatim ({set_sha[:16]}…)")
+    else:
+        print(f"set-sha256 MISMATCH: manifest {set_sha[:16]}…, decoded {decoded[:16]}…, "
+              f"verbatim {verbatim[:16]}… — the set is inconsistent (half-written?), "
+              "so the verdicts below mean nothing")
+        return 2
 
     agree = 0
     disagreements = []
