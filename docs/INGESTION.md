@@ -235,10 +235,11 @@ Freshness is therefore *our* mechanism, and the tiered machinery below is
    authoritative base catalog; tiers 1–2 produce small overlay catalogs
    that stack on top by priority until the next base.
 
-**Nightly CI releases — the noted idea (not built).** The pipeline is
-headless and resumable, so a scheduled CI job could run tier 2 nightly and
-publish the overlay as a release asset (`sbdb-delta-YYYYMMDD.epm` +
-sha256), tier 3 weekly/monthly. Etiquette binds CI like any other runner:
+**Nightly releases — the noted idea (not built).** The pipeline is
+headless and resumable, so a scheduled job on our own machine (the project
+uses no hosted CI) could run tier 2 nightly and publish the overlay as a
+release asset (`sbdb-delta-YYYYMMDD.epm` + sha256), tier 3 weekly/monthly.
+Etiquette binds a scheduled job like any other runner:
 sequential, delay-bearing, announcing itself. Deliberately parked until
 someone actually wants the cadence.
 
@@ -259,7 +260,7 @@ tagged GitHub release assets, not repo-tree files**:
   the pipeline that made a catalog ships with it.
 - The **only** data file in the repo tree is
   `tests/data/sample-100.epm` (~10 KB, the first 100 numbered asteroids):
-  a fixture so CI exercises the reader against real JPL full-precision
+  a fixture so the tests exercise the reader against real JPL full-precision
   data, not just synthetic records. Rebuild it only when refreshing the
   fixture intentionally (its Ceres elements are pinned in
   `test_catalog.cpp`).

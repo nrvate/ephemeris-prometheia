@@ -19,7 +19,7 @@ in NAIF's SPK container are read by `prometheia::spk`
 
 The DE440 files live in the repo's gitignored `ephe/` directory (see
 `ephe/SHA256SUMS` locally); real-file tests print SKIP when a file is
-absent, so CI runs the synthetic part only.
+absent, so a machine without them runs the synthetic part only.
 
 ## Byte map
 
@@ -119,7 +119,7 @@ A `DeFile` caches its last record and is not safe for concurrent use.
 
 `tests/test_de.cpp`:
 
-- **Synthetic** (runs everywhere, CI included): a DE-layout file with 450
+- **Synthetic** (runs everywhere, no data files needed): a DE-layout file with 450
   constants, eight-subinterval Moon, nutations, librations, TT−TDB and an
   absent column, in both byte orders; every column checked at
   record/subinterval boundaries and the end epoch (exact, |Δ| = 0);

@@ -5,7 +5,7 @@
 // Part A writes synthetic DAF/SPK files in both byte orders with type 2
 // and type 3 segments, an overriding later segment and an unsupported
 // segment type, and checks evaluation, segment chaining and precedence
-// exactly (runs everywhere, CI included).
+// exactly (runs everywhere, no data files needed).
 //
 // Part B opens JPL's de440s.bsp (PROMETHEIA_DE440S, default
 // ephe/de440s.bsp) and cross-checks it against the DE440 binary

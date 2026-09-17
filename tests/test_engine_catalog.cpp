@@ -3,7 +3,7 @@
 // Catalog overlay tests: small bodies answered by the engine through
 // on-demand integration of the catalog's osculating elements.
 //
-// Part A (runs everywhere, CI included): the barycentric force model
+// Part A (runs everywhere, no data files needed): the barycentric force model
 // against the closed-form two-body solution, and the whole overlay
 // pipeline on the synthetic linear SPK kernel against an independent
 // integration of the same force model (the oracle reads the kernel

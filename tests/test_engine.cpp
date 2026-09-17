@@ -2,7 +2,7 @@
 //
 // Engine tests.
 //
-// Part A (runs everywhere, CI included): the apparent-place primitives
+// Part A (runs everywhere, no data files needed): the apparent-place primitives
 // against closed-form magnitudes (20.5" annual aberration, 4.07 mas
 // deflection at 90 degrees, 1.75" at the solar limb), and the whole
 // engine pipeline on a synthetic SPK kernel with linearly moving bodies,

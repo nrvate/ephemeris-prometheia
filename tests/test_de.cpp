@@ -3,7 +3,7 @@
 // DE binary reader tests.
 //
 // Part A builds synthetic files with known analytic Chebyshev fields and
-// checks the reader exactly (runs everywhere, CI included): both byte
+// checks the reader exactly (runs everywhere, no data files needed): both byte
 // orders, more than 400 constants and a TT-TDB column.
 //
 // Part B validates real JPL binaries when present on this machine; those

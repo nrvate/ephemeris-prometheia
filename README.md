@@ -110,6 +110,10 @@ cd build && ctest
 Requires C++20, CMake ≥ 3.20, `libzstd` and `pkg-config`. Sanitizer build:
 `-DPROMETHEIA_SANITIZE=ON`.
 
+There is no hosted CI. Before committing, run the local gate —
+`tools/gate.sh` (clang-format 14 check, Release and ASan+UBSan builds, all
+tests; `CLANG_FORMAT=/path/to/clang-format` to pick the binary).
+
 Tests use [doctest](https://github.com/doctest/doctest) 2.5.3, vendored
 under `third_party/` (MIT, test code only — the library itself depends
 only on zstd). Each suite is a doctest binary: `./build/test_engine

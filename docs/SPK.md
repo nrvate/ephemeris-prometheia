@@ -88,7 +88,7 @@ concurrent use.
 
 `tests/test_spk.cpp`:
 
-- **Synthetic** (runs everywhere, CI included), in both byte orders:
+- **Synthetic** (runs everywhere, no data files needed), in both byte orders:
   type-2 and type-3 segments, a later segment overriding the middle
   record of an earlier one, an unsupported type-1 segment; direct
   evaluation across record boundaries (exact), chaining in both

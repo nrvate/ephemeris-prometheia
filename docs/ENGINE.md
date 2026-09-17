@@ -211,7 +211,7 @@ not indexed (address those by their NAIF IDs).
 
 `tests/test_engine.cpp`.
 
-**Synthetic, everywhere (CI):** closed-form checks of the primitives
+**Synthetic, everywhere (no data files):** closed-form checks of the primitives
 (20.49″ aberration perpendicular to 29.79 km/s, none along it; 4.07 mas
 and 1.75″ deflection; frame-bias matrix orthogonal with the published
 offsets), then the full engine on a synthetic SPK kernel whose bodies
@@ -300,7 +300,7 @@ the catalog epoch, 2026-09, and ±11 yr:
 The residual is dominated by the difference between SBDB's osculating
 elements (our seed) and SWE's stored integration (their source); the
 engine's own integration contributes ~0.001″ over the same span. The
-synthetic CI tests (same file, no data files needed) gate the force
+synthetic tests (same file, no data files needed) gate the force
 model against the closed-form two-body solution and the whole overlay
 pipeline against an independent integration of the same force model to
 10⁻⁸ AU, in both time directions.

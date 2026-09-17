@@ -93,8 +93,12 @@ no code read or reused — see Cleanroom policy):
    work supports. (The original sketch said public domain; superseded
    2026-09-16 by explicit owner decision. Data files remain US-government
    public domain as data.)
-10. **Platforms: Linux-first CI**, portable C++20 throughout; macOS/Windows/
-    Android after the numerical core is validated.
+10. **Platforms: Linux-first**, portable C++20 throughout; macOS/Windows/
+    Android after the numerical core is validated. **No hosted CI**
+    (owner decision 2026-09-16: no GitHub Actions — they cost money and
+    tie the project to one public host). `tools/gate.sh` is the gate:
+    format check, Release and ASan+UBSan builds, all tests, run locally
+    before every commit.
 11. **Naming:** repo slug `ephemeris-prometheia`, library `libprometheia`,
     namespace `prometheia`, tools `prometheia-*`, future daemon
     `prometheiad`, container magic `EPM1`.
@@ -118,7 +122,8 @@ tool and script in this repo, and for anyone running them:
 
 ## Roadmap
 
-- **M0** — bootstrap: repo, CMake, GPL, CI, docs. *(done)*
+- **M0** — bootstrap: repo, CMake, GPL, docs. *(done; its GitHub
+  Actions workflow was later replaced by the local `tools/gate.sh`)*
 - **M1** — EPM1 container + SBDB ingest pipeline + tools. *(done)*
 - **M2** — mechanics core. *(done 2026-09-16, three increments)*
   - Increment 1: Kepler engine + adaptive DP5(4) with FSAL (3495d52).
