@@ -554,3 +554,127 @@ TEST_CASE("server_ephproto_matches_astrolog") {
     CHECK_MESSAGE(ours == theirs,
                   "Astrolog's ephproto.h changed: review it and re-pin (third_party/README.md)");
 }
+
+TEST_CASE("server_limits_caps_and_budget") {
+    LimitsConfig lc;
+    lc.max_conns = 3;
+    lc.max_conns_per_addr = 2;
+    lc.cells_per_sec = 100;
+    lc.burst_cells = 1000;
+    Limits limits(lc, {"secret"});
+
+    CHECK(limits.admit("a") == nullptr);
+    CHECK(limits.admit("a") == nullptr);
+    CHECK(std::string(limits.admit("a")) == "too many connections from this address");
+    CHECK(limits.admit("b") == nullptr);
+    CHECK(std::string(limits.admit("c")) == "the server is at its connection limit");
+    CHECK(limits.connections() == 3);
+    limits.release("a");
+    CHECK(limits.admit("c") == nullptr);
+
+    CHECK(limits.token_known("secret"));
+    CHECK(!limits.token_known(""));
+    CHECK(!limits.token_known("guess"));
+
+    const auto t0 = Limits::Clock::now();
+    CHECK(limits.charge("k", 1000, t0) == 0.0); // a full bucket covers one full request
+    CHECK(limits.charge("k", 50, t0) == doctest::Approx(0.5));
+    CHECK(limits.charge("k", 50, t0 + std::chrono::milliseconds(500)) == 0.0);
+    CHECK(limits.charge("other", 1000, t0) == 0.0); // budgets are separate
+
+    LimitsConfig none;
+    none.cells_per_sec = 0;
+    CHECK(Limits(none).charge("k", 1u << 30) == 0.0);
+
+    TempFile tokens("tokens");
+    {
+        std::ofstream out(tokens.path);
+        out << "# accepted\n\n  alpha  \nbeta\r\n";
+    }
+    auto loaded = Limits::load_tokens(tokens.path.string());
+    REQUIRE(loaded.ok());
+    CHECK(loaded.value().size() == 2);
+    CHECK(loaded.value().count("alpha") == 1);
+    CHECK(loaded.value().count("beta") == 1);
+    {
+        std::ofstream out(tokens.path);
+        out << std::string(129, 'x') << "\n";
+    }
+    CHECK(!Limits::load_tokens(tokens.path.string()).ok());
+    CHECK(!Limits::load_tokens("/nonexistent/tokens").ok());
+}
+
+TEST_CASE("server_tokens_and_rate_limit") {
+    TempFile tf("server-limits");
+    WireMap map = WireMap::parse(kTestMap).value();
+    LimitsConfig lc;
+    lc.require_token = true;
+    lc.cells_per_sec = 10;
+    lc.burst_cells = 20;
+    Limits limits(lc, {"secret"});
+    ServerConfig config;
+    config.max_cells = 20;
+    LoopContext ctx(synth::open_synthetic(tf), map, config, &limits);
+
+    const auto hello_with = [](const char* token) {
+        uint8_t buf[eph::kHelloMaxSize];
+        uint32_t len = 0;
+        eph::buildHello(buf, 0, 1, "test", &len, token);
+        return as_view(eph::makeMessage(eph::kMsgHello, 1, buf, len));
+    };
+
+    SUBCASE("no token, unknown token: ERROR 7 and close") {
+        Session a(ctx, "10.0.0.1");
+        CHECK(!a.on_message(hello_with(nullptr), true));
+        CHECK(error_of(drain(a)[0]).text == "this server requires a token");
+        Session b(ctx, "10.0.0.1");
+        CHECK(!b.on_message(hello_with("guess"), true));
+        auto e = error_of(drain(b)[0]);
+        CHECK(e.code == eph::kErrToken);
+        CHECK(e.text == "unknown token");
+        CHECK(ctx.metrics().errors[eph::kErrToken] == 2);
+    }
+    SUBCASE("a known token has its own budget; over it, ERROR 6") {
+        Session s(ctx, "10.0.0.1");
+        CHECK(s.on_message(hello_with("secret"), true));
+        CHECK(drain(s)[0].env.type == eph::kMsgWelcome);
+        eph::Request req = base_request(2451545.0, 20);
+        req.objs = {obj(900)};
+        CHECK(s.on_message(request(req, 1), true));
+        CHECK(drain(s).back().env.type == eph::kMsgData);
+        req.jdStart += 1.0;
+        CHECK(s.on_message(request(req, 2), true));
+        const auto r = drain(s);
+        REQUIRE(r.size() == 1);
+        const auto e = error_of(r[0]);
+        CHECK(e.code == eph::kErrRateLimited);
+        CHECK(e.text.rfind("rate limited: 10 cells a second; ask again in ", 0) == 0);
+        CHECK(ctx.metrics().hellos == 1);
+        CHECK(ctx.metrics().requests == 1);
+        CHECK(ctx.metrics().cache_misses == 1);
+        CHECK(ctx.metrics().cells_computed == 20);
+    }
+}
+
+TEST_CASE("server_metrics_text") {
+    Metrics a, b;
+    ++a.hellos;
+    b.hellos += 2;
+    a.error(eph::kErrLimits);
+    b.error(99);
+    a.computed(40, 3.0);
+    ServerInfo info;
+    info.server_version = kServerVersion;
+    info.protocol = 3;
+    const std::string text = metrics_text({&a, &b}, info);
+    CHECK(text.find("prometheiad_hellos_total 3\n") != std::string::npos);
+    CHECK(text.find("prometheiad_errors_total{code=\"2\"} 1\n") != std::string::npos);
+    CHECK(text.find("prometheiad_errors_total{code=\"0\"} 1\n") != std::string::npos);
+    CHECK(text.find("prometheiad_compute_seconds_bucket{le=\"0.001\"} 0\n") != std::string::npos);
+    CHECK(text.find("prometheiad_compute_seconds_bucket{le=\"0.005\"} 1\n") != std::string::npos);
+    CHECK(text.find("prometheiad_compute_seconds_count 1\n") != std::string::npos);
+    CHECK(text.find("prometheiad_cells_computed_total 40\n") != std::string::npos);
+    CHECK(text.find(
+              "prometheiad_build_info{server=\"prometheiad/0.1.0\",protocol=\"3\",tls=\"0\"} 1") !=
+          std::string::npos);
+}

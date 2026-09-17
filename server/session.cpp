@@ -2,6 +2,7 @@
 #include "session.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -156,16 +157,23 @@ void ResultCache::put(const std::string& key, std::shared_ptr<const Answer> answ
 
 // ---- LoopContext -----------------------------------------------------------
 
-LoopContext::LoopContext(Engine engine, const WireMap& map, const ServerConfig& config)
-    : engine_(std::move(engine)), map_(map), config_(config), cache_(config.cache_bytes) {}
+LoopContext::LoopContext(Engine engine, const WireMap& map, const ServerConfig& config,
+                         Limits* limits, Metrics* metrics)
+    : engine_(std::move(engine)), map_(map), config_(config), cache_(config.cache_bytes),
+      limits_(limits), metrics_(metrics ? metrics : &own_metrics_) {}
 
 std::shared_ptr<const Answer> LoopContext::answer(const eph::Request& req,
                                                   std::string_view payload) {
     const std::string key(payload.substr(0, payload.size() - kDeliveryFieldsSize));
     if (auto hit = cache_.get(key)) {
+        ++metrics_->cache_hits;
         return hit;
     }
+    const auto t0 = std::chrono::steady_clock::now();
     auto computed = compute(req);
+    metrics_->computed(
+        uint64_t(req.objs.size()) * req.nTime,
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
     cache_.put(key, computed);
     return computed;
 }
@@ -258,6 +266,7 @@ void Session::send_error(uint32_t request_id, int32_t code, const std::string& t
     eph::putU32(payload.data(), request_id);
     eph::putI32(payload.data() + 4, code);
     std::copy(text.begin(), text.end(), payload.begin() + sizeof(eph::ErrorWire));
+    ctx_.metrics().error(code);
     send(eph::kMsgError, request_id, payload.data(), payload.size());
 }
 
@@ -322,6 +331,16 @@ bool Session::on_message(std::string_view message, bool binary) {
         if (version_ == 0) {
             version_ = uint8_t(std::min<uint32_t>(hello.protoVersion, eph::kProtoVersion));
         }
+        if (Limits* limits = ctx_.limits()) {
+            if (limits->token_known(hello.token)) {
+                budget_key_ = "t:" + hello.token;
+            } else if (limits->require_token()) {
+                send_error(env.requestId, eph::kErrToken,
+                           hello.token.empty() ? "this server requires a token" : "unknown token");
+                return false;
+            }
+        }
+        ++ctx_.metrics().hellos;
         uint8_t welcome[sizeof(eph::WelcomeWire) + 256];
         uint32_t len = 0;
         // swissephVersion: 0, this is not the Swiss Ephemeris.
@@ -371,6 +390,18 @@ bool Session::on_request(const eph::Envelope& env, const uint8_t* payload) {
                    "too many answers computed and not yet read on this connection");
         return true;
     }
+    if (Limits* limits = ctx_.limits()) {
+        // Charged whether the answer is cached or not: which it will be is
+        // not known yet.
+        if (const double wait = limits->charge(budget_key_, cells); wait > 0.0) {
+            char text[160];
+            // Rounded up to the tenth: "0.0 s" for a 12 ms wait reads as "now".
+            std::snprintf(text, sizeof text, "rate limited: %u cells a second; ask again in %.1f s",
+                          limits->config().cells_per_sec, std::ceil(wait * 10.0) / 10.0);
+            send_error(env.requestId, eph::kErrRateLimited, text);
+            return true;
+        }
+    }
     Stream s;
     s.request_id = env.requestId;
     s.precision = req.precision;
@@ -383,6 +414,7 @@ bool Session::on_request(const eph::Envelope& env, const uint8_t* payload) {
         send_error(env.requestId, eph::kErrInternal, "out of memory computing this request");
         return true;
     }
+    ++ctx_.metrics().requests;
     streams_.push_back(std::move(s));
     return true;
 }

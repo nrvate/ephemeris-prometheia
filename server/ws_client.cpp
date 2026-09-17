@@ -8,9 +8,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <random>
+
+#ifdef PROMETHEIA_TLS
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
+#endif
 
 namespace prometheia::server {
 namespace {
@@ -41,6 +48,16 @@ WsClient::~WsClient() {
 }
 
 void WsClient::close() {
+#ifdef PROMETHEIA_TLS
+    if (ssl_) {
+        SSL_free(static_cast<SSL*>(ssl_));
+        ssl_ = nullptr;
+    }
+    if (ssl_ctx_) {
+        SSL_CTX_free(static_cast<SSL_CTX*>(ssl_ctx_));
+        ssl_ctx_ = nullptr;
+    }
+#endif
     if (fd_ >= 0) {
         ::close(fd_);
         fd_ = -1;
@@ -48,7 +65,7 @@ void WsClient::close() {
     buffered_.clear();
 }
 
-Result<void> WsClient::connect(const std::string& host, int port, const std::string& path) {
+Result<void> WsClient::open_transport(const std::string& host, int port, const WsTlsOptions& tls) {
     close();
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
@@ -70,6 +87,57 @@ Result<void> WsClient::connect(const std::string& host, int port, const std::str
     }
     const int one = 1;
     setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    if (!tls.enabled) {
+        return {};
+    }
+#ifdef PROMETHEIA_TLS
+    const auto tls_error = [this](const std::string& what) {
+        char text[256] = "";
+        if (const unsigned long e = ERR_get_error()) {
+            ERR_error_string_n(e, text, sizeof text);
+        }
+        ERR_clear_error();
+        close();
+        return make_error(ErrorCode::IoError, what + ": " + text);
+    };
+    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
+    ssl_ctx_ = ctx;
+    if (!ctx) {
+        return tls_error("TLS context");
+    }
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+    if (tls.verify) {
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
+        const int loaded = tls.ca_file.empty()
+                               ? SSL_CTX_set_default_verify_paths(ctx)
+                               : SSL_CTX_load_verify_locations(ctx, tls.ca_file.c_str(), nullptr);
+        if (loaded != 1) {
+            return tls_error("trust anchors");
+        }
+    }
+    SSL* ssl = SSL_new(ctx);
+    ssl_ = ssl;
+    const std::string name = tls.sni.empty() ? host : tls.sni;
+    SSL_set_tlsext_host_name(ssl, name.c_str());
+    if (tls.verify) {
+        SSL_set1_host(ssl, name.c_str());
+    }
+    SSL_set_fd(ssl, fd_);
+    if (SSL_connect(ssl) != 1) {
+        return tls_error("TLS handshake with " + host);
+    }
+    return {};
+#else
+    close();
+    return make_error(ErrorCode::ArgumentError, "this build has no TLS (OpenSSL was not found)");
+#endif
+}
+
+Result<void> WsClient::connect(const std::string& host, int port, const std::string& path,
+                               const WsTlsOptions& tls) {
+    if (auto r = open_transport(host, port, tls); !r) {
+        return r;
+    }
 
     uint8_t nonce[16];
     std::random_device rd;
@@ -85,17 +153,14 @@ Result<void> WsClient::connect(const std::string& host, int port, const std::str
         return w;
     }
     std::string response;
-    char buf[1024];
+    uint8_t buf[1024];
     while (response.find("\r\n\r\n") == std::string::npos) {
-        pollfd pfd{fd_, POLLIN, 0};
-        if (::poll(&pfd, 1, 10000) <= 0) {
-            return make_error(ErrorCode::IoError, "no WebSocket upgrade response");
+        auto n = read_some(buf, sizeof buf, 10000);
+        if (!n) {
+            return make_error(ErrorCode::IoError,
+                              "no WebSocket upgrade response: " + n.error().message);
         }
-        const ssize_t n = ::recv(fd_, buf, sizeof buf, 0);
-        if (n <= 0) {
-            return make_error(ErrorCode::IoError, "connection closed during the upgrade");
-        }
-        response.append(buf, size_t(n));
+        response.append(reinterpret_cast<const char*>(buf), n.value());
         if (response.size() > 16384) {
             return make_error(ErrorCode::FormatError, "oversized upgrade response");
         }
@@ -111,6 +176,18 @@ Result<void> WsClient::connect(const std::string& host, int port, const std::str
 
 Result<void> WsClient::write_all(const uint8_t* data, size_t len) {
     while (len > 0) {
+#ifdef PROMETHEIA_TLS
+        if (ssl_) {
+            const int n =
+                SSL_write(static_cast<SSL*>(ssl_), data, int(std::min<size_t>(len, 1 << 30)));
+            if (n <= 0) {
+                return make_error(ErrorCode::IoError, "TLS write failed");
+            }
+            data += n;
+            len -= size_t(n);
+            continue;
+        }
+#endif
         const ssize_t n = ::send(fd_, data, len, MSG_NOSIGNAL);
         if (n < 0) {
             if (errno == EINTR) {
@@ -124,24 +201,46 @@ Result<void> WsClient::write_all(const uint8_t* data, size_t len) {
     return {};
 }
 
-Result<void> WsClient::read_exact(uint8_t* data, size_t len, int timeout_ms) {
-    const size_t from_buffer = std::min(len, buffered_.size());
-    std::memcpy(data, buffered_.data(), from_buffer);
-    buffered_.erase(buffered_.begin(), buffered_.begin() + long(from_buffer));
-    size_t got = from_buffer;
-    while (got < len) {
-        pollfd pfd{fd_, POLLIN, 0};
-        const int ready = ::poll(&pfd, 1, timeout_ms);
-        if (ready == 0) {
-            return make_error(ErrorCode::IoError, "timed out waiting for the server");
+Result<size_t> WsClient::read_some(uint8_t* data, size_t len, int timeout_ms) {
+    for (;;) {
+#ifdef PROMETHEIA_TLS
+        const bool tls_buffered = ssl_ && SSL_pending(static_cast<SSL*>(ssl_)) > 0;
+#else
+        const bool tls_buffered = false;
+#endif
+        if (!tls_buffered) {
+            pollfd pfd{fd_, POLLIN, 0};
+            const int ready = ::poll(&pfd, 1, timeout_ms);
+            if (ready == 0) {
+                return make_error(ErrorCode::IoError, "timed out waiting for the server");
+            }
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                return io_error("poll");
+            }
         }
-        if (ready < 0) {
-            if (errno == EINTR) {
+#ifdef PROMETHEIA_TLS
+        if (ssl_) {
+            SSL* ssl = static_cast<SSL*>(ssl_);
+            const int n = SSL_read(ssl, data, int(std::min<size_t>(len, 1 << 30)));
+            if (n > 0) {
+                return size_t(n);
+            }
+            const int e = SSL_get_error(ssl, n);
+            if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) {
                 continue;
             }
-            return io_error("poll");
+            if (e == SSL_ERROR_ZERO_RETURN || e == SSL_ERROR_SYSCALL) {
+                ERR_clear_error();
+                return make_error(ErrorCode::NotFound, "the server closed the connection");
+            }
+            ERR_clear_error();
+            return make_error(ErrorCode::IoError, "TLS read failed");
         }
-        const ssize_t n = ::recv(fd_, data + got, len - got, 0);
+#endif
+        const ssize_t n = ::recv(fd_, data, len, 0);
         if (n == 0) {
             return make_error(ErrorCode::NotFound, "the server closed the connection");
         }
@@ -151,9 +250,61 @@ Result<void> WsClient::read_exact(uint8_t* data, size_t len, int timeout_ms) {
             }
             return io_error("recv");
         }
-        got += size_t(n);
+        return size_t(n);
+    }
+}
+
+Result<void> WsClient::read_exact(uint8_t* data, size_t len, int timeout_ms) {
+    const size_t from_buffer = std::min(len, buffered_.size());
+    std::memcpy(data, buffered_.data(), from_buffer);
+    buffered_.erase(buffered_.begin(), buffered_.begin() + long(from_buffer));
+    size_t got = from_buffer;
+    while (got < len) {
+        auto n = read_some(data + got, len - got, timeout_ms);
+        if (!n) {
+            return n.error();
+        }
+        got += n.value();
     }
     return {};
+}
+
+Result<std::string> WsClient::http_get(const std::string& host, int port, const std::string& path,
+                                       const WsTlsOptions& tls) {
+    WsClient c;
+    if (auto r = c.open_transport(host, port, tls); !r) {
+        return r.error();
+    }
+    const std::string request =
+        "GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n";
+    if (auto r = c.write_all(reinterpret_cast<const uint8_t*>(request.data()), request.size());
+        !r) {
+        return r.error();
+    }
+    std::string response;
+    uint8_t buf[4096];
+    for (;;) {
+        auto n = c.read_some(buf, sizeof buf, 5000);
+        if (!n) {
+            if (n.error().code == ErrorCode::NotFound && !response.empty()) {
+                break;
+            }
+            return n.error();
+        }
+        response.append(reinterpret_cast<const char*>(buf), n.value());
+        // uWS answers with Content-Length and may keep the socket open.
+        const size_t head = response.find("\r\n\r\n");
+        if (head != std::string::npos) {
+            const size_t cl = response.find("Content-Length: ");
+            if (cl != std::string::npos && cl < head) {
+                const size_t body = std::strtoul(response.c_str() + cl + 16, nullptr, 10);
+                if (response.size() >= head + 4 + body) {
+                    break;
+                }
+            }
+        }
+    }
+    return response;
 }
 
 Result<void> WsClient::send_frame(uint8_t opcode, const uint8_t* data, size_t len) {

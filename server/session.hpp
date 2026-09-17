@@ -22,6 +22,8 @@
 #include <vector>
 
 #include "ephproto.h"
+#include "limits.hpp"
+#include "metrics.hpp"
 #include "prometheia/engine.hpp"
 #include "wire_map.hpp"
 
@@ -68,7 +70,11 @@ private:
 
 class LoopContext {
 public:
-    LoopContext(Engine engine, const WireMap& map, const ServerConfig& config);
+    // `limits` is shared by every loop and may be null (no tokens, no budget).
+    // `metrics` may live outside the context so other threads can read it
+    // for its whole life; null keeps the context's own.
+    LoopContext(Engine engine, const WireMap& map, const ServerConfig& config,
+                Limits* limits = nullptr, Metrics* metrics = nullptr);
 
     // A request's answer from the cache, or computed and cached.
     std::shared_ptr<const Answer> answer(const eph::Request& req, std::string_view payload);
@@ -77,17 +83,24 @@ public:
 
     const ServerConfig& config() const { return config_; }
     ResultCache& cache() { return cache_; }
+    Limits* limits() const { return limits_; }
+    Metrics& metrics() { return *metrics_; }
 
 private:
     Engine engine_;
     const WireMap& map_;
     ServerConfig config_;
     ResultCache cache_;
+    Limits* limits_;
+    Metrics own_metrics_;
+    Metrics* metrics_;
 };
 
 class Session {
 public:
-    explicit Session(LoopContext& ctx) : ctx_(ctx) {}
+    // `addr` is the peer's address, the default compute-budget key.
+    explicit Session(LoopContext& ctx, std::string addr = {})
+        : ctx_(ctx), budget_key_("a:" + addr) {}
 
     // Handles one WebSocket message. Returns false when the connection is to
     // be closed once the replies queued so far have been sent.
@@ -119,6 +132,7 @@ private:
     bool on_request(const eph::Envelope& env, const uint8_t* payload);
 
     LoopContext& ctx_;
+    std::string budget_key_; // "a:" address, or "t:" token once HELLO gave a known one
     uint8_t version_ = 0;
     std::deque<std::vector<uint8_t>> control_;
     std::deque<Stream> streams_;

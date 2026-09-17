@@ -320,6 +320,16 @@ tool and script in this repo, and for anyone running them:
     patch) run one event loop and one engine per thread on a shared port.
     `prometheiad`, the reference client `prometheia-wire-client`, and an
     in-process socket round-trip test (0.15 s).
+  - Increment 3 (done 2026-09-17): operations, matching Astrolog's server.
+    - The rest of protocol version 3: tokens (ERROR 7) and per-address or
+      per-token cell budgets (ERROR 6).
+    - Connection caps with 503 at the upgrade, and the HELLO deadline.
+    - `/healthz`, `/readyz` and `/metrics`.
+    - SIGTERM drain.
+    - wss:// with SIGHUP certificate reload (OpenSSL, optional at build).
+    - Refusing a port already served.
+    Remaining: zstd, the extra-columns extension (needs Astrolog's
+    specification), and the Astrolog wire map.
 
 ## Cleanroom policy
 

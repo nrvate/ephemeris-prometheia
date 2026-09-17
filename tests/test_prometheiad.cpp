@@ -5,8 +5,10 @@
 // protocol details are tested socket-free in test_server.cpp; this checks
 // the transport: upgrade, framing both ways, chunk streaming, several
 // connections, and closing after a protocol error.
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -27,16 +29,20 @@ constexpr const char* kTestMap = "# invented numbers, test only\n"
                                  "body 905 5\n"
                                  "flag 5 equatorial\n";
 
+WsOptions test_options() {
+    WsOptions o;
+    o.port = 0;
+    o.bind = "127.0.0.1";
+    o.threads = 2;
+    return o;
+}
+
 struct Running {
     TempFile tf{"prometheiad"};
     std::unique_ptr<WsServer> server;
 
-    Running() {
+    explicit Running(WsOptions o = test_options()) {
         synth::write_linear_spk(tf.path);
-        WsOptions o;
-        o.port = 0;
-        o.bind = "127.0.0.1";
-        o.threads = 2;
         const std::string path = tf.path.string();
         server = std::make_unique<WsServer>(o, WireMap::parse(kTestMap).value(),
                                             [path] { return Engine::open(path); });
@@ -208,3 +214,200 @@ TEST_CASE("prometheiad_connections") {
         CHECK(closed.error().code == prometheia::ErrorCode::NotFound);
     }
 }
+
+TEST_CASE("prometheiad_operations") {
+    SUBCASE("connection caps refuse at the upgrade with 503") {
+        WsOptions o = test_options();
+        o.limits.max_conns_per_addr = 2;
+        Running run(o);
+        WsClient a, b, c;
+        REQUIRE(a.connect("127.0.0.1", run.server->port()).ok());
+        REQUIRE(b.connect("127.0.0.1", run.server->port()).ok());
+        const auto refused = c.connect("127.0.0.1", run.server->port());
+        REQUIRE(!refused.ok());
+        CHECK(refused.error().message == "upgrade refused: HTTP/1.1 503 Service Unavailable");
+        a.close();
+        // The place comes back once the server has seen the close.
+        bool admitted = false;
+        for (int i = 0; i < 50 && !admitted; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            admitted = c.connect("127.0.0.1", run.server->port()).ok();
+        }
+        CHECK(admitted);
+        CHECK(run.server->metrics().find("prometheiad_refused_connections_total 1\n") !=
+              std::string::npos);
+    }
+    SUBCASE("no HELLO in time: closed") {
+        WsOptions o = test_options();
+        o.hello_timeout_ms = 100;
+        Running run(o);
+        WsClient c;
+        REQUIRE(c.connect("127.0.0.1", run.server->port()).ok());
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto closed = c.receive(3000);
+        REQUIRE(!closed.ok());
+        CHECK(closed.error().code == prometheia::ErrorCode::NotFound);
+        CHECK(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(2));
+        // A connection that said HELLO stays.
+        WsClient d;
+        connect_and_hello(d, run.server->port());
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        REQUIRE(d.send(eph::buildPing(1)).ok());
+        CHECK(d.receive(1000).ok());
+    }
+    SUBCASE("healthz, readyz, metrics") {
+        Running run;
+        const int port = run.server->port();
+        const auto health = WsClient::http_get("127.0.0.1", port, "/healthz");
+        REQUIRE_MESSAGE(health.ok(), health.error().message);
+        CHECK(health.value().rfind("HTTP/1.1 200 OK", 0) == 0);
+        CHECK(health.value().find("\r\n\r\nok\n") != std::string::npos);
+        const auto ready = WsClient::http_get("127.0.0.1", port, "/readyz");
+        REQUIRE(ready.ok());
+        CHECK(ready.value().find("\r\n\r\nready\n") != std::string::npos);
+
+        WsClient c;
+        connect_and_hello(c, port);
+        const auto metrics = WsClient::http_get("127.0.0.1", port, "/metrics");
+        REQUIRE(metrics.ok());
+        CHECK(metrics.value().find("prometheiad_hellos_total 1\n") != std::string::npos);
+        CHECK(metrics.value().find("prometheiad_connections_open 1\n") != std::string::npos);
+        CHECK(metrics.value().find("prometheiad_draining 0\n") != std::string::npos);
+    }
+    SUBCASE("drain: answers in flight finish, then 1001, then the loops return") {
+        Running run;
+        const int port = run.server->port();
+        WsClient c;
+        connect_and_hello(c, port);
+        eph::Request req;
+        req.jdStart = 2451545.0;
+        req.stepSeconds = 60;
+        req.nTime = 3000;
+        req.chunkRows = 100;
+        eph::ObjSpec sun;
+        sun.id = 900;
+        req.objs = {sun};
+        REQUIRE(c.send(request_message(req, 5)).ok());
+        // Let the request arrive, then drain before reading anything.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        run.server->drain(5);
+        CHECK(run.server->draining());
+        CHECK(run.server->metrics().find("prometheiad_draining 1\n") != std::string::npos);
+        uint32_t chunks = 0;
+        for (;;) {
+            const auto m = c.receive(5000);
+            if (!m.ok()) {
+                CHECK(m.error().code == prometheia::ErrorCode::NotFound);
+                break;
+            }
+            CHECK(type_of(m.value()) == eph::kMsgData);
+            ++chunks;
+        }
+        CHECK(chunks == 30);
+        run.server->join();
+        WsClient late;
+        CHECK(!late.connect("127.0.0.1", port).ok());
+    }
+    SUBCASE("a port another server listens on is refused") {
+        Running run;
+        WsOptions o = test_options();
+        o.port = run.server->port();
+        WsServer second(o, WireMap(), [path = run.tf.path.string()] { return Engine::open(path); });
+        const auto r = second.start();
+        REQUIRE(!r.ok());
+        CHECK(r.error().message ==
+              "another server is listening on port " + std::to_string(run.server->port()));
+    }
+}
+
+#ifdef PROMETHEIA_TLS
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509v3.h>
+
+namespace {
+
+// A self-signed P-256 certificate for "localhost", valid for a day.
+void write_self_signed(const std::string& cert_path, const std::string& key_path) {
+    EVP_PKEY* key = EVP_EC_gen("P-256");
+    REQUIRE(key != nullptr);
+    X509* x = X509_new();
+    X509_set_version(x, 2);
+    ASN1_INTEGER_set(X509_get_serialNumber(x), 1);
+    X509_gmtime_adj(X509_getm_notBefore(x), -60);
+    X509_gmtime_adj(X509_getm_notAfter(x), 86400);
+    X509_set_pubkey(x, key);
+    X509_NAME* name = X509_get_subject_name(x);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                               reinterpret_cast<const unsigned char*>("localhost"), -1, -1, 0);
+    X509_set_issuer_name(x, name);
+    X509V3_CTX v3;
+    X509V3_set_ctx_nodb(&v3);
+    X509V3_set_ctx(&v3, x, x, nullptr, nullptr, 0);
+    X509_EXTENSION* san = X509V3_EXT_conf_nid(nullptr, &v3, NID_subject_alt_name, "DNS:localhost");
+    X509_add_ext(x, san, -1);
+    X509_EXTENSION_free(san);
+    REQUIRE(X509_sign(x, key, EVP_sha256()) > 0);
+    FILE* f = std::fopen(cert_path.c_str(), "wb");
+    PEM_write_X509(f, x);
+    std::fclose(f);
+    f = std::fopen(key_path.c_str(), "wb");
+    PEM_write_PrivateKey(f, key, nullptr, nullptr, 0, nullptr, nullptr);
+    std::fclose(f);
+    X509_free(x);
+    EVP_PKEY_free(key);
+}
+
+} // namespace
+
+TEST_CASE("prometheiad_tls") {
+    TempFile cert("tls-cert"), key("tls-key"), other_cert("tls-other-cert"),
+        other_key("tls-other-key");
+    write_self_signed(cert.path.string(), key.path.string());
+    write_self_signed(other_cert.path.string(), other_key.path.string());
+
+    WsOptions o = test_options();
+    o.tls_cert = cert.path.string();
+    o.tls_key = key.path.string();
+    Running run(o);
+    CHECK(run.server->tls());
+    const int port = run.server->port();
+
+    WsTlsOptions tls;
+    tls.enabled = true;
+    tls.ca_file = cert.path.string();
+    tls.sni = "localhost";
+
+    WsClient c;
+    const auto r = c.connect("127.0.0.1", port, "/", tls);
+    REQUIRE_MESSAGE(r.ok(), r.error().message);
+    REQUIRE(c.send(hello_message()).ok());
+    const auto w = c.receive();
+    REQUIRE(w.ok());
+    CHECK(type_of(w.value()) == eph::kMsgWelcome);
+
+    const auto health = WsClient::http_get("127.0.0.1", port, "/healthz", tls);
+    REQUIRE_MESSAGE(health.ok(), health.error().message);
+    CHECK(health.value().find("\r\n\r\nok\n") != std::string::npos);
+
+    // Verification fails against another anchor, and plain ws:// is not served.
+    WsTlsOptions wrong = tls;
+    wrong.ca_file = other_cert.path.string();
+    WsClient d;
+    CHECK(!d.connect("127.0.0.1", port, "/", wrong).ok());
+    WsClient plain;
+    CHECK(!plain.connect("127.0.0.1", port).ok());
+
+    CHECK(run.server->reload_tls().ok());
+    CHECK(run.server->metrics().find("tls=\"1\"") != std::string::npos);
+
+    // A key that does not match its certificate fails before any loop starts.
+    WsOptions bad = test_options();
+    bad.tls_cert = cert.path.string();
+    bad.tls_key = other_key.path.string();
+    WsServer refused(bad, WireMap(), [p = run.tf.path.string()] { return Engine::open(p); });
+    const auto e = refused.start();
+    REQUIRE(!e.ok());
+    CHECK(e.error().message.find("does not match certificate") != std::string::npos);
+}
+#endif

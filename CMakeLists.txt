@@ -80,7 +80,8 @@ prometheia_test(horizons tests/test_horizons.cpp)
 
 # prometheiad's protocol core (docs/SERVER.md): Astrolog's ephemeris protocol
 # (third_party/ephproto, pinned) over the engine, with no sockets in it.
-add_library(prometheia_server STATIC server/session.cpp server/wire_map.cpp)
+add_library(prometheia_server STATIC server/session.cpp server/wire_map.cpp server/limits.cpp
+  server/metrics.cpp)
 target_include_directories(prometheia_server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/server)
 target_include_directories(prometheia_server SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ephproto)
 target_link_libraries(prometheia_server PUBLIC prometheia)
@@ -90,18 +91,33 @@ prometheia_test(server tests/test_server.cpp)
 target_link_libraries(test_server PRIVATE prometheia_server)
 
 # The WebSocket head: uWebSockets + uSockets (third_party, Apache-2.0),
-# built without TLS and without zlib (compression is off).
+# without zlib (compression is off). With OpenSSL found, uSockets is built
+# with TLS and prometheiad can serve wss:// (PROMETHEIA_TLS).
+find_package(OpenSSL)
+option(PROMETHEIA_WITH_TLS "Build prometheiad with TLS (needs OpenSSL)" ${OPENSSL_FOUND})
 file(GLOB USOCKETS_SOURCES third_party/uSockets/src/*.c third_party/uSockets/src/eventing/*.c)
+if(PROMETHEIA_WITH_TLS)
+  list(APPEND USOCKETS_SOURCES third_party/uSockets/src/crypto/openssl.c
+    third_party/uSockets/src/crypto/sni_tree.cpp)
+endif()
 add_library(usockets STATIC ${USOCKETS_SOURCES})
 target_include_directories(usockets SYSTEM PUBLIC third_party/uSockets/src)
-target_compile_definitions(usockets PUBLIC LIBUS_NO_SSL)
 set_target_properties(usockets PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
 target_compile_options(usockets PRIVATE -w)
+if(PROMETHEIA_WITH_TLS)
+  target_compile_definitions(usockets PUBLIC LIBUS_USE_OPENSSL)
+  target_link_libraries(usockets PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+else()
+  target_compile_definitions(usockets PUBLIC LIBUS_NO_SSL)
+endif()
 
 find_package(Threads REQUIRED)
-add_library(prometheia_ws STATIC server/ws_server.cpp server/ws_client.cpp)
+add_library(prometheia_ws STATIC server/ws_server.cpp server/ws_client.cpp server/tls.cpp)
 target_include_directories(prometheia_ws SYSTEM PRIVATE third_party/uWebSockets/src)
 target_compile_definitions(prometheia_ws PRIVATE UWS_NO_ZLIB)
+if(PROMETHEIA_WITH_TLS)
+  target_compile_definitions(prometheia_ws PUBLIC PROMETHEIA_TLS)
+endif()
 target_link_libraries(prometheia_ws PUBLIC prometheia_server usockets Threads::Threads)
 target_compile_options(prometheia_ws PRIVATE -Wall -Wextra -Werror)
 

@@ -20,21 +20,72 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
             --wire-map astrolog.wiremap --port 47190
 ```
 
-- **Options.**
+- **Options.** `prometheiad --help` lists them all.
   - `--threads N`: the number of event loops (default: one per hardware
     thread). Each loop opens its own engine.
   - `--bind ADDR`: the listen address.
   - `--max-cells N`: the per-request bound WELCOME advertises.
   - `--cache-mb N`: the result cache per loop.
   - `--verbose`: log each connection.
-- **Stopping.** SIGINT or SIGTERM closes the listeners and every connection.
+  - Limits, tokens, TLS and draining: see Operations below.
 - **Reference client.** `prometheia-wire-client --port 47190 --obj 0 --jd
   2461300.5 --count 3` sends HELLO and one REQUEST, and prints each object's
-  metadata and one line per row. `--help` lists the options.
+  metadata and one line per row. `--token`, `--tls`, `--ca`, `--sni` and
+  `--insecure` cover the options below; `--help` lists the rest.
+
+## Operations
+
+These follow Astrolog's own server (`astrolog-ephd`), so a deployment
+behaves the same with either.
+
+- **Connection caps.** `--max-conns N` (default 10,000) in total and
+  `--max-conns-per-ip N` (default 64) per peer address; 0 disables a cap. A
+  refused client gets HTTP 503 with the reason at the upgrade, before any
+  WebSocket exists.
+- **HELLO deadline.** A connection that has not sent HELLO after
+  `--hello-seconds N` (default 10; 0 = never) is closed (1008).
+- **Tokens.** `--tokens FILE` lists accepted tokens, one a line (`#` lines
+  and blank lines skipped; at most 128 bytes each). The token is HELLO's
+  version-3 field. With `--require-token`, a HELLO without a known token gets
+  ERROR 7 and the connection closes. The log counts tokens and never prints
+  them.
+- **Compute budget.** Each peer address, or each known token, has a bucket of
+  cells (objects × rows) that refills at `--cells-per-sec N` (default 10,000;
+  0 = no budget) up to `--max-cells`, so one full request is always possible
+  from a full bucket. A REQUEST over budget gets ERROR 6, "rate limited: N
+  cells a second; ask again in S s", and later requests are served. The
+  charge is made whether or not the answer is cached.
+- **Probes and metrics**, on the same port and scheme:
+  - `GET /healthz`: `ok` while the process answers.
+  - `GET /readyz`: `ready`, or 503 with the reason while draining or before
+    every loop listens.
+  - `GET /metrics`: Prometheus text summed over the loops. It covers
+    connections (open, total, refused, HELLO timeouts), HELLOs, requests,
+    cells computed, cache hits and misses, bytes sent, backpressure waits,
+    ERRORs by code, a compute-time histogram, a draining gauge and build
+    info. Nothing in it names a client or a request.
+- **Draining.** SIGTERM or SIGINT stops accepting (the listeners close).
+  Connections with answers queued or bytes unsent get up to
+  `--drain-seconds N` (default 10) to finish. Then every connection is closed
+  with 1001 (hard, for one whose client stopped reading) and the process
+  exits 0. A second signal exits at once.
+- **TLS.** `--tls-cert FILE --tls-key FILE` serves wss:// (and the probes
+  over HTTPS) on the same port.
+  - At startup the pair is checked: readable PEM, a key that matches, a
+    certificate valid now.
+  - SIGHUP re-reads both into every loop, after the same check. A bad pair
+    keeps the current one; established sessions are untouched.
+  - Protocols and ciphers: TLS 1.2 and later. TLS 1.2 is restricted to
+    forward-secret AEAD suites; TLS 1.3 uses OpenSSL's defaults.
+  - The build: TLS is compiled in when CMake finds OpenSSL
+    (`PROMETHEIA_WITH_TLS`, on by default then).
+- **Port sharing.** Every loop listens on the port with `SO_REUSEPORT`, so a
+  second server would bind the same port silently and share its traffic.
+  Startup therefore refuses a port something already accepts connections on.
 
 ## Licence of the binary
 
-uWebSockets and uSockets are Apache-2.0. Apache-2.0 is compatible with
+uWebSockets, uSockets and OpenSSL 3 (linked for TLS) are Apache-2.0. Apache-2.0 is compatible with
 GPL version 3 but not with version 2, so `prometheiad` and
 `prometheia-wire-client`, which link them, are distributable under
 GPL-3.0-or-later terms. The library, `ephem` and the other tools do not link
@@ -137,18 +188,28 @@ come from Astrolog's specification, written outside this cleanroom.
     silently drops sends, ERRORs included.
   - After a closing error the connection ends once the error is sent.
 - **Heartbeats.** WebSocket protocol pings, with a 30-second idle timeout.
-- **Build.** No compression, TLS or HTTP routes.
+- **Build.** No compression; TLS when OpenSSL is found.
 
 `server/ws_client.{hpp,cpp}` is a small blocking WebSocket client (masking,
 fragment reassembly, answering pings) behind `prometheia-wire-client` and
 `tests/test_prometheiad.cpp`. That test runs two loops on the synthetic
-kernel in-process and covers, in about 0.15 s:
+kernel in-process and covers:
 
 - the upgrade and a 1,200-row answer in three chunks, checked against the
   engine;
 - PING, with six simultaneous clients;
 - closing after REQUEST-before-HELLO;
-- `stop()` closing live connections.
+- `stop()` closing live connections;
+- the connection caps (503, and the place coming back after a close);
+- the HELLO deadline;
+- `/healthz`, `/readyz` and `/metrics`;
+- a drain that delivers all 30 chunks of an answer in flight before 1001;
+- refusing a port already served;
+- wss:// with a certificate generated by the test: verification against the
+  right and a wrong trust anchor, HTTPS probes, reload, and a mismatched key
+  refused at startup.
+
+The whole suite takes about 0.7 s.
 
 ### The protocol core
 
@@ -161,6 +222,8 @@ kernel in-process and covers, in about 0.15 s:
     sent: REQUEST before HELLO, or a version below 2.
   - A connection holding four computed answers it has not read yet is refused
     a fifth with ERROR 2, before anything is computed.
+  - With `Limits` (`server/limits.{hpp,cpp}`), HELLO checks the token
+    (ERROR 7) and each REQUEST is charged to its budget (ERROR 6).
 - **`LoopContext`**, one per event-loop thread, owns that thread's `Engine`
   and a least-recently-used **result cache** (64 MiB by default). The cache
   key is the REQUEST payload minus its two delivery-only fields (precision
@@ -181,9 +244,7 @@ kernel (wire-map numbers invented for the test), in about 10 ms. It covers:
 
 ## Not implemented
 
-- **From Astrolog's version 3:** tokens (ERROR 7) and per-address rate
-  limits (ERROR 6). HELLO's token is accepted and ignored.
-- **Other features:** zstd payloads, and the planned negotiated extra columns
-  (sigma, ayanamsha).
-- **Operations:** TLS, the `/healthz`, `/readyz` and `/metrics` routes, and
-  connection caps (Astrolog's server has all of these).
+- **zstd payloads.** Reserved in the envelope, advertised by no one.
+- **Extra columns** (sigma, ayanamsha). The plan is a negotiated extension,
+  which has to go into Astrolog's specification first.
+- **The wire map for Astrolog** (above).

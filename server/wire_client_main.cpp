@@ -35,6 +35,11 @@ constexpr const char* kUsage =
     "  --f32               ask for float32 values\n"
     "  --chunk N           chunk-size hint (default 500)\n"
     "  --proto N           HELLO's protocol version (default 3)\n"
+    "  --token T           HELLO's access token\n"
+    "  --tls               wss:// (verifies the certificate and name)\n"
+    "  --ca FILE           trust anchors for --tls (default: the system store)\n"
+    "  --sni NAME          name to verify (default: --host)\n"
+    "  --insecure          --tls without verification\n"
     "Prints: <object> <row> <retFlag> <six values, %.17g> and, per object, its\n"
     "name and error text on a '#' line. Exit 2 on a server ERROR.\n";
 
@@ -48,6 +53,8 @@ int main(int argc, char** argv) {
     std::string host = "127.0.0.1";
     int port = eph::kDefaultPort;
     unsigned proto = eph::kProtoVersion;
+    std::string token;
+    WsTlsOptions tls;
     eph::Request req;
     req.jdStart = 2451545.0;
     req.stepSeconds = 86400;
@@ -101,6 +108,17 @@ int main(int argc, char** argv) {
             req.precision = eph::kPrecF32;
         } else if (arg == "--chunk") {
             req.chunkRows = uint32_t(std::strtoul(value(), nullptr, 10));
+        } else if (arg == "--token") {
+            token = value();
+        } else if (arg == "--tls") {
+            tls.enabled = true;
+        } else if (arg == "--ca") {
+            tls.ca_file = value();
+        } else if (arg == "--sni") {
+            tls.sni = value();
+        } else if (arg == "--insecure") {
+            tls.enabled = true;
+            tls.verify = false;
         } else if (arg == "--proto") {
             proto = unsigned(std::strtoul(value(), nullptr, 10));
         } else {
@@ -114,7 +132,7 @@ int main(int argc, char** argv) {
     }
 
     WsClient ws;
-    if (auto r = ws.connect(host, port); !r) {
+    if (auto r = ws.connect(host, port, "/", tls); !r) {
         std::fprintf(stderr, "%s\n", r.error().message.c_str());
         return 1;
     }
@@ -125,7 +143,7 @@ int main(int argc, char** argv) {
 
     uint8_t hello[eph::kHelloMaxSize];
     uint32_t len = 0;
-    eph::buildHello(hello, eph::kCapFloat32, 1, "prometheia-wire-client/0.1.0", &len, nullptr,
+    eph::buildHello(hello, eph::kCapFloat32, 1, "prometheia-wire-client/0.1.0", &len, token.c_str(),
                     uint8_t(proto));
     if (auto r = ws.send(eph::makeMessage(eph::kMsgHello, 1, hello, len, 0, uint8_t(proto))); !r) {
         return fail(r.error());

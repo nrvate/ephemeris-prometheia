@@ -119,7 +119,7 @@ cmake --build build -j
 cd build && ctest
 ```
 
-Requires C++20, CMake ≥ 3.20, `libzstd` and `pkg-config`. Sanitizer build:
+Requires C++20, CMake ≥ 3.20, `libzstd` and `pkg-config`; OpenSSL, if found, enables wss:// in `prometheiad`. Sanitizer build:
 `-DPROMETHEIA_SANITIZE=ON`.
 
 Install (library, C and C++ headers, `ephem`, `prometheia-info`,

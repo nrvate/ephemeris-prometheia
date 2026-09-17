@@ -23,8 +23,9 @@ commits (`ephsrv/uWebSockets`, `ephsrv/uSockets`), including the patch:
 `us_socket_write2` did not set `last_write_failed` on a partial write, so a
 partial write from inside the writable callback had its writable poll turned
 back off and the buffered tail was never sent. Astrolog found and fixed it
-(its review item S2). Built without TLS (`LIBUS_NO_SSL`) and without zlib
-(`UWS_NO_ZLIB`). Checksum of the two trees, file by file in sorted order
+(its review item S2). Built without zlib (`UWS_NO_ZLIB`), and with OpenSSL
+(`LIBUS_USE_OPENSSL`, `src/crypto/`) when CMake finds it, else without TLS
+(`LIBUS_NO_SSL`). Checksum of the two trees, file by file in sorted order
 (run in `third_party/`: `find uWebSockets uSockets -type f | sort | xargs sha256sum | sha256sum`):
 `4e1b8459c1df6348203d7d650ab64fb12c31d1240b22877e5fd8899432cb03cc`.
 
