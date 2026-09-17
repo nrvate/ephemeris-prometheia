@@ -96,10 +96,16 @@ A year — a transit scan:
 
 | Body    | Target  | Segments | Degree | Declared           | Sampler calls | Time  |
 |---------|---------|----------|--------|--------------------|---------------|-------|
-| Moon    | 1″      | 16       | 12–16  | 0.44″, 8.6″/day    | 1,660         | 57 ms |
+| Moon    | 1″      | 16       | 12–16  | 0.44″, 8.6″/day    | 1,660         | 35 ms |
 | Moon    | 0.1″    | 21       | 9–16   | 0.068″, 1.7″/day   | 2,274         | 12 ms |
 | Sun     | 0.1″    | 8        | 12–16  | 0.055″, 0.22″/day  | 1,666         | 6 ms  |
 | Jupiter | 0.1″    | 12       | 6–16   | 0.098″, 0.54″/day  | 3,325         | 13 ms |
+
+The first fit over a time window costs more than the ones after it, which is
+the 35 ms against 12 ms above for the same body: the frame work underneath —
+chiefly the nutation nodes, one per half day — is computed once for a window
+and shared by everything else that touches it (docs/FRAMES.md). A year of
+window is about 15 ms, paid by whoever asks first.
 
 The sampler calls are the fit's whole cost; afterwards the client pays no
 engine time at all, for any instant in the span. A year of the Moon is about
