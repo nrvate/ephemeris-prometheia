@@ -296,9 +296,13 @@ tool and script in this repo, and for anyone running them:
     docs/FRAMES.md): `CalcOptions::precession`, C ABI 3,
     `ephem --precession`. Reduces to IAU 2006 at J2000 to the published
     rounding, agrees within 0.002″ over ±200 yr and 0.06″ over ±1000 yr,
-    and brings the date frames 1 mas closer to swetest. The
-    Stephenson–Morrison–Hohenkerk 2016 ΔT reconstruction was checked and
-    not adopted (CC BY / Crown copyright attribution terms; TIME.md).
+    and brings the date frames 1 mas closer to swetest.
+  - Increment 8 (done 2026-09-17): pre-1657 ΔT from
+    Stephenson–Morrison–Hohenkerk 2016, v. 2020 coefficients (CC BY 4.0,
+    cited; `StephensonMorrisonHohenkerkDeltaT`, TIME.md), now the
+    pre-telescopic branch of `ObservedDeltaT`; Espenak–Meeus stays
+    selectable (`ObservedDeltaT::Early::kEspenakMeeus`). It moves ΔT by
+    +94 s at 1500, +76 s at 1000 and −265 s at −500.
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 

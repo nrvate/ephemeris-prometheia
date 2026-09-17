@@ -291,11 +291,18 @@ TEST_CASE("time_delta_t_observed") {
         CHECK(near(obs.delta_t_seconds(jd + 0.73), obs.delta_t_seconds(jd), 0.02));
     }
 
-    // Before the table: Espenak-Meeus a century out (continuous-year
-    // evaluation differs from its mid-month convention by < 1 s there).
-    const EspenakMeeusDeltaT em;
+    // Before the table: Stephenson-Morrison-Hohenkerk a century out.
+    const StephensonMorrisonHohenkerkDeltaT smh;
     const double jd1500 = jd_from_civil(1500, 1, 1.0);
-    CHECK(near(obs.delta_t_seconds(jd1500), em.delta_t_seconds(jd1500), 0.5));
+    CHECK(near(obs.delta_t_seconds(jd1500), smh.delta_t_seconds(jd1500), 0.0));
+    // Espenak-Meeus stays selectable there (continuous-year evaluation
+    // differs from its mid-month convention by < 1 s), and the choice
+    // does not touch the observed era.
+    const ObservedDeltaT obs_em(ObservedDeltaT::Early::kEspenakMeeus);
+    const EspenakMeeusDeltaT em;
+    CHECK(near(obs_em.delta_t_seconds(jd1500), em.delta_t_seconds(jd1500), 0.5));
+    CHECK(near(obs_em.delta_t_seconds(first - 1e-6), obs_em.delta_t_seconds(first), 1e-6));
+    CHECK(near(obs_em.delta_t_seconds(2451545.0), obs.delta_t_seconds(2451545.0), 0.0));
     // After the table: near-flat at first, then the tidal parabola.
     const double jd2030 = jd_from_civil(2030, 1, 1.0);
     CHECK(obs.delta_t_seconds(jd2030) > 66.0);
@@ -309,5 +316,69 @@ TEST_CASE("time_delta_t_observed") {
     for (double jd : {first, last, first + 0.5, last + 0.5, 2451545.0, 2305447.5, 2488069.5}) {
         const double rt = jd_tt_from_ut1(jd_ut1_from_tt(jd));
         CHECK(near(rt, jd, 1e-8));
+    }
+}
+
+TEST_CASE("time_delta_t_smh") {
+    // Stephenson-Morrison-Hohenkerk, Table S15 v. 2020 (docs/TIME.md).
+    const StephensonMorrisonHohenkerkDeltaT smh;
+    auto at = [&](double year) {
+        return smh.delta_t_seconds(2451545.0 + (year - 2000.0) * 365.25);
+    };
+    CHECK(StephensonMorrisonHohenkerkDeltaT::spline_first_year() == -720.0);
+    CHECK(StephensonMorrisonHohenkerkDeltaT::spline_last_year() == 2019.0);
+
+    // Knots reproduce the published a0 of the row that starts there.
+    CHECK(near(at(-720.0), 20371.848, 1e-6));
+    CHECK(near(at(-100.0), 11557.668, 1e-6));
+    CHECK(near(at(1000.0), 1650.393, 1e-6));
+    CHECK(near(at(1600.0), 109.127, 1e-6));
+    CHECK(near(at(1800.0), 18.367, 1e-6));
+    CHECK(near(at(2016.0), 68.109, 1e-6));
+    // Mid-segment: row 9 (1650-1720) at t = 0.1.
+    CHECK(near(at(1657.0), 43.952 - 6.8089 + 0.38333 - 0.002127, 1e-6));
+    // End of the last row: 68.109 + 1.277 - 0.007 - 0.139.
+    CHECK(near(at(2019.0), 69.240, 1e-6));
+
+    // Continuous in value, including at the published 3-decimal knots and
+    // both joins to the parabola; the steepest slope here (18.4 s/yr, at
+    // -1000) moves it 6.8 s per step.
+    for (double y = -1000.0; y < 2100.0; y += 0.37) {
+        CHECK(near(at(y + 0.37), at(y), 7.0));
+    }
+    for (double k : {-720.0, -100.0, 400.0, 1000.0, 1650.0, 1800.0, 2019.0}) {
+        CHECK(near(at(k - 1e-9), at(k), 0.01));
+    }
+
+    // Outside the spline: eq. (4.1) of the 2016 paper, shifted by the
+    // constant that meets the spline end.
+    auto parabola = [](double y) {
+        const double u = (y - 1825.0) / 100.0;
+        return -320.0 + 32.5 * u * u;
+    };
+    const double shift_early = 20371.848 - parabola(-720.0);
+    CHECK(near(at(-2000.0), parabola(-2000.0) + shift_early, 1e-6));
+    CHECK(shift_early > -360.0);
+    CHECK(shift_early < -350.0); // -358.4 s
+    const double shift_late = 69.240 - parabola(2019.0);
+    CHECK(near(at(2300.0), parabola(2300.0) + shift_late, 1e-6));
+
+    // Against Espenak-Meeus: within their published disagreement, a few
+    // hundred seconds in antiquity and tens of seconds in the Middle Ages.
+    const EspenakMeeusDeltaT em;
+    auto em_at = [&](double year) {
+        return em.delta_t_seconds(2451545.0 + (year - 2000.0) * 365.25);
+    };
+    CHECK(std::abs(at(-500.0) - em_at(-500.0)) < 300.0); // -265 s
+    CHECK(std::abs(at(1000.0) - em_at(1000.0)) < 100.0); // +76 s
+    CHECK(std::abs(at(2000.0) - em_at(2000.0)) < 0.1);
+
+    // UT1 inversion through the model round-trips.
+    for (double y : {-1500.0, -720.0, 0.0, 1000.0, 1650.0}) {
+        const double jd = 2451545.0 + (y - 2000.0) * 365.25;
+        const double ut1 = jd - smh.delta_t_seconds(jd) / 86400.0;
+        double tt = ut1 + smh.delta_t_seconds(ut1) / 86400.0;
+        tt = ut1 + smh.delta_t_seconds(tt) / 86400.0;
+        CHECK(near(tt, jd, 1e-8));
     }
 }

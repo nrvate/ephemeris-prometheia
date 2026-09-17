@@ -61,7 +61,7 @@ astrology it is orders of magnitude beyond sufficient.
 
 ## Delta T (TT − UT1)
 
-`DeltaTModel` is a virtual interface with two built-in implementations.
+`DeltaTModel` is a virtual interface with three built-in implementations.
 
 ### Default: `ObservedDeltaT`
 
@@ -81,11 +81,13 @@ which is accurate to milliseconds at these spacings.
 
 Outside the table:
 
-- **Before 1657:** the Espenak–Meeus polynomials (below), evaluated at a
-  continuous decimal year, plus an offset that makes them meet the first
-  observation (+3.8 s) and fades linearly to zero over the preceding
-  century. Espenak–Meeus has its own 0.25 s seam at 1600.0 between two
-  published segments, inside that blend.
+- **Before 1657:** the Stephenson–Morrison–Hohenkerk spline (below),
+  plus an offset that makes it meet the first observation (+6.48 s: the
+  USNO table has 44.0 s at 1657.0, the spline 37.52 s) and fades linearly
+  to zero over the preceding century. `ObservedDeltaT(Early::kEspenakMeeus)`
+  uses the Espenak–Meeus polynomials there instead (offset +3.7 s),
+  evaluated at a continuous decimal year; they have their own 0.25 s seam
+  at 1600.0 between two published segments, inside that blend.
 - **After the last sample:** a least-squares trend over the table's last
   two years, blended by a smoothstep over the following century into
   the Morrison & Stephenson (2004) long-term parabola
@@ -125,21 +127,42 @@ by construction, and segment boundaries (e.g. 1986.0, 2005.0) have
 genuine jumps of ~2 s. Inversion (`jd_tt_from_ut1`) is therefore
 ill-defined within ~ΔT of those steps.
 
-### Considered, not adopted: Stephenson–Morrison–Hohenkerk 2016
+### `StephensonMorrisonHohenkerkDeltaT`
 
-The modern long-term reconstruction (Stephenson, Morrison & Hohenkerk 2016,
-*Proc. R. Soc. A* 472: 20160404, with a 2020 addendum) would replace the
-Espenak–Meeus polynomials before 1657, where published reconstructions
-disagree by seconds. Its terms were checked on 2026-09-17:
-- the paper is published under CC BY 4.0, which requires crediting the authors and source;
-- the ΔT tables and spline data are published on HM Nautical Almanac Office's
-  website (UK Hydrographic Office, Crown copyright).
+The modern reconstruction of Earth rotation from ancient and medieval
+eclipses and telescopic lunar occultations: the cubic spline of
+Stephenson, Morrison & Hohenkerk (2016), in its **v. 2020 coefficients**
+from the addendum by Morrison, Stephenson, Hohenkerk & Zawilski (2021).
+It is the pre-1657 branch of `ObservedDeltaT`, and usable on its own.
 
-Both carry attribution conditions, the same kind that keeps MPC data out of
-the project ([DESIGN.md](DESIGN.md), data sources). Not adopted pending a
-maintainer decision.
+- **Data:** Table S15 v. 2020, 58 cubic segments from −720.0 to 2019.0,
+  compiled in as `src/delta_t_smh_table.inc`. ΔT = a₀ + a₁t + a₂t² + a₃t³
+  with t = (Y − Kᵢ)/(Kᵢ₊₁ − Kᵢ), Y a continuous decimal Julian year
+  (2000 + (JD − 2451545)/365.25).
+- **Outside the spline:** the paper's long-term parabola (eq. 4.1)
+  ΔT = −320.0 + 32.5 u² s, u = (Y − 1825)/100, shifted by a constant so
+  the value is continuous: −358.4 s before −720, +267.0 s after 2019. The
+  parabola's slope differs from the spline's by 0.4 s/yr at −720 and
+  1 s/yr at 2019. After 2019 the standalone model is a rough tidal trend
+  (111 s in 2050); `ObservedDeltaT` never uses that side.
+- **Continuity:** the published knots agree to their 3-decimal rounding
+  (the generator enforces ≤ 0.01 s).
+- **Against Espenak–Meeus:** −254 s at −720, −265 s at −500, −143 s at
+  year 0, +76 s at 1000, +94 s at 1500, −6 s at 1650, −0.07 s at 2000.
+  Hundreds of seconds is ~0.1° of Earth rotation, which is what the
+  2016 analysis corrected with new eclipse data.
+
+**Licence.** Both papers and the figshare supplement (item 13885863)
+are CC BY 4.0: free to use with credit, which this section, the header
+comment and the generated table give. The HM Nautical Almanac Office's
+web copies of the same tables are Crown copyright and are not used.
 
 ### Refreshing the tables
+
+`tools/gen/gen_smh_delta_t.py` builds `src/delta_t_smh_table.inc` from
+the supplement zip (`https://ndownloader.figshare.com/files/26513569`,
+sha256 `1a649a16…cf37`, checked). It is a fixed publication, not part of
+release ingestion; rerun it only if the authors publish a new version.
 
 `tools/gen/gen_earth_orientation.py` regenerates `src/delta_t_table.inc`
 and `src/leap_second_table.inc` from USNO's files. It records each
@@ -156,6 +179,15 @@ stale. The release procedure is in [INGESTION.md](INGESTION.md).
 - USNO `maia.usno.navy.mil/ser7/tai-utc.dat` — leap-second table.
 - USNO `maia.usno.navy.mil/ser7/historic_deltat.data` and `deltat.data` —
   observed ΔT (public domain, US Government work).
+- F. R. Stephenson, L. V. Morrison & C. Y. Hohenkerk (2016),
+  "Measurement of the Earth's rotation: 720 BC to AD 2015", Proc. R. Soc.
+  A 472: 20160404, https://doi.org/10.1098/rspa.2016.0404 (CC BY 4.0) —
+  the spline and the long-term parabola.
+- L. V. Morrison, F. R. Stephenson, C. Y. Hohenkerk & M. Zawilski (2021),
+  "Addendum 2020 to 'Measurement of the Earth's rotation: 720 BC to AD
+  2015'", Proc. R. Soc. A 477: 20200776,
+  https://doi.org/10.1098/rspa.2020.0776; supplementary Table S15 v. 2020,
+  figshare 10.6084/m9.figshare.c.5300925 (CC BY 4.0) — the coefficients.
 - Morrison & Stephenson (2004), J. Hist. Astron. 35, 327 — the long-term
   ΔT parabola −20 + 32u².
 - NASA `eclipse.gsfc.nasa.gov/SEhelp/deltatpoly2004.html` — Espenak–Meeus

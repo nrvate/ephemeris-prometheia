@@ -75,6 +75,47 @@ struct DeltaTSample {
 #include "delta_t_table.inc"
 constexpr size_t kDeltaTCount = sizeof(kDeltaTTable) / sizeof(kDeltaTTable[0]);
 
+// Stephenson-Morrison-Hohenkerk spline segments (docs/TIME.md), generated
+// by tools/gen/gen_smh_delta_t.py from the authors' CC BY table.
+struct SmhSegment {
+    double k0, k1;         // years (decimal) the cubic spans
+    double a0, a1, a2, a3; // seconds, in t = (Y - k0) / (k1 - k0)
+};
+#include "delta_t_smh_table.inc"
+constexpr size_t kSmhCount = sizeof(kSmhDeltaT) / sizeof(kSmhDeltaT[0]);
+
+double smh_cubic(const SmhSegment& s, double y) {
+    const double t = (y - s.k0) / (s.k1 - s.k0);
+    return s.a0 + t * (s.a1 + t * (s.a2 + t * s.a3));
+}
+
+// Long-term parabola of the 2016 paper, eq. (4.1), u from 1825.
+double smh_parabola(double y) {
+    const double u = (y - 1825.0) / 100.0;
+    return -320.0 + 32.5 * u * u;
+}
+
+double smh_seconds(double y) {
+    const SmhSegment& first = kSmhDeltaT[0];
+    const SmhSegment& last = kSmhDeltaT[kSmhCount - 1];
+    // Outside the spline: the parabola, shifted by a constant to meet it.
+    if (y < first.k0) {
+        return smh_parabola(y) + (first.a0 - smh_parabola(first.k0));
+    }
+    if (y >= last.k1) {
+        return smh_parabola(y) + (smh_cubic(last, last.k1) - smh_parabola(last.k1));
+    }
+    const SmhSegment* seg =
+        std::upper_bound(kSmhDeltaT, kSmhDeltaT + kSmhCount, y,
+                         [](double v, const SmhSegment& s) { return v < s.k1; });
+    return smh_cubic(*seg, y);
+}
+
+// Continuous decimal (Julian) year of a TT date.
+double julian_year(double jd_tt) {
+    return 2000.0 + (jd_tt - 2451545.0) / 365.25;
+}
+
 // Months since year 0 for table comparisons (month 1-based).
 int64_t month_index(int year, int month) {
     return int64_t(year) * 12 + (month - 1);
@@ -318,6 +359,18 @@ double EspenakMeeusDeltaT::delta_t_seconds(double jd_tt) const {
     return espenak_meeus_seconds(double(c.year) + (double(c.month) - 0.5) / 12.0);
 }
 
+double StephensonMorrisonHohenkerkDeltaT::delta_t_seconds(double jd_tt) const {
+    return smh_seconds(julian_year(jd_tt));
+}
+
+double StephensonMorrisonHohenkerkDeltaT::spline_first_year() {
+    return kSmhDeltaT[0].k0;
+}
+
+double StephensonMorrisonHohenkerkDeltaT::spline_last_year() {
+    return kSmhDeltaT[kSmhCount - 1].k1;
+}
+
 double ObservedDeltaT::table_first_jd() {
     return kDeltaTTable[0].jd;
 }
@@ -332,16 +385,17 @@ double ObservedDeltaT::delta_t_seconds(double jd_tt) const {
     const DeltaTSample& last = kDeltaTTable[kDeltaTCount - 1];
 
     if (jd_tt < first.jd) {
-        // Espenak-Meeus, shifted to meet the first observation and fading
-        // back to the unshifted polynomials a century earlier.
-        // The polynomials take a continuous decimal year here, so the
-        // blend has no monthly steps.
-        const auto em = [](double jd) {
-            return espenak_meeus_seconds(2000.0 + (jd - 2451545.0) / 365.25);
+        // The pre-telescopic model, shifted to meet the first observation
+        // and fading back to the unshifted model a century earlier. Both
+        // take a continuous decimal year here, so the blend has no
+        // monthly steps.
+        const auto model = [this](double jd) {
+            return early_ == Early::kEspenakMeeus ? espenak_meeus_seconds(julian_year(jd))
+                                                  : smh_seconds(julian_year(jd));
         };
-        const double offset = first.seconds - em(first.jd);
+        const double offset = first.seconds - model(first.jd);
         const double w = std::max(0.0, 1.0 - (first.jd - jd_tt) / kCentury);
-        return em(jd_tt) + offset * w;
+        return model(jd_tt) + offset * w;
     }
 
     if (jd_tt >= last.jd) {
