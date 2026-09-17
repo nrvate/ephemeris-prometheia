@@ -106,6 +106,7 @@ struct CalcOptions {
     bool deflection = true;             // Sun's gravitational light bending
     bool aberration = true;             // observer-velocity aberration
     bool speed = true;                  // compute daily rates (3x the work)
+    bool sigma = true;                  // catalog bodies: sigma_arcsec (12 extra integrations)
     frames::GeoSite site{};             // Center::Topocentric only
 
     // Presets. apparent(): what an observer sees, in the true equinox of

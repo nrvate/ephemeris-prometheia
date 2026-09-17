@@ -315,7 +315,7 @@ include it.
 | milestone | ingestion | notes |
 |---|---|---|
 | M3 | JPL DE binary files (planetary + Moon truth) | own cleanroom reader of the documented public format; also validates everything else |
-| M5 | Horizons state vectors → verification corpus | sampled truth for precision gates; rate-limited sampling, same etiquette |
+| M5 (built) | Horizons observer tables + vectors → `tests/horizons_corpus.inc` | a verification fixture, refreshed deliberately — not part of release ingestion; see VALIDATION.md |
 | later | SBDB non-grav params `A1`/`A2`/`A3` | needed for long-arc comet integration |
 | later | SBDB `albedo`, `rot_per`, GM, taxonomy | physical-param extension of the record |
 | later | delta catalogs (SBDB change feeds are not offered — diff via `full-prec` re-pull of changed designations) | overlay strategy makes this cheap |

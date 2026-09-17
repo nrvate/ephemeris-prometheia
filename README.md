@@ -96,7 +96,8 @@ Design rationale, evidence from the Swiss Ephemeris source, and the full
 decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0–M3 done
 (DE + SPK readers, time scales, frames); M4 done (engine,
 catalog overlay with sigma and name lookup, sidereal ayanamshas, C
-ABI, `ephem` CLI); then validation gates (M5),
+ABI, `ephem` CLI); M5 in progress (JPL Horizons corpus: planets to
+6 µas, see [docs/VALIDATION.md](docs/VALIDATION.md)); then
 transports (M6).
 
 ## Build

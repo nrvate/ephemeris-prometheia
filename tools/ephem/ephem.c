@@ -311,6 +311,7 @@ static void print_help(void) {
            "      --astrometric      light time only\n"
            "      --geometric        no light time, deflection or aberration\n"
            "      --no-light-time, --no-deflection, --no-aberration, --no-speed\n"
+           "      --no-sigma         skip catalog uncertainties (much faster for small bodies)\n"
            "\n"
            "Output:\n"
            "  -f, --format table|csv|json  (default table)\n"
@@ -364,10 +365,19 @@ static int parse_args(int argc, char** argv, config* c) {
                                        PROMETHEIA_FRAME_J2000, PROMETHEIA_FRAME_ICRF};
     static const char* const format_names[] = {"table", "csv", "json"};
     static const int format_values[] = {FORMAT_TABLE, FORMAT_CSV, FORMAT_JSON};
-    static const char* const flags_without_value[] = {
-        "--help",          "--version",       "--equatorial", "--ecliptic",
-        "--apparent",      "--astrometric",   "--geometric",  "--no-light-time",
-        "--no-deflection", "--no-aberration", "--no-speed",   "--dms"};
+    static const char* const flags_without_value[] = {"--help",
+                                                      "--version",
+                                                      "--equatorial",
+                                                      "--ecliptic",
+                                                      "--apparent",
+                                                      "--astrometric",
+                                                      "--geometric",
+                                                      "--no-light-time",
+                                                      "--no-deflection",
+                                                      "--no-aberration",
+                                                      "--no-speed",
+                                                      "--no-sigma",
+                                                      "--dms"};
     int site_given = 0, center_given = 0, only_bodies = 0;
     size_t k;
     arg_cursor a;
@@ -501,6 +511,8 @@ static int parse_args(int argc, char** argv, config* c) {
             c->opts.aberration = 0;
         } else if (is_opt(&a, NULL, "--no-speed")) {
             c->opts.speed = 0;
+        } else if (is_opt(&a, NULL, "--no-sigma")) {
+            c->opts.sigma = 0;
         } else if (is_opt(&a, NULL, "--dms")) {
             c->dms = 1;
         } else {

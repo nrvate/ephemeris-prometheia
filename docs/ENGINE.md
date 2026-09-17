@@ -56,6 +56,7 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
 | `sidereal` | `Tropical`, `FaganBradley`, `Lahiri`, `User` (+ `sidereal_epoch_jtdb`, `sidereal_ayanamsa_deg`) | tropical |
 | `light_time`, `deflection`, `aberration` | independent switches | all on |
 | `speed` | rates by central difference (3× the work) | on |
+| `sigma` | catalog bodies' `sigma_arcsec` (12 extra integrations per body) | on |
 
 Presets: `CalcOptions::apparent()` (the defaults), `astrometric()` (light
 time only), `geometric()` (no corrections).
@@ -165,10 +166,14 @@ loads (the load streams and CRC-verifies the whole container):
 `calc`. A shared name is answered by the newest catalog; planets are
 not indexed (address those by their NAIF IDs).
 
-- **Seed:** the record's osculating elements (heliocentric, ecliptic
-  and equinox of J2000, TDB epoch) become a Cartesian state, rotated
-  to ICRF by (R1(ε̄₀)·B)ᵀ and translated by the Sun's barycentric state
-  at the epoch.
+- **Seed:** the record's osculating elements (heliocentric, JPL's
+  ecliptic and equinox of J2000, TDB epoch) become a Cartesian state,
+  rotated to ICRF by R1(84381.448″)ᵀ and translated by the Sun's
+  barycentric state at the epoch. JPL's J2000 ecliptic (SBDB, Horizons,
+  SPICE `ECLIPJ2000`) is the ICRF rotated by the IAU 1976 obliquity
+  with no frame bias — not the IAU 2006 mean ecliptic of the engine's
+  `J2000` output; using the latter misplaced seeds by ~50 km
+  ([VALIDATION.md](VALIDATION.md)).
 - **Force model** (`include/prometheia/forces.hpp`,
   `BarycentricForce`): barycentric point masses — the Sun, Mercury…
   Pluto at their *system barycentres* (where the DE GMs live), Earth and
@@ -201,7 +206,12 @@ not indexed (address those by their NAIF IDs).
   every published sigma is zero; absent, with the position intact,
   when the perturbed tracks cannot reach the epoch. Eigenvalues are
   rotation-invariant, so the value is frame-independent and the
-  light-optics corrections never enter.
+  light-optics corrections never enter. **Calibration:** against
+  Horizons' full-covariance uncertainties this is 10–1000× too large
+  (the element correlations the bulk SBDB query omits are what
+  constrain the orbits), so read it as a loose upper bound
+  ([VALIDATION.md](VALIDATION.md)). It costs twelve extra integrations
+  per body; `CalcOptions::sigma = false` skips them.
 - **Provenance:** catalog answers name the overlay
   ("… + EPM1 catalog(s) […]").
 - Costs of the query epoch outside the planetary ephemeris's coverage,
@@ -262,14 +272,18 @@ case:
   differences SWE *positions*.
 - **Heliocentric apparent, up to 0.8″ (Mercury):** SWE's heliocentric
   light time is ~1% larger than the Sun→body distance gives. Geometric
-  heliocentric positions agree to 0.0001″.
+  heliocentric positions agree to 0.0001″. JPL Horizons agrees with ours
+  (Sun-centred astrometric to 6 µas), so the difference is SWE's.
 - **ΔT:** SWE's ΔT differs from ours outside the observed era (68.82 vs
   69.12 s in 2026-09, 93 vs 203 s at 2100; see [TIME.md](TIME.md)).
   The topocentric fixtures therefore run with SWE's values through a
   fixed `DeltaTModel`.
 
-A JPL Horizons corpus (M5) will be the independent referee for the
-topocentric and heliocentric cases.
+JPL Horizons is the independent referee
+([VALIDATION.md](VALIDATION.md)): astrometric positions agree to 6 µas
+(topocentric 11 µas), apparent place of date to ~1 mas once Horizons'
+documented IAU 1976/80 equinox offset is removed, and the topocentric
+Moon to 0.008″ — the SWE differences above are SWE's.
 
 **Sidereal ayanamshas** (`tests/sidereal_fixtures.inc`, from
 `tools/gen/gen_sidereal_fixtures.py`; swetest `-ay<mode>` and

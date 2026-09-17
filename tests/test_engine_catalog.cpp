@@ -215,21 +215,19 @@ struct KernelPerturbers : PerturberStates {
     bool bad = false;
 };
 
+// JPL's J2000 ecliptic frame (SBDB elements, Horizons, SPICE ECLIPJ2000):
+// the ICRF rotated about x by the IAU 1976 obliquity, no frame bias.
+constexpr double kJplEclipticObliquity = 84381.448 / 3600.0 * 3.14159265358979323846 / 180.0;
+
 // The engine's seed construction, rebuilt independently: elements ->
-// heliocentric state in the ecliptic of J2000, rotated to ICRF by the
-// transpose of R1(eps0)*B, then translated by the Sun's barycentric state.
+// heliocentric state in JPL's J2000 ecliptic, rotated to ICRF by the
+// transpose of R1(84381.448"), then translated by the Sun's barycentric
+// state.
 State oracle_seed(spk::SpkFile& file, const Elements& els) {
     auto helio = elements_to_state(gm::kSun, els);
     CHECK(helio.ok());
-    double b[9];
-    frames::frame_bias_matrix(b);
-    const double eps0 = frames::mean_obliquity(kJ2000);
-    const double c = std::cos(eps0), s = std::sin(eps0);
-    const double r1[9] = {1, 0, 0, 0, c, s, 0, -s, c};
-    double m[9]; // r1 * b
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 3; ++j)
-            m[3 * i + j] = r1[3 * i] * b[j] + r1[3 * i + 1] * b[3 + j] + r1[3 * i + 2] * b[6 + j];
+    const double c = std::cos(kJplEclipticObliquity), s = std::sin(kJplEclipticObliquity);
+    const double m[9] = {1, 0, 0, 0, c, s, 0, -s, c};
 
     double sun[6];
     CHECK(file.state(10, 0, kEpoch, sun).ok());
@@ -502,15 +500,8 @@ TEST_CASE("sigma_circle_analytic_epoch") {
 
     // Rotate c into ICRF by m^T and build the barycentric line of sight
     // from the seed construction (r_bary = m^T r_helio + sun).
-    double b[9];
-    frames::frame_bias_matrix(b);
-    const double eps0 = frames::mean_obliquity(kJ2000);
-    const double ce = std::cos(eps0), se = std::sin(eps0);
-    const double r1[9] = {1, 0, 0, 0, ce, se, 0, -se, ce};
-    double m[9];
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 3; ++j)
-            m[3 * i + j] = r1[3 * i] * b[j] + r1[3 * i + 1] * b[3 + j] + r1[3 * i + 2] * b[6 + j];
+    const double ce = std::cos(kJplEclipticObliquity), se = std::sin(kJplEclipticObliquity);
+    const double m[9] = {1, 0, 0, 0, ce, se, 0, -se, ce};
     double c[3], rbar[3];
     auto helio = elements_to_state(gm::kSun, circ);
     CHECK(helio.ok());

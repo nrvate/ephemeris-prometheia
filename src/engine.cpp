@@ -25,6 +25,9 @@ namespace prometheia {
 namespace {
 
 constexpr double kAuKm = 149597870.7; // IAU 2012 Resolution B2 (exact)
+// Obliquity defining JPL's J2000 ecliptic frame (SBDB elements, Horizons,
+// SPICE ECLIPJ2000): the IAU 1976 value, applied to the ICRF without bias.
+constexpr double kJplEclipticObliquityArcsec = 84381.448;
 constexpr double kRad2Deg = 180.0 / 3.14159265358979323846;
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 constexpr double kJ2000 = 2451545.0;
@@ -673,10 +676,12 @@ struct Engine::Impl {
 
     // Elements (heliocentric, ecliptic and equinox of J2000, at a TDB
     // epoch) -> ICRF barycentric seed state (AU, AU/day): elements ->
-    // heliocentric Cartesian in the J2000 ecliptic, rotated by the
-    // transpose of R1(eps0)*B (the matrix of the J2000-ecliptic output
-    // branch of vector_at), then translated by the Sun's barycentric
-    // state at the epoch.
+    // heliocentric Cartesian in JPL's J2000 ecliptic, rotated to ICRF, then
+    // translated by the Sun's barycentric state at the epoch. JPL's
+    // ecliptic (SBDB elements, Horizons, SPICE ECLIPJ2000) is the ICRF
+    // rotated about x by the IAU 1976 obliquity 84381.448" with no frame
+    // bias -- not the IAU 2006 mean ecliptic our J2000 output uses; the
+    // difference (0.042" plus the 23 mas bias) is ~50 km at 2.7 AU.
     Result<State> seed_from_elements(const Elements& el, double epoch_jtdb) {
         const double mu_sun = gm_or_builtin(source.get(), body::kSun);
         auto st = elements_to_state(mu_sun, el);
@@ -685,8 +690,7 @@ struct Engine::Impl {
         const State helio = st.value();
 
         double m[9];
-        rot1(eps_j2000, m);
-        matmul(m, bias, m);
+        rot1(kJplEclipticObliquityArcsec / 206264.80624709636, m);
         double r[3] = {helio.pos.x, helio.pos.y, helio.pos.z};
         double rv[3] = {helio.vel.x, helio.vel.y, helio.vel.z};
         double p[3], v[3];
@@ -1129,7 +1133,7 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
             return s.error();
         res.ayanamsa_deg = s.value();
     }
-    if (from_catalog)
+    if (from_catalog && o.sigma)
         res.sigma_arcsec = impl_->sigma_arcsec(id, o, jd_tt, tau);
     return res;
 }

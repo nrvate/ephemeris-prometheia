@@ -119,6 +119,7 @@ prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometh
     o.deflection = c.deflection != 0;
     o.aberration = c.aberration != 0;
     o.speed = c.speed != 0;
+    o.sigma = c.sigma != 0;
     o.site.lon_rad = c.site_lon_deg * kDegToRad;
     o.site.lat_rad = c.site_lat_deg * kDegToRad;
     o.site.height_m = c.site_height_m;
@@ -203,6 +204,7 @@ void prometheia_options_init(prometheia_options* opts) {
     opts->deflection = d.deflection;
     opts->aberration = d.aberration;
     opts->speed = d.speed;
+    opts->sigma = d.sigma;
     opts->site_lon_deg = d.site.lon_rad / kDegToRad;
     opts->site_lat_deg = d.site.lat_rad / kDegToRad;
     opts->site_height_m = d.site.height_m;

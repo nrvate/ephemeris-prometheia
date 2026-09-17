@@ -76,6 +76,7 @@ TEST_CASE("c_api_library_and_defaults") {
     CHECK(c.deflection == 1);
     CHECK(c.aberration == 1);
     CHECK(c.speed == 1);
+    CHECK(c.sigma == 1);
     CHECK(c.sidereal_epoch_jd == 0.0);
     CHECK(c.sidereal_ayanamsa_deg == 0.0);
     CHECK(c.site_lon_deg == 0.0);

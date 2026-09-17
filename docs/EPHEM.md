@@ -55,7 +55,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 - `--site LON,LAT[,H]`: geodetic degrees east and north, metres above WGS84. It implies `topo`.
 - `--frame true|mean|j2000|icrf`, `--equatorial`.
 - `--sidereal fagan-bradley|fb|lahiri|user:JD:DEG|tropical`. For `user`, DEG is the mean ayanamsha at the TT Julian date JD.
-- Apparent place is the default. `--astrometric` applies light time only and `--geometric` applies no corrections. `--no-light-time`, `--no-deflection`, `--no-aberration` and `--no-speed` switch off one correction each.
+- Apparent place is the default. `--astrometric` applies light time only and `--geometric` applies no corrections. `--no-light-time`, `--no-deflection`, `--no-aberration` and `--no-speed` switch off one correction each. `--no-sigma` skips catalog uncertainties, which cost twelve extra integrations per small body.
 
 The option meanings, models and accuracy are the engine's: see [ENGINE.md](ENGINE.md).
 

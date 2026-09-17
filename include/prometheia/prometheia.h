@@ -40,7 +40,7 @@ extern "C" {
 #define PROMETHEIA_API
 #endif
 
-#define PROMETHEIA_ABI_VERSION 1
+#define PROMETHEIA_ABI_VERSION 2
 
 /* ---- Status and errors ------------------------------------------------ */
 
@@ -120,6 +120,7 @@ typedef struct prometheia_options {
     int deflection; /* nonzero: Sun's gravitational light bending (default 1) */
     int aberration; /* nonzero: observer-velocity aberration (default 1) */
     int speed;      /* nonzero: daily rates, 3x the work (default 1) */
+    int sigma;      /* nonzero: catalog bodies' sigma_arcsec, 12 extra integrations (default 1) */
     /* PROMETHEIA_CENTER_TOPOCENTRIC site on the WGS84 ellipsoid. */
     double site_lon_deg; /* geodetic longitude, east positive */
     double site_lat_deg; /* geodetic latitude */

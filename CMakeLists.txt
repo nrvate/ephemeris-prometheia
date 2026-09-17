@@ -72,6 +72,9 @@ set_source_files_properties(tests/c_api_smoke.c PROPERTIES
 prometheia_test(time tests/test_time.cpp)
 prometheia_test(frames tests/test_frames.cpp)
 
+# JPL Horizons referee corpus (M5); needs the DE440 binary, SKIPs without it.
+prometheia_test(horizons tests/test_horizons.cpp)
+
 add_executable(prometheia-bench tools/bench/bench_main.cpp)
 target_link_libraries(prometheia-bench PRIVATE prometheia)
 

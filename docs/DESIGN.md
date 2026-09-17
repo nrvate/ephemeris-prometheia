@@ -229,6 +229,18 @@ tool and script in this repo, and for anyone running them:
   thresholds, full-catalog bench run (the ~3.5 min/core extrapolation
   must be measured), numeric cross-check against installed Swiss
   Ephemeris as an output-only oracle.
+  - Increment 1 (done 2026-09-17): the JPL Horizons corpus and gates
+    (docs/VALIDATION.md) — 37 sequential requests, 236 observer + 54
+    vector rows. Astrometric positions agree to 6 µas (topocentric
+    11 µas), apparent place of date to ~1 mas after Horizons' documented
+    IAU 1976/80 equinox offset, topocentric Moon 0.008″; both open SWE
+    differences resolved as SWE's. Found and fixed: small-body seeds used
+    the IAU 2006 ecliptic + frame bias instead of JPL's ecliptic
+    (84381.448″, no bias), ~50 km. Small bodies ≤ 0.12″ within 10 yr of
+    their elements, up to 9″ at 100 yr (no asteroid perturbers or
+    relativity yet); `sigma_arcsec` found 10–1000× pessimistic.
+    `CalcOptions::sigma` (C ABI 2, `ephem --no-sigma`) makes it
+    optional. Gate cost 0.2 s; the long-arc report is opt-in.
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 
