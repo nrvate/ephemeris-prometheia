@@ -750,6 +750,13 @@ struct Engine::Impl {
     std::vector<std::unique_ptr<catalog::Reader>> catalogs;
     PerturberSet perturbers;
     std::unordered_map<uint64_t, SmallBody> small_bodies;
+    // Decoding a catalog record walks its chunk from the start, so a body
+    // asked for repeatedly — which is every body in a chart — would pay that
+    // walk on every single position. The bodies in play are few; the whole
+    // cache is dropped rather than evicted once it outgrows any working set a
+    // client plausibly has.
+    std::unordered_map<uint64_t, catalog::Record> record_cache;
+    static constexpr size_t kRecordCacheMax = 4096;
     std::unordered_map<uint64_t, std::unique_ptr<SigmaTracks>> sigma_tracks;
     std::string overlay_source_; // provenance for catalog bodies
     std::string perturber_note_; // appended when asteroid perturbers are loaded
@@ -1007,10 +1014,16 @@ struct Engine::Impl {
     // Newest-catalog-wins record lookup for a body the planetary
     // ephemeris does not carry. Engaged only after it returned NotFound.
     Result<std::optional<catalog::Record>> find_record(int id) {
+        if (auto hit = record_cache.find(uint64_t(id)); hit != record_cache.end())
+            return std::optional<catalog::Record>(hit->second);
         for (auto it = catalogs.rbegin(); it != catalogs.rend(); ++it) {
             auto rr = (*it)->lookup(uint64_t(id));
-            if (rr.ok())
+            if (rr.ok()) {
+                if (record_cache.size() >= kRecordCacheMax)
+                    record_cache.clear();
+                record_cache[uint64_t(id)] = rr.value();
                 return std::optional<catalog::Record>(rr.value());
+            }
             if (rr.error().code != ErrorCode::NotFound)
                 return rr.error();
         }
@@ -1898,6 +1911,7 @@ Result<void> Engine::add_catalog(const std::string& path) {
     // integrated: drop the memoized trajectories and uncertainty tracks,
     // they rebuild lazily.
     impl_->small_bodies.clear();
+    impl_->record_cache.clear();
     impl_->sigma_tracks.clear();
     impl_->refresh_overlay_source();
     return {};
@@ -1928,6 +1942,7 @@ Result<void> Engine::add_perturbers(const std::string& path) {
     impl_->refresh_overlay_source();
     // Every trajectory integrated so far lacked these masses.
     impl_->small_bodies.clear();
+    impl_->record_cache.clear();
     impl_->sigma_tracks.clear();
     return {};
 }
@@ -1936,6 +1951,7 @@ void Engine::release_small_bodies() {
     if (!impl_)
         return;
     impl_->small_bodies.clear();
+    impl_->record_cache.clear();
     impl_->sigma_tracks.clear();
 }
 
