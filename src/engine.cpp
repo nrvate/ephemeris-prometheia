@@ -298,6 +298,7 @@ public:
     size_t count() const override { return entries_.size(); }
     const double* mus() const override { return mus_.data(); }
     bool ok() const override { return ok_; }
+    long sun_index() const override { return sun_index_; }
 
 private:
     static constexpr double kBlockDays = 365.25;
@@ -315,6 +316,8 @@ private:
         for (int id : kPerturberIds) {
             double st[6];
             if (source_->barycentric(id, t, st).ok()) {
+                if (id == body::kSun)
+                    sun_index_ = long(entries_.size());
                 entries_.push_back(Entry{id, {}});
                 mus_.push_back(gm_or_builtin(source_, id));
             }
@@ -447,6 +450,7 @@ private:
 
     Source* source_ = nullptr;
     bool ok_ = true;
+    long sun_index_ = -1;
     bool built_ = false;
     std::string error_;
     double lo_ = 0.0, hi_ = 0.0;

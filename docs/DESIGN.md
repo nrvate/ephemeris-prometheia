@@ -241,6 +241,11 @@ tool and script in this repo, and for anyone running them:
     relativity yet); `sigma_arcsec` found 10–1000× pessimistic.
     `CalcOptions::sigma` (C ABI 2, `ephem --no-sigma`) makes it
     optional. Gate cost 0.2 s; the long-arc report is opt-in.
+  - Increment 2 (done 2026-09-17): the Sun's post-Newtonian term in
+    `BarycentricForce` (closed-form perihelion advance to 1e-4 relative).
+    Horizons small-body rms: ±10 yr 0.066″ → 0.041″, ±25 yr 0.22″ →
+    0.17″; longer arcs await the asteroid perturbers (a maintainer
+    decision: JPL's SB441-N16 kernel vs integrating the 16 bodies).
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 

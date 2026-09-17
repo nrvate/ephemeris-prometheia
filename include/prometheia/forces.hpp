@@ -100,14 +100,27 @@ struct PerturberStates {
     // GM per perturber (AU^3/day^2), count() entries.
     virtual const double* mus() const = 0;
     virtual bool ok() const = 0;
+    // Index of the Sun among the perturbers (the source of the relativistic
+    // term), or -1 when it is absent or not yet known.
+    virtual long sun_index() const { return -1; }
 };
+
+// Speed of light in AU/day (IAU 2012 AU, exact c).
+inline constexpr double kLightAuPerDay = 299792.458 * 86400.0 / 149597870.7;
 
 // Barycentric N-body point-mass force: acceleration is the sum of
 // mu_p (r_p - r)/|r_p - r|^3 over the perturbers — the Sun is one of
-// them, so there is no central-body term. dydt[0..2] = velocity,
+// them, so there is no central-body term — plus, when the perturbers
+// name the Sun, its post-Newtonian (Schwarzschild, PPN beta = gamma = 1)
+// correction in the test-particle form used for asteroid integrations:
+//   a_GR = mu / (c^2 r^3) [ (4 mu / r - v^2) r_vec + 4 (r . v) v_vec ]
+// with r, v relative to the Sun. It is the source of the relativistic
+// perihelion advance 6 pi mu / (c^2 a (1 - e^2)) per orbit (43"/century
+// for Mercury, ~0.3"/century at 2.8 AU). dydt[0..2] = velocity,
 // dydt[3..5] = acceleration. Not const: lazy perturber coverage.
 struct BarycentricForce {
     PerturberStates* perturbers = nullptr; // not owned
+    bool relativity = true;                // the Sun's post-Newtonian term
 
     void operator()(const double y[6], double t, double dydt[6]) {
         dydt[0] = y[3];
@@ -122,6 +135,7 @@ struct BarycentricForce {
         }
         const size_t n = perturbers->count();
         const double* mu = perturbers->mus();
+        const long sun = relativity ? perturbers->sun_index() : -1;
         double ax = 0.0, ay = 0.0, az = 0.0;
         double ps[6];
         for (size_t i = 0; i < n; ++i) {
@@ -132,6 +146,18 @@ struct BarycentricForce {
             ax += k * dx;
             ay += k * dy;
             az += k * dz;
+            if (long(i) == sun) {
+                const double r[3] = {-dx, -dy, -dz};
+                const double v[3] = {y[3] - ps[3], y[4] - ps[4], y[5] - ps[5]};
+                const double rr = std::sqrt(d2);
+                const double v2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+                const double rv = r[0] * v[0] + r[1] * v[1] + r[2] * v[2];
+                const double g = mu[i] / (kLightAuPerDay * kLightAuPerDay * d2 * rr);
+                const double cr = g * (4.0 * mu[i] / rr - v2), cv = g * 4.0 * rv;
+                ax += cr * r[0] + cv * v[0];
+                ay += cr * r[1] + cv * v[1];
+                az += cr * r[2] + cv * v[2];
+            }
         }
         dydt[3] = ax;
         dydt[4] = ay;

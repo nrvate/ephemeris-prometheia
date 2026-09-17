@@ -184,7 +184,12 @@ not indexed (address those by their NAIF IDs).
   (a kernel without the Moon perturbs without it). GMs come from the
   ephemeris's own constants when it publishes them (DE headers carry
   GM1…GM9, GMB, GMS in AU³/day²), else the DE440 values in `forces.hpp`
-  (relative differences ~1e-9).
+  (relative differences ~1e-9). The Sun also contributes its
+  post-Newtonian (Schwarzschild, PPN β = γ = 1) term in test-particle form,
+  μ/(c²r³)[(4μ/r − v²) **r** + 4(**r**·**v**) **v**], relative to the Sun:
+  the relativistic perihelion advance (tested against the closed form
+  6πμ/(c²a(1−e²)) per orbit to 1 part in 10⁴). No asteroid perturbers yet
+  ([VALIDATION.md](VALIDATION.md)).
 - **Memo:** one M2 `WindowMemo` per body — year windows of integrated
   samples, warm evaluations are spline reads. The integration error is
   ~1e-8 AU over ±26 yr (0.001″); practical accuracy is set by the

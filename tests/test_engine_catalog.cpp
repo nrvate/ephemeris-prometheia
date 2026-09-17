@@ -152,6 +152,52 @@ TEST_CASE("barycentric_force_memo_matches_integration") {
     CHECK(worst_direct < 1e-8);
 }
 
+// The Sun's post-Newtonian term against its closed form: the perihelion of
+// a tight, eccentric orbit about a static Sun advances by
+// 6 pi mu / (c^2 a (1 - e^2)) per revolution. The Laplace-Runge-Lenz
+// vector is read after whole periods, where the osculating wobble repeats.
+TEST_CASE("barycentric_force_relativistic_perihelion_advance") {
+    struct RelativisticSun : StaticSun {
+        long sun_index() const override { return 0; }
+    } sun;
+    const double a = 0.05, e = 0.5;
+    const Elements els{a, e, 0.0, 0.0, 0.0, 0.0};
+    auto s0 = elements_to_state(gm::kSun, els);
+    REQUIRE(s0.ok());
+    const double period = 2.0 * 3.14159265358979323846 * std::sqrt(a * a * a / gm::kSun);
+    const int orbits = 100;
+
+    auto perihelion_angle = [](const double y[6]) {
+        const double h[3] = {y[1] * y[5] - y[2] * y[4], y[2] * y[3] - y[0] * y[5],
+                             y[0] * y[4] - y[1] * y[3]};
+        const double r = std::sqrt(y[0] * y[0] + y[1] * y[1] + y[2] * y[2]);
+        const double ax = (y[4] * h[2] - y[5] * h[1]) / gm::kSun - y[0] / r;
+        const double ay = (y[5] * h[0] - y[3] * h[2]) / gm::kSun - y[1] / r;
+        return std::atan2(ay, ax);
+    };
+    double y[6];
+    to_array(s0.value(), y);
+    const double w0 = perihelion_angle(y);
+
+    for (bool relativity : {false, true}) {
+        BarycentricForce force{&sun, relativity};
+        to_array(s0.value(), y);
+        IntegrateStats stats;
+        REQUIRE(
+            integrate_dp54(y, kJ2000, kJ2000 + orbits * period, force, IntegrateOptions{}, &stats)
+                .ok());
+        const double advance =
+            std::remainder(perihelion_angle(y) - w0, 2.0 * 3.14159265358979323846);
+        const double expected = relativity
+                                    ? orbits * 6.0 * 3.14159265358979323846 * gm::kSun /
+                                          (kLightAuPerDay * kLightAuPerDay * a * (1.0 - e * e))
+                                    : 0.0;
+        std::printf("  relativity %d: perihelion advance %.6e rad (closed form %.6e)\n",
+                    int(relativity), advance, expected);
+        CHECK(std::fabs(advance - expected) < 0.01 * 4.96e-4);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Part A2: the engine overlay on the synthetic kernel, against an
 // independent integration of the same force model.
@@ -208,6 +254,7 @@ struct KernelPerturbers : PerturberStates {
     size_t count() const override { return ids_.size(); }
     const double* mus() const override { return mus_.data(); }
     bool ok() const override { return !bad; }
+    long sun_index() const override { return 0; }
 
     spk::SpkFile file_;
     std::vector<int> ids_{10, 399, 5};

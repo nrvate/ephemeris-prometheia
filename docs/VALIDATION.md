@@ -70,13 +70,18 @@ Six numbered asteroids, all from `tests/data/sample-100.epm`: Ceres, Pallas,
 Vesta, Iris, Hygiea and Cybele. Epochs are the element epoch (2026-06-08) and
 ±10, 25, 50 and 100 years.
 
-| span from element epoch | astrometric, max over 6 bodies | gate |
+| span from element epoch | astrometric, rms · max over 6 bodies | gate |
 |---|---:|---:|
-| 0 | 0.0016″; heliocentric 0.1–4 km | 0.005″; 10 km |
-| ±10 yr | 0.12″ | 0.15″ |
-| ±25 yr | 0.35″ | report |
-| ±50 yr | 2.7″ (Hygiea) | report |
-| ±100 yr | 8.9″ (Hygiea), 3.7″ (Pallas), others ≤ 1.7″ | report |
+| 0 | max 0.0016″; heliocentric 0.1–4 km | 0.005″; 10 km |
+| ±10 yr | 0.041″ · 0.12″ | 0.15″ |
+| ±25 yr | 0.17″ · 0.39″ | report |
+| ±50 yr | 0.89″ · 2.5″ (Hygiea) | report |
+| ±100 yr | 2.9″ · 8.7″ (Hygiea), 4.4″ (Pallas), others ≤ 1.7″ | report |
+
+With the Sun's post-Newtonian term (added after the first measurement), the
+rms fell from 0.066″ to 0.041″ at ±10 yr and from 0.22″ to 0.17″ at ±25 yr.
+Beyond that, the missing asteroid perturbers dominate, and the 50- and
+100-year rms did not move (0.88″ and 2.9″ before).
 
 - **Frame fix at the element epoch:** the first measurement showed 40–100 km
   here. SBDB elements are in **JPL's J2000 ecliptic**: the ICRF rotated by the
@@ -85,8 +90,8 @@ Vesta, Iris, Hygiea and Cybele. Epochs are the element epoch (2026-06-08) and
   now uses JPL's definition, and the residual at the element epoch fell to
   metres–kilometres.
 - **Long arcs:** growth beyond ±10 years is our force model. The Sun and planets
-  act as point masses, with no asteroid perturbers and no relativity. Horizons
-  includes both. Hygiea's jump between +25 and +50 years is consistent with a
+  act as point masses plus the Sun's relativistic term, with no asteroid
+  perturbers. Horizons integrates with the 16 SB441-N16 asteroids. Hygiea's jump between +25 and +50 years is consistent with a
   close approach to one of the big perturbers.
 - **Uncertainties:** propagating SBDB's 1-σ element sigmas as uncorrelated
   gives `sigma_arcsec` values roughly 10–1000× larger than Horizons' own full-covariance
