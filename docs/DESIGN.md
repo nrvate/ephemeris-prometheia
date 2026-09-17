@@ -160,6 +160,19 @@ tool and script in this repo, and for anyone running them:
 - **M4** — engine API (`prometheia::Engine`), catalog stack overlay,
   calc() with flags/sigma/provenance, pdes→spkid secondary index,
   ayanamsa layer, C ABI shim, `ephem` CLI.
+  - Increment 1 (done 2026-09-16): engine core (docs/ENGINE.md) — DE or
+    SPK source by content, NAIF body IDs, geo/topo/helio/barycentric
+    observers, light time (TwoSum-exact retarded epochs), solar
+    deflection, relativistic aberration, frame bias (new
+    `frames::frame_bias_matrix`), ICRF/J2000/mean/true-of-date ecliptic
+    or equatorial, rates by whole-pipeline central differences, per-epoch
+    frame cache (6 µs/position). Against swetest on the same DE440 file:
+    0.0001″ (J2000 frame), ≤ 0.0031″ (date frames, SWE's precession
+    model), topocentric Moon 0.13″ (SWE rotates the site about the mean
+    pole); SWE's printed speeds found inconsistent with its own
+    positions, so rates gate against differenced positions.
+  - Next: catalog overlay (small bodies integrated from EPM1 elements
+    with DE perturbers, sigma), ayanamsas, C ABI shim, `ephem` CLI.
 - **M5** — validation gates: Horizons-sampled corpus, per-tier precision
   thresholds, full-catalog bench run (the ~3.5 min/core extrapolation
   must be measured), numeric cross-check against installed Swiss

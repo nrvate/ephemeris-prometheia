@@ -80,8 +80,11 @@ All checks in `tests/test_frames.cpp`:
 ## Accuracy notes
 
 - ICRF vs the J2000 mean equator/ecliptic differ by the ~0.02″ frame
-  bias; we ignore it (below any tolerance we promise; a later increment
-  can add the B matrix).
+  bias. `frame_bias_matrix()` provides B = R1(−η₀)·R2(ξ₀)·R3(dα₀)
+  (dα₀ = −14.6 mas, ξ₀ = −16.617 mas, η₀ = −6.8192 mas); the date-frame
+  matrices here exclude it and the engine composes M·B
+  ([ENGINE.md](ENGINE.md)). Against swetest's `-icrs` vs `-j2000`
+  outputs the composed chain agrees to 0.0001″.
 - The equation-of-equinoxes complementary series is the circular's
   truncation (sub-microarcsecond for practical dates).
 - Nutation evaluation costs 1365 sin/cos pairs (~10 µs); memoize per

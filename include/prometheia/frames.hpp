@@ -39,6 +39,13 @@ double mean_obliquity(double jd_tt);
 
 // --- Matrices, row-major 3x3, r_out = M * r_in, all from ICRF -------
 
+// Frame bias B = R1(-eta0) R2(xi0) R3(d_alpha0): ICRF -> mean equator
+// and equinox of J2000.0, with d_alpha0 = -14.6 mas, xi0 = -16.617 mas,
+// eta0 = -6.8192 mas (Circular 179 ch. 5). About 23 mas; the date-frame
+// matrices below do NOT include it: compose M * B for a bias-consistent
+// chain (the engine does).
+void frame_bias_matrix(double m[9]);
+
 // Mean equator & equinox of date (IAU 2006 precession alone).
 void mean_equator_of_date_matrix(double jd_tt, double m[9]);
 

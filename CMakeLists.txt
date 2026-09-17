@@ -16,6 +16,7 @@ add_library(prometheia
   src/catalog.cpp
   src/cbor.cpp
   src/de.cpp
+  src/engine.cpp
   src/spk.cpp
   src/frames.cpp
   src/kepler.cpp
@@ -64,6 +65,10 @@ add_test(NAME de COMMAND test_de)
 add_executable(test_spk tests/test_spk.cpp)
 target_link_libraries(test_spk PRIVATE prometheia)
 add_test(NAME spk COMMAND test_spk)
+
+add_executable(test_engine tests/test_engine.cpp)
+target_link_libraries(test_engine PRIVATE prometheia)
+add_test(NAME engine COMMAND test_engine)
 
 add_executable(test_time tests/test_time.cpp)
 target_link_libraries(test_time PRIVATE prometheia)

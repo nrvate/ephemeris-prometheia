@@ -174,6 +174,19 @@ double mean_obliquity(double jd_tt) {
     return as * kAs2Rad;
 }
 
+void frame_bias_matrix(double m[9]) {
+    // B = R1(-eta0) R2(xi0) R3(d_alpha0).
+    const double da0 = -0.01460 * kAs2Rad;
+    const double xi0 = -0.0166170 * kAs2Rad;
+    const double eta0 = -0.0068192 * kAs2Rad;
+    double r1[9], r2[9], r3[9], t[9];
+    rot1(-eta0, r1);
+    rot2(xi0, r2);
+    rot3(da0, r3);
+    matmul(r1, r2, t);
+    matmul(t, r3, m);
+}
+
 void mean_equator_of_date_matrix(double jd_tt, double m[9]) {
     double zeta, z, theta;
     precession_angles(jd_tt, zeta, z, theta);

@@ -17,7 +17,7 @@ application). The ephemeris *data* it ingests is US-government public domain
 
 ## Status
 
-Milestones 0–2 of 6 complete (2026-09-16):
+Milestones 0–3 of 6 complete, M4 under way (2026-09-16):
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
@@ -52,18 +52,27 @@ Milestones 0–2 of 6 complete (2026-09-16):
   topocentric helper. Differentially validated against the installed
   Swiss Ephemeris to 0.0005". Sources and conventions:
   [docs/FRAMES.md](docs/FRAMES.md).
+- **Engine API** — `prometheia::Engine::calc(body, time, options)` over a
+  DE binary or SPK kernel: geocentric, topocentric, heliocentric or
+  barycentric; light time, solar light deflection and relativistic
+  aberration; ICRF, J2000, mean or true equinox of date, ecliptic or
+  equatorial; rates and provenance. Agrees with the Swiss Ephemeris run
+  on the same DE440 file to 0.0001″ in the J2000 frame (Moon 0.001″;
+  0.003″ in date frames, their precession model). ~6 µs per position. Details and the
+  understood differences: [docs/ENGINE.md](docs/ENGINE.md).
 - **Measured on real data** (`prometheia-bench`, 100-body SBDB fixture,
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
 - **Tools** — `prometheia-fetch` (Python), `prometheia-convert`,
-  `prometheia-info`, `prometheia-bench`. Ten test suites, clean under
+  `prometheia-info`, `prometheia-bench`. Eleven test suites, clean under
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
 decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0-M3 done
-(DE + SPK readers, time scales, frames); next: engine API with
-apparent place + ayanamsas (M4), validation gates (M5), transports (M6).
+(DE + SPK readers, time scales, frames); M4 in progress (engine core with
+apparent place done; next: catalog overlay for small bodies, ayanamsas,
+C ABI, `ephem` CLI); then validation gates (M5), transports (M6).
 
 ## Build
 
