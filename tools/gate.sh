@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # The pre-commit gate, run locally (the project uses no hosted CI):
-#   1. clang-format check over include/ src/ tests/ tools/ (third_party excluded)
+#   1. clang-format check over include/ src/ server/ tests/ tools/ (third_party excluded)
 #   2. Release build + ctest in build/
 #   3. ASan+UBSan build + ctest in build-asan/
 # Tests run serially: the integrator benchmark asserts a wall-clock bound.
@@ -20,7 +20,7 @@ fi
 clang_format="${CLANG_FORMAT:-clang-format}"
 
 echo "== format ($("$clang_format" --version | head -1))"
-find include src tests tools \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \
+find include src server tests tools \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \
     -o -name '*.inl' \) -print0 | xargs -0 "$clang_format" --dry-run -Werror
 
 # Runs a step quietly; on failure prints its full output and stops.

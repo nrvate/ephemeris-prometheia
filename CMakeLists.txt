@@ -78,6 +78,17 @@ prometheia_test(frames tests/test_frames.cpp)
 # JPL Horizons referee corpus (M5); needs the DE440 binary, SKIPs without it.
 prometheia_test(horizons tests/test_horizons.cpp)
 
+# prometheiad's protocol core (docs/SERVER.md): Astrolog's ephemeris protocol
+# (third_party/ephproto, pinned) over the engine, with no sockets in it.
+add_library(prometheia_server STATIC server/session.cpp server/wire_map.cpp)
+target_include_directories(prometheia_server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/server)
+target_include_directories(prometheia_server SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ephproto)
+target_link_libraries(prometheia_server PUBLIC prometheia)
+target_compile_options(prometheia_server PRIVATE -Wall -Wextra -Werror)
+
+prometheia_test(server tests/test_server.cpp)
+target_link_libraries(test_server PRIVATE prometheia_server)
+
 add_executable(prometheia-bench tools/bench/bench_main.cpp)
 target_link_libraries(prometheia-bench PRIVATE prometheia)
 

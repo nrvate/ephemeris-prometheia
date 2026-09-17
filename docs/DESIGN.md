@@ -84,8 +84,8 @@ no code read or reused — see Cleanroom policy):
    [INGESTION.md](INGESTION.md).
 7. **API: C++20, no process-wide globals, ever.** Contexts are the
    foundation, not a bolt-on (the lesson of the Swiss Ephemeris threading
-   forks). C ABI shim for bindings; transport heads (HTTP, binary socket,
-   custom protocol) as thin add-on libraries over the same core. M6.
+   forks). C ABI shim for bindings; transport heads as thin add-ons over the same
+   core. M6: `prometheiad`, Astrolog's binary WebSocket protocol.
 8. **Astrology transforms in v1:** ICRF-native core with ecliptic-of-date,
    topocentric, light-time/aberration, sidereal ayanamsas from published
    formulas. Houses, fictitious bodies, fixed stars: later milestones.
@@ -303,8 +303,18 @@ tool and script in this repo, and for anyone running them:
     pre-telescopic branch of `ObservedDeltaT`; Espenak–Meeus stays
     selectable (`ObservedDeltaT::Early::kEspenakMeeus`). It moves ΔT by
     +94 s at 1500, +76 s at 1000 and −265 s at −500.
-- **M6** — transports: `Transport` interface, binary-socket head
-  (length-prefixed CBOR), `prometheiad` HTTP head.
+- **M6** — transports. Decided 2026-09-17: no HTTP head.
+  - `prometheiad` speaks Astrolog's ephemeris protocol (version 3) over
+    WebSocket, so it serves Astrolog directly. Astrolog owns the protocol;
+    this repository pins a copy.
+  - The Swiss Ephemeris numbers the protocol uses come only from a wire-map
+    file written from Astrolog's specification, outside this cleanroom.
+    Unsupported objects fail alone.
+  - Details: docs/SERVER.md.
+  - Increment 1 (done 2026-09-17): the protocol core (`server/`): HELLO and
+    WELCOME negotiation, REQUEST limits, chunked f64/f32 DATA, per-object
+    NaN failures, a per-loop result cache, and the wire-map parser. Tested
+    socket-free.
 
 ## Cleanroom policy
 
