@@ -276,7 +276,7 @@ same host:
 - **Caching:** a new connection may land on another loop, which has its own
   cache.
 
-## Protocol version 4 (agreed with Astrolog, not yet implemented)
+## Protocol version 4 (agreed with Astrolog; §3 locked; not yet implemented here)
 
 Astrolog is replacing version 3 with **version 4** on its `ephv4` branch: the
 spec and conformance fixtures are `EPHEMERIS_PLUGINS_PLAN.md` and
@@ -346,10 +346,18 @@ sharing no code with Astrolog's codec or with its fixture generator. A
 disagreement between the two readings means the spec, one parser or one
 fixture is wrong. Run it against the conformance directory in Astrolog's
 tree; it reports the verdict (ok, malformed, unsupported) for every fixture
-and exits nonzero on a disagreement. Runs so far, 2026-09-17: 74/74 on the first drop, then 85/85 after the
-match-length, tolerance and request-id changes.
+and exits nonzero on a disagreement. Runs: 74/74 on the first drop, 85/85 on
+the second, and — 2026-09-18, after the reader learned `deadlineMs`, the
+batched LOOKUP, `u8 nQueries` and `corrApplied` (all its own staleness, not
+the drop's bytes) — **91/91 on the corrApplied drop** (ephv4 `0fbc863`,
+`set-sha256 1c934c7d…` verified independently). **§3 is locked** on that
+verdict; the lock's prose carries two reading-rule recommendations (the
+`maxPayload` zero-check, and unknown precision/column bits being
+unsupported-not-malformed) that move no bytes.
 
-**Our migration** (when Astrolog lands the pass and the fixtures are pinned):
+**Our migration** (the pass has landed and the fixtures are pinned; step 1
+done — the v4 header and `registries.json` are vendored with checksums at
+`third_party/ephproto/v4/`, the v3 header stays until the delete step):
 1. Take the renamed `ephproto.h` and the fixtures; the pinned-header check
    diverges once, as expected.
 2. Implement the v4 codec and run the fixtures in `test_server`.
