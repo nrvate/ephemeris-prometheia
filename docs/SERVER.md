@@ -340,6 +340,15 @@ Settled in the same exchange:
   legitimately differ (topocentric Moon, heliocentric light time, star
   catalogues, mean-element models, distance rates) are report-only.
 
+**Reading the fixtures.** `tools/check/ephproto4_fixtures.py` parses
+Astrolog's conformance fixtures with a reader written from the spec text,
+sharing no code with Astrolog's codec or with its fixture generator. A
+disagreement between the two readings means the spec, one parser or one
+fixture is wrong. Run it against the conformance directory in Astrolog's
+tree; it reports the verdict (ok, malformed, unsupported) for every fixture
+and exits nonzero on a disagreement. The first run, 2026-09-17, agreed on
+all 74.
+
 **Our migration** (when Astrolog lands the pass and the fixtures are pinned):
 1. Take the renamed `ephproto.h` and the fixtures; the pinned-header check
    diverges once, as expected.
