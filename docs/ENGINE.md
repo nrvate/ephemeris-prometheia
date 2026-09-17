@@ -26,7 +26,8 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
   solar-system barycentre, and 4–9 for Mars…Pluto. JPL's planetary files
   carry only *system barycentres* beyond Venus; the planet-centre IDs
   (499…999) are answered by an ephemeris that has them and are otherwise
-  `NotFound` — never substituted.
+  `NotFound` — never substituted. Bodies the ephemeris does not know are
+  looked up in the catalogs added with `add_catalog()` (below).
 - **Time:** `calc` takes JD(TT); `calc_ut` takes JD(UT1) and converts with
   the engine's `DeltaTModel` (observed USNO ΔT, `time::ObservedDeltaT`,
   unless set; [TIME.md](TIME.md)). TDB for the
@@ -105,6 +106,40 @@ Cost (`-O2`, DE440): 6 µs per position, 19 µs with rates; a ten-body
 chart at one instant ~0.2 ms (nutation is evaluated once per epoch and
 cached).
 
+## Small bodies: the catalog overlay
+
+`add_catalog(path)` stacks EPM1 containers ([FORMAT.md](FORMAT.md));
+`calc` resolves a body the planetary ephemeris does not know (by
+SPK-ID, the catalog's key) through on-demand integration. Several
+catalogs may be stacked; the newest wins for a given body, and adding
+one invalidates the memoized trajectories.
+
+- **Seed:** the record's osculating elements (heliocentric, ecliptic
+  and equinox of J2000, TDB epoch) become a Cartesian state, rotated
+  to ICRF by (R1(ε̄₀)·B)ᵀ and translated by the Sun's barycentric state
+  at the epoch.
+- **Force model** (`include/prometheia/forces.hpp`,
+  `BarycentricForce`): barycentric point masses — the Sun, Mercury…
+  Pluto at their *system barycentres* (where the DE GMs live), Earth and
+  Moon split from the Earth-Moon barycentre by EMRAT. States are
+  sampled from the engine's own ephemeris onto cubic-Hermite tables,
+  128 samples per 365.25-day block, extended lazily as integration
+  windows march; masses the opened ephemeris does not carry are skipped
+  (a kernel without the Moon perturbs without it). GMs come from the
+  ephemeris's own constants when it publishes them (DE headers carry
+  GM1…GM9, GMB, GMS in AU³/day²), else the DE440 values in `forces.hpp`
+  (relative differences ~1e-9).
+- **Memo:** one M2 `WindowMemo` per body — year windows of integrated
+  samples, warm evaluations are spline reads. The integration error is
+  ~1e-8 AU over ±26 yr (0.001″); practical accuracy is set by the
+  catalog's elements. Keplerian singulars (e = 1) are rejected at the
+  container, so the engine never sees them.
+- **Provenance:** catalog answers name the overlay
+  ("… + EPM1 catalog(s) […]"), `sigma_arcsec` is filled by a later M4
+  increment.
+- Costs of the query epoch outside the planetary ephemeris's coverage,
+  or a body absent everywhere, are errors — never extrapolations.
+
 ## Validation
 
 `tests/test_engine.cpp`.
@@ -168,3 +203,24 @@ case:
 
 A JPL Horizons corpus (M5) will be the independent referee for the
 topocentric and heliocentric cases.
+
+**Catalog overlay, DE440 against the Swiss Ephemeris asteroid file**
+(`tests/test_engine_catalog.cpp`, `PROMETHEIA_DE440`; fixtures from
+`tools/gen/gen_catalog_fixtures.py`, which runs swetest on the same
+DE440 with SWE's independent `seas_18.se1` Ceres — an output-only
+oracle, offline): Ceres from `tests/data/sample-100.epm` at J2000,
+the catalog epoch, 2026-09, and ±11 yr:
+
+| quantity | residual |
+|----------|----------|
+| apparent, ecliptic of date | 0.19″ |
+| geometric, ecliptic J2000 | 0.19″ |
+| distance | 2.2 × 10⁻⁶ AU |
+
+The residual is dominated by the difference between SBDB's osculating
+elements (our seed) and SWE's stored integration (their source); the
+engine's own integration contributes ~0.001″ over the same span. The
+synthetic CI tests (same file, no data files needed) gate the force
+model against the closed-form two-body solution and the whole overlay
+pipeline against an independent integration of the same force model to
+10⁻⁸ AU, in both time directions.

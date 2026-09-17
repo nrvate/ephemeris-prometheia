@@ -70,6 +70,10 @@ add_executable(test_engine tests/test_engine.cpp)
 target_link_libraries(test_engine PRIVATE prometheia)
 add_test(NAME engine COMMAND test_engine)
 
+add_executable(test_engine_catalog tests/test_engine_catalog.cpp)
+target_link_libraries(test_engine_catalog PRIVATE prometheia)
+add_test(NAME engine_catalog COMMAND test_engine_catalog)
+
 add_executable(test_time tests/test_time.cpp)
 target_link_libraries(test_time PRIVATE prometheia)
 add_test(NAME time COMMAND test_time)

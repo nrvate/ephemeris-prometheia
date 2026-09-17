@@ -20,6 +20,9 @@
 
 namespace prometheia {
 
+// Force-generic: the engine instantiates it with BarycentricForce; the
+// default keeps the M2-era HeliocentricForce call sites unchanged.
+template <typename Force = HeliocentricForce>
 class WindowMemo {
 public:
     struct Config {
@@ -30,11 +33,10 @@ public:
         int min_samples = 128;
     };
 
-    WindowMemo(const HeliocentricForce* force, IntegrateOptions opts)
-        : WindowMemo(force, opts, Config{}) {}
+    WindowMemo(Force* force, IntegrateOptions opts) : WindowMemo(force, opts, Config{}) {}
 
-    WindowMemo(const HeliocentricForce* force, IntegrateOptions opts, Config cfg)
-        : force_(force), opts_(opts), cfg_(cfg) {}
+    WindowMemo(Force* force, IntegrateOptions opts, Config cfg)
+        : force_(force), opts_(std::move(opts)), cfg_(cfg) {}
 
     // The reference state the memo propagates from. Resets all coverage.
     void set_seed(const State& s, double t) {
@@ -227,7 +229,7 @@ private:
         return integrate_window(lo_, to, false);
     }
 
-    const HeliocentricForce* force_;
+    Force* force_;
     IntegrateOptions opts_;
     Config cfg_;
     State seed_{};

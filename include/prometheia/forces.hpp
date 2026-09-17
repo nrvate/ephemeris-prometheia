@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Force models for small-body integration. v1 is heliocentric: the central
-// mass at the origin, perturbers on Trajectory tables. When the DE reader
-// lands (M3) the same interface takes barycentric truth; nothing downstream
-// changes.
+// Force models for small-body integration. HeliocentricForce is the v1
+// model: the central mass at the origin, perturbers on Trajectory tables.
+// BarycentricForce is the engine's model: every mass, the Sun included,
+// is a perturber whose barycentric state comes from the loaded planetary
+// ephemeris.
 #ifndef PROMETHEIA_FORCES_HPP
 #define PROMETHEIA_FORCES_HPP
+
+#include <cstddef>
 
 #include <vector>
 
@@ -40,6 +43,95 @@ struct HeliocentricForce {
             ax += inv_d3 * dx;
             ay += inv_d3 * dy;
             az += inv_d3 * dz;
+        }
+        dydt[3] = ax;
+        dydt[4] = ay;
+        dydt[5] = az;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Barycentric force model.
+
+// GM values from the DE440 header constants (public domain; JPL), in
+// AU^3/day^2 — the units the force models take. The engine prefers the
+// constants published by the opened ephemeris and falls back to these;
+// DE440 values differ from DE441 by ~1e-9 relative, far below any
+// accuracy this library promises for small bodies.
+namespace gm {
+
+// Sun GMS; the mass SBDB-style heliocentric elements are referred to.
+inline constexpr double kSun = 0.295912208284119561e-3;
+inline constexpr double kMercury = 0.491250019488931818e-10;      // GM1
+inline constexpr double kVenus = 0.724345233264411869e-9;         // GM2
+inline constexpr double kEarthMoonBary = 0.899701139294734660e-9; // GMB
+inline constexpr double kMars = 0.954954882972581189e-10;         // GM4
+inline constexpr double kJupiter = 0.282534582522579175e-6;       // GM5
+inline constexpr double kSaturn = 0.845970599337629027e-7;        // GM6
+inline constexpr double kUranus = 0.129202656496823994e-7;        // GM7
+inline constexpr double kNeptune = 0.152435734788519386e-7;       // GM8
+inline constexpr double kPluto = 0.217509646489335811e-11;        // GM9
+// EMRAT, the Earth/Moon mass ratio that splits GMB.
+inline constexpr double kEmrat = 81.3005682214972154;
+
+inline constexpr double kEarth = kEarthMoonBary * kEmrat / (1.0 + kEmrat);
+inline constexpr double kMoon = kEarthMoonBary / (1.0 + kEmrat);
+
+} // namespace gm
+
+// Barycentric states of the perturbing masses, indexed 0..count()-1.
+// Implemented by the engine over the loaded ephemeris (sampling it onto
+// spline tables lazily, in blocks, as integration windows march). The
+// calls are non-const: this is where coverage grows.
+struct PerturberStates {
+    virtual ~PerturberStates() = default;
+
+    // Makes sure the tables cover TDB JD t. Builds them on first use.
+    // A failure (no masses at all, or the ephemeris does not cover the
+    // epoch) is sticky: ok() turns false and states read zero — the
+    // caller refuses results after checking ok().
+    virtual void ensure(double t) = 0;
+
+    // out = {x, y, z, vx, vy, vz}, barycentric, AU and AU/day. Assumes
+    // ensure(t) has been called for this t.
+    virtual void state(size_t index, double t, double out[6]) = 0;
+
+    virtual size_t count() const = 0;
+    // GM per perturber (AU^3/day^2), count() entries.
+    virtual const double* mus() const = 0;
+    virtual bool ok() const = 0;
+};
+
+// Barycentric N-body point-mass force: acceleration is the sum of
+// mu_p (r_p - r)/|r_p - r|^3 over the perturbers — the Sun is one of
+// them, so there is no central-body term. dydt[0..2] = velocity,
+// dydt[3..5] = acceleration. Not const: lazy perturber coverage.
+struct BarycentricForce {
+    PerturberStates* perturbers = nullptr; // not owned
+
+    void operator()(const double y[6], double t, double dydt[6]) {
+        dydt[0] = y[3];
+        dydt[1] = y[4];
+        dydt[2] = y[5];
+        perturbers->ensure(t);
+        if (!perturbers->ok() || perturbers->count() == 0) {
+            // The engine rejects results whenever ok() is false; zero
+            // acceleration keeps the integrator finite in the meantime.
+            dydt[3] = dydt[4] = dydt[5] = 0.0;
+            return;
+        }
+        const size_t n = perturbers->count();
+        const double* mu = perturbers->mus();
+        double ax = 0.0, ay = 0.0, az = 0.0;
+        double ps[6];
+        for (size_t i = 0; i < n; ++i) {
+            perturbers->state(i, t, ps);
+            const double dx = ps[0] - y[0], dy = ps[1] - y[1], dz = ps[2] - y[2];
+            const double d2 = dx * dx + dy * dy + dz * dz;
+            const double k = mu[i] / (d2 * std::sqrt(d2));
+            ax += k * dx;
+            ay += k * dy;
+            az += k * dz;
         }
         dydt[3] = ax;
         dydt[4] = ay;

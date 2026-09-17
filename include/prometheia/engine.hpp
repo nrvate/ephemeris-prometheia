@@ -21,7 +21,9 @@
 // Body identity is the NAIF integer ID, the same key the catalog uses
 // for small bodies. For Mars through Pluto the JPL planetary files carry
 // system barycentres only (IDs 4-9); the planet-centre IDs 499..999 are
-// answered only by an ephemeris that has them.
+// answered only by an ephemeris that has them. Bodies the ephemeris
+// does not know are looked up in the catalogs added with add_catalog()
+// — small bodies by SPK-ID, integrated on demand.
 //
 // Threading: an Engine caches ephemeris records and frame matrices and
 // is not safe for concurrent use. Give each thread its own Engine;
@@ -142,6 +144,18 @@ public:
     // Opens a planetary ephemeris: a JPL DE binary or a DAF/SPK kernel
     // (detected by content, not extension).
     static Result<Engine> open(const std::string& ephemeris_path);
+
+    // Adds a small-body catalog (an EPM1 container, docs/FORMAT.md).
+    // Catalog bodies answer calc() under their SPK-ID — the same NAIF
+    // integer ID space as the planets. Positions come from on-demand
+    // integration of the catalog's osculating elements in a barycentric
+    // point-mass force field built from the engine's own ephemeris
+    // (Sun plus Mercury..Pluto at their system barycentres; Earth and
+    // Moon split from the Earth-Moon barycentre), memoized per body.
+    // May be called more than once; the newest catalog wins when
+    // several carry the same body, and any small-body positions cached
+    // so far are invalidated.
+    Result<void> add_catalog(const std::string& catalog_path);
 
     // Position of `body` at a TT Julian date.
     Result<CalcResult> calc(int body, double jd_tt, const CalcOptions& opts = {});

@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
 
     // ---- Scenario B: warm memoized evaluations ----------------------------
     {
-        WindowMemo::Config cfg;
+        WindowMemo<>::Config cfg;
         cfg.window_days = 365.25;
         WindowMemo memo(&force, IntegrateOptions{}, cfg);
         memo.set_seed(elements_to_state(kMuSun, els[0]).value(), 0.0);
