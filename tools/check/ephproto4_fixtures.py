@@ -376,7 +376,7 @@ def parse_meta(r, n_obj):
 
 
 def parse_data(r):
-    r.u32()  # chunkIndex
+    chunk_index = r.u32()
     i_time = r.u32()
     n_rows = r.u32()
     total_rows = r.u32()
@@ -386,8 +386,7 @@ def parse_data(r):
     columns = r.u32()
     if precision > 1:
         raise Malformed(f"precision {precision}")
-    if chunk_flags & ~0x07:
-        raise Malformed(f"chunkFlags {chunk_flags:#04x}")
+    # §3.1: unknown bits in an answer's flag fields are ignored.
     if columns & ~0x0F:
         # The exception to the answering direction's tolerance (§3.1): an
         # unadvertised column bit changes the row width, so the message cannot
@@ -395,6 +394,8 @@ def parse_data(r):
         raise Malformed(f"columnsPresent {columns:#010x} are not in A.10")
     if i_time + n_rows > total_rows:
         raise Malformed("this chunk's rows run past totalRows")
+    if chunk_index == 0 and not chunk_flags & 0x04:
+        raise Malformed("the meta-present flag must be set on chunk 0")
     if chunk_flags & 0x04:
         parse_meta(r, n_obj)
     n_cols = 6 + bin(columns).count("1")
@@ -421,17 +422,18 @@ def parse_segment(r):
 
 
 def parse_segdata(r):
-    r.u32()  # chunkIndex
+    chunk_index = r.u32()
     chunk_flags = r.u8()
     r.zero(1, "SEGDATA reserved")
     n_obj = r.u16()
     i_obj = r.u16()
     n_obj_chunk = r.u16()
     r.zero(4, "SEGDATA reserved")
-    if chunk_flags & ~0x07:
-        raise Malformed(f"chunkFlags {chunk_flags:#04x}")
+    # §3.1: unknown chunkFlags bits are ignored.
     if i_obj + n_obj_chunk > n_obj:
         raise Malformed("this chunk's objects run past nObj")
+    if chunk_index == 0 and not chunk_flags & 0x04:
+        raise Malformed("the meta-present flag must be set on chunk 0")
     if chunk_flags & 0x04:
         parse_meta(r, n_obj)
         n_ayan = r.u8()
@@ -506,9 +508,9 @@ def parse_payload(version, mtype, request_id, payload):
         r.done("ERROR")
         # An unknown ERROR code is a failure of unknown kind (§3.1); its flags
         # still say whether the connection closes and whether a retry may work.
-        _ = code
-        if flags & ~0x03:
-            raise Malformed(f"ERROR flags {flags:#06x}")
+        # An unknown ERROR code, and unknown flag bits, are tolerated (§3.1);
+        # flags bits 0 and 1 keep their meaning.
+        _ = (code, flags)
     elif mtype in (6, 7):
         r.done("PING/PONG")
     elif mtype == 8:
@@ -533,19 +535,27 @@ def parse_payload(version, mtype, request_id, payload):
         for _ in range(n):
             quality = r.u8()
             r.u8()  # sourceIdx
-            r.zero(2, "MATCH reserved")
+            match_len = r.u16()
+            end = r.i + match_len
+            if end > len(r.d):
+                raise Malformed("MATCH matchLen runs past the message")
             _ = quality  # an unknown quality is tolerated (§3.1)
-            # An unknown object kind here cannot be skipped: its payload length
-            # is unknown, so the rest of the message cannot be read. See the
-            # note sent to Astrolog; the reader follows the layout as written.
-            parse_object(r, 1)
-            r.str8("canonicalName")
-            r.str8("designation")
-            r.time("validMin")
-            r.time("validMax")
+            try:
+                parse_object(r, 1)
+                r.str8("canonicalName")
+                r.str8("designation")
+                r.time("validMin")
+                r.time("validMax")
+            except Unsupported:
+                # A kind this client cannot ask for: skip it by its length.
+                r.i = end
+                continue
+            if r.i != end:
+                raise Malformed(f"MATCH matchLen {match_len} disagrees with a match "
+                                f"this reader can read ({r.i - (end - match_len)} bytes)")
         r.done("LOOKUP_RESULT")
-        if flags & ~0x01:
-            raise Malformed(f"LOOKUP_RESULT flags {flags:#04x}")
+        # Unknown LOOKUP_RESULT flag bits are ignored (§3.1).
+        _ = flags
     elif mtype == 15:
         parse_segdata(r)
     else:
