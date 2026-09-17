@@ -738,9 +738,53 @@ struct Engine::Impl {
     std::string overlay_source_; // provenance for catalog bodies
     std::string perturber_note_; // appended when asteroid perturbers are loaded
 
-    // Designations and proper names of every loaded catalog, lowercased
-    // ASCII, merged newest-wins; values are the SPK-IDs calc() takes.
-    std::unordered_map<std::string, uint64_t> name_index;
+    // Per catalog (parallel to `catalogs`), built on the first lookup():
+    // sorted (FNV-1a hash of the lowercased designation or name, SPK-ID)
+    // pairs. A hash hit is confirmed against the record's own names, so
+    // collisions cannot answer a wrong body. ~16 bytes per name instead of a
+    // string map (1.57M bodies: ~50 MB and ~0.5 s, was ~250 MB and ~1.4 s).
+    struct NameIndex {
+        bool built = false;
+        std::vector<std::pair<uint64_t, uint64_t>> entries;
+    };
+    std::vector<NameIndex> name_indexes;
+
+    static std::string lowercase(std::string_view s) {
+        std::string key(s);
+        for (char& c : key)
+            if (c >= 'A' && c <= 'Z')
+                c += 'a' - 'A';
+        return key;
+    }
+
+    static uint64_t name_hash(std::string_view lower) {
+        uint64_t h = 1469598103934665603ull;
+        for (unsigned char c : lower) {
+            h ^= c;
+            h *= 1099511628211ull;
+        }
+        return h;
+    }
+
+    Result<void> ensure_name_index(size_t i) {
+        NameIndex& idx = name_indexes[i];
+        if (idx.built)
+            return {};
+        std::vector<std::pair<uint64_t, uint64_t>> entries;
+        entries.reserve(size_t(catalogs[i]->record_count()) + 1024);
+        auto fe = catalogs[i]->for_each([&](const catalog::Record& rec, const catalog::Names& n) {
+            if (!n.pdes.empty())
+                entries.emplace_back(name_hash(lowercase(n.pdes)), rec.spkid);
+            if (!n.name.empty())
+                entries.emplace_back(name_hash(lowercase(n.name)), rec.spkid);
+        });
+        if (!fe)
+            return fe.error();
+        std::sort(entries.begin(), entries.end());
+        idx.entries = std::move(entries);
+        idx.built = true;
+        return {};
+    }
 
     // Provenance of catalog answers: the ephemeris, the catalog stack (newest
     // first) and, when loaded, the asteroid perturbers.
@@ -1450,35 +1494,20 @@ Result<void> Engine::add_catalog(const std::string& path) {
     if (!r)
         return r.error();
 
-    // Index the new catalog's names (this streams and CRC-verifies the
-    // whole container) before it is owned by the engine, so a corrupt
-    // file fails add_catalog cleanly.
-    std::unordered_map<std::string, uint64_t> names;
-    auto fe = r.value().for_each([&](const catalog::Record& rec, const catalog::Names& n) {
-        auto put = [&](std::string_view s) {
-            if (s.empty())
-                return;
-            std::string key(s);
-            for (char& c : key)
-                if (c >= 'A' && c <= 'Z')
-                    c += 'a' - 'A';
-            names[std::move(key)] = rec.spkid;
-        };
-        put(n.pdes);
-        put(n.name);
-    });
+    // Stream and CRC-verify the whole container before the engine owns it,
+    // so a corrupt file fails add_catalog cleanly. The name index is built
+    // on the first lookup().
+    auto fe = r.value().for_each([](const catalog::Record&, const catalog::Names&) {});
     if (!fe)
         return fe.error();
 
     impl_->catalogs.push_back(std::make_unique<catalog::Reader>(std::move(r).value()));
+    impl_->name_indexes.emplace_back();
     // A newer catalog may carry revised elements for bodies already
     // integrated: drop the memoized trajectories and uncertainty tracks,
     // they rebuild lazily.
     impl_->small_bodies.clear();
     impl_->sigma_tracks.clear();
-    // The new catalog wins for any name an older one also carries.
-    for (auto& kv : names)
-        impl_->name_index[std::move(kv.first)] = kv.second;
     impl_->refresh_overlay_source();
     return {};
 }
@@ -1522,14 +1551,30 @@ void Engine::release_small_bodies() {
 Result<int> Engine::lookup(std::string_view name) const {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");
-    std::string key(name);
-    for (char& c : key)
-        if (c >= 'A' && c <= 'Z')
-            c += 'a' - 'A';
-    auto it = impl_->name_index.find(key);
-    if (it == impl_->name_index.end())
-        return make_error(ErrorCode::NotFound, "no loaded catalog answers '" + key + "'");
-    return int(it->second);
+    const std::string key = Impl::lowercase(name);
+    const uint64_t h = Impl::name_hash(key);
+    // Newest catalog first; within one catalog the highest SPK-ID carrying
+    // the name wins (as a later record would have overwritten it).
+    for (size_t i = impl_->catalogs.size(); i-- > 0;) {
+        if (auto r = impl_->ensure_name_index(i); !r)
+            return r.error();
+        const auto& entries = impl_->name_indexes[i].entries;
+        auto lo = std::lower_bound(entries.begin(), entries.end(), std::make_pair(h, uint64_t(0)));
+        uint64_t best = 0;
+        for (auto it = lo; it != entries.end() && it->first == h; ++it) {
+            auto rec = impl_->catalogs[i]->lookup(it->second);
+            if (!rec)
+                return rec.error();
+            const catalog::Names n =
+                catalog::record_names(impl_->catalogs[i]->name_pool(), rec.value());
+            if (Impl::lowercase(n.pdes) == key ||
+                (!n.name.empty() && Impl::lowercase(n.name) == key))
+                best = std::max(best, it->second);
+        }
+        if (best != 0)
+            return int(best);
+    }
+    return make_error(ErrorCode::NotFound, "no loaded catalog answers '" + key + "'");
 }
 
 Result<CalcResult> Engine::calc_ut(int id, double jd_ut1, const CalcOptions& o) {

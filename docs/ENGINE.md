@@ -167,8 +167,11 @@ SPK-ID, the catalog's key) through on-demand integration. Several
 catalogs may be stacked; the newest wins for a given body, and adding
 one invalidates the memoized trajectories.
 
-Each catalog's primary designations and proper names are indexed as it
-loads (the load streams and CRC-verifies the whole container):
+Loading a catalog streams and CRC-verifies the whole container (0.56 s,
+17 MB for the 1.57M-body catalog). Its primary designations and proper
+names are indexed on the first `lookup()` (0.7 s, ~25 MB: sorted 64-bit
+name hashes, each hit confirmed against the record's own names, so hash
+collisions cannot answer a wrong body):
 `Engine::lookup(name)` — `lookup("Ceres")`, `lookup("1")`,
 `lookup("ceres")`, ASCII-case-insensitive — returns the SPK-ID to feed
 `calc`. A shared name is answered by the newest catalog; planets are

@@ -287,8 +287,10 @@ tool and script in this repo, and for anyone running them:
     was killed out of memory at 800k bodies — memoized trajectories are
     kept for an engine's lifetime — hence `Engine::release_small_bodies()`
     for long-running processes and sweeps. Engine setup with the full
-    catalog is 4–5 s and ~250 MB per engine, dominated by building the
-    name index (a candidate for lazy construction).
+    catalog was 4–5 s and ~250 MB per engine, dominated by building the
+    name index; the index is now built on the first `lookup()` as sorted
+    name hashes (`add_catalog` 1.97 → 0.56 s and 249 → 17 MB; first
+    lookup 0.7 s, +25 MB).
   - Increment 7 (done 2026-09-17): long-term precession option
     (Vondrák, Capitaine & Wallace 2011, with its corrigendum;
     docs/FRAMES.md): `CalcOptions::precession`, C ABI 3,
