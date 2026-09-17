@@ -9,6 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 
@@ -26,7 +27,9 @@ add_library(prometheia
   src/frames.cpp
   src/kepler.cpp
   src/time.cpp)
-target_include_directories(prometheia PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(prometheia PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(prometheia PUBLIC PkgConfig::ZSTD)
 target_compile_options(prometheia PRIVATE -Wall -Wextra -Werror)
 
@@ -92,3 +95,14 @@ target_compile_options(ephem PRIVATE -Wall -Wextra -pedantic -Werror)
 prometheia_test(ephem tests/test_ephem.cpp)
 target_compile_definitions(test_ephem PRIVATE EPHEM_BIN="$<TARGET_FILE:ephem>")
 add_dependencies(test_ephem ephem)
+
+# Install: the library, the public headers (C++ and C), the tools and a
+# pkg-config file. `cmake --install build --prefix /usr/local`.
+install(TARGETS prometheia ephem prometheia-info prometheia-convert
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY include/prometheia DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+configure_file(tools/prometheia.pc.in prometheia.pc @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/prometheia.pc
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)

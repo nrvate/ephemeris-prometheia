@@ -1,0 +1,12 @@
+# Relocatable: paths are relative to this file (lib/pkgconfig/prometheia.pc).
+prefix=${pcfiledir}/../..
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: prometheia
+Description: Ephemeris Prometheia: cleanroom solar-system ephemeris (C++20 library with a C interface)
+Version: @PROJECT_VERSION@
+Requires.private: libzstd
+Libs: -L${libdir} -lprometheia
+Libs.private: -lstdc++ -lm
+Cflags: -I${includedir}

@@ -97,6 +97,12 @@ transports). Enumerated values and error codes are only ever appended.
 `ephem` ([EPHEM.md](EPHEM.md)) is a complete C99 program written against
 this header alone.
 
+Outside the source tree, `cmake --install build --prefix <dir>` installs
+`libprometheia`, the headers and `lib/pkgconfig/prometheia.pc`. The
+pkg-config file is relocatable (paths relative to itself) and lists the
+static library's C++ runtime and zstd dependencies:
+`cc -std=c99 app.c $(pkg-config --static --cflags --libs prometheia)`.
+
 Exported symbols carry default visibility, so a shared build
 (`-DBUILD_SHARED_LIBS=ON`) exports the `prometheia_*` functions.
 

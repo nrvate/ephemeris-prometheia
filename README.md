@@ -111,6 +111,14 @@ cd build && ctest
 Requires C++20, CMake ≥ 3.20, `libzstd` and `pkg-config`. Sanitizer build:
 `-DPROMETHEIA_SANITIZE=ON`.
 
+Install (library, C and C++ headers, `ephem`, `prometheia-info`,
+`prometheia-convert`, and a relocatable pkg-config file):
+
+```sh
+cmake --install build --prefix /usr/local
+cc -std=c99 app.c $(pkg-config --static --cflags --libs prometheia)
+```
+
 There is no hosted CI. Before committing, run the local gate —
 `tools/gate.sh` (clang-format 14 check, Release and ASan+UBSan builds, all
 tests; `CLANG_FORMAT=/path/to/clang-format` to pick the binary).
