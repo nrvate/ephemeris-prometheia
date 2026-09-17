@@ -324,7 +324,7 @@ TEST_CASE("horizons_small_bodies") {
     seed_km.print("small bodies heliocentric, element epoch", "km");
 }
 
-// Report only (slow: +-100-year integrations and the sigma tracks).
+// Report only (seconds: +-100-year integrations and the sigma tracks).
 TEST_CASE("horizons_small_bodies_long_arc_report" * doctest::skip()) {
     Engine* e = engine();
     if (!e)

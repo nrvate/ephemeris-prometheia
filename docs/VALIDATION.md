@@ -101,7 +101,7 @@ Beyond that, the missing asteroid perturbers dominate, and the 50- and
   not a calibrated uncertainty.
 - **Running the report:** the long-arc rows and the uncertainty comparison are
   a report case, skipped by default because the ±100-year and sigma
-  integrations take ~30 s:
+  integrations take ~4 s (Release):
   `build/test_horizons -tc=horizons_small_bodies_long_arc_report --no-skip`.
 
 ## Findings carried back to the Swiss Ephemeris comparison

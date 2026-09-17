@@ -175,10 +175,13 @@ private:
 
         IntegrateStats istats;
         const double step = (to - from) / double(nseg);
+        IntegrateOptions seg = opts_;
+        if (seg.first_step == 0.0)
+            seg.first_step = step;
         for (int i = 0; i < nseg; ++i) {
             const double ta = from + step * double(i);
             const double tb = from + step * double(i + 1);
-            auto r = integrate_dp54(y, ta, tb, *force_, opts_, &istats);
+            auto r = integrate_dp54(y, ta, tb, *force_, seg, &istats);
             if (!r.ok())
                 return false;
             double d[6];
