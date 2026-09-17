@@ -5,7 +5,9 @@
 // validation in docs/FRAMES.md.
 #include "prometheia/frames.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace prometheia::frames {
 namespace {
@@ -174,6 +176,150 @@ double mean_obliquity(double jd_tt) {
     return as * kAs2Rad;
 }
 
+// --- Long-term precession (Vondrak, Capitaine & Wallace 2011) ---------
+
+namespace {
+
+// One periodic term: period (centuries), then cosine and sine amplitudes
+// (arcsec) of the first and second parameter of the table.
+struct LtpTerm {
+    double period_cy, c1, s1, c2, s2;
+};
+
+// Table 1: P_A, Q_A. C7 of Q_A as corrected in A&A 541, C1 (2012):
+// 198.296701 (the original printed 198.296071); with it the series
+// vanish exactly at J2000.
+constexpr LtpTerm kLtpPQ[] = {
+    {708.15, -5486.751211, 667.666730, -684.661560, -5523.863691},
+    {2309.00, -17.127623, -2354.886252, 2446.283880, -549.747450},
+    {1620.00, -617.517403, -428.152441, 399.671049, -310.998056},
+    {492.20, 413.442940, 376.202861, -356.652376, 421.535876},
+    {1183.00, 78.614193, 184.778874, -186.387003, -36.776172},
+    {622.00, -180.732815, 335.321713, -316.800070, -145.278396},
+    {882.00, -87.676083, -185.138669, 198.296701, -34.744450},
+    {547.00, 46.140315, -120.972830, 101.135679, 22.885731},
+};
+
+// Table 2: X_A, Y_A.
+constexpr LtpTerm kLtpXY[] = {
+    {256.75, -819.940624, 81491.287984, 75004.344875, 1558.515853},
+    {708.15, -8444.676815, 787.163481, 624.033993, 7774.939698},
+    {274.20, 2600.009459, 1251.296102, 1251.136893, -2219.534038},
+    {241.45, 2755.175630, -1257.950837, -1102.212834, -2523.969396},
+    {2309.00, -167.659835, -2966.799730, -2660.664980, 247.850422},
+    {492.20, 871.855056, 639.744522, 699.291817, -846.485643},
+    {396.10, 44.769698, 131.600209, 153.167220, -1393.124055},
+    {288.90, -512.313065, -445.040117, -950.865637, 368.526116},
+    {231.10, -819.415595, 584.522874, 499.754645, 749.045012},
+    {1610.00, -538.071099, -89.756563, -145.188210, 444.704518},
+    {620.00, -189.793622, 524.429630, 558.116553, 235.934465},
+    {157.87, -402.922932, -13.549067, -23.923029, 374.049623},
+    {220.30, 179.516345, -210.157124, -165.405086, -171.330180},
+    {1200.00, -9.814756, -44.919798, 9.344131, -22.899655},
+};
+
+// Table 3: p_A, epsilon_A.
+constexpr LtpTerm kLtpPE[] = {
+    {409.90, -6908.287473, -2845.175469, 753.872780, -1704.720302},
+    {396.15, -3198.706291, 449.844989, -247.805823, -862.308358},
+    {537.22, 1453.674527, -1255.915323, 379.471484, 447.832178},
+    {402.90, -857.748557, 886.736783, -53.880558, -889.571909},
+    {417.15, 1173.231614, 418.887514, -90.109153, 190.402846},
+    {288.92, -156.981465, 997.912441, -353.600190, -56.564991},
+    {4043.00, 371.836550, -240.979710, -63.115353, -296.222622},
+    {306.00, -216.619040, 76.541307, -28.248187, -75.859952},
+    {277.00, 193.691479, -36.788069, 17.703387, 67.473503},
+    {203.00, 11.891524, -170.964086, 38.911307, 3.014055},
+};
+
+// Cubic polynomial coefficients (arcsec, per century^k): {a0, a1, a2, a3}.
+constexpr double kLtpP[4] = {5851.607687, -0.1189000, -0.00028913, 101e-9};
+constexpr double kLtpQ[4] = {-1600.886300, 1.1689818, -0.00000020, -437e-9};
+constexpr double kLtpX[4] = {5453.282155, 0.4252841, -0.00037173, -152e-9};
+constexpr double kLtpY[4] = {-73750.930350, -0.7675452, -0.00018725, 231e-9};
+constexpr double kLtpPA[4] = {8134.017132, 5043.0520035, -0.00710733, 271e-9};
+constexpr double kLtpEps[4] = {84028.206305, 0.3624445, -0.00004039, -110e-9};
+
+// Polynomial plus the periodic terms of one column, arcseconds.
+template <size_t N>
+void ltp_series(const LtpTerm terms[N], const double a[4], const double b[4], double T,
+                double& first, double& second) {
+    first = a[0] + T * (a[1] + T * (a[2] + T * a[3]));
+    second = b[0] + T * (b[1] + T * (b[2] + T * b[3]));
+    for (size_t i = 0; i < N; ++i) {
+        const double arg = 2.0 * 3.14159265358979323846 * T / terms[i].period_cy;
+        const double c = std::cos(arg), s = std::sin(arg);
+        first += terms[i].c1 * c + terms[i].s1 * s;
+        second += terms[i].c2 * c + terms[i].s2 * s;
+    }
+}
+
+} // namespace
+
+void ltp_ecliptic_pole(double jd_tt, double k[3]) {
+    double p, q;
+    ltp_series<std::size(kLtpPQ)>(kLtpPQ, kLtpP, kLtpQ, centuries(jd_tt), p, q);
+    p *= kAs2Rad;
+    q *= kAs2Rad;
+    const double w = std::sqrt(std::max(1.0 - p * p - q * q, 0.0));
+    // (P, -Q, W) in the J2000 ecliptic, rotated to the J2000 equator by
+    // the IAU 2006 obliquity at J2000.
+    const double eps0 = 84381.406 * kAs2Rad;
+    const double s = std::sin(eps0), c = std::cos(eps0);
+    k[0] = p;
+    k[1] = -q * c - w * s;
+    k[2] = -q * s + w * c;
+}
+
+void ltp_equator_pole(double jd_tt, double n[3]) {
+    double x, y;
+    ltp_series<std::size(kLtpXY)>(kLtpXY, kLtpX, kLtpY, centuries(jd_tt), x, y);
+    x *= kAs2Rad;
+    y *= kAs2Rad;
+    n[0] = x;
+    n[1] = y;
+    n[2] = std::sqrt(std::max(1.0 - x * x - y * y, 0.0));
+}
+
+void ltp_mean_equator_of_date_matrix(double jd_tt, double m[9]) {
+    double n[3], k[3];
+    ltp_equator_pole(jd_tt, n);
+    ltp_ecliptic_pole(jd_tt, k);
+    double e[3] = {n[1] * k[2] - n[2] * k[1], n[2] * k[0] - n[0] * k[2], n[0] * k[1] - n[1] * k[0]};
+    const double len = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+    for (double& v : e)
+        v /= len;
+    const double mid[3] = {n[1] * e[2] - n[2] * e[1], n[2] * e[0] - n[0] * e[2],
+                           n[0] * e[1] - n[1] * e[0]};
+    for (int j = 0; j < 3; ++j) {
+        m[j] = e[j];
+        m[3 + j] = mid[j];
+        m[6 + j] = n[j];
+    }
+}
+
+double ltp_mean_obliquity(double jd_tt) {
+    double n[3], k[3];
+    ltp_equator_pole(jd_tt, n);
+    ltp_ecliptic_pole(jd_tt, k);
+    const double cx = n[1] * k[2] - n[2] * k[1], cy = n[2] * k[0] - n[0] * k[2],
+                 cz = n[0] * k[1] - n[1] * k[0];
+    return std::atan2(std::sqrt(cx * cx + cy * cy + cz * cz),
+                      n[0] * k[0] + n[1] * k[1] + n[2] * k[2]);
+}
+
+double ltp_precession_in_longitude_deg(double jd_tt) {
+    double pa, eps;
+    ltp_series<std::size(kLtpPE)>(kLtpPE, kLtpPA, kLtpEps, centuries(jd_tt), pa, eps);
+    return pa / 3600.0;
+}
+
+double ltp_obliquity_series(double jd_tt) {
+    double pa, eps;
+    ltp_series<std::size(kLtpPE)>(kLtpPE, kLtpPA, kLtpEps, centuries(jd_tt), pa, eps);
+    return eps * kAs2Rad;
+}
+
 // --- Sidereal zodiacs ------------------------------------------------
 
 namespace {
@@ -212,18 +358,44 @@ double precession_in_longitude_deg(double jd_tt) {
 }
 
 Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt) {
-    const double mean =
-        ayan0_mean_deg + precession_in_longitude_deg(jd_tt) - precession_in_longitude_deg(t0_jtdb);
+    return ayanamsa_anchored(t0_jtdb, ayan0_mean_deg, jd_tt, PrecessionModel::IAU2006);
+}
+
+Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt,
+                           PrecessionModel model) {
+    const double mean = ayan0_mean_deg + precession_in_longitude_deg(jd_tt, model) -
+                        precession_in_longitude_deg(t0_jtdb, model);
     double dpsi, deps;
     nutation(jd_tt, dpsi, deps);
     return Ayanamsa{mean, mean + dpsi * kRad2Deg};
 }
 
 std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt) {
+    return ayanamsa(mode, jd_tt, PrecessionModel::IAU2006);
+}
+
+std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt, PrecessionModel model) {
     if (mode < 0 || size_t(mode) >= sizeof kAyanAnchors / sizeof kAyanAnchors[0])
         return std::nullopt;
     const AyanAnchor& a = kAyanAnchors[mode];
-    return ayanamsa_anchored(a.t0_jtdb, a.mean0_deg, jd_tt);
+    return ayanamsa_anchored(a.t0_jtdb, a.mean0_deg, jd_tt, model);
+}
+
+double precession_in_longitude_deg(double jd_tt, PrecessionModel model) {
+    return model == PrecessionModel::Vondrak2011 ? ltp_precession_in_longitude_deg(jd_tt)
+                                                 : precession_in_longitude_deg(jd_tt);
+}
+
+double mean_obliquity(double jd_tt, PrecessionModel model) {
+    return model == PrecessionModel::Vondrak2011 ? ltp_mean_obliquity(jd_tt)
+                                                 : mean_obliquity(jd_tt);
+}
+
+void mean_equator_of_date_matrix(double jd_tt, PrecessionModel model, double m[9]) {
+    if (model == PrecessionModel::Vondrak2011)
+        ltp_mean_equator_of_date_matrix(jd_tt, m);
+    else
+        mean_equator_of_date_matrix(jd_tt, m);
 }
 
 void frame_bias_matrix(double m[9]) {

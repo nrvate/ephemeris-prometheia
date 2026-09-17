@@ -61,6 +61,50 @@ void mean_ecliptic_of_date_matrix(double jd_tt, double m[9]);
 // classical "apparent longitude" frame.
 void true_ecliptic_of_date_matrix(double jd_tt, double m[9]);
 
+// --- Long-term precession (Vondrak, Capitaine & Wallace 2011) ---------
+//
+// Which precession model a date frame uses. IAU 2006 is the default and
+// the standard near the present; Vondrak 2011 for epochs centuries or more
+// from J2000.
+enum class PrecessionModel { IAU2006 = 0, Vondrak2011 = 1 };
+
+// The model-selecting forms of the precession-dependent quantities: the
+// mean equator of date matrix (no bias), mean obliquity, general
+// precession in longitude, and the ayanamshas built on it.
+void mean_equator_of_date_matrix(double jd_tt, PrecessionModel model, double m[9]);
+double mean_obliquity(double jd_tt, PrecessionModel model);
+double precession_in_longitude_deg(double jd_tt, PrecessionModel model);
+//
+// Series fitted to IAU 2006 near J2000 and to numerical integrations over
+// +-200 millennia (A&A 534, A22, 2011; Table 1 corrected per A&A 541, C1,
+// 2012): a cubic polynomial plus 8-14 periodic terms for each parameter.
+// Comparable to IAU 2006 within a few centuries of J2000, a few arcseconds
+// over the historical period, where the IAU 2006 polynomials degrade
+// quickly. All vectors and matrices refer to the mean equator and equinox
+// of J2000.0 (compose with frame_bias_matrix for ICRF input).
+
+// Unit vector of the ecliptic pole of date (Eq. 8, Table 1).
+void ltp_ecliptic_pole(double jd_tt, double k[3]);
+
+// Unit vector of the mean equator pole of date (Eq. 9, Table 2).
+void ltp_equator_pole(double jd_tt, double n[3]);
+
+// Mean equator & equinox of date from J2000.0 mean, built from the two
+// poles (Eq. 23): rows = equinox (n x k normalized), n x equinox, n.
+void ltp_mean_equator_of_date_matrix(double jd_tt, double m[9]);
+
+// Mean obliquity of date (radians): the angle between the two poles, so
+// that it is exactly consistent with ltp_mean_equator_of_date_matrix.
+double ltp_mean_obliquity(double jd_tt);
+
+// General precession in longitude p_A from J2000 (degrees; Eq. 10,
+// Table 3).
+double ltp_precession_in_longitude_deg(double jd_tt);
+
+// The obliquity series epsilon_A of Eq. 10 (Table 3), radians; exposed for
+// validation against the pole angle.
+double ltp_obliquity_series(double jd_tt);
+
 // --- Sidereal zodiacs (ayanamshas) ----------------------------------
 
 // A sidereal zodiac is the ecliptic of date with its longitude origin
@@ -84,6 +128,11 @@ std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt);
 // TT epoch t0_jtdb (the same convention as the Swiss Ephemeris
 // -sidudef anchor).
 Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt);
+
+// The same, with the general precession of the given model.
+std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt, PrecessionModel model);
+Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt,
+                           PrecessionModel model);
 
 // IAU 2006 general precession in longitude from J2000 (degrees): the
 // motion of the mean equinox along the ecliptic of date.

@@ -86,6 +86,45 @@ All checks in `tests/test_frames.cpp`:
 - The nutation-shift property (Δψ longitude shift, zero latitude shift)
   is asserted directly at four epochs.
 
+## Long-term precession (Vondrák, Capitaine & Wallace 2011)
+
+IAU 2006 precession is a set of polynomials fitted near J2000; their errors
+grow quickly beyond a few centuries. For epochs further out (DE441 spans
+±13,000 years) the engine offers the long-term model of Vondrák,
+Capitaine & Wallace (A&A 534, A22, 2011), selected per query with
+`CalcOptions::precession = Precession::Vondrak2011` (C:
+`PROMETHEIA_PRECESSION_VONDRAK2011`; `ephem --precession vondrak2011`).
+IAU 2006 remains the default.
+
+- **Model:** each primary parameter is a cubic polynomial plus 8–14
+  periodic terms, fitted to IAU 2006 near J2000 and to numerical
+  integrations over ±200 millennia: the ecliptic pole P_A, Q_A (Eq. 8,
+  Table 1, with the corrigendum A&A 541, C1, 2012: Q_A C7 = 198.296701),
+  the equator pole X_A, Y_A (Eq. 9, Table 2), and the general precession
+  p_A (Eq. 10, Table 3). The tables were extracted programmatically from
+  the article text, not retyped.
+- **Matrix:** built from the two pole vectors (Eq. 23): rows = the equinox
+  n̄ × k (normalized), n̄ × equinox, n̄ — J2000.0 mean equator and equinox
+  to mean of date; the engine composes it with the frame bias as for IAU
+  2006. The mean obliquity of date is the angle between the two poles, so
+  the ecliptic pole of date lies exactly at latitude 90°. (The paper's
+  separately fitted ε_A series agrees with that angle to a few arcseconds
+  within ±4000 years, and drifts to hundreds of arcseconds at ±200
+  millennia.) Sidereal zodiacs use the model's p_A for their drift.
+- **Unchanged:** IAU 2000A nutation, and the IAU 2006 GMST polynomial for
+  topocentric Earth rotation, which are themselves near-J2000 models.
+- **Validation** (`tests/test_frames.cpp`, `tests/test_engine.cpp`):
+  - at J2000 every series reduces to its IAU 2006 value to the published
+    6-decimal rounding (≤ 1e-6″) — which the corrigendum is required for;
+  - agreement with IAU 2006 (largest axis offset of the matrices):
+    0.00003″ at ±10 yr, 0.0006″ at ±100 yr, 0.002″ at ±200 yr, 0.012″ at
+    −500 yr, 0.056″ at ±1000 yr;
+  - orthonormal to 1e-14 across ±200 millennia;
+  - against swetest (whose default long-term precession is this model) on
+    DE440 over 1800–2100: apparent ecliptic of date 2.5 → 1.7 mas,
+    equator of date 3.1 → 1.9 mas with the option selected; the remaining
+    ~2 mas are SWE conventions outside precession.
+
 ## Accuracy notes
 
 - ICRF vs the J2000 mean equator/ecliptic differ by the ~0.02″ frame

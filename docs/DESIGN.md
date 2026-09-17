@@ -289,6 +289,14 @@ tool and script in this repo, and for anyone running them:
     for long-running processes and sweeps. Engine setup with the full
     catalog is 4–5 s and ~250 MB per engine, dominated by building the
     name index (a candidate for lazy construction).
+  - Increment 7 (done 2026-09-17): long-term precession option
+    (Vondrák, Capitaine & Wallace 2011, with its corrigendum;
+    docs/FRAMES.md): `CalcOptions::precession`, C ABI 3,
+    `ephem --precession`. Reduces to IAU 2006 at J2000 to the published
+    rounding, agrees within 0.002″ over ±200 yr and 0.06″ over ±1000 yr,
+    and brings the date frames 1 mas closer to swetest. The
+    Stephenson–Morrison–Hohenkerk 2016 ΔT reconstruction was checked and
+    not adopted (CC BY / Crown copyright attribution terms; TIME.md).
 - **M6** — transports: `Transport` interface, binary-socket head
   (length-prefixed CBOR), `prometheiad` HTTP head.
 

@@ -669,6 +669,58 @@ TEST_CASE("de440_engine_matches_swetest") {
     }
 }
 
+TEST_CASE("de440_vondrak_precession_matches_swetest") {
+    // The Swiss Ephemeris' default long-term precession is Vondrak et al.
+    // (2011). Selecting it here shrinks our date-frame residuals against its
+    // output over 1800-2100 (ecliptic of date 2.5 -> 1.7 mas, equator of
+    // date 3.1 -> 1.9 mas); the ~2 mas that remain, and the ayanamshas'
+    // 2.6 mas, are SWE conventions beyond precession (obliquity/nutation
+    // details), not the precession model.
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    REQUIRE(opened.ok());
+    Engine e = std::move(opened).value();
+    FixedDeltaT dt;
+    e.set_delta_t_model(&dt);
+    double worst[2] = {0.0, 0.0}, worst_iau[2] = {0.0, 0.0};
+    for (const Fixture& f : kFixtures) {
+        if (f.mode != Mode::Apparent && f.mode != Mode::ApparentEquatorial)
+            continue;
+        for (const DeltaTFixture& d : kSweDeltaT)
+            if (d.jd_tt == f.jd_tt)
+                dt.seconds = d.seconds;
+        CalcOptions o = options_for(f.mode);
+        auto iau = e.calc(f.body, f.jd_tt, o);
+        o.precession = Precession::Vondrak2011;
+        auto ltp = e.calc(f.body, f.jd_tt, o);
+        REQUIRE(iau.ok());
+        REQUIRE(ltp.ok());
+        const int k = f.mode == Mode::Apparent ? 0 : 1;
+        worst[k] =
+            std::max(worst[k], sep_as(ltp.value().pos.lon_deg, ltp.value().pos.lat_deg, f.a, f.b));
+        worst_iau[k] = std::max(worst_iau[k],
+                                sep_as(iau.value().pos.lon_deg, iau.value().pos.lat_deg, f.a, f.b));
+    }
+    double worst_ayan = 0.0, worst_ayan_iau = 0.0;
+    for (const AyanamsaFixture& f : kAyanamsaFixtures) {
+        auto a = frames::ayanamsa(f.mode, f.jd_tt, frames::PrecessionModel::Vondrak2011);
+        auto b = frames::ayanamsa(f.mode, f.jd_tt);
+        REQUIRE(a.has_value());
+        REQUIRE(b.has_value());
+        worst_ayan = std::max(worst_ayan, std::fabs(a->true_deg - f.deg) * 3600.0);
+        worst_ayan_iau = std::max(worst_ayan_iau, std::fabs(b->true_deg - f.deg) * 3600.0);
+    }
+    std::printf("  vs swetest, IAU 2006 -> Vondrak 2011: ecliptic of date %.4f\" -> %.4f\", "
+                "equator of date %.4f\" -> %.4f\", ayanamsha %.4f\" -> %.4f\"\n",
+                worst_iau[0], worst[0], worst_iau[1], worst[1], worst_ayan_iau, worst_ayan);
+    CHECK(worst[0] < 0.0025);
+    CHECK(worst[1] < 0.0025);
+    CHECK(worst[0] < worst_iau[0]);
+    CHECK(worst[1] < worst_iau[1]);
+    CHECK(worst_ayan < 0.005);
+}
+
 TEST_CASE("de440_engine_rates_match_differenced_swetest") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;

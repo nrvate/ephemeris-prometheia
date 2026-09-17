@@ -223,6 +223,8 @@ TEST_CASE("ephem_options_map_to_engine") {
     topo.site = {-70.25 * kDegToRad, -30.5 * kDegToRad, 2200.0};
     CalcOptions lahiri;
     lahiri.sidereal = SiderealMode::Lahiri;
+    CalcOptions lahiri_ltp = lahiri;
+    lahiri_ltp.precession = Precession::Vondrak2011;
     CalcOptions user;
     user.sidereal = SiderealMode::User;
     user.sidereal_epoch_jtdb = 2440000.5;
@@ -239,6 +241,7 @@ TEST_CASE("ephem_options_map_to_engine") {
         {"--site=-70.25,-30.5,2200", topo},
         {"--center topo --site -70.25,-30.5,2200", topo},
         {"--sidereal lahiri", lahiri},
+        {"--precession vondrak2011 --sidereal lahiri", lahiri_ltp},
         {"--sidereal user:2440000.5:22.25", user},
         {"--no-deflection --no-speed", partial},
         {"--center barycentric", bary},
@@ -366,6 +369,7 @@ TEST_CASE("ephem_errors_and_status") {
         "--step 1w",
         "--site 1,95",
         "--sidereal krishnamurti",
+        "--precession iau1976",
         "--geometric=yes",
         "--bogus",
         "-f xml",

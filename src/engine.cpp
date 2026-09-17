@@ -302,6 +302,7 @@ void apply_transpose(const double m[9], const double v[3], double out[3]) {
 // Everything frame-related that depends only on the TT epoch.
 struct EpochFrames {
     double jd_tt = NAN;
+    frames::PrecessionModel model = frames::PrecessionModel::IAU2006;
     bool have_nutation = false;
     double pb[9];  // P * B: ICRF -> mean equator of date
     double npb[9]; // N * P * B: ICRF -> true equator of date
@@ -762,9 +763,10 @@ struct Engine::Impl {
         return (delta_t ? delta_t : &default_delta_t)->delta_t_seconds(jd_tt);
     }
 
-    const EpochFrames& frames_at(double jd_tt, bool need_nutation) {
+    const EpochFrames& frames_at(double jd_tt, bool need_nutation, Precession precession) {
+        const auto model = frames::PrecessionModel(int(precession));
         for (EpochFrames& f : cache) {
-            if (f.jd_tt == jd_tt) {
+            if (f.jd_tt == jd_tt && f.model == model) {
                 if (need_nutation && !f.have_nutation)
                     add_nutation(f);
                 return f;
@@ -773,11 +775,12 @@ struct Engine::Impl {
         EpochFrames& f = cache[cache_next];
         cache_next = (cache_next + 1) % 3;
         f.jd_tt = jd_tt;
+        f.model = model;
         f.have_nutation = false;
         double p[9];
-        frames::mean_equator_of_date_matrix(jd_tt, p);
+        frames::mean_equator_of_date_matrix(jd_tt, model, p);
         matmul(p, bias, f.pb);
-        f.eps_mean = frames::mean_obliquity(jd_tt);
+        f.eps_mean = frames::mean_obliquity(jd_tt, model);
         if (need_nutation)
             add_nutation(f);
         return f;
@@ -811,7 +814,7 @@ struct Engine::Impl {
             auto r = source->barycentric(body::kEarth, jd_tdb, out);
             if (!r)
                 return r;
-            const EpochFrames& f = frames_at(jd_tt, true);
+            const EpochFrames& f = frames_at(jd_tt, true, o.precession);
             const double jd_ut1 = jd_tt - delta_t_seconds(jd_tt) / 86400.0;
             const double gast = frames::gast_rad(jd_ut1, jd_tt, f.dpsi, f.eps_mean);
             double site[3];
@@ -1130,13 +1133,15 @@ struct Engine::Impl {
     // ecliptic of J2000. Error for an unknown mode or a non-finite
     // user anchor.
     Result<double> sidereal_shift(const CalcOptions& o, double jd_tt) const {
+        const auto model = frames::PrecessionModel(int(o.precession));
         std::optional<frames::Ayanamsa> aya;
         if (o.sidereal == SiderealMode::User) {
             if (!std::isfinite(o.sidereal_epoch_jtdb) || !std::isfinite(o.sidereal_ayanamsa_deg))
                 return make_error(ErrorCode::ArgumentError, "sidereal User anchor is not finite");
-            aya = frames::ayanamsa_anchored(o.sidereal_epoch_jtdb, o.sidereal_ayanamsa_deg, jd_tt);
+            aya = frames::ayanamsa_anchored(o.sidereal_epoch_jtdb, o.sidereal_ayanamsa_deg, jd_tt,
+                                            model);
         } else {
-            aya = frames::ayanamsa(int(o.sidereal), jd_tt);
+            aya = frames::ayanamsa(int(o.sidereal), jd_tt, model);
             if (!aya)
                 return make_error(ErrorCode::ArgumentError, "unknown sidereal mode");
         }
@@ -1150,7 +1155,7 @@ struct Engine::Impl {
             // The zodiac's zero point has a fixed longitude on the mean
             // ecliptic of J2000: the ayanamsha less the precession
             // accumulated since J2000.
-            return aya->mean_deg - frames::precession_in_longitude_deg(jd_tt);
+            return aya->mean_deg - frames::precession_in_longitude_deg(jd_tt, model);
         }
         return make_error(ErrorCode::ArgumentError, "unknown frame");
     }
@@ -1236,7 +1241,7 @@ struct Engine::Impl {
             }
             break;
         case Frame::MeanOfDate: {
-            const EpochFrames& f = frames_at(jd_tt, need_nut);
+            const EpochFrames& f = frames_at(jd_tt, need_nut, o.precession);
             if (o.coords == Coords::Ecliptic) {
                 rot1(f.eps_mean, m);
                 matmul(m, f.pb, m);
@@ -1246,7 +1251,7 @@ struct Engine::Impl {
             break;
         }
         case Frame::TrueOfDate: {
-            const EpochFrames& f = frames_at(jd_tt, need_nut);
+            const EpochFrames& f = frames_at(jd_tt, need_nut, o.precession);
             if (o.coords == Coords::Ecliptic) {
                 // The ecliptic does not nutate; the equinox slides by dpsi.
                 double a[9], b[9];
@@ -1278,12 +1283,12 @@ struct Engine::Impl {
                 double eps = 0.0;
                 switch (o.frame) {
                 case Frame::TrueOfDate: {
-                    const EpochFrames& f = frames_at(jd_tt, true);
+                    const EpochFrames& f = frames_at(jd_tt, true, o.precession);
                     eps = f.eps_mean + f.deps;
                     break;
                 }
                 case Frame::MeanOfDate:
-                    eps = frames_at(jd_tt, false).eps_mean;
+                    eps = frames_at(jd_tt, false, o.precession).eps_mean;
                     break;
                 case Frame::J2000:
                 case Frame::ICRF:

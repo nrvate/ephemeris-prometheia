@@ -71,6 +71,8 @@ TEST_CASE("c_api_library_and_defaults") {
     CHECK(c.coords == int(d.coords));
     CHECK(c.sidereal == int(d.sidereal));
     CHECK(c.sidereal == PROMETHEIA_SIDEREAL_TROPICAL);
+    CHECK(c.precession == int(d.precession));
+    CHECK(PROMETHEIA_PRECESSION_VONDRAK2011 == int(Precession::Vondrak2011));
     CHECK(c.frame == PROMETHEIA_FRAME_TRUE_OF_DATE);
     CHECK(c.center == PROMETHEIA_CENTER_GEOCENTRIC);
     CHECK(c.light_time == 1);
@@ -269,6 +271,7 @@ TEST_CASE("c_api_calc_errors") {
     bad([](prometheia_options& x) { x.coords = 2; });
     bad([](prometheia_options& x) { x.sidereal = 2; });
     bad([](prometheia_options& x) { x.sidereal = -2; });
+    bad([](prometheia_options& x) { x.precession = 2; });
     bad([](prometheia_options& x) {
         x.sidereal = PROMETHEIA_SIDEREAL_USER;
         x.sidereal_ayanamsa_deg = std::nan("");

@@ -95,11 +95,21 @@ enum class SiderealMode : int {
     User = 255,
 };
 
+// Precession model of the date frames (and of the sidereal zodiacs' drift).
+// IAU 2006 is the standard near the present; Vondrak, Capitaine & Wallace
+// (2011) stays valid over +-200 millennia (docs/FRAMES.md). Nutation is IAU
+// 2000A either way.
+enum class Precession : int {
+    IAU2006 = 0,
+    Vondrak2011 = 1,
+};
+
 struct CalcOptions {
     Center center = Center::Geocentric;
     Frame frame = Frame::TrueOfDate;
     Coords coords = Coords::Ecliptic;
     SiderealMode sidereal = SiderealMode::Tropical;
+    Precession precession = Precession::IAU2006;
     double sidereal_epoch_jtdb = 0.0;   // SiderealMode::User anchor epoch
     double sidereal_ayanamsa_deg = 0.0; // SiderealMode::User anchor value
     bool light_time = true;             // retarded position of the body

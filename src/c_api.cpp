@@ -100,6 +100,9 @@ prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometh
     if (c.coords != PROMETHEIA_COORDS_ECLIPTIC && c.coords != PROMETHEIA_COORDS_EQUATORIAL) {
         return argument(err, "options: coords out of range");
     }
+    if (c.precession != PROMETHEIA_PRECESSION_IAU2006 &&
+        c.precession != PROMETHEIA_PRECESSION_VONDRAK2011)
+        return argument(err, "options: precession model out of range");
     switch (c.sidereal) {
     case PROMETHEIA_SIDEREAL_TROPICAL:
     case PROMETHEIA_SIDEREAL_FAGAN_BRADLEY:
@@ -113,6 +116,7 @@ prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometh
     o.frame = static_cast<Frame>(c.frame);
     o.coords = static_cast<Coords>(c.coords);
     o.sidereal = static_cast<SiderealMode>(c.sidereal);
+    o.precession = static_cast<Precession>(c.precession);
     o.sidereal_epoch_jtdb = c.sidereal_epoch_jd;
     o.sidereal_ayanamsa_deg = c.sidereal_ayanamsa_deg;
     o.light_time = c.light_time != 0;
@@ -198,6 +202,7 @@ void prometheia_options_init(prometheia_options* opts) {
     opts->frame = static_cast<int>(d.frame);
     opts->coords = static_cast<int>(d.coords);
     opts->sidereal = static_cast<int>(d.sidereal);
+    opts->precession = static_cast<int>(d.precession);
     opts->sidereal_epoch_jd = d.sidereal_epoch_jtdb;
     opts->sidereal_ayanamsa_deg = d.sidereal_ayanamsa_deg;
     opts->light_time = d.light_time;

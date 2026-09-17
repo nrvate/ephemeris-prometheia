@@ -309,6 +309,7 @@ static void print_help(void) {
            "      --frame true|mean|j2000|icrf   equinox of date (default true)\n"
            "      --equatorial       right ascension/declination instead of ecliptic\n"
            "      --sidereal MODE    fagan-bradley (fb), lahiri, user:JD:DEG, tropical\n"
+           "      --precession MODEL iau2006 (default) or vondrak2011 (long-term)\n"
            "\n"
            "Corrections (default: apparent place, with rates):\n"
            "      --astrometric      light time only\n"
@@ -489,6 +490,15 @@ static int parse_args(int argc, char** argv, config* c) {
                 return EXIT_USAGE;
             if (!parse_keyword(v, frame_names, frame_values, 4, &c->opts.frame))
                 return usage_error("unknown frame '%s' (true, mean, j2000, icrf)", v);
+        } else if (is_opt(&a, NULL, "--precession")) {
+            if (!(v = value_of(&a)))
+                return EXIT_USAGE;
+            if (equals_nocase(v, "iau2006"))
+                c->opts.precession = PROMETHEIA_PRECESSION_IAU2006;
+            else if (equals_nocase(v, "vondrak2011") || equals_nocase(v, "vondrak"))
+                c->opts.precession = PROMETHEIA_PRECESSION_VONDRAK2011;
+            else
+                return usage_error("unknown precession model '%s' (iau2006, vondrak2011)", v);
         } else if (is_opt(&a, NULL, "--sidereal")) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;

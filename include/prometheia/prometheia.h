@@ -40,7 +40,7 @@ extern "C" {
 #define PROMETHEIA_API
 #endif
 
-#define PROMETHEIA_ABI_VERSION 2
+#define PROMETHEIA_ABI_VERSION 3
 
 /* ---- Status and errors ------------------------------------------------ */
 
@@ -102,16 +102,20 @@ PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION *
 #define PROMETHEIA_SIDEREAL_LAHIRI 1
 #define PROMETHEIA_SIDEREAL_USER 255
 
+#define PROMETHEIA_PRECESSION_IAU2006 0
+#define PROMETHEIA_PRECESSION_VONDRAK2011 1
+
 /*
  * Start from prometheia_options_init(), not a zeroed struct: zero is not
  * the default for every field (frame 0 is ICRF, sidereal 0 is
  * Fagan/Bradley).
  */
 typedef struct prometheia_options {
-    int center;   /* PROMETHEIA_CENTER_*, default geocentric */
-    int frame;    /* PROMETHEIA_FRAME_*, default true of date */
-    int coords;   /* PROMETHEIA_COORDS_*, default ecliptic */
-    int sidereal; /* PROMETHEIA_SIDEREAL_*, default tropical */
+    int center;     /* PROMETHEIA_CENTER_*, default geocentric */
+    int frame;      /* PROMETHEIA_FRAME_*, default true of date */
+    int coords;     /* PROMETHEIA_COORDS_*, default ecliptic */
+    int sidereal;   /* PROMETHEIA_SIDEREAL_*, default tropical */
+    int precession; /* PROMETHEIA_PRECESSION_*, default IAU 2006 */
     /* PROMETHEIA_SIDEREAL_USER anchor: the MEAN ayanamsha (degrees) at a
      * TT Julian date. */
     double sidereal_epoch_jd;

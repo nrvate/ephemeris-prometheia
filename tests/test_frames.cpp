@@ -266,3 +266,97 @@ TEST_CASE("frames_observer_geocentric") {
     CHECK(near(out[0], 0.0, 1e-9));
     CHECK(near(out[1], 6378.137, 1e-3));
 }
+
+namespace {
+
+// Largest angle (arcsec) between corresponding rows of two rotation
+// matrices: how far apart the two frames' axes are.
+double frame_offset_arcsec(const double a[9], const double b[9]) {
+    double worst = 0.0;
+    for (int r = 0; r < 3; ++r) {
+        const double* u = a + 3 * r;
+        const double* v = b + 3 * r;
+        const double c[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2],
+                             u[0] * v[1] - u[1] * v[0]};
+        const double s = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+        worst = std::max(worst, std::atan2(s, u[0] * v[0] + u[1] * v[1] + u[2] * v[2]));
+    }
+    return worst * 206264.80624709636;
+}
+
+} // namespace
+
+TEST_CASE("ltp_series_reduce_to_j2000") {
+    // Every Vondrak et al. (2011) series is constrained to IAU 2006 at J2000:
+    // P_A = Q_A = X_A = Y_A = p_A = 0 and epsilon_A = 84381.406". The
+    // polynomial constants cancel the periodic cosine amplitudes to the
+    // published 6-decimal rounding (1e-6") — which also pins the
+    // corrigendum's Q_A C7 = 198.296701 (the originally printed 198.296071
+    // leaves 0.0006").
+    constexpr double kJ2000 = 2451545.0;
+    const double eps0 = 84381.406 / 206264.80624709636;
+    double k[3], n[3];
+    ltp_ecliptic_pole(kJ2000, k);
+    ltp_equator_pole(kJ2000, n);
+    constexpr double kRoundingArcsec = 5e-6;
+    constexpr double kRoundingRad = kRoundingArcsec / 206264.80624709636;
+    CHECK(std::fabs(k[0]) < kRoundingRad);
+    CHECK(std::fabs(k[1] + std::sin(eps0)) < kRoundingRad);
+    CHECK(std::fabs(k[2] - std::cos(eps0)) < kRoundingRad);
+    CHECK(std::fabs(n[0]) < kRoundingRad);
+    CHECK(std::fabs(n[1]) < kRoundingRad);
+    CHECK(std::fabs(ltp_precession_in_longitude_deg(kJ2000)) * 3600.0 < kRoundingArcsec);
+    CHECK(std::fabs(ltp_obliquity_series(kJ2000) - eps0) * 206264.80624709636 < kRoundingArcsec);
+    CHECK(std::fabs(ltp_mean_obliquity(kJ2000) - eps0) * 206264.80624709636 < kRoundingArcsec);
+    double m[9];
+    ltp_mean_equator_of_date_matrix(kJ2000, m);
+    const double identity[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    CHECK(frame_offset_arcsec(m, identity) < kRoundingArcsec);
+}
+
+TEST_CASE("ltp_agrees_with_iau2006_near_j2000") {
+    // Within centuries of J2000 the long-term model reproduces IAU 2006
+    // (it was fitted with overwhelming weight there); it departs slowly
+    // beyond. Offsets printed for the record, gated loosely.
+    std::printf("  %8s %14s %14s %14s\n", "years", "matrix", "obliquity", "p_A");
+    for (double years :
+         {-1000.0, -500.0, -200.0, -100.0, -10.0, 10.0, 100.0, 200.0, 500.0, 1000.0}) {
+        const double jd = 2451545.0 + years * 365.25;
+        double a[9], b[9];
+        mean_equator_of_date_matrix(jd, a);
+        ltp_mean_equator_of_date_matrix(jd, b);
+        const double d_mat = frame_offset_arcsec(a, b);
+        const double d_eps = (ltp_mean_obliquity(jd) - mean_obliquity(jd)) * 206264.80624709636;
+        const double d_pa =
+            (ltp_precession_in_longitude_deg(jd) - precession_in_longitude_deg(jd)) * 3600.0;
+        std::printf("  %+8.0f %13.5f\" %13.5f\" %13.5f\"\n", years, d_mat, d_eps, d_pa);
+        const double gate =
+            std::fabs(years) <= 100.0 ? 0.002 : (std::fabs(years) <= 200.0 ? 0.01 : 1.0);
+        CHECK(d_mat < gate);
+        CHECK(std::fabs(d_eps) < gate);
+        CHECK(std::fabs(d_pa) < gate);
+    }
+}
+
+TEST_CASE("ltp_long_range_is_a_rotation") {
+    // Orthonormal across the model's +-200 millennia. The pole-angle
+    // obliquity (what the matrix implies, and what the engine uses) follows
+    // the separately fitted epsilon_A series to a few arcseconds within
+    // +-4000 years; beyond, the two published fits drift apart (hundreds of
+    // arcseconds at +-200 millennia), which is reported, not gated.
+    for (double cy : {-2000.0, -500.0, -130.0, -40.0, 40.0, 130.0, 500.0, 2000.0}) {
+        const double jd = 2451545.0 + cy * 36525.0;
+        double m[9];
+        ltp_mean_equator_of_date_matrix(jd, m);
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) {
+                const double dot =
+                    m[3 * i] * m[3 * j] + m[3 * i + 1] * m[3 * j + 1] + m[3 * i + 2] * m[3 * j + 2];
+                CHECK(std::fabs(dot - (i == j ? 1.0 : 0.0)) < 1e-14);
+            }
+        const double d = (ltp_mean_obliquity(jd) - ltp_obliquity_series(jd)) * 206264.80624709636;
+        std::printf("  T=%+6.0f cy: pole-angle obliquity - epsilon_A series %.3f\"\n", cy, d);
+        if (std::fabs(cy) <= 40.0)
+            CHECK(std::fabs(d) < 5.0);
+    }
+}
