@@ -311,6 +311,35 @@ these semantics (they are what prometheiad must implement):
 - **Privacy:** neither ERROR text nor per-object error text may name an
   instant or a place.
 
+Settled in the same exchange:
+
+- **Segments** carry tropical coefficients; the ayanamsa travels as its own
+  segmented series per profile (segmented, not one series, because a
+  true-of-date ayanamsa carries nutation). A `maxDegreeHint` rides in the
+  delivery block, outside the cache key. The three error figures are the
+  largest residuals the server *measured* against its own answers on a
+  check set of at least 4(d+1) instants, not claimed bounds; a rate error
+  is among them, because stations come from rates. A capability names the
+  object kinds a server will fit (ours will exclude osculating lunar
+  apsides, which swing degrees a day).
+- **Deep sky** is one capability bit plus the catalogs list saying which
+  catalogues a server resolves; ours is Messier only.
+- **Provenance** is `<engine> | <ephemeris> | <model>`, and `datasetId` is
+  `<engine>/<ephemeris>/<catalogs>#<8 hex>` over every data file's checksum
+  and the engine version. A request can pin `datasetId` itself.
+- **Rate tolerances:** 1e-5 deg/day for angles, 1e-6 AU/day for distances. A
+  distance rate that omits the light-time term differs by the observer's
+  acceleration times the light time (measured on Swiss: 3e-5 AU/day for
+  Uranus), which is a definitional difference a server flags rather than a
+  fault.
+- **Registries** are generated to `ephsrv/registries.json` beside the header,
+  checked against the codec's constants; we vendor both with checksums.
+- **An interop harness** in Astrolog's tree runs a question set against both
+  servers, records each side's answers for offline diffing, and attributes
+  disagreements instead of averaging them. Classes where the models
+  legitimately differ (topocentric Moon, heliocentric light time, star
+  catalogues, mean-element models, distance rates) are report-only.
+
 **Our migration** (when Astrolog lands the pass and the fixtures are pinned):
 1. Take the renamed `ephproto.h` and the fixtures; the pinned-header check
    diverges once, as expected.
@@ -323,7 +352,13 @@ these semantics (they are what prometheiad must implement):
 5. Advertise the star catalog as a pinnable catalog id, and derive datasetId
    from the ephemeris, catalogs and star catalog.
 6. Segments (SEGDATA) are ours to implement first; the engine already
-   evaluates Chebyshev series.
+   evaluates Chebyshev series. Measured motivation: a 10-body, 10,000-row
+   hourly window is 0.29 s of compute and 9.7 MB of f64 DATA, against about
+   40 KB per body as segments.
+7. Priority ordering and CANCEL, which our v3 server does not have. CANCEL
+   must stop the computation, not just drop bytes, so a request computes in
+   row blocks that check for cancellation between them; a cancelled request
+   caches nothing.
 
 ## Not implemented
 
