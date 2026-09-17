@@ -189,44 +189,58 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
 
     const Plan plan = plan_of(req, map_);
     const auto flags = int32_t(uint32_t(req.iflag & 0xFFFFFFFFu));
-    for (uint32_t o = 0; o < n_obj; ++o) {
-        const eph::ObjSpec& obj = req.objs[o];
-        double* first_row = ans->cols.data() + size_t(o) * n_time * eph::kColsPerObj;
-        std::string why = plan.why;
-        std::optional<WireBody> body;
-        if (why.empty()) {
-            if (obj.kind == eph::kObjStar) {
-                why = "fixed stars are not supported";
-            } else if (obj.kind == eph::kObjNodAps) {
-                why = "nodes and apsides are not supported";
-            } else if (!(body = map_.body(obj.id))) {
-                why = "body " + std::to_string(obj.id) + " has no wire-map entry";
-            }
-        }
+
+    // What each object resolves to, and how its rows went.
+    struct Object {
+        std::string why; // set: every row fails with this reason
+        int naif_id = 0;
         std::string name, first_error;
         bool any_ok = false;
-        if (body) {
-            name = body->name.empty() ? "SPK-ID " + std::to_string(body->naif_id) : body->name;
+    };
+    std::vector<Object> objects(n_obj);
+    for (uint32_t o = 0; o < n_obj; ++o) {
+        const eph::ObjSpec& obj = req.objs[o];
+        Object& t = objects[o];
+        t.why = plan.why;
+        if (!t.why.empty()) {
+            continue;
         }
-        for (uint32_t r = 0; r < n_time; ++r) {
-            double* row = first_row + size_t(r) * eph::kColsPerObj;
-            if (!why.empty()) {
+        std::optional<WireBody> body;
+        if (obj.kind == eph::kObjStar) {
+            t.why = "fixed stars are not supported";
+        } else if (obj.kind == eph::kObjNodAps) {
+            t.why = "nodes and apsides are not supported";
+        } else if (!(body = map_.body(obj.id))) {
+            t.why = "body " + std::to_string(obj.id) + " has no wire-map entry";
+        } else {
+            t.naif_id = body->naif_id;
+            t.name = body->name.empty() ? "SPK-ID " + std::to_string(body->naif_id) : body->name;
+        }
+    }
+
+    // Time-major: every object at one instant before the next instant, so
+    // the engine's per-instant work (observer, Sun, frames, nutation) is
+    // shared across the objects. The answer does not depend on the order.
+    for (uint32_t r = 0; r < n_time; ++r) {
+        // Row r's instant, exactly as Astrolog's client computes it.
+        const double jd = req.jdStart + double(uint64_t(r) * uint64_t(req.stepSeconds)) / 86400.0;
+        for (uint32_t o = 0; o < n_obj; ++o) {
+            Object& t = objects[o];
+            double* row = ans->cols.data() + (size_t(o) * n_time + r) * eph::kColsPerObj;
+            if (!t.why.empty()) {
                 fill_nan(row);
                 continue;
             }
-            // Row r's instant, exactly as Astrolog's client computes it.
-            const double jd =
-                req.jdStart + double(uint64_t(r) * uint64_t(req.stepSeconds)) / 86400.0;
-            auto res = plan.time_tt ? engine_.calc(body->naif_id, jd, plan.opts)
-                                    : engine_.calc_ut(body->naif_id, jd, plan.opts);
+            auto res = plan.time_tt ? engine_.calc(t.naif_id, jd, plan.opts)
+                                    : engine_.calc_ut(t.naif_id, jd, plan.opts);
             if (!res) {
                 fill_nan(row);
-                if (first_error.empty()) {
-                    first_error = res.error().message;
+                if (t.first_error.empty()) {
+                    t.first_error = res.error().message;
                 }
                 continue;
             }
-            any_ok = true;
+            t.any_ok = true;
             const Position& p = res.value().pos;
             if (plan.xyz) {
                 row[0] = p.xyz_au[0];
@@ -245,10 +259,13 @@ std::shared_ptr<const Answer> LoopContext::compute(const eph::Request& req) {
                 row[5] = p.dist_speed;
             }
         }
-        const std::string serr = !why.empty() ? why : first_error;
-        eph::writeDataMeta(ans->meta.data() + size_t(o) * eph::kDataMetaSize, any_ok ? flags : -1,
-                           any_ok ? flags : 0, serr.empty() ? nullptr : serr.c_str(),
-                           any_ok ? name.c_str() : nullptr);
+    }
+    for (uint32_t o = 0; o < n_obj; ++o) {
+        const Object& t = objects[o];
+        const std::string& serr = !t.why.empty() ? t.why : t.first_error;
+        eph::writeDataMeta(ans->meta.data() + size_t(o) * eph::kDataMetaSize, t.any_ok ? flags : -1,
+                           t.any_ok ? flags : 0, serr.empty() ? nullptr : serr.c_str(),
+                           t.any_ok ? t.name.c_str() : nullptr);
     }
     return ans;
 }

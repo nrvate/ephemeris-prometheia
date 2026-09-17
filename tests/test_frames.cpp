@@ -366,8 +366,8 @@ TEST_CASE("nutation_rates_and_taylor_step") {
     // The analytic rates reproduce the series itself: the value equals
     // nutation(), the first and second derivatives match central
     // differences, and a second-order Taylor step from a node carries the
-    // series within 0.05 day to well under a microarcsecond — what lets the
-    // engine anchor nutation on a 0.1-day grid.
+    // series within 0.05 day to well under a microarcsecond. (The engine
+    // interpolates instead; nutation_interpolator below.)
     const double kMuas = 1e-6 / 206264.80624709636;
     double worst_step = 0.0, worst_d1 = 0.0, worst_d2 = 0.0;
     for (int k = 0; k < 40; ++k) {
@@ -399,4 +399,42 @@ TEST_CASE("nutation_rates_and_taylor_step") {
     CHECK(worst_step < 1.0);
     CHECK(worst_d1 < 1.0);
     CHECK(worst_d2 < 100.0);
+}
+
+TEST_CASE("nutation_interpolator") {
+    // Quintic Hermite from half-day nodes against the full series, 1800-2100,
+    // at node boundaries and between them: measured 0.004 uas.
+    const double kMuas = 1e-6 / 206264.80624709636;
+    NutationInterpolator interp;
+    double worst = 0.0;
+    for (int k = 0; k < 60; ++k) {
+        const double base = std::floor((2378496.5 + k * 1826.11) * 2.0) / 2.0;
+        for (double dt : {0.0, 0.03, 0.125, 0.25, 0.31, 0.4999}) {
+            double ip, ie, sp, se;
+            interp.at(base + dt, ip, ie);
+            nutation(base + dt, sp, se);
+            worst = std::max({worst, std::fabs(ip - sp) / kMuas, std::fabs(ie - se) / kMuas});
+        }
+    }
+    std::printf("  quintic Hermite, 0.5-day nodes: %.5f uas\n", worst);
+    CHECK(worst < 0.05);
+
+    // Values depend only on the epoch: a fresh interpolator, and one whose
+    // cache has seen other epochs, agree exactly.
+    NutationInterpolator fresh;
+    double a1, a2, b1, b2;
+    fresh.at(2461300.37, a1, a2);
+    interp.at(2461300.37, b1, b2);
+    CHECK(a1 == b1);
+    CHECK(a2 == b2);
+
+    // Sweeping one window twice sums the series once per node.
+    NutationInterpolator sweep;
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int r = 0; r < 240; ++r) {
+            double p, e;
+            sweep.at(2461300.5 + r / 24.0, p, e);
+        }
+    }
+    CHECK(sweep.evaluations() == 21); // nodes 0 .. 20 over ten days
 }

@@ -830,38 +830,13 @@ struct Engine::Impl {
         return f;
     }
 
-    // Nutation anchored on a fixed 0.05-day grid: the full 1365-term series
-    // and its analytic rates are summed once per grid node, and any epoch
-    // takes a second-order Taylor step from its nearest node (|dt| <= 0.025
-    // day, ~0.1 uas; tests/test_frames.cpp). The value depends only on the
-    // epoch, never on query history; rate stencils and series of nearby
-    // epochs share nodes.
-    struct NutationNode {
-        double jd = NAN;
-        double n[6];
-    };
-    NutationNode nutation_nodes[4];
-    int nutation_next = 0;
-
-    void nutation_at(double jd_tt, double& dpsi, double& deps) {
-        const double node_jd = std::nearbyint(jd_tt * 20.0) / 20.0;
-        NutationNode* node = nullptr;
-        for (NutationNode& n : nutation_nodes)
-            if (n.jd == node_jd)
-                node = &n;
-        if (!node) {
-            node = &nutation_nodes[nutation_next];
-            nutation_next = (nutation_next + 1) % 4;
-            node->jd = node_jd;
-            frames::nutation_with_rates(node_jd, node->n);
-        }
-        const double dt = jd_tt - node_jd;
-        dpsi = node->n[0] + dt * (node->n[2] + 0.5 * dt * node->n[4]);
-        deps = node->n[1] + dt * (node->n[3] + 0.5 * dt * node->n[5]);
-    }
+    // Nutation interpolated from half-day nodes (frames::NutationInterpolator,
+    // 0.004 uas): the value depends only on the epoch, and the node cache is
+    // shared by every body and every rate stencil this engine evaluates.
+    frames::NutationInterpolator nutation;
 
     void add_nutation(EpochFrames& f) {
-        nutation_at(f.jd_tt, f.dpsi, f.deps);
+        nutation.at(f.jd_tt, f.dpsi, f.deps);
         // N = R1(-(eps + deps)) R3(-dpsi) R1(eps), docs/FRAMES.md.
         double a[9], b[9], c[9], n[9];
         rot1(-(f.eps_mean + f.deps), a);
@@ -873,15 +848,88 @@ struct Engine::Impl {
         f.have_nutation = true;
     }
 
-    // Observer barycentric state (km, km/day) at the given epoch.
+    // The last few observer and Sun states, keyed exactly: a request of many
+    // bodies at one instant (and its rate stencil) reads the ephemeris for
+    // them once. Three entries cover t - h, t, t + h.
+    struct ObserverMemo {
+        bool valid = false;
+        double jd_tt = 0.0;
+        Center center = Center::Geocentric;
+        Precession precession = Precession::IAU2006;
+        frames::GeoSite site{};
+        double delta_t = 0.0; // topocentric: the UT1 the site was rotated with
+        double state[6];
+    };
+    ObserverMemo observer_memo[3];
+    int observer_memo_next = 0;
+    struct SunMemo {
+        double jd_tdb = NAN;
+        double state[6];
+    };
+    SunMemo sun_memo[3];
+    int sun_memo_next = 0;
+
+    void forget_observers() {
+        for (ObserverMemo& m : observer_memo)
+            m.valid = false;
+    }
+
+    Result<void> sun_at(double jd_tdb, double out[6]) {
+        for (const SunMemo& m : sun_memo) {
+            if (m.jd_tdb == jd_tdb) {
+                std::memcpy(out, m.state, sizeof m.state);
+                return {};
+            }
+        }
+        auto r = source->barycentric(body::kSun, jd_tdb, out);
+        if (!r)
+            return r;
+        SunMemo& m = sun_memo[sun_memo_next];
+        sun_memo_next = (sun_memo_next + 1) % 3;
+        m.jd_tdb = jd_tdb;
+        std::memcpy(m.state, out, sizeof m.state);
+        return {};
+    }
+
     Result<void> observer(const CalcOptions& o, double jd_tt, double jd_tdb, double out[6]) {
+        const bool topo = o.center == Center::Topocentric;
+        // A Delta T model (the C interface's callback, say) may change its
+        // answer between calls, so a topocentric entry is keyed on it too.
+        const double dt = topo ? delta_t_seconds(jd_tt) : 0.0;
+        for (const ObserverMemo& m : observer_memo) {
+            if (m.valid && m.jd_tt == jd_tt && m.center == o.center &&
+                (!topo || (m.precession == o.precession && m.site.lon_rad == o.site.lon_rad &&
+                           m.site.lat_rad == o.site.lat_rad && m.site.height_m == o.site.height_m &&
+                           m.delta_t == dt))) {
+                std::memcpy(out, m.state, sizeof m.state);
+                return {};
+            }
+        }
+        auto r = observer_uncached(o, jd_tt, jd_tdb, out);
+        if (!r)
+            return r;
+        ObserverMemo& m = observer_memo[observer_memo_next];
+        observer_memo_next = (observer_memo_next + 1) % 3;
+        m.valid = true;
+        m.jd_tt = jd_tt;
+        m.center = o.center;
+        m.precession = o.precession;
+        m.site = o.site;
+        m.delta_t = dt;
+        std::memcpy(m.state, out, sizeof m.state);
+        return {};
+    }
+
+    // Observer barycentric state (km, km/day) at the given epoch.
+    Result<void> observer_uncached(const CalcOptions& o, double jd_tt, double jd_tdb,
+                                   double out[6]) {
         switch (o.center) {
         case Center::Barycentric:
             for (int i = 0; i < 6; ++i)
                 out[i] = 0.0;
             return {};
         case Center::Heliocentric:
-            return source->barycentric(body::kSun, jd_tdb, out);
+            return sun_at(jd_tdb, out);
         case Center::Geocentric:
             return source->barycentric(body::kEarth, jd_tdb, out);
         case Center::Topocentric: {
@@ -1251,6 +1299,8 @@ struct Engine::Impl {
     }
 
     // Observer->body vector in the output frame (km), for one TT epoch.
+    // `tau` on entry is a starting guess for the light time (0 when none);
+    // the solution does not depend on it beyond the 1e-15-day tolerance.
     Result<void> vector_at(int id, double jd_tt, const CalcOptions& o, double out[3], double& tau,
                            int& origin) {
         const double jd_tdb = time::tdb_from_tt(jd_tt);
@@ -1261,25 +1311,30 @@ struct Engine::Impl {
 
         double tgt[6];
         double p[3];
-        tau = 0.0;
-        r = retarded(id, jd_tdb, 0.0, tgt, &origin);
+        if (!o.light_time || !(tau >= 0.0 && tau < 1.0))
+            tau = 0.0;
+        r = retarded(id, jd_tdb, tau, tgt, &origin);
         if (!r)
             return r;
         for (int i = 0; i < 3; ++i)
             p[i] = tgt[i] - obs[i];
         if (o.light_time) {
-            // Fixed-point iteration; contracts by ~v/c per pass.
-            for (int it = 0; it < 10; ++it) {
-                const double next =
-                    std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) / apparent::kLightKmPerDay;
-                const bool done = std::fabs(next - tau) < 1e-15;
-                tau = next;
+            // Newton's method on f(tau) = |p(tau)| - c tau, with p's rate
+            // from the body's velocity: quadratic convergence, two or three
+            // ephemeris reads from a cold start and one or two from a
+            // nearby epoch's tau.
+            for (int it = 0; it < 12; ++it) {
+                const double d = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+                const double dp = -(p[0] * tgt[3] + p[1] * tgt[4] + p[2] * tgt[5]) / d;
+                const double step =
+                    (d - apparent::kLightKmPerDay * tau) / (apparent::kLightKmPerDay - dp);
+                tau += step;
                 r = retarded(id, jd_tdb, tau, tgt, nullptr);
                 if (!r)
                     return r;
                 for (int i = 0; i < 3; ++i)
                     p[i] = tgt[i] - obs[i];
-                if (done)
+                if (std::fabs(step) < 1e-15)
                     break;
             }
         }
@@ -1288,7 +1343,7 @@ struct Engine::Impl {
             o.center == Center::Heliocentric || o.center == Center::Barycentric;
         if (o.deflection && !observer_is_sun_or_bary && id != body::kSun) {
             double sun[6];
-            r = source->barycentric(body::kSun, jd_tdb, sun);
+            r = sun_at(jd_tdb, sun);
             if (!r)
                 return r;
             const double sun_to_body[3] = {tgt[0] - sun[0], tgt[1] - sun[1], tgt[2] - sun[2]};
@@ -1438,12 +1493,13 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
         pos.xyz_au[i] = v[i] / kAuKm;
     if (o.speed) {
         const double tp = jd_tt + kSpeedStepDays, tm = jd_tt - kSpeedStepDays;
-        double vp[3], vm[3], unused_tau;
+        // The stencil starts its light-time solve from the centre's tau.
+        double vp[3], vm[3], tau_p = tau, tau_m = tau;
         int unused_origin;
-        r = impl_->vector_at(id, tp, o, vp, unused_tau, unused_origin);
+        r = impl_->vector_at(id, tp, o, vp, tau_p, unused_origin);
         if (!r)
             return r.error();
-        r = impl_->vector_at(id, tm, o, vm, unused_tau, unused_origin);
+        r = impl_->vector_at(id, tm, o, vm, tau_m, unused_origin);
         if (!r)
             return r.error();
         const double span = (tp - tm) * kAuKm; // actual, rounded, step
@@ -1588,8 +1644,10 @@ Result<CalcResult> Engine::calc_ut(int id, double jd_ut1, const CalcOptions& o) 
 }
 
 void Engine::set_delta_t_model(const time::DeltaTModel* model) {
-    if (impl_)
+    if (impl_) {
+        impl_->forget_observers(); // topocentric sites rotate with UT1
         impl_->delta_t = model;
+    }
 }
 
 std::string_view Engine::source() const {

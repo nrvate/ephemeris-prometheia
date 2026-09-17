@@ -94,8 +94,22 @@ through its linear-in-T amplitudes and the fundamental arguments'
 polynomials). Tests: the value equals `nutation()` to 1e-15 rad, the first
 derivative matches central differences to 0.55 µas/day, and a
 second-order Taylor step of up to 0.05 day reproduces the full series to
-0.68 µas over 1800–2100. The engine uses it to anchor nutation on a
-0.05-day grid (docs/ENGINE.md).
+0.68 µas over 1800–2100.
+
+`frames::NutationInterpolator` uses it to interpolate nutation from nodes
+on a fixed half-day grid. The polynomial is the quintic Hermite matching
+value, first and second derivative at both nodes, and it reproduces the
+full series to 0.004 µas over 1800–2100. The measured maxima against node
+spacing:
+
+| spacing | quintic Hermite | cubic Hermite (no second derivative) |
+|---|---:|---:|
+| 1 d | 0.27 µas | 59 µas |
+| 0.5 d | 0.004 µas | 3.9 µas |
+| 0.25 d | 0.0001 µas | 0.24 µas |
+
+Nodes are cached, direct-mapped, 4,096 of them. The engine uses it for
+every nutation (docs/ENGINE.md).
 
 ## Long-term precession (Vondrák, Capitaine & Wallace 2011)
 

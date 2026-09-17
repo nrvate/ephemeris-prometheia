@@ -40,6 +40,36 @@ void nutation(double jd_tt, double& dpsi, double& deps);
 // terms (docs/FRAMES.md).
 void nutation_with_rates(double jd_tt, double out[6]);
 
+// IAU 2000A nutation interpolated from nodes on a fixed half-day grid: each
+// node holds the series value and its first and second derivatives
+// (nutation_with_rates), and an epoch between two nodes takes the quintic
+// Hermite polynomial matching all six. Measured against the full series
+// over 1800-2100: 0.004 uas (docs/FRAMES.md). The value depends only on the
+// epoch, never on query history. Nodes are kept in a direct-mapped cache
+// (4096 nodes, ~200 KB, about 5.6 years), so a sweep of many bodies over
+// one time window sums the series once per half day in total. Not
+// thread-safe; one per thread (the Engine keeps its own).
+class NutationInterpolator {
+public:
+    NutationInterpolator();
+    ~NutationInterpolator();
+    NutationInterpolator(const NutationInterpolator&) = delete;
+    NutationInterpolator& operator=(const NutationInterpolator&) = delete;
+
+    void at(double jd_tt, double& dpsi, double& deps);
+
+    // Series sums so far (for tests and benchmarks).
+    unsigned long long evaluations() const { return evaluations_; }
+
+    static constexpr double kNodeSpacingDays = 0.5;
+
+private:
+    struct Node;
+    const Node& node(long long index);
+    Node* nodes_;
+    unsigned long long evaluations_ = 0;
+};
+
 // IAU 2006 precession angles zeta, z, theta (radians).
 void precession_angles(double jd_tt, double& zeta, double& z, double& theta);
 

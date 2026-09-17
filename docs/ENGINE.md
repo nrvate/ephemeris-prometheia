@@ -118,8 +118,9 @@ For a TT epoch *t*:
    rate, 2π · 1.00273781191135448 rad/day). Polar motion is neglected
    (≤ 0.3″ in the site, sub-mas at the Moon).
 2. **Light time:** the body's barycentric position at *t* − τ with
-   τ = |x_body(t − τ) − x_obs(t)| / c, iterated to |Δτ| < 10⁻¹⁵ day (the
-   iteration contracts by ~v/c per pass; 3–4 passes). The retarded epoch
+   τ = |x_body(t − τ) − x_obs(t)| / c, solved by Newton's method (the
+   derivative from the body's velocity) to |Δτ| < 10⁻¹⁵ day, usually in
+   2–3 ephemeris reads. The retarded epoch
    `jd − τ` is formed with its exact rounding error recovered (TwoSum) and
    applied through the body's velocity: a JD double near the present
    resolves only ~40 µs, which would otherwise put metre-class noise into
@@ -148,16 +149,27 @@ For a TT epoch *t*:
    therefore describe the *apparent* coordinates (aberration and nutation
    changes included) and are consistent with differencing positions.
 
-Cost (`-O2`, DE440): 6 µs per position, 19 µs with rates; a ten-body
-chart at one instant ~0.2 ms (nutation is evaluated once per epoch and
-cached, and topocentric Earth rotation reuses it). Nutation is anchored
-on a fixed 0.05-day grid: the 1365-term series and its analytic first and
-second derivatives are summed once per node, and every epoch takes a
-second-order Taylor step from its nearest node (≤ 0.025 d, error ~0.1 µas;
-0.68 µas at 0.05 d measured), so the value depends only on the epoch and
-the rate stencil (t ± 0.001 d) and nearby series epochs share one node. A
-topocentric position at a fresh epoch costs ~67 µs, ~70 µs with rates
-(was 54 and 156 µs with the series summed per epoch).
+Cost (`-O2`, DE440, measured 2026-09-17 on ten bodies × 10,000 hourly
+instants):
+- **Per position:** 1.9 µs without rates, 4.0 µs with rates when each
+  body is swept over the window in turn. Evaluating every body at one
+  instant before the next brings it to 2.95 µs, which is what prometheiad
+  does. It was 53 and 55 µs before the changes below.
+- **Nutation** is interpolated from nodes on a fixed half-day grid
+  (`frames::NutationInterpolator`). Each node holds the 1365-term series
+  and its analytic first and second derivatives, and an epoch takes the
+  quintic Hermite polynomial through the two surrounding nodes. The error
+  is 0.004 µas. The value depends only on the epoch. The engine keeps 4,096
+  nodes (about 5.6 years), so a many-body sweep sums the series once per
+  half day in total.
+  - The previous scheme, a Taylor step from a 0.05-day grid, was 0.68 µas.
+    It re-summed the series almost every hourly row, which was 92% of the
+    cost.
+- **Light time** is solved by Newton's method (step 2). The rate stencil
+  starts from the centre's τ.
+- **Per-instant memos:** the observer's state and the Sun's state are kept
+  for the last three instants, keyed exactly (topocentric entries also on
+  ΔT), so bodies at one instant and its stencil read them once.
 
 ## Small bodies: the catalog overlay
 

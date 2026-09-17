@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 
 namespace prometheia::frames {
 namespace {
@@ -592,6 +593,60 @@ void observer_geocentric(const GeoSite& site, double gast, double out[3]) {
     out[0] = (c * x_ecef - s * y_ecef) / 1000.0; // km
     out[1] = (s * x_ecef + c * y_ecef) / 1000.0;
     out[2] = z / 1000.0;
+}
+
+// ---------------------------------------------------------------------------
+// NutationInterpolator
+// ---------------------------------------------------------------------------
+
+namespace {
+constexpr size_t kNutationCacheSize = 4096; // a power of two
+} // namespace
+
+struct NutationInterpolator::Node {
+    long long index = std::numeric_limits<long long>::min();
+    double n[6] = {0, 0, 0, 0, 0, 0};
+};
+
+NutationInterpolator::NutationInterpolator() : nodes_(new Node[kNutationCacheSize]) {}
+
+NutationInterpolator::~NutationInterpolator() {
+    delete[] nodes_;
+}
+
+const NutationInterpolator::Node& NutationInterpolator::node(long long index) {
+    Node& slot = nodes_[size_t(index) & (kNutationCacheSize - 1)];
+    if (slot.index != index) {
+        slot.index = index;
+        nutation_with_rates(double(index) * kNodeSpacingDays, slot.n);
+        ++evaluations_;
+    }
+    return slot;
+}
+
+void NutationInterpolator::at(double jd_tt, double& dpsi, double& deps) {
+    // Node k sits at k * 0.5 day, exactly representable; u in [0, 1).
+    const double k = std::floor(jd_tt / kNodeSpacingDays);
+    const auto index = static_cast<long long>(k);
+    const double u = (jd_tt - k * kNodeSpacingDays) / kNodeSpacingDays;
+    // Both nodes are read before either reference could be invalidated by
+    // the other's lookup (they are different slots, or the same index).
+    double a[6], b[6];
+    std::copy(node(index).n, node(index).n + 6, a);
+    std::copy(node(index + 1).n, node(index + 1).n + 6, b);
+    const double h = kNodeSpacingDays;
+    const double u2 = u * u, u3 = u2 * u, u4 = u3 * u, u5 = u4 * u;
+    // Quintic Hermite basis on [0, 1]: value, first and second derivative
+    // at each end.
+    const double h00 = 1 - 10 * u3 + 15 * u4 - 6 * u5, h01 = 10 * u3 - 15 * u4 + 6 * u5;
+    const double h10 = u - 6 * u3 + 8 * u4 - 3 * u5, h11 = -4 * u3 + 7 * u4 - 3 * u5;
+    const double h20 = 0.5 * (u2 - 3 * u3 + 3 * u4 - u5), h21 = 0.5 * (u3 - 2 * u4 + u5);
+    const auto interp = [&](int c) {
+        return h00 * a[c] + h01 * b[c] + h * (h10 * a[c + 2] + h11 * b[c + 2]) +
+               h * h * (h20 * a[c + 4] + h21 * b[c + 4]);
+    };
+    dpsi = interp(0);
+    deps = interp(1);
 }
 
 } // namespace prometheia::frames
