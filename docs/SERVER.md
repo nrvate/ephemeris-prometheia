@@ -276,9 +276,58 @@ same host:
 - **Caching:** a new connection may land on another loop, which has its own
   cache.
 
+## Protocol version 4 (agreed with Astrolog, not yet implemented)
+
+Astrolog is replacing version 3 with **version 4** on its `ephv4` branch: the
+spec and conformance fixtures are `EPHEMERIS_PLUGINS_PLAN.md` and
+`ephsrv/conformance/` there. Version 4 names bodies by NAIF/SPK-ID, so the
+wire map goes away. Prometheia reviewed the draft and the two sides agreed
+these semantics (they are what prometheiad must implement):
+
+- **Requests** carry profiles, so one request can mix observers and options;
+  instants come as a grid or a list; LOOKUP, CANCEL and segments are new.
+- **Rates** are the time derivatives of the answered coordinates, per day of
+  the request's time scale. A server whose rates differ from the central
+  difference of its own positions flags them and advertises the size of the
+  difference. Ours are that central difference.
+- **ΔT** may come as a table of samples, interpolated piecewise-linearly, not
+  one value for a whole span.
+- **Sidereal** is ecliptic-only. The anchor epoch is TT and its ayanamsa is
+  the mean one. True of date takes the true ayanamsa, mean of date the mean,
+  J2000 and ICRF a constant zero point on the J2000 ecliptic — what the
+  engine already does.
+- **Orbit points** are geometric, on the ecliptic of the profile's frame,
+  heliocentric for planets and geocentric for the Moon. A mean model must
+  name itself in the object's source string.
+- **Fixed stars** have a normative name grammar (IAU name, Bayer with
+  component numbers, Flamsteed, HR/HD/HIP). An ambiguous name is a per-object
+  error rather than a silent choice, and an object without a parallax
+  reports distance 0 with a flag.
+- **Corrections** are honoured as sent for every observer, with the
+  per-observer masks a server advertises.
+- **Frames** are pinned: the ecliptic of date takes longitudes from the true
+  equinox on the mean ecliptic; J2000 includes frame bias; ICRF does not; both
+  use the IAU 2006 J2000 mean obliquity. Sites are WGS84 geodetic.
+- **Privacy:** neither ERROR text nor per-object error text may name an
+  instant or a place.
+
+**Our migration** (when Astrolog lands the pass and the fixtures are pinned):
+1. Take the renamed `ephproto.h` and the fixtures; the pinned-header check
+   diverges once, as expected.
+2. Implement the v4 codec and run the fixtures in `test_server`.
+3. Delete the wire map and the v3 session.
+4. Behaviour changes: ambiguous star names become a per-object error;
+   no-parallax distance becomes 0 with the flag; a sidereal request on the
+   equatorial plane is malformed; deflection is honoured for barycentric
+   observers; per-object error text is rewritten to name no instant.
+5. Advertise the star catalog as a pinnable catalog id, and derive datasetId
+   from the ephemeris, catalogs and star catalog.
+6. Segments (SEGDATA) are ours to implement first; the engine already
+   evaluates Chebyshev series.
+
 ## Not implemented
 
 - **zstd payloads.** Reserved in the envelope, advertised by no one.
 - **Extra columns** (sigma, ayanamsha). The plan is a negotiated extension,
   which has to go into Astrolog's specification first.
-- **The wire map for Astrolog** (above).
+- **The wire map for Astrolog** (above) — dropped entirely in version 4.
