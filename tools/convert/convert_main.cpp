@@ -124,10 +124,13 @@ ParseOutcome parse_row(const std::vector<std::string>& cols, const FieldMap& fm,
     bool have_sigma = false;
     static const char* kSigmaCols[6] = {"sigma_a",  "sigma_e", "sigma_i",
                                         "sigma_om", "sigma_w", "sigma_ma"};
+    // SBDB delivers angle sigmas in degrees; the record stores them in the
+    // elements' units (radians), per docs/FORMAT.md.
+    static constexpr double kSigmaScale[6] = {1.0, 1.0, kDegToRad, kDegToRad, kDegToRad, kDegToRad};
     for (int k = 0; k < 6; ++k) {
         const std::string& s = col(kSigmaCols[k]);
         if (!s.empty()) {
-            r.sigmas[k] = parse_double_or(s, -1.0);
+            r.sigmas[k] = parse_double_or(s, -1.0) * kSigmaScale[k];
             if (r.sigmas[k] < 0)
                 r.sigmas[k] = 0.0; // treat missing as zero, not negative
             have_sigma = true;

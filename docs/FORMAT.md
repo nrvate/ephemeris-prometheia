@@ -110,7 +110,7 @@ order:
 | 3 | u8 | flags (below) |
 | 4 | f64 | epoch, JD TDB, equinox J2000 |
 | 5 | f64 ×6 | elements: a [AU, negative for hyperbolic], e, i [rad], Ω [rad], ω [rad], M₀ [rad] |
-| 6 | f32 ×6 | 1-sigma of the six elements, same order — only if flag `kSigmas` |
+| 6 | f32 ×6 | 1-sigma of the six elements, same order and units (angles in radians) — only if flag `kSigmas`; uncorrelated summaries, not a covariance |
 | 7 | f32 ×2 | H magnitude, G slope — only if flag `kHg` |
 | 8 | f32 | diameter [km] — only if flag `kDiameter` |
 | 9 | f64 + f64 ×6 + f64 ×21 | covariance block — only if flag `kCovariance` (1.1): covariance epoch (JD TDB); the nominal cometary elements at that epoch {e, q [AU], tp [JD TDB], Ω [rad], ω [rad], i [rad]}; the 6×6 covariance of those elements, packed upper triangle row-major ((0,0), (0,1), …, (5,5)), units squared |

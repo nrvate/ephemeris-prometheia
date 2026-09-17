@@ -83,7 +83,7 @@ Connection: close
 | `epoch` | epoch of the element set | JD, TDB |
 | `e` `a` | eccentricity; semimajor axis (negative when hyperbolic) | — ; AU |
 | `i` `om` `w` `ma` | inclination; ascending node; arg. of perihelion; mean anomaly | degrees |
-| `sigma_e` `sigma_a` `sigma_i` `sigma_om` `sigma_w` `sigma_ma` | 1-sigma of the elements | mixed |
+| `sigma_e` `sigma_a` `sigma_i` `sigma_om` `sigma_w` `sigma_ma` | 1-sigma of the elements | as the elements (angles in degrees; the converter stores radians) |
 | `H` `G` | absolute magnitude; slope parameter | mag ; — |
 | `diameter` | effective diameter, null for most | km |
 
