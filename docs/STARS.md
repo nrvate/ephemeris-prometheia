@@ -30,6 +30,7 @@ non-commercial terms.
 | IAU Catalog of Star Names, IAU Division C WGSN (exopla.net) | the IAU names, with HR/HIP and Bayer designations and each name's origin | IAU: CC BY 4.0 |
 | R. H. Allen, *Star-Names and Their Meanings* (1899), Internet Archive OCR text | the check for the curated traditional names: every alias must appear in the book | public domain |
 | SIMBAD, one query | the Messier objects: ICRS position, object type, angular size | CDS: free use, acknowledge |
+| SIMBAD, one query | radial velocities of Hipparcos stars (quality A–C, 91,438) | CDS: free use, acknowledge |
 | SIMBAD, one query | traditional "NAME" identifiers of HR stars: the cross-check of which star each curated name belongs to | CDS: free use, acknowledge |
 | NASA HEASARC Messier Nebulae table (from *Sky Catalogue 2000.0* vol. 2) | the Messier objects' constellations; a second set of positions to cross-check SIMBAD | US Government service |
 | Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42 | the constellation boundaries (Delporte 1930), equinox B1875.0 | CDS: free use, acknowledge |
@@ -45,8 +46,8 @@ Acknowledgements the terms ask for:
 The fetched files are not committed. `stars-raw/` is gitignored.
 
 ```sh
-tools/fetch/stars_fetch.py --list                       # the 12 sources
-tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~11 MB, 12 requests, 5 s apart
+tools/fetch/stars_fetch.py --list                       # the 13 sources
+tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~13 MB, 13 requests, 5 s apart
 tools/fetch/stars_fetch.py --raw-dir stars-raw --verify # against the pinned checksums
 ```
 
@@ -84,7 +85,9 @@ Per object:
 - V magnitude;
 - ICRS right ascension and declination at the catalog epoch (J1991.25 for
   Hipparcos, J2000 otherwise);
-- proper motions (RA · cos Dec, and Dec), parallax and radial velocity;
+- proper motions (RA · cos Dec, and Dec) and parallax;
+- radial velocity: SIMBAD's (quality A–C, mostly modern surveys) where it
+  has one, 7,712 stars; else the Bright Star Catalogue's;
 - angular size;
 - spectral type;
 - names (IAU first).
@@ -113,6 +116,7 @@ Per object:
 | IAU printed coordinates vs the star | median 0.01″; 15 errata below |
 | curated names vs SIMBAD's NAME identifiers | 91 confirmed on the same star; a name SIMBAD gives to a different star is refused (this removed Scheat from δ Aqr, Deneb from ζ Aql and Algenib from α Per) |
 | one object per name | enforced |
+| Bright Star Catalogue radial velocities vs SIMBAD | median 1.3 km/s over 7,477 stars; 453 differ by over 10 km/s (spectroscopic binaries and variables, where SIMBAD's modern values are used) |
 | SIMBAD vs HEASARC Messier positions | median 0.58′, within half the object's size; 1 erratum below |
 
 **Upstream errata found by the cross-checks.** The identification is right
@@ -224,19 +228,19 @@ mean or true of date.
 
 | quantity | max difference | gate |
 |---|---:|---:|
-| apparent RA/Dec, true equator and equinox of date | 0.15 mas | 1 mas |
-| apparent ecliptic longitude/latitude of date | 0.15 mas | 1 mas |
-| astrometric RA/Dec, ICRS | 0.14 mas | 1 mas |
+| apparent RA/Dec, true equator and equinox of date | 0.34 mas | 1 mas |
+| apparent ecliptic longitude/latitude of date | 0.34 mas | 1 mas |
+| astrometric RA/Dec, ICRS | 0.33 mas | 1 mas |
 
-The largest difference is Barnard's Star, the fastest-moving star, where
-ERFA's space motion includes the light-time term the straight-line model
-leaves out.
+The largest difference is Barnard's Star in 1900. It is the fastest-moving
+star, with a radial velocity of −110 km/s, and ERFA's space motion includes
+the light-time term that the straight-line model leaves out. Every other
+object agrees to about 0.15 mas.
 
 ## Known limits
 
-- Radial velocities come from the Bright Star Catalogue. The 84 IAU-named
-  stars beyond it (Barnard's Star, Proxima Centauri) have none, which
-  matters only for the few fast, near stars over centuries.
+- Stars without a radial velocity in either source move in proper motion
+  only. This matters only for fast, near stars over centuries.
 - Deep-sky positions are their SIMBAD centres. Extended objects have no
   single position; M 40 and M 73 are loose groups.
 

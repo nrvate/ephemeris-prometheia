@@ -267,7 +267,7 @@ It is available for the Moon and the major planets (NotFound otherwise).
 fixed-star and Messier catalog (`prometheia/stars.hpp`: lookup by any name
 or designation). Space motion, parallax, the Sun's deflection and aberration
 lead into the same output frames and zodiacs as bodies. The details and the
-validation against ERFA (0.15 mas) are in [STARS.md](STARS.md).
+validation against ERFA (0.34 mas) are in [STARS.md](STARS.md).
 
 ## Small bodies: the catalog overlay
 

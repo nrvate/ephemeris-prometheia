@@ -97,7 +97,7 @@ Milestones 0–4 of 6 complete (2026-09-16):
   with Hipparcos astrometry, 84 more IAU-named stars) and the 110 Messier
   objects, found by IAU or traditional name, Bayer, Flamsteed, HR, HD, HIP or
   Messier designation. Apparent places with space motion, deflection and
-  aberration, validated against ERFA to 0.15 mas.
+  aberration, validated against ERFA to 0.34 mas.
   Constellation of any position. [docs/STARS.md](docs/STARS.md).
 - **Nodes and apsides** — osculating and mean ascending/descending nodes,
   perihelia and aphelia (perigee/apogee for the Moon) as points seen from any

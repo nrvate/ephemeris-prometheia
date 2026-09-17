@@ -29,11 +29,12 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
 USER_AGENT = ("prometheia-fetch/0.1.0 "
-              "(Ephemeris Prometheia fixed-star catalog; sequential, 12 requests)")
+              "(Ephemeris Prometheia fixed-star catalog; sequential, 13 requests)")
 PAUSE_S = 5.0
 
 CDS = "https://cdsarc.cds.unistra.fr/ftp/"
@@ -41,8 +42,9 @@ SIMBAD_TAP = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
 
 
 def tap(query):
+    # MAXREC above SIMBAD's default of 50,000 rows, which truncates silently.
     return SIMBAD_TAP + "?" + urllib.parse.urlencode(
-        {"request": "doQuery", "lang": "adql", "format": "csv", "query": query})
+        {"request": "doQuery", "lang": "adql", "format": "csv", "maxrec": "500000", "query": query})
 
 
 # name -> (file, url, pinned sha256 or None, terms)
@@ -80,6 +82,11 @@ SOURCES = [
      "Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42; "
      "CDS: free use with acknowledgement"),
     ("roman-1987", "VI_42_data.dat", CDS + "VI/42/data.dat", "daf9e2b39ec57446d862a445276ae2ea50490ee455540972906098f5f9187957", "as roman-1987-readme"),
+    ("simbad-rv", "simbad-rv.csv",
+     tap("SELECT i.id AS hip, b.rvz_radvel, b.rvz_err, b.rvz_qual FROM ident AS i "
+         "JOIN basic AS b ON i.oidref = b.oid WHERE i.id LIKE 'HIP %' "
+         "AND b.rvz_type = 'v' AND b.rvz_radvel IS NOT NULL AND b.rvz_qual IN ('A', 'B', 'C')"),
+     "bc7cff05d5dbac59f53aae8fa5b8ecf4c6686ce26981f8fc57d4c5363a2887a8", "as simbad-hr-hip; radial velocities (quality A-C) of Hipparcos stars"),
     ("simbad-messier", "simbad-messier.csv",
      tap("SELECT i.id AS messier, b.main_id, b.ra, b.dec, b.otype, b.galdim_majaxis, "
          "b.galdim_minaxis FROM ident AS i JOIN basic AS b ON i.oidref = b.oid "
@@ -103,6 +110,13 @@ def fetch(url):
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(req, timeout=300) as resp:
                 return resp.read()
+        except urllib.error.HTTPError as exc:
+            # A client error (a rejected query) will not succeed on retry.
+            if exc.code < 500 or attempt == 3:
+                raise
+            print(f"  retry after {delay:.0f} s: {exc}", file=sys.stderr)
+            time.sleep(delay)
+            delay *= 2
         except Exception as exc:  # noqa: BLE001 - retry any transport error
             if attempt == 3:
                 raise

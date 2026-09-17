@@ -12,7 +12,8 @@ checksums first) and data/star_names.txt (the curated traditional names).
     parallax, proper motions.
   - A star without a Hipparcos match keeps the Bright Star Catalogue's
     J2000 position, proper motion and parallax (flagged).
-  - Radial velocities come from the Bright Star Catalogue.
+  - Radial velocities come from SIMBAD (quality A-C) where it has one, else
+    from the Bright Star Catalogue; the two are compared.
 - IAU names: each name of the IAU Catalog of Star Names attaches to its star
   by HIP number, or by HR number for the few without one. A named star
   outside the Bright Star Catalogue but in Hipparcos is added.
@@ -207,6 +208,18 @@ def at_j2000(star):
 
 def name_key(name):
     return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def parse_simbad_rv(raw_dir):
+    out = {}
+    with open(os.path.join(raw_dir, "simbad-rv.csv"), newline="") as f:
+        for row in csv.DictReader(f):
+            h = row["hip"].split()[1]
+            if h.isdigit() and row["rvz_radvel"]:
+                out[int(h)] = float(row["rvz_radvel"])
+    if len(out) < 80000:
+        fail(f"SIMBAD radial velocities: only {len(out)} rows (a truncated query?)")
+    return out
 
 
 def parse_simbad_names(raw_dir):
@@ -445,6 +458,19 @@ def main():
                                    row["name"])
         attached += 1
 
+    # Radial velocities: SIMBAD's (quality A-C, mostly modern surveys) where it
+    # has one, else the Bright Star Catalogue's. Cross-check the two.
+    simbad_rv = parse_simbad_rv(args.raw_dir)
+    rv_diffs = []
+    rv_from_simbad = 0
+    for obj in list(stars.values()) + extras:
+        if obj["hip"] and obj["hip"] in simbad_rv:
+            v = simbad_rv[obj["hip"]]
+            if obj["hr"] and obj["rv"]:
+                rv_diffs.append(abs(v - obj["rv"]))
+            obj["rv"] = v
+            rv_from_simbad += 1
+
     # Messier objects.
     deep = []
     for n in range(1, 111):
@@ -554,7 +580,8 @@ def main():
         "// Sources (tools/fetch/stars_fetch.py, checksums pinned there):",
         "//   Yale Bright Star Catalogue, 5th rev. ed. (Hoffleit & Warren 1991), CDS V/50",
         "//   Hipparcos, the New Reduction (van Leeuwen 2007), CDS I/311",
-        "//   SIMBAD (Wenger et al. 2000), CDS: HR-HIP identifications, Messier objects",
+        "//   SIMBAD (Wenger et al. 2000), CDS: HR-HIP identifications, names (a check),",
+        "//   radial velocities, Messier objects; NASA HEASARC Messier table",
         "//   IAU Catalog of Star Names, IAU WGSN (CC BY 4.0)",
         "//   data/star_names.txt, checked against Allen, Star-Names and Their Meanings (1899)",
         "// This research has made use of the SIMBAD database and the VizieR catalogue",
@@ -615,7 +642,9 @@ def main():
           f"99% {pct(bsc_vs_hip, 0.99):.1f}\" max {max(bsc_vs_hip):.1f}\" ({len(bsc_vs_hip)} stars); "
           f"IAU positions median {pct(iau_sep, 0.5):.2f}\" max {max(iau_sep):.1f}\", "
           f"{iau_bayer_checked} Bayer letters agree; curated names confirmed by SIMBAD "
-          f"{simbad_confirmed}; {positional} Hipparcos matches by position; Messier SIMBAD vs HEASARC median {pct(messier_sep, 0.5):.2f}' "
+          f"{simbad_confirmed}; {positional} Hipparcos matches by position; radial velocities from "
+          f"SIMBAD {rv_from_simbad}, BSC vs SIMBAD median {pct(rv_diffs, 0.5):.1f} km/s, "
+          f"{sum(1 for d in rv_diffs if d > 10)} of {len(rv_diffs)} over 10 km/s; Messier SIMBAD vs HEASARC median {pct(messier_sep, 0.5):.2f}' "
           f"max {max(messier_sep):.1f}'", file=sys.stderr)
     print(f"{len(stars)} BSC stars, {len(extras)} extra IAU stars, {len(deep)} Messier; "
           f"{attached} IAU names attached, {unplaced} without a Hipparcos star; "
