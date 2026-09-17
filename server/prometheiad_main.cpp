@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// prometheiad: the engine over Astrolog's ephemeris protocol (version 3) on
+// prometheiad: the engine over Astrolog's ephemeris protocol (version 4) on
 // WebSocket. docs/SERVER.md.
 #include <csignal>
 #include <cstdio>
@@ -12,6 +12,7 @@
 
 #include <pthread.h>
 
+#include "dataset.hpp"
 #include "tls.hpp"
 #include "ws_server.hpp"
 
@@ -25,8 +26,6 @@ constexpr const char* kUsage =
     "  --ephemeris FILE      JPL DE binary or SPK kernel (required)\n"
     "  --catalog FILE        EPM1 small-body catalog (repeatable, newest wins)\n"
     "  --perturbers FILE     asteroid perturber SPK kernel (e.g. sb441-n16.bsp)\n"
-    "  --wire-map FILE       wire map from Astrolog's protocol specification;\n"
-    "                        without one every object fails (docs/SERVER.md)\n"
     "  --bind ADDR           listen address (default: every interface)\n"
     "  --port N              default 47190; 0 picks a free port\n"
     "  --threads N           event loops, one engine each (default: hardware threads)\n"
@@ -58,7 +57,7 @@ bool parse_uint(const char* s, unsigned long& out) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string ephemeris, perturbers, wire_map_path, tokens_path;
+    std::string ephemeris, perturbers, tokens_path;
     std::vector<std::string> catalogs;
     WsOptions options;
     options.threads = std::max(1u, std::thread::hardware_concurrency());
@@ -86,8 +85,6 @@ int main(int argc, char** argv) {
             catalogs.emplace_back(value());
         } else if (arg == "--perturbers") {
             perturbers = value();
-        } else if (arg == "--wire-map") {
-            wire_map_path = value();
         } else if (arg == "--bind") {
             options.bind = value();
         } else if (arg == "--port") {
@@ -139,17 +136,6 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    WireMap map;
-    if (wire_map_path.empty()) {
-        std::fprintf(stderr, "prometheiad: no --wire-map: every object will fail\n");
-    } else {
-        auto m = WireMap::load(wire_map_path);
-        if (!m) {
-            std::fprintf(stderr, "prometheiad: %s\n", m.error().message.c_str());
-            return 1;
-        }
-        map = std::move(m).value();
-    }
     if (!tokens_path.empty()) {
         auto t = Limits::load_tokens(tokens_path);
         if (!t) {
@@ -191,7 +177,27 @@ int main(int argc, char** argv) {
     pthread_sigmask(SIG_BLOCK, &signals, nullptr);
     std::signal(SIGPIPE, SIG_IGN);
 
-    WsServer server(options, std::move(map), make_engine);
+    // The dataset identity: the engine string names what is read, and the
+    // digest over the files' contents changes whenever an answer could
+    // (docs/SERVER.md, "datasetId"). A probe engine reads the same files the
+    // loops will, so the description matches what is served.
+    {
+        auto probe = make_engine();
+        if (!probe) {
+            std::fprintf(stderr, "prometheiad: %s\n", probe.error().message.c_str());
+            return 1;
+        }
+        const Dataset dataset =
+            make_dataset("Prometheia 0.1.0, " + std::string(probe.value().source()), ephemeris,
+                         catalogs, perturbers);
+        options.config.engine = dataset.engine;
+        options.config.dataset_id = dataset.id;
+        options.config.ephemeris_name = dataset.ephemeris;
+        options.config.catalog_names = dataset.catalogs;
+        std::fprintf(stderr, "prometheiad: dataset %s\n", dataset.id.c_str());
+    }
+
+    WsServer server(options, make_engine);
     if (auto r = server.start(); !r) {
         std::fprintf(stderr, "prometheiad: %s\n", r.error().message.c_str());
         return 1;

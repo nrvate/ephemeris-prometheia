@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // prometheia-wire-client: the reference client for prometheiad (or any
-// server speaking Astrolog's ephemeris protocol, version 3). Sends HELLO and
+// server speaking Astrolog's ephemeris protocol, version 4). Sends HELLO and
 // one REQUEST, collects the DATA chunks and prints one line per object per
 // row. docs/SERVER.md.
 #include <cmath>
@@ -23,28 +23,41 @@ constexpr const char* kUsage =
     "usage: prometheia-wire-client [options]\n"
     "  --host H            default 127.0.0.1\n"
     "  --port N            default 47190\n"
-    "  --obj ID            a body by wire id (repeatable)\n"
+    "  --obj NAIF          a body by NAIF/SPK-ID (repeatable)\n"
+    "  --name NAME         a catalog body by designation or name (repeatable)\n"
     "  --star NAME         a fixed star by name (repeatable)\n"
-    "  --jd JD             first row, UT unless --tt (default 2451545.0)\n"
-    "  --tt                rows are TT\n"
+    "  --node NAIF.M       an orbit point, M = a|d|p|A (asc, desc, peri, apo)\n"
+    "  --jd JD             first row, TT (default 2451545.0)\n"
+    "  --ut                rows are UT1 (server's delta T)\n"
     "  --step SECONDS      between rows (default 86400)\n"
     "  --count N           rows (default 1)\n"
-    "  --iflag HEX         the low 32 bits of iflag (wire-map numbering)\n"
-    "  --sid MODE,T0,AYAN  sidereal mode and user anchor\n"
+    "  --helio | --bary    the observer (default geocentric)\n"
+    "  --eq                equatorial plane (default ecliptic)\n"
+    "  --j2000 | --icrs    the frame (default true of date)\n"
+    "  --no-corrections    geometric positions\n"
+    "  --sid TOKEN         a zodiac (fagan-bradley, lahiri, user)\n"
+    "  --sidu T0,AYAN      a user zodiac's anchor (mean ayanamsa at TT epoch)\n"
     "  --topo LON,LAT,ELV  observer site (degrees east, degrees, metres)\n"
     "  --f32               ask for float32 values\n"
-    "  --chunk N           chunk-size hint (default 500)\n"
-    "  --proto N           HELLO's protocol version (default 3)\n"
+    "  --chunk N           chunk-size hint (default: the server's maximum)\n"
     "  --token T           HELLO's access token\n"
     "  --tls               wss:// (verifies the certificate and name)\n"
     "  --ca FILE           trust anchors for --tls (default: the system store)\n"
     "  --sni NAME          name to verify (default: --host)\n"
     "  --insecure          --tls without verification\n"
-    "Prints: <object> <row> <retFlag> <six values, %.17g> and, per object, its\n"
-    "name and error text on a '#' line. Exit 2 on a server ERROR.\n";
+    "Prints: <object> <row> <six values, %.17g> and, per object, its name,\n"
+    "corrections applied and error text on a '#' line. Exit 2 on a server ERROR.\n";
 
 bool three(const char* s, double& a, double& b, double& c) {
     return std::sscanf(s, "%lf,%lf,%lf", &a, &b, &c) == 3;
+}
+
+std::vector<uint8_t> message(uint16_t type, uint32_t request_id, const uint8_t* payload,
+                             size_t len) {
+    std::vector<uint8_t> out;
+    eph::WriteEnvelope(&out, type, request_id, len);
+    out.insert(out.end(), payload, payload + len);
+    return out;
 }
 
 } // namespace
@@ -52,14 +65,11 @@ bool three(const char* s, double& a, double& b, double& c) {
 int main(int argc, char** argv) {
     std::string host = "127.0.0.1";
     int port = eph::kDefaultPort;
-    unsigned proto = eph::kProtoVersion;
     std::string token;
     WsTlsOptions tls;
-    eph::Request req;
-    req.jdStart = 2451545.0;
-    req.stepSeconds = 86400;
-    req.nTime = 1;
-    req.chunkRows = eph::kMaxChunkRows;
+    eph::Request req; // defaults: TT grid, one profile, f64
+    eph::Profile& pf = req.profiles.emplace_back();
+    double step_seconds = 86400.0;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const auto value = [&]() -> const char* {
@@ -74,36 +84,67 @@ int main(int argc, char** argv) {
         } else if (arg == "--port") {
             port = std::atoi(value());
         } else if (arg == "--obj") {
-            eph::ObjSpec o;
-            o.id = uint32_t(std::strtoul(value(), nullptr, 10));
+            eph::Object o;
+            o.kind = eph::kObjBody;
+            o.naif = std::atoi(value());
+            req.objs.push_back(o);
+        } else if (arg == "--name") {
+            eph::Object o;
+            o.kind = eph::kObjDesignation;
+            o.name = value();
             req.objs.push_back(o);
         } else if (arg == "--star") {
-            eph::ObjSpec o;
+            eph::Object o;
             o.kind = eph::kObjStar;
-            std::snprintf(o.name, sizeof o.name, "%s", value());
+            o.name = value();
+            req.objs.push_back(o);
+        } else if (arg == "--node") {
+            std::string spec = value();
+            const size_t dot = spec.find('.');
+            int method = 0;
+            if (dot != std::string::npos) {
+                method = spec[dot + 1] == 'o' ? 1 : 0; // .m mean, .o osculating
+                spec = spec.substr(0, dot);
+            }
+            eph::Object o;
+            o.kind = eph::kObjOrbitPoint;
+            o.naif = std::atoi(spec.c_str());
+            o.method = uint8_t(method);
             req.objs.push_back(o);
         } else if (arg == "--jd") {
-            req.jdStart = std::strtod(value(), nullptr);
-        } else if (arg == "--tt") {
-            req.iflag |= eph::kIflagTimeTT;
+            req.start.jd1 = std::strtod(value(), nullptr);
+        } else if (arg == "--ut") {
+            req.timeScale = eph::kTimeUT1;
         } else if (arg == "--step") {
-            req.stepSeconds = uint32_t(std::strtoul(value(), nullptr, 10));
+            step_seconds = std::strtod(value(), nullptr);
         } else if (arg == "--count") {
             req.nTime = uint32_t(std::strtoul(value(), nullptr, 10));
-        } else if (arg == "--iflag") {
-            req.iflag |= std::strtoull(value(), nullptr, 16) & 0xFFFFFFFFull;
+        } else if (arg == "--helio") {
+            pf.observer = eph::kObsHelio;
+        } else if (arg == "--bary") {
+            pf.observer = eph::kObsBary;
+        } else if (arg == "--eq") {
+            pf.plane = eph::kPlaneEquator;
+        } else if (arg == "--j2000") {
+            pf.frame = eph::kFrameJ2000;
+        } else if (arg == "--icrs") {
+            pf.frame = eph::kFrameIcrf;
+        } else if (arg == "--no-corrections") {
+            pf.corrections = 0;
         } else if (arg == "--sid") {
-            double mode = 0.0;
-            if (!three(value(), mode, req.sidT0, req.sidAyanOff)) {
+            pf.zodiac = value();
+        } else if (arg == "--sidu") {
+            if (std::sscanf(value(), "%lf,%lf", &pf.anchorEpoch.jd1, &pf.anchorAyanamsaDeg) != 2) {
                 std::fputs(kUsage, stderr);
                 return 2;
             }
-            req.sidMode = int32_t(mode);
+            pf.zodiac = "user";
         } else if (arg == "--topo") {
-            if (!three(value(), req.topoLon, req.topoLat, req.topoElv)) {
+            if (!three(value(), pf.siteLonEastDeg, pf.siteLatDeg, pf.siteHeightM)) {
                 std::fputs(kUsage, stderr);
                 return 2;
             }
+            pf.observer = eph::kObsTopo;
         } else if (arg == "--f32") {
             req.precision = eph::kPrecF32;
         } else if (arg == "--chunk") {
@@ -119,8 +160,6 @@ int main(int argc, char** argv) {
         } else if (arg == "--insecure") {
             tls.enabled = true;
             tls.verify = false;
-        } else if (arg == "--proto") {
-            proto = unsigned(std::strtoul(value(), nullptr, 10));
         } else {
             std::fprintf(stderr, "bad option %s\n%s", arg.c_str(), kUsage);
             return 2;
@@ -130,6 +169,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "no objects\n%s", kUsage);
         return 2;
     }
+    if (req.nTime > 1 && step_seconds == 0.0) {
+        std::fprintf(stderr, "--step 0 with several rows\n%s", kUsage);
+        return 2;
+    }
+    // 3.5: stepNs is 0 with one row, nonzero otherwise.
+    req.stepNs = req.nTime > 1 ? int64_t(step_seconds * 1e9) : 0;
 
     WsClient ws;
     if (auto r = ws.connect(host, port, "/", tls); !r) {
@@ -141,93 +186,105 @@ int main(int argc, char** argv) {
         return 1;
     };
 
-    uint8_t hello[eph::kHelloMaxSize];
-    uint32_t len = 0;
-    eph::buildHello(hello, eph::kCapFloat32, 1, "prometheia-wire-client/0.1.0", &len, token.c_str(),
-                    uint8_t(proto));
-    if (auto r = ws.send(eph::makeMessage(eph::kMsgHello, 1, hello, len, 0, uint8_t(proto))); !r) {
+    eph::Hello hello;
+    hello.protoMax = eph::kProtoVersion;
+    hello.protoMin = eph::kProtoMin;
+    hello.clientName = "prometheia-wire-client/0.2.0";
+    hello.token = token;
+    std::vector<uint8_t> hello_payload;
+    eph::EncodeHello(&hello_payload, hello);
+    if (auto r = ws.send(message(eph::kMsgHello, 0, hello_payload.data(), hello_payload.size()));
+        !r) {
         return fail(r.error());
     }
     std::vector<uint8_t> payload;
-    eph::buildRequest(&payload, req);
+    eph::EncodeRequest(&payload, req);
     const uint32_t request_id = 2;
-    if (auto r = ws.send(eph::makeMessage(eph::kMsgRequest, request_id, payload.data(),
-                                          payload.size(), 0, uint8_t(proto)));
+    if (auto r = ws.send(message(eph::kMsgRequest, request_id, payload.data(), payload.size()));
         !r) {
         return fail(r.error());
     }
 
     const auto n_obj = uint32_t(req.objs.size());
-    std::vector<double> cols(size_t(n_obj) * req.nTime * 6, NAN);
-    std::vector<int32_t> ret(n_obj, -1);
+    std::vector<double> cols;
+    std::vector<eph::Meta> meta;
     uint32_t rows_seen = 0, chunk_expected = 0;
-    while (rows_seen < req.nTime) {
+    int n_cols = 6;
+    for (;;) {
         auto msg = ws.receive();
         if (!msg) {
             return fail(msg.error());
         }
         const std::vector<uint8_t>& m = msg.value();
         eph::Envelope env{};
-        if (m.size() < eph::kEnvelopeSize || !eph::parseEnvelope(m.data(), &env) ||
-            env.payloadLen != m.size() - eph::kEnvelopeSize) {
-            std::fprintf(stderr, "malformed message from the server\n");
+        std::string why;
+        if (m.size() < eph::kEnvelopeSize ||
+            eph::ParseEnvelope(m.data(), m.size(), &env, &why) != eph::kOk) {
+            std::fprintf(stderr, "malformed message from the server (%s)\n", why.c_str());
             return 1;
         }
         const uint8_t* p = m.data() + eph::kEnvelopeSize;
         if (env.type == eph::kMsgWelcome) {
             eph::Welcome w;
-            if (eph::parseWelcome(p, env.payloadLen, &w)) {
-                std::printf("# WELCOME %s protocol %u maxCells %u\n", w.serverVersion.c_str(),
-                            w.protoVersion, w.maxCells);
+            if (eph::ParseWelcome(p, env.payloadLen, &w, &why) == eph::kOk) {
+                std::printf("# WELCOME %s protocol %u engine \"%s\" dataset %s maxCells %u\n",
+                            w.serverName.c_str(), w.protoSession, w.engine.c_str(),
+                            w.datasetId.c_str(), w.maxCells);
             }
             continue;
         }
         if (env.type == eph::kMsgError) {
-            eph::ErrorMsg e;
-            if (eph::parseError(p, env.payloadLen, &e)) {
-                std::fprintf(stderr, "ERROR %d: %s\n", e.code, e.text.c_str());
+            eph::Error e;
+            if (eph::ParseError(p, env.payloadLen, &e, &why) == eph::kOk) {
+                std::fprintf(stderr, "ERROR %u: %s\n", e.code, e.text.c_str());
             }
             return 2;
         }
         if (env.type != eph::kMsgData || env.requestId != request_id) {
             continue;
         }
-        eph::Reader rd(p, env.payloadLen);
-        const uint32_t chunk = rd.u32(), i_time = rd.u32(), rows = rd.u32();
-        const uint8_t precision = rd.u8();
-        if (chunk != chunk_expected++ || i_time != rows_seen || rd.u32() != n_obj ||
-            i_time + rows > req.nTime) {
+        eph::DataChunk d;
+        if (eph::ParseData(p, env.payloadLen, &d, &why) != eph::kOk) {
+            std::fprintf(stderr, "bad DATA chunk: %s\n", why.c_str());
+            return 1;
+        }
+        if (d.chunkIndex != chunk_expected || d.iTime != rows_seen ||
+            d.iTime + d.nRows > req.nTime) {
             std::fprintf(stderr, "out-of-order or mismatched DATA chunk\n");
             return 1;
         }
-        for (uint32_t o = 0; o < n_obj; ++o) {
-            char serr[eph::kSerrMax + 1] = {0}, name[eph::kMetaNameMax + 1] = {0};
-            ret[o] = rd.i32();
-            rd.i32();
-            rd.raw(serr, eph::kSerrMax);
-            rd.raw(name, eph::kMetaNameMax);
-            if (chunk == 0) {
-                std::printf("# object %u name \"%s\" retFlag %d serr \"%s\"\n", o, name, ret[o],
-                            serr);
-            }
+        n_cols = d.Cols();
+        if (cols.empty()) {
+            cols.assign(size_t(n_obj) * req.nTime * n_cols, NAN);
+        }
+        for (const eph::Meta& mm : d.meta) {
+            std::printf("# object %ld name \"%s\" rowsOk %d corr %u err %u \"%s\"\n",
+                        long(&mm - d.meta.data()), mm.name.c_str(), mm.rowsOk, mm.corrApplied,
+                        mm.errCode, mm.errText.c_str());
         }
         for (uint32_t o = 0; o < n_obj; ++o) {
-            for (uint32_t k = 0; k < rows * 6; ++k) {
-                cols[(size_t(o) * req.nTime + i_time) * 6 + k] =
-                    precision == eph::kPrecF32 ? double(rd.f32()) : rd.f64();
+            for (uint32_t r = 0; r < d.nRows; ++r) {
+                for (int k = 0; k < n_cols; ++k) {
+                    const size_t at = (size_t(o) * d.totalRows + d.iTime + r) * n_cols + k;
+                    cols[at] = d.values[(size_t(o) * d.nRows + r) * n_cols + k];
+                }
             }
         }
-        if (!rd.ok() || rd.left() != 0) {
-            std::fprintf(stderr, "DATA chunk size mismatch\n");
-            return 1;
+        rows_seen += d.nRows;
+        ++chunk_expected;
+        if (d.flags & eph::kChunkLast) {
+            break;
         }
-        rows_seen += rows;
     }
     for (uint32_t o = 0; o < n_obj; ++o) {
         for (uint32_t r = 0; r < req.nTime; ++r) {
-            const double* v = &cols[(size_t(o) * req.nTime + r) * 6];
-            std::printf("%u %u %d %.17g %.17g %.17g %.17g %.17g %.17g\n", o, r, ret[o], v[0], v[1],
-                        v[2], v[3], v[4], v[5]);
+            const double* v = &cols[(size_t(o) * req.nTime + r) * n_cols];
+            std::printf("%u %u %.17g %.17g %.17g %.17g %.17g %.17g", o, r, v[0], v[1], v[2], v[3],
+                        v[4], v[5]);
+            for (int k = 6; k < n_cols; ++k) {
+                std::printf(" %.17g", v[k]);
+            }
+            std::printf("\n");
         }
     }
     return 0;

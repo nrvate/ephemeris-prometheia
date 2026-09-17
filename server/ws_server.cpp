@@ -103,7 +103,6 @@ bool port_in_use(const std::string& bind, int port) {
 
 struct WsServer::Impl {
     WsOptions options;
-    WireMap map;
     EngineFactory make_engine;
     std::unique_ptr<Limits> limits;
     bool tls = false;
@@ -190,7 +189,7 @@ struct WsServer::Impl {
 
         typename App<SSL>::template WebSocketBehavior<Conn> behavior;
         behavior.compression = uWS::DISABLED;
-        behavior.maxPayloadLength = eph::kMaxPayload + 65536;
+        behavior.maxPayloadLength = ctx.config().max_payload + 65536;
         behavior.idleTimeout = kIdleTimeoutSeconds;
         behavior.maxBackpressure = 0;
         behavior.sendPingsAutomatically = true;
@@ -326,7 +325,7 @@ struct WsServer::Impl {
             report(ls, nullptr, -1, "engine: " + engine.error().message);
             return;
         }
-        LoopContext ctx(std::move(engine).value(), map, options.config, limits.get(), &ls.metrics);
+        LoopContext ctx(std::move(engine).value(), options.config, limits.get(), &ls.metrics);
         std::unique_ptr<App<SSL>> app;
         if (SSL) {
             uWS::SocketContextOptions o;
@@ -458,10 +457,8 @@ struct WsServer::Impl {
     }
 };
 
-WsServer::WsServer(WsOptions options, WireMap map, EngineFactory make_engine)
-    : impl_(std::make_unique<Impl>()) {
+WsServer::WsServer(WsOptions options, EngineFactory make_engine) : impl_(std::make_unique<Impl>()) {
     impl_->options = std::move(options);
-    impl_->map = std::move(map);
     impl_->make_engine = std::move(make_engine);
     LimitsConfig lc = impl_->options.limits;
     lc.burst_cells = impl_->options.config.max_cells;

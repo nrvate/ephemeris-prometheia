@@ -255,6 +255,16 @@ public:
     // NAIF IDs directly).
     Result<int> lookup(std::string_view name) const;
 
+    // A catalog body's identities: its primary designation and proper name
+    // (docs/FORMAT.md's string pool), for consumers that must present a
+    // catalog body by name — the protocol's LOOKUP answers. NotFound for a
+    // body no loaded catalog carries; the newest catalog wins, as lookup()
+    // does. The name is empty for a body catalogued by designation alone.
+    struct BodyNames {
+        std::string designation, name;
+    };
+    Result<BodyNames> names(int spkid) const;
+
     // Position of `body` at a TT Julian date.
     Result<CalcResult> calc(int body, double jd_tt, const CalcOptions& opts = {});
 
@@ -265,9 +275,11 @@ public:
     // options' observer in the options' frame (docs/ENGINE.md, "Nodes and
     // apsides"). The orbit is heliocentric, or geocentric for the Moon, and
     // the ecliptic is that of the output frame (the mean ecliptic of date
-    // for the date frames, of J2000 for J2000 and ICRF). The point is
-    // geometric: light time, deflection and aberration do not apply to it.
-    // Rates are central differences, as for calc(); sigma is never set.
+    // for the date frames, of J2000 for J2000 and ICRF). Corrections apply
+    // as sent, exactly as to a body (light time by the point's slow
+    // fixed-point, deflection with the Sun-observer skip, aberration); see
+    // docs/ORBIT-POINTS.md for why and what that is worth. Rates are
+    // central differences, as for calc(); sigma is never set.
     // ArgumentError where the point is undefined (nodes of an orbit in the
     // ecliptic, apsides of a circular orbit, the aphelion of an open one).
     Result<CalcResult> calc_orbit_point(int body, OrbitPoint point, OrbitElements elements,

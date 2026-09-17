@@ -1,16 +1,88 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "objects.hpp"
 
-#include <optional>
-
 #include "prometheia/stars.hpp"
 
 namespace prometheia::server {
+namespace {
 
-Result<ResolvedObject> resolve_object(const eph::ObjSpec& spec, const WireMap& map) {
+// Display names for the ephemeris bodies, which the catalogs do not carry.
+// The NAIF ids of the planets and their system barycentres are the JPL
+// standard (docs/ENGINE.md); there are eleven.
+std::string planet_name(int naif) {
+    switch (naif) {
+    case 0:
+        return "solar-system barycentre";
+    case 10:
+        return "Sun";
+    case 199:
+        return "Mercury";
+    case 299:
+        return "Venus";
+    case 399:
+        return "Earth";
+    case 301:
+        return "Moon";
+    case 4:
+        return "Mars";
+    case 5:
+        return "Jupiter";
+    case 6:
+        return "Saturn";
+    case 7:
+        return "Uranus";
+    case 8:
+        return "Neptune";
+    case 9:
+        return "Pluto";
+    default:
+        return {};
+    }
+}
+
+constexpr const char* kPointSuffix[] = {"asc. node", "desc. node", "perihelion", "aphelion"};
+
+} // namespace
+
+Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine) {
     ResolvedObject out;
-    if (spec.kind == eph::kObjStar) {
-        // Any name or designation the catalog knows (docs/STARS.md).
+    switch (spec.kind) {
+    case eph::kObjBody:
+    case eph::kObjDesignation: {
+        if (spec.kind == eph::kObjDesignation) {
+            // Kind 5 resolves exactly, as a LOOKUP of quality 0 or 1 (3.5);
+            // Engine::lookup's index is exact, so there is no ambiguity.
+            auto found = engine.lookup(spec.name);
+            if (!found) {
+                return found.error();
+            }
+            out.naif_id = found.value();
+        } else {
+            out.naif_id = spec.naif;
+        }
+        if (out.naif_id < 0) {
+            return make_error(ErrorCode::ArgumentError,
+                              "NAIF id " + std::to_string(out.naif_id) + " is not a body id");
+        }
+        out.kind = ResolvedObject::Kind::Body;
+        out.is_sun = out.naif_id == 10;
+        if (out.naif_id == 0) {
+            return make_error(ErrorCode::ArgumentError,
+                              "the barycentre is not a body with a position");
+        }
+        auto body_names = engine.names(out.naif_id);
+        if (body_names.ok()) {
+            out.name = body_names.value().name.empty() ? body_names.value().designation
+                                                       : body_names.value().name;
+        } else {
+            out.name = planet_name(out.naif_id);
+            if (out.name.empty()) {
+                out.name = "SPK-ID " + std::to_string(out.naif_id);
+            }
+        }
+        return out;
+    }
+    case eph::kObjStar: {
         auto found = stars::find(spec.name);
         if (!found) {
             return found.error();
@@ -18,45 +90,71 @@ Result<ResolvedObject> resolve_object(const eph::ObjSpec& spec, const WireMap& m
         out.kind = ResolvedObject::Kind::Star;
         out.star_index = found.value();
         out.name = stars::at(found.value()).name();
+        out.no_parallax = stars::at(found.value()).parallax_mas <= 0.0f;
         return out;
     }
-    const std::optional<WireBody> body = map.body(spec.id);
-    if (!body) {
-        return make_error(ErrorCode::NotFound,
-                          "body " + std::to_string(spec.id) + " has no wire-map entry");
-    }
-    out.naif_id = body->naif_id;
-    out.name = body->name.empty() ? "SPK-ID " + std::to_string(body->naif_id) : body->name;
-    if (spec.kind == eph::kObjNodAps) {
-        // parseRequest has checked point 1-4 and method 0-1.
+    case eph::kObjOrbitPoint: {
+        // parseRequest has bounded point and method to their registries; the
+        // engine serves points 0-3 by methods 0 (mean) and 1 (osculating).
+        if (spec.method > 1) {
+            return make_error(ErrorCode::ArgumentError, "orbit method " +
+                                                            std::to_string(spec.method) +
+                                                            " is not served by this engine");
+        }
         static constexpr OrbitPoint kPoints[] = {OrbitPoint::AscendingNode,
                                                  OrbitPoint::DescendingNode, OrbitPoint::Perihelion,
                                                  OrbitPoint::Aphelion};
-        static constexpr const char* kSuffix[] = {" asc. node", " desc. node", " perihelion",
-                                                  " aphelion"};
+        // A body the ephemeris knows gets its display name; a catalog body
+        // its own. The engine rejects what has no orbit.
+        eph::Object body_spec{};
+        body_spec.kind = eph::kObjBody;
+        body_spec.naif = spec.naif;
+        auto body = resolve_object(body_spec, engine);
+        if (!body) {
+            return body.error();
+        }
         out.kind = ResolvedObject::Kind::OrbitPoint;
-        out.point = kPoints[spec.point - eph::kPntNorthNode];
-        out.elements =
-            spec.method == eph::kNodOscu ? OrbitElements::Osculating : OrbitElements::Mean;
-        out.name += kSuffix[spec.point - eph::kPntNorthNode];
+        out.naif_id = spec.naif;
+        out.point = kPoints[spec.point];
+        out.elements = spec.method == 0 ? OrbitElements::Mean : OrbitElements::Osculating;
+        out.name =
+            body.value().name + (spec.method == 0 ? " mean " : " ") + kPointSuffix[spec.point];
+        return out;
     }
-    return out;
+    case eph::kObjHypothetical:
+        return make_error(ErrorCode::ArgumentError,
+                          "hypothetical bodies are not served by this engine");
+    case eph::kObjElements:
+        return make_error(ErrorCode::ArgumentError,
+                          "objects from polynomial elements are not served by this engine");
+    default:
+        return make_error(ErrorCode::ArgumentError,
+                          "object kind " + std::to_string(spec.kind) + " is not served");
+    }
 }
 
-Result<CalcResult> calc_at(Engine& engine, const ResolvedObject& obj, double jd, bool jd_is_tt,
+Result<CalcResult> calc_at(Engine& engine, const ResolvedObject& obj, double jd, int time_scale,
                            const CalcOptions& opts) {
+    // Row instants arrive in the request's time scale; the engine's entry
+    // points are TT and UT1 (converted with the delta T model the server
+    // has installed on it), and TDB converts to TT at a few nanoseconds'
+    // loss against the Fairhead-Bretagnon series' own ~10 us (docs/TIME.md).
+    if (time_scale == eph::kTimeTDB) {
+        jd = prometheia::time::tt_from_tdb(jd);
+        time_scale = eph::kTimeTT;
+    }
+    const bool ut1 = time_scale == eph::kTimeUT1;
     switch (obj.kind) {
     case ResolvedObject::Kind::Star:
-        return jd_is_tt ? engine.calc_star(obj.star_index, jd, opts)
-                        : engine.calc_star_ut(obj.star_index, jd, opts);
+        return ut1 ? engine.calc_star_ut(obj.star_index, jd, opts)
+                   : engine.calc_star(obj.star_index, jd, opts);
     case ResolvedObject::Kind::OrbitPoint:
-        return jd_is_tt
-                   ? engine.calc_orbit_point(obj.naif_id, obj.point, obj.elements, jd, opts)
-                   : engine.calc_orbit_point_ut(obj.naif_id, obj.point, obj.elements, jd, opts);
+        return ut1 ? engine.calc_orbit_point_ut(obj.naif_id, obj.point, obj.elements, jd, opts)
+                   : engine.calc_orbit_point(obj.naif_id, obj.point, obj.elements, jd, opts);
     case ResolvedObject::Kind::Body:
         break;
     }
-    return jd_is_tt ? engine.calc(obj.naif_id, jd, opts) : engine.calc_ut(obj.naif_id, jd, opts);
+    return ut1 ? engine.calc_ut(obj.naif_id, jd, opts) : engine.calc(obj.naif_id, jd, opts);
 }
 
 segments::Sampler sampler_for(Engine& engine, const ResolvedObject& obj, CalcOptions opts) {
@@ -64,7 +162,7 @@ segments::Sampler sampler_for(Engine& engine, const ResolvedObject& obj, CalcOpt
     opts.sigma = false; // twelve extra integrations a sample, for nothing
     return
         [&engine, obj, opts](double jd_tt, double pos_au[3], double vel_au_day[3]) -> Result<void> {
-            auto res = calc_at(engine, obj, jd_tt, true, opts);
+            auto res = calc_at(engine, obj, jd_tt, eph::kTimeTT, opts);
             if (!res) {
                 return res.error();
             }

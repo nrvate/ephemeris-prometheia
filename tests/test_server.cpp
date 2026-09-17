@@ -1,21 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// prometheiad's protocol core: the wire map and the Session state machine,
-// driven without sockets. The wire-map numbers here are invented for the
-// test; they are not Astrolog's (docs/SERVER.md).
+// prometheiad's protocol core: the Session state machine (protocol version
+// 4), driven without sockets, against the synthetic linear kernel and the
+// committed sample catalog. The conformance fixtures pin the codec itself
+// (tests/test_ephproto4.cpp); this file pins the server: the handshake, the
+// profiles, the answers' metadata and values, and the limits.
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
+#include "dataset.hpp"
 #include "objects.hpp"
 #include "prometheia/stars.hpp"
 #include "session.hpp"
 #include "synthetic_spk.hpp"
-#include "wire_map.hpp"
 
 #include <doctest/doctest.h>
 
@@ -23,23 +26,6 @@ using namespace prometheia::server;
 using synth::TempFile;
 
 namespace {
-
-constexpr const char* kTestMap = R"(# invented numbers, test only
-body 900 10 Test Sun
-body 905 5
-asteroids 70000
-flag 2 speed
-flag 5 equatorial
-flag 6 j2000
-flag 9 xyz
-flag 10 radians
-flag 11 heliocentric
-flag 12 topocentric
-flag 13 barycentric
-flag 14 sidereal
-flag 20 ignore
-sidereal 7 lahiri
-)";
 
 struct Reply {
     eph::Envelope env{};
@@ -53,10 +39,11 @@ std::vector<Reply> drain(Session& s) {
         Reply r;
         REQUIRE(msg.size() >= eph::kEnvelopeSize);
         r.env.version = msg[2];
-        r.env.flags = msg[3];
-        r.env.type = eph::getU16(msg.data() + 4);
-        r.env.requestId = eph::getU32(msg.data() + 8);
-        r.env.payloadLen = eph::getU32(msg.data() + 12);
+        r.env.type = uint16_t(msg[4] | (uint16_t(msg[5]) << 8));
+        r.env.requestId = uint32_t(msg[8]) | (uint32_t(msg[9]) << 8) | (uint32_t(msg[10]) << 16) |
+                          (uint32_t(msg[11]) << 24);
+        r.env.payloadLen = uint32_t(msg[12]) | (uint32_t(msg[13]) << 8) |
+                           (uint32_t(msg[14]) << 16) | (uint32_t(msg[15]) << 24);
         r.payload.assign(msg.begin() + eph::kEnvelopeSize, msg.end());
         CHECK(r.payload.size() == r.env.payloadLen);
         out.push_back(std::move(r));
@@ -68,140 +55,149 @@ std::string as_view(const std::vector<uint8_t>& v) {
     return std::string(reinterpret_cast<const char*>(v.data()), v.size());
 }
 
-std::string hello(uint32_t proto, uint8_t envelope_version = eph::kProtoVersion) {
-    uint8_t buf[eph::kHelloMaxSize];
-    uint32_t len = 0;
-    eph::buildHello(buf, eph::kCapFloat32, 1, "test", &len, nullptr, uint8_t(proto));
-    return as_view(eph::makeMessage(eph::kMsgHello, 1, buf, len, 0, envelope_version));
+std::vector<uint8_t> message(uint16_t type, uint32_t request_id, const uint8_t* payload, size_t len,
+                             uint8_t version = eph::kProtoVersion) {
+    std::vector<uint8_t> out;
+    eph::WriteEnvelope(&out, type, request_id, len, version);
+    out.insert(out.end(), payload, payload + len);
+    return out;
 }
 
-std::string request(const eph::Request& req, uint32_t id) {
-    std::vector<uint8_t> payload;
-    eph::buildRequest(&payload, req);
-    return as_view(eph::makeMessage(eph::kMsgRequest, id, payload.data(), payload.size()));
-}
-
-eph::ObjSpec obj(uint32_t id) {
-    eph::ObjSpec o;
-    o.id = id;
-    return o;
-}
-
-eph::ErrorMsg error_of(const Reply& r) {
-    eph::ErrorMsg e{};
-    REQUIRE(r.env.type == eph::kMsgError);
-    REQUIRE(eph::parseError(r.payload.data(), r.payload.size(), &e));
-    return e;
-}
-
-// A decoded DATA answer: all chunks joined back into object-major columns.
-struct Data {
-    std::vector<int32_t> ret;
-    std::vector<std::string> serr, name;
-    std::vector<double> cols;
-    uint32_t chunks = 0;
-};
-
-Data join(const std::vector<Reply>& replies, uint32_t n_obj, uint32_t n_time) {
-    Data d;
-    d.cols.assign(size_t(n_obj) * n_time * 6, -1.0);
-    for (const Reply& r : replies) {
-        if (r.env.type != eph::kMsgData) {
-            continue;
-        }
-        eph::Reader rd(r.payload.data(), r.payload.size());
-        CHECK(rd.u32() == d.chunks);
-        const uint32_t i_time = rd.u32(), rows = rd.u32();
-        const uint8_t precision = rd.u8();
-        CHECK(rd.u32() == n_obj);
-        if (d.chunks == 0) {
-            for (uint32_t o = 0; o < n_obj; ++o) {
-                eph::DataMetaWire m{};
-                d.ret.push_back(rd.i32());
-                rd.i32();
-                rd.raw(m.serr, sizeof m.serr);
-                rd.raw(m.name, sizeof m.name);
-                d.serr.emplace_back(m.serr, strnlen(m.serr, sizeof m.serr));
-                d.name.emplace_back(m.name, strnlen(m.name, sizeof m.name));
-            }
-        } else {
-            rd.skip(n_obj * eph::kDataMetaSize);
-        }
-        for (uint32_t o = 0; o < n_obj; ++o) {
-            for (uint32_t k = 0; k < rows * 6; ++k) {
-                d.cols[(size_t(o) * n_time + i_time) * 6 + k] =
-                    precision == eph::kPrecF32 ? double(rd.f32()) : rd.f64();
-            }
-        }
-        CHECK(rd.ok());
-        CHECK(rd.left() == 0);
-        ++d.chunks;
+std::string hello(uint32_t proto_max = eph::kProtoVersion, uint32_t proto_min = eph::kProtoMin,
+                  const char* token = nullptr, uint8_t envelope_version = eph::kProtoVersion) {
+    eph::Hello h;
+    h.protoMax = proto_max;
+    h.protoMin = proto_min;
+    h.clientName = "test";
+    if (token) {
+        h.token = token;
     }
-    return d;
+    std::vector<uint8_t> payload;
+    eph::EncodeHello(&payload, h);
+    return as_view(message(eph::kMsgHello, 0, payload.data(), payload.size(), envelope_version));
 }
 
 struct Fixture {
     TempFile tf{"server"};
-    WireMap map = WireMap::parse(kTestMap).value();
     ServerConfig config;
     std::unique_ptr<LoopContext> ctx;
     std::unique_ptr<Session> session;
 
     Fixture() {
-        ctx = std::make_unique<LoopContext>(synth::open_synthetic(tf), map, config);
+        Engine engine = synth::open_synthetic(tf);
+        auto catalog =
+            engine.add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm");
+        REQUIRE_MESSAGE(catalog.ok(), catalog.error().message);
+        config.engine = "Prometheia 0.1.0, synthetic kernel";
+        config.dataset_id = "synthetic/test#00000000";
+        config.ephemeris_name = "synthetic.bsp";
+        config.catalog_names = {"sample-100.epm"};
+        ctx = std::make_unique<LoopContext>(std::move(engine), config);
         session = std::make_unique<Session>(*ctx);
     }
-    void welcome() {
-        CHECK(session->on_message(hello(3), true));
+    eph::Welcome welcome() {
+        CHECK(session->on_message(hello(), true));
         const auto r = drain(*session);
         REQUIRE(r.size() == 1);
         REQUIRE(r[0].env.type == eph::kMsgWelcome);
+        eph::Welcome w;
+        std::string why;
+        REQUIRE_MESSAGE(
+            eph::ParseWelcome(r[0].payload.data(), r[0].payload.size(), &w, &why) == eph::kOk, why);
+        return w;
     }
 };
 
-eph::Request base_request(double jd, uint32_t n_time) {
+// A request with one profile (returned for tweaking) and body objects.
+eph::Request base_request(double jd, uint32_t n_time, double step_days = 0.25) {
     eph::Request req;
-    req.jdStart = jd;
-    req.stepSeconds = 3600 * 6;
+    req.start.jd1 = jd;
     req.nTime = n_time;
+    // 3.5: stepNs is 0 with one row, nonzero otherwise.
+    req.stepNs = n_time > 1 ? int64_t(step_days * 86400.0 * 1e9) : 0;
+    req.profiles.emplace_back(); // one default profile: geocentric apparent
     return req;
 }
 
-} // namespace
-
-TEST_CASE("server_wire_map") {
-    auto map = WireMap::parse(kTestMap);
-    REQUIRE(map.ok());
-    const WireMap& m = map.value();
-    CHECK(!m.empty());
-    CHECK(m.body(900)->naif_id == 10);
-    CHECK(m.body(900)->name == "Test Sun");
-    CHECK(m.body(905)->name.empty());
-    CHECK(!m.body(901));
-    CHECK(m.body(70001)->naif_id == 20000001);
-    CHECK(!m.body(70000));
-    CHECK(m.flag(5) == FlagMeaning::Equatorial);
-    CHECK(m.flag(0) == FlagMeaning::None);
-    CHECK(m.flag(40) == FlagMeaning::None);
-    CHECK(m.sidereal(7) == SiderealMode::Lahiri);
-    CHECK(!m.sidereal(8));
-    CHECK(flag_meaning_name(FlagMeaning::NoNutation) == "no-nutation");
-
-    CHECK(WireMap::parse("# nothing\n\n").value().empty());
-    const auto bad = [](const char* text) {
-        auto r = WireMap::parse(text);
-        return r.ok() ? std::string() : r.error().message;
-    };
-    CHECK(bad("flag 3 sideways\n") == "wire map line 1: unknown flag meaning 'sideways'");
-    CHECK(bad("\nflag 32 speed\n") == "wire map line 2: expected: flag <bit 0-31> <meaning>");
-    CHECK(bad("body 1 10\nbody 1 11\n") == "wire map line 2: body 1 is mapped twice");
-    CHECK(bad("body x 10\n") == "wire map line 1: expected: body <wire-id> <naif-id> [name]");
-    CHECK(bad("flag 1 speed\nflag 1 xyz\n") == "wire map line 2: flag bit 1 is mapped twice");
-    CHECK(bad("sidereal 1 tropical\n") == "wire map line 1: unknown zodiac 'tropical'");
-    CHECK(bad("asteroids 1\nasteroids 2\n") == "wire map line 2: asteroids is given twice");
-    CHECK(bad("planet 1 2\n") == "wire map line 1: unknown entry 'planet'");
-    CHECK(!WireMap::load("/nonexistent/wire.map").ok());
+eph::Object body_obj(int naif) {
+    eph::Object o;
+    o.kind = eph::kObjBody;
+    o.naif = naif;
+    return o;
 }
+
+std::string request(const eph::Request& req, uint32_t id) {
+    std::vector<uint8_t> payload;
+    eph::EncodeRequest(&payload, req);
+    return as_view(message(eph::kMsgRequest, id, payload.data(), payload.size()));
+}
+
+eph::Error error_of(const Reply& r) {
+    eph::Error e;
+    std::string why;
+    REQUIRE(r.env.type == eph::kMsgError);
+    REQUIRE_MESSAGE(eph::ParseError(r.payload.data(), r.payload.size(), &e, &why) == eph::kOk, why);
+    return e;
+}
+
+// A decoded DATA answer: all chunks joined back into object-major columns.
+struct Data {
+    std::vector<eph::Meta> meta;
+    std::vector<double> cols;
+    uint32_t chunks = 0, columns_present = 0;
+    int n_cols = 6;
+
+    const eph::Meta* find(const char* name) const {
+        for (const eph::Meta& m : meta) {
+            if (m.name == name) {
+                return &m;
+            }
+        }
+        return nullptr;
+    }
+};
+
+Data join(const std::vector<Reply>& replies) {
+    Data d;
+    uint32_t total = 0;
+    for (const Reply& r : replies) {
+        if (r.env.type != eph::kMsgData) {
+            continue;
+        }
+        eph::DataChunk c;
+        std::string why;
+        REQUIRE_MESSAGE(eph::ParseData(r.payload.data(), r.payload.size(), &c, &why) == eph::kOk,
+                        why);
+        REQUIRE(c.chunkIndex == d.chunks);
+        REQUIRE(c.iTime == total);
+        if (c.flags & eph::kChunkMeta) {
+            REQUIRE(d.meta.empty());
+            d.meta = c.meta;
+            d.columns_present = c.columnsPresent;
+            d.n_cols = c.Cols();
+            if (d.cols.empty()) {
+                d.cols.assign(size_t(c.nObj) * c.totalRows * d.n_cols,
+                              std::numeric_limits<double>::quiet_NaN());
+            }
+        }
+        for (uint32_t o = 0; o < c.nObj; ++o) {
+            for (uint32_t r2 = 0; r2 < c.nRows; ++r2) {
+                for (int k = 0; k < d.n_cols; ++k) {
+                    d.cols[(size_t(o) * c.totalRows + c.iTime + r2) * d.n_cols + k] =
+                        c.values[(size_t(o) * c.nRows + r2) * d.n_cols + k];
+                }
+            }
+        }
+        total += c.nRows;
+        ++d.chunks;
+        if (d.chunks > 1) {
+            REQUIRE(total <= d.cols.size() / d.n_cols);
+        }
+    }
+    return d;
+}
+
+} // namespace
 
 TEST_CASE("server_handshake") {
     Fixture f;
@@ -209,113 +205,131 @@ TEST_CASE("server_handshake") {
 
     SUBCASE("REQUEST before HELLO closes") {
         eph::Request req = base_request(2451545.0, 1);
-        req.objs = {obj(900)};
+        req.objs = {body_obj(10)};
         CHECK(!s.on_message(request(req, 5), true));
         const auto r = drain(s);
         REQUIRE(r.size() == 1);
-        CHECK(error_of(r[0]).code == eph::kErrBad);
-        CHECK(error_of(r[0]).requestId == 5);
+        CHECK(error_of(r[0]).code == eph::kErrMalformed);
     }
-    SUBCASE("version 3 WELCOME") {
-        CHECK(s.on_message(hello(3), true));
+    SUBCASE("WELCOME carries the session, the bounds and the capabilities") {
+        const eph::Welcome w = f.welcome();
+        CHECK(w.protoSession == 4);
+        CHECK(w.caps ==
+              (eph::kCapF32 | eph::kCapInstantLists | eph::kCapLookup | eph::kCapDeepSky));
+        CHECK(w.serverName == kServerVersion);
+        CHECK(w.engine == f.config.engine);
+        CHECK(w.datasetId == f.config.dataset_id);
+        CHECK(w.maxObjs == f.config.max_objs);
+        CHECK(w.maxCells == f.config.max_cells);
+        CHECK(s.version() == 4);
+        eph::Capabilities c;
+        std::string why;
+        REQUIRE_MESSAGE(eph::ParseCapabilities(w.caps_, &c, &why) == eph::kOk, why);
+        CHECK(c.Kind(eph::kObjBody));
+        CHECK(c.Kind(eph::kObjOrbitPoint));
+        CHECK(c.Kind(eph::kObjStar));
+        CHECK(!c.Kind(eph::kObjElements));
+        CHECK(c.Observer(eph::kObsGeo));
+        CHECK(c.Observer(eph::kObsBary));
+        CHECK(c.Zodiac("fagan-bradley"));
+        CHECK(c.Zodiac("user"));
+        CHECK(!c.Zodiac("raman"));
+        CHECK(c.TimeScale(eph::kTimeUT1));
+        CHECK(c.TimeScale(eph::kTimeTDB));
+        CHECK(c.deltaTModel == kDeltaTModelName);
+        // The Sun's centre cannot be deflected; every other observer can
+        // (3.5a), including the barycentre.
+        CHECK(c.CorrectionMask(eph::kObsGeo, eph::kCorrMask));
+        CHECK(c.CorrectionMask(eph::kObsTopo, eph::kCorrMask));
+        CHECK(c.CorrectionMask(eph::kObsBary, eph::kCorrMask));
+        CHECK(!c.CorrectionMask(eph::kObsHelio, eph::kCorrDeflection));
+        CHECK(c.CorrectionMask(eph::kObsHelio, eph::kCorrLightTime | eph::kCorrAberration));
+        CHECK(c.lookupMax > 0);
+    }
+    SUBCASE("a newer client meets the server at 4") {
+        CHECK(s.on_message(hello(9), true));
         const auto r = drain(s);
         REQUIRE(r.size() == 1);
-        CHECK(r[0].env.type == eph::kMsgWelcome);
-        CHECK(r[0].env.version == 3);
+        CHECK(r[0].env.version == 4);
         eph::Welcome w;
-        REQUIRE(eph::parseWelcome(r[0].payload.data(), r[0].payload.size(), &w));
-        CHECK(w.protoVersion == 3);
-        CHECK(w.caps == eph::kCapFloat32);
-        CHECK(w.swissephVersion == 0);
-        CHECK(w.maxObjs == eph::kMaxObjs);
-        CHECK(w.maxCells == eph::kMaxCellsDefault);
-        CHECK(w.serverVersion == kServerVersion);
-        CHECK(s.version() == 3);
+        std::string why;
+        REQUIRE(eph::ParseWelcome(r[0].payload.data(), r[0].payload.size(), &w, &why) == eph::kOk);
+        CHECK(w.protoSession == 4);
     }
-    SUBCASE("a version 2 client is answered in version 2") {
-        CHECK(s.on_message(hello(2, 2), true));
+    SUBCASE("a repeated HELLO keeps the first session") {
+        f.welcome();
+        CHECK(s.on_message(hello(9), true));
+        CHECK(drain(s)[0].env.version == 4);
+    }
+    SUBCASE("an older envelope is refused in its own layout") {
+        // A version-3 HELLO: the ERROR comes back as the legacy layout, in
+        // version 3 (3.3.5).
+        const auto msg = hello(3, 3, nullptr, 3);
+        CHECK(!s.on_message(msg, true));
         const auto r = drain(s);
         REQUIRE(r.size() == 1);
-        CHECK(r[0].env.version == 2);
-        CHECK(s.version() == 2);
-        // Later HELLOs keep the first one's version.
-        CHECK(s.on_message(hello(3), true));
-        CHECK(drain(s)[0].env.version == 2);
-    }
-    SUBCASE("a newer client is answered in version 3") {
-        uint8_t buf[eph::kHelloMaxSize];
-        uint32_t len = 0;
-        eph::buildHello(buf, 0, 1, "future", &len, nullptr, 3);
-        eph::putU32(buf, 9);
-        CHECK(s.on_message(as_view(eph::makeMessage(eph::kMsgHello, 1, buf, len)), true));
-        CHECK(drain(s)[0].env.version == 3);
-    }
-    SUBCASE("too old: HELLO below the minimum") {
-        CHECK(!s.on_message(hello(1, 2), true));
-        const auto r = drain(s);
-        REQUIRE(r.size() == 1);
-        CHECK(error_of(r[0]).code == eph::kErrVersion);
-    }
-    SUBCASE("too old: envelope below the minimum, refused in its own version") {
-        auto msg = eph::makeMessage(eph::kMsgHello, 1, nullptr, 0, 0, 1);
-        CHECK(!s.on_message(as_view(msg), true));
-        const auto r = drain(s);
-        REQUIRE(r.size() == 1);
-        CHECK(r[0].env.version == 1);
-        CHECK(error_of(r[0]).code == eph::kErrVersion);
+        CHECK(r[0].env.version == 3);
+        CHECK(r[0].env.type == eph::kMsgError);
+        eph::LegacyError le;
+        std::string why;
+        REQUIRE(eph::ParseLegacyError(r[0].payload.data(), r[0].payload.size(), &le, &why) ==
+                eph::kOk);
+        CHECK(le.code == eph::kErrVersion);
     }
     SUBCASE("malformed frames") {
-        CHECK(s.on_message("text", false));
-        CHECK(s.on_message("short", true));
-        auto msg = eph::makeMessage(eph::kMsgPing, 3, nullptr, 0);
+        CHECK(!s.on_message("text", false));
+        CHECK(!s.on_message("short", true));
+        auto msg = message(eph::kMsgPing, 0, nullptr, 0);
         msg[0] ^= 0xFF;
-        CHECK(s.on_message(as_view(msg), true));
-        msg = eph::makeMessage(eph::kMsgPing, 3, nullptr, 0);
-        eph::putU32(msg.data() + 12, 4);
-        CHECK(s.on_message(as_view(msg), true));
-        msg = eph::makeMessage(eph::kMsgPing, 3, nullptr, 0, eph::kEnvFlagZstd);
-        CHECK(s.on_message(as_view(msg), true));
-        msg = eph::makeMessage(eph::kMsgPing, 3, nullptr, 0);
-        msg[3] = 0x80;
-        CHECK(s.on_message(as_view(msg), true));
+        CHECK(!s.on_message(as_view(msg), true));
+        msg = message(eph::kMsgPing, 0, nullptr, 0);
+        msg[12] = 4; // payloadLen does not match the frame
+        CHECK(!s.on_message(as_view(msg), true));
+        msg = message(eph::kMsgPing, 0, nullptr, 0);
+        msg[6] = 1; // reserved nonzero
+        CHECK(!s.on_message(as_view(msg), true));
         const auto r = drain(s);
-        REQUIRE(r.size() == 6);
+        REQUIRE(r.size() == 5);
         for (const Reply& e : r) {
-            CHECK(error_of(e).code == eph::kErrBad);
+            CHECK(error_of(e).code == eph::kErrMalformed);
         }
     }
-    SUBCASE("ping, pong, unknown type") {
+    SUBCASE("ping, pong, unknown type, wrong direction") {
         f.welcome();
-        CHECK(s.on_message(as_view(eph::buildPing(42)), true));
-        CHECK(s.on_message(as_view(eph::buildPong(43)), true));
-        CHECK(s.on_message(as_view(eph::makeMessage(99, 44, nullptr, 0)), true));
+        CHECK(s.on_message(as_view(message(eph::kMsgPing, 0, nullptr, 0)), true));
+        CHECK(s.on_message(as_view(message(eph::kMsgPong, 0, nullptr, 0)), true));
+        CHECK(s.on_message(as_view(message(99, 44, nullptr, 0)), true));
+        CHECK(s.on_message(as_view(message(eph::kMsgWelcome, 0, nullptr, 0)), true));
         const auto r = drain(s);
-        REQUIRE(r.size() == 2);
+        REQUIRE(r.size() == 3);
         CHECK(r[0].env.type == eph::kMsgPong);
-        CHECK(r[0].env.requestId == 42);
-        CHECK(error_of(r[1]).code == eph::kErrUnknown);
-        CHECK(error_of(r[1]).requestId == 44);
+        CHECK(error_of(r[1]).code == eph::kErrUnknownType);
+        CHECK(error_of(r[2]).code == eph::kErrMalformed);
     }
 }
 
-TEST_CASE("server_request") {
+TEST_CASE("server_request_answers") {
     Fixture f;
     Session& s = *f.session;
     Engine check = synth::open_synthetic(f.tf);
+    REQUIRE(
+        check.add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm").ok());
     f.welcome();
 
     const double jd = 2451545.25;
     const uint32_t n_time = 7;
     eph::Request req = base_request(jd, n_time);
-    eph::ObjSpec star;
+    eph::Object star;
     star.kind = eph::kObjStar;
-    std::strcpy(star.name, "Sirius");
-    eph::ObjSpec node = obj(905);
-    node.kind = eph::kObjNodAps;
-    node.point = eph::kPntNorthNode;
-    node.method = eph::kNodOscu;
-    req.objs = {obj(900), obj(905), obj(901), star, node};
-    req.iflag = (1u << 2) | (1u << 20);
+    star.name = "Sirius";
+    eph::Object node = body_obj(5);
+    node.kind = eph::kObjOrbitPoint;
+    node.point = eph::kPtAscNode;
+    node.method = eph::kMethOsculating;
+    eph::Object ceres;
+    ceres.kind = eph::kObjDesignation;
+    ceres.name = "Ceres";
+    req.objs = {body_obj(10), body_obj(5), body_obj(1), star, node, ceres};
     req.chunkRows = 3;
 
     CHECK(s.on_message(request(req, 77), true));
@@ -327,20 +341,21 @@ TEST_CASE("server_request") {
         CHECK(r.env.requestId == 77);
         CHECK(r.env.flags == 0);
     }
-    const Data d = join(replies, 5, n_time);
+    const Data d = join(replies);
     CHECK(d.chunks == 3);
+    REQUIRE(d.meta.size() == 6);
 
-    // Mapped bodies: the engine's answer, bit for bit, at each row's UT.
+    // Mapped bodies: the engine's answer, bit for bit, at each row's TT.
     const auto opts = [] {
         CalcOptions o;
         o.sigma = false;
         return o;
     }();
     for (uint32_t o = 0; o < 2; ++o) {
-        CHECK(d.ret[o] == int32_t(req.iflag));
-        CHECK(d.serr[o].empty());
+        CHECK(d.meta[o].rowsOk == int32_t(n_time));
+        CHECK(d.meta[o].errCode == eph::kOErrNone);
         for (uint32_t r = 0; r < n_time; ++r) {
-            const auto res = check.calc_ut(o == 0 ? 10 : 5, jd + r * 0.25, opts);
+            const auto res = check.calc(o == 0 ? 10 : 5, jd + r * 0.25, opts);
             REQUIRE(res.ok());
             const Position& p = res.value().pos;
             const double* row = &d.cols[(size_t(o) * n_time + r) * 6];
@@ -352,35 +367,52 @@ TEST_CASE("server_request") {
             CHECK(row[5] == p.dist_speed);
         }
     }
-    CHECK(d.name[0] == "Test Sun");
-    CHECK(d.name[1] == "SPK-ID 5");
+    CHECK(d.meta[0].name == "Sun");
+    CHECK(d.meta[1].name == "Jupiter");
+    CHECK(d.meta[0].resolvedNaif == 10);
 
-    // Unsupported objects fail alone: NaN rows, retFlag -1, the reason.
-    CHECK(d.serr[2] == "body 901 has no wire-map entry");
-    // The star object ("Sirius"): the engine's catalog place.
-    CHECK(d.ret[3] == int32_t(req.iflag));
-    CHECK(d.name[3] == "Sirius");
+    // A body the kernel does not carry fails alone (3.5).
+    CHECK(d.meta[2].rowsOk == 0);
+    CHECK(d.meta[2].errCode == eph::kOErrUnknownBody);
+    CHECK(!d.meta[2].errText.empty());
     for (uint32_t r = 0; r < n_time; ++r) {
-        const auto res = check.calc_star_ut(stars::find("Sirius").value(), jd + r * 0.25, opts);
+        for (int k = 0; k < 6; ++k) {
+            CHECK(std::isnan(d.cols[(size_t(2) * n_time + r) * 6 + k]));
+        }
+    }
+
+    // The star object: the engine's catalog place, with no light time
+    // structurally (corrApplied 2|4).
+    CHECK(d.meta[3].rowsOk == int32_t(n_time));
+    CHECK(d.meta[3].name == "Sirius");
+    CHECK(d.meta[3].corrApplied == (eph::kCorrDeflection | eph::kCorrAberration));
+    CHECK(d.meta[3].resolvedNaif == eph::kNaifNone);
+    for (uint32_t r = 0; r < n_time; ++r) {
+        const auto res = check.calc_star(stars::find("Sirius").value(), jd + r * 0.25, opts);
         REQUIRE(res.ok());
         CHECK(d.cols[(3 * n_time + r) * 6] == res.value().pos.lon_deg);
     }
-    // The node object (osculating ascending node of wire body 905).
-    CHECK(d.ret[4] == int32_t(req.iflag));
-    CHECK(d.name[4] == "SPK-ID 5 asc. node");
+
+    // The osculating ascending node of Jupiter.
+    CHECK(d.meta[4].rowsOk == int32_t(n_time));
+    CHECK(d.meta[4].name == "Jupiter asc. node");
+    CHECK(d.meta[4].corrApplied == eph::kCorrMask);
     for (uint32_t r = 0; r < n_time; ++r) {
-        const auto res = check.calc_orbit_point_ut(5, OrbitPoint::AscendingNode,
-                                                   OrbitElements::Osculating, jd + r * 0.25, opts);
+        const auto res = check.calc_orbit_point(5, OrbitPoint::AscendingNode,
+                                                OrbitElements::Osculating, jd + r * 0.25, opts);
         REQUIRE(res.ok());
         CHECK(d.cols[(4 * n_time + r) * 6] == res.value().pos.lon_deg);
         CHECK(d.cols[(4 * n_time + r) * 6 + 3] == res.value().pos.lon_speed);
     }
-    for (uint32_t o = 2; o < 3; ++o) {
-        CHECK(d.ret[o] == -1);
-        CHECK(d.name[o].empty());
-        for (size_t k = 0; k < n_time * 6; ++k) {
-            CHECK(std::isnan(d.cols[size_t(o) * n_time * 6 + k]));
-        }
+
+    // The designation resolves through the catalog, exactly as a LOOKUP.
+    CHECK(d.meta[5].rowsOk == int32_t(n_time));
+    CHECK(d.meta[5].name == "Ceres");
+    CHECK(d.meta[5].resolvedNaif == 20000001);
+    for (uint32_t r = 0; r < n_time; ++r) {
+        const auto res = check.calc(20000001, jd + r * 0.25, opts);
+        REQUIRE(res.ok());
+        CHECK(d.cols[(5 * n_time + r) * 6] == res.value().pos.lon_deg);
     }
 
     SUBCASE("the same question again is a cache hit, whatever the delivery") {
@@ -391,7 +423,9 @@ TEST_CASE("server_request") {
         REQUIRE(again.size() == 1);
         CHECK(f.ctx->cache().hits() == 1);
         CHECK(f.ctx->cache().entries() == 1);
-        const Data d32 = join(again, 5, n_time);
+        const Data d32 = join(again);
+        REQUIRE(d32.meta.size() == 6);
+        CHECK(d32.meta[2].errCode == eph::kOErrUnknownBody); // meta survives the hit
         for (size_t k = 0; k < d.cols.size(); ++k) {
             if (std::isnan(d.cols[k])) {
                 CHECK(std::isnan(d32.cols[k]));
@@ -401,174 +435,442 @@ TEST_CASE("server_request") {
         }
     }
     SUBCASE("a row the engine cannot answer is NaN; the object keeps the rest") {
-        eph::Request edge = base_request(jd + 60.0 * 365.25 - 1.0, 4);
-        edge.stepSeconds = 86400;
-        edge.objs = {obj(900)};
+        eph::Request edge = base_request(jd + 60.0 * 365.25 - 1.0, 4, 1.0);
+        edge.objs = {body_obj(10)};
         CHECK(s.on_message(request(edge, 79), true));
-        const Data e = join(drain(s), 1, 4);
-        CHECK(e.ret[0] >= 0);
-        CHECK(!e.serr[0].empty());
+        const Data e = join(drain(s));
+        REQUIRE(e.meta.size() == 1);
+        CHECK(e.meta[0].rowsOk > 0);
+        CHECK((e.meta[0].flags & eph::kMetaPartial) != 0);
+        CHECK(e.meta[0].firstFailedRow == uint32_t(e.meta[0].rowsOk));
+        CHECK(e.meta[0].errCode == eph::kOErrCoverage);
+        // 3.8: the reason names no instant.
+        CHECK(e.meta[0].errText.find("JD") == std::string::npos);
         CHECK(!std::isnan(e.cols[0]));
-        CHECK(std::isnan(e.cols[3 * 6]));
+        CHECK(std::isnan(e.cols[size_t(e.meta[0].firstFailedRow) * 6]));
     }
 }
 
-TEST_CASE("server_flags") {
+TEST_CASE("server_profiles") {
     Fixture f;
     Session& s = *f.session;
     Engine check = synth::open_synthetic(f.tf);
     f.welcome();
     const double jd = 2451600.5;
 
-    const auto one = [&](uint64_t iflag, uint32_t id = 905) {
+    const auto one = [&](const eph::Profile& pf, uint32_t columns = 0) {
         eph::Request req = base_request(jd, 1);
-        req.objs = {obj(id)};
-        req.iflag = iflag;
-        req.topoLon = 10.0;
-        req.topoLat = 50.0;
-        req.topoElv = 300.0;
-        req.sidMode = 7;
+        req.profiles[0] = pf;
+        req.profiles[0].columns = columns;
+        req.objs = {body_obj(5)};
         static uint32_t rid = 100;
         CHECK(s.on_message(request(req, ++rid), true));
-        return join(drain(s), 1, 1);
+        return join(drain(s));
     };
-    const auto engine = [&](CalcOptions o, bool tt = false) {
+    const auto engine = [&](CalcOptions o) {
         o.sigma = false;
-        auto r = tt ? check.calc(5, jd, o) : check.calc_ut(5, jd, o);
+        auto r = check.calc(5, jd, o);
         REQUIRE(r.ok());
-        return r.value().pos;
+        return r.value();
     };
 
     SUBCASE("equatorial, J2000") {
         CalcOptions o;
         o.coords = Coords::Equatorial;
         o.frame = Frame::J2000;
-        const Position p = engine(o);
-        const Data d = one((1u << 5) | (1u << 6));
-        CHECK(d.cols[0] == p.lon_deg);
-        CHECK(d.cols[1] == p.lat_deg);
+        const CalcResult want = engine(o);
+        eph::Profile pf;
+        pf.plane = eph::kPlaneEquator;
+        pf.frame = eph::kFrameJ2000;
+        const Data d = one(pf);
+        CHECK(d.cols[0] == want.pos.lon_deg);
+        CHECK(d.cols[1] == want.pos.lat_deg);
     }
     SUBCASE("rectangular, heliocentric") {
         CalcOptions o;
         o.center = Center::Heliocentric;
-        const Position p = engine(o);
-        const Data d = one((1u << 9) | (1u << 11));
+        const CalcResult want = engine(o);
+        eph::Profile pf;
+        pf.observer = eph::kObsHelio;
+        pf.form = eph::kFormRectangular;
+        const Data d = one(pf);
         for (int i = 0; i < 3; ++i) {
-            CHECK(d.cols[i] == p.xyz_au[i]);
-            CHECK(d.cols[3 + i] == p.vel_au_day[i]);
+            CHECK(d.cols[i] == want.pos.xyz_au[i]);
+            CHECK(d.cols[3 + i] == want.pos.vel_au_day[i]);
+        }
+        // Heliocentric: no deflection, structurally.
+        REQUIRE(d.meta.size() == 1);
+        CHECK(d.meta[0].corrApplied == (eph::kCorrLightTime | eph::kCorrAberration));
+    }
+    SUBCASE("the Sun's own light is not deflected; barycentric light is") {
+        eph::Profile pf;
+        const Data sun = [&] {
+            eph::Request req = base_request(jd, 1);
+            req.objs = {body_obj(10)};
+            CHECK(s.on_message(request(req, 201), true));
+            return join(drain(s));
+        }();
+        REQUIRE(sun.meta.size() == 1);
+        CHECK(sun.meta[0].corrApplied == (eph::kCorrLightTime | eph::kCorrAberration));
+        pf.observer = eph::kObsBary;
+        const Data bary = one(pf);
+        REQUIRE(bary.meta.size() == 1);
+        CHECK(bary.meta[0].corrApplied == eph::kCorrMask);
+    }
+    SUBCASE("speeds off: zero rate columns and the noSpeeds flag") {
+        eph::Profile pf;
+        pf.speeds = 0;
+        const Data d = one(pf);
+        REQUIRE(d.meta.size() == 1);
+        CHECK((d.meta[0].flags & eph::kMetaNoSpeeds) != 0);
+        for (int k = 3; k < 6; ++k) {
+            CHECK(d.cols[k] == 0.0);
         }
     }
-    SUBCASE("radians") {
-        const Position p = engine(CalcOptions{});
-        const Data d = one(1u << 10);
-        CHECK(d.cols[0] == p.lon_deg * (3.14159265358979323846 / 180.0));
-        CHECK(d.cols[2] == p.dist_au);
-    }
-    SUBCASE("topocentric uses the request's site") {
+    SUBCASE("topocentric uses the profile's site") {
         CalcOptions o;
         o.center = Center::Topocentric;
-        o.site.lon_rad = 10.0 * (3.14159265358979323846 / 180.0);
-        o.site.lat_rad = 50.0 * (3.14159265358979323846 / 180.0);
+        o.site.lon_rad = 10.0 * (std::acos(-1.0) / 180.0);
+        o.site.lat_rad = 50.0 * (std::acos(-1.0) / 180.0);
         o.site.height_m = 300.0;
-        CHECK(one(1u << 12).cols[0] == engine(o).lon_deg);
+        const Position want = engine(o).pos;
+        eph::Profile pf;
+        pf.observer = eph::kObsTopo;
+        pf.siteLonEastDeg = 10.0;
+        pf.siteLatDeg = 50.0;
+        pf.siteHeightM = 300.0;
+        CHECK(one(pf).cols[0] == want.lon_deg);
     }
-    SUBCASE("sidereal through the map's zodiac") {
+    SUBCASE("a zodiac shifts the longitude; the ayanamsa column reports it") {
         CalcOptions o;
         o.sidereal = SiderealMode::Lahiri;
-        CHECK(one(1u << 14).cols[0] == engine(o).lon_deg);
+        const CalcResult want = engine(o);
+        eph::Profile pf;
+        pf.zodiac = "lahiri";
+        const Data d = one(pf, eph::kColAyanamsa);
+        CHECK(d.columns_present == eph::kColAyanamsa);
+        CHECK(d.n_cols == 7);
+        CHECK(d.cols[0] == want.pos.lon_deg);
+        CHECK(d.cols[6] == want.ayanamsa_deg.value());
+        // Tropical asks nothing and reports zero.
+        const Data trop = one(eph::Profile{}, eph::kColAyanamsa);
+        CHECK(trop.cols[6] == 0.0);
     }
-    SUBCASE("an unmapped bit fails the objects") {
-        const Data d = one(1u << 3);
-        CHECK(std::isnan(d.cols[0]));
-        CHECK(d.ret[0] == -1);
-        CHECK(d.serr[0] == "iflag bit 3 has no wire-map entry");
-    }
-    SUBCASE("planet-centred through the request's center") {
+    SUBCASE("a user zodiac anchors at the profile's epoch") {
         CalcOptions o;
-        o.center = Center::Body;
-        o.center_body = 10;
+        o.sidereal = SiderealMode::User;
+        o.sidereal_epoch_jtdb = 2435553.5;
+        o.sidereal_ayanamsa_deg = 23.0;
+        const Position want = engine(o).pos;
+        eph::Profile pf;
+        pf.zodiac = "user";
+        pf.anchorEpoch.jd1 = 2435553.5;
+        pf.anchorAyanamsaDeg = 23.0;
+        CHECK(one(pf).cols[0] == want.lon_deg);
+    }
+    SUBCASE("a zodiac this engine does not serve is refused") {
+        eph::Profile pf;
+        pf.zodiac = "raman";
         eph::Request req = base_request(jd, 1);
-        req.objs = {obj(905)};
-        req.center = 900; // the Sun, by its wire id
-        CHECK(s.on_message(request(req, 300), true));
-        const Data d = join(drain(s), 1, 1);
-        CHECK(d.ret[0] >= 0);
-        CHECK(d.cols[0] == engine(o).lon_deg);
-        // Center 0 with the flag bit is wire body 0, which this map lacks;
-        // a center together with an observer flag is a conflict.
-        req.center = 900;
-        req.iflag = 1u << 11;
-        CHECK(s.on_message(request(req, 301), true));
-        CHECK(join(drain(s), 1, 1).serr[0] == "more than one observer (helio, bary, topo, center)");
+        req.profiles[0] = pf;
+        req.objs = {body_obj(5)};
+        CHECK(s.on_message(request(req, 210), true));
+        const auto r = drain(s);
+        REQUIRE(r.size() == 1);
+        CHECK(error_of(r[0]).code == eph::kErrUnsupported);
+        // The anchor-epoch sidereal plane is not served either.
+        pf.zodiac = "lahiri";
+        pf.siderealPlane = eph::kSidPlaneAnchor;
+        eph::Request req2 = base_request(jd, 1);
+        req2.profiles[0] = pf;
+        req2.objs = {body_obj(5)};
+        CHECK(s.on_message(request(req2, 211), true));
+        CHECK(error_of(drain(s)[0]).code == eph::kErrUnsupported);
     }
-    SUBCASE("TT rows") {
-        CHECK(one(eph::kIflagTimeTT).cols[0] == engine(CalcOptions{}, true).lon_deg);
-    }
-    SUBCASE("unsupported combinations fail the objects") {
-        CHECK(one((1u << 11) | (1u << 13)).serr[0] ==
-              "more than one observer (helio, bary, topo, center)");
-        CHECK(one(eph::kIflagCenter).serr[0] == "center 0 has no wire-map entry");
+    SUBCASE("an observer equal to the object is a per-object error") {
+        eph::Profile pf;
+        pf.observer = eph::kObsBody;
+        pf.observerBody = 5;
+        const Data d = one(pf);
+        REQUIRE(d.meta.size() == 1);
+        CHECK(d.meta[0].rowsOk == 0);
+        CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
     }
 }
 
-TEST_CASE("server_limits") {
+TEST_CASE("server_time_and_columns") {
+    Fixture f;
+    Session& s = *f.session;
+    Engine check = synth::open_synthetic(f.tf);
+    f.welcome();
+    const double jd = 2451600.5;
+
+    SUBCASE("UT1 rows with the server's delta T") {
+        eph::Request req = base_request(jd, 2);
+        req.timeScale = eph::kTimeUT1;
+        req.objs = {body_obj(5)};
+        CHECK(s.on_message(request(req, 300), true));
+        const Data d = join(drain(s));
+        CalcOptions o;
+        o.sigma = false;
+        const auto want = check.calc_ut(5, jd, o);
+        REQUIRE(want.ok());
+        CHECK(d.cols[0] == want.value().pos.lon_deg);
+    }
+    SUBCASE("UT1 rows with the client's one delta T value") {
+        eph::Request req = base_request(jd, 2);
+        req.timeScale = eph::kTimeUT1;
+        req.deltaTSec = 70.0;
+        req.objs = {body_obj(5)};
+        CHECK(s.on_message(request(req, 301), true));
+        const Data d = join(drain(s));
+        struct Constant : time::DeltaTModel {
+            double delta_t_seconds(double) const override { return 70.0; }
+        } constant;
+        check.set_delta_t_model(&constant);
+        CalcOptions o;
+        o.sigma = false;
+        const auto want = check.calc_ut(5, jd, o);
+        check.set_delta_t_model(nullptr);
+        REQUIRE(want.ok());
+        CHECK(d.cols[0] == want.value().pos.lon_deg);
+    }
+    SUBCASE("TDB rows") {
+        eph::Request req = base_request(jd, 1);
+        req.timeScale = eph::kTimeTDB;
+        req.objs = {body_obj(5)};
+        CHECK(s.on_message(request(req, 302), true));
+        const Data d = join(drain(s));
+        CalcOptions o;
+        o.sigma = false;
+        const auto want = check.calc(5, time::tt_from_tdb(jd), o);
+        REQUIRE(want.ok());
+        CHECK(d.cols[0] == want.value().pos.lon_deg);
+    }
+    SUBCASE("a delta T table, and the delta T column") {
+        eph::Request req = base_request(jd, 2);
+        req.timeScale = eph::kTimeUT1;
+        std::vector<std::pair<eph::Time, double>> table;
+        eph::Time a, b;
+        a.jd1 = jd - 1.0;
+        b.jd1 = jd + 1.0;
+        table.push_back({a, 60.0});
+        table.push_back({b, 80.0});
+        eph::Tlv e;
+        eph::EncodeDeltaTTable(table, &e);
+        req.ext.push_back(std::move(e));
+        req.objs = {body_obj(5)};
+        // The columns come with the question, so a second profile-less ask:
+        req.profiles[0].columns = eph::kColDeltaT | eph::kColLightTime;
+        CHECK(s.on_message(request(req, 303), true));
+        const Data d = join(drain(s));
+        CHECK(d.columns_present == (eph::kColDeltaT | eph::kColLightTime));
+        CHECK(d.n_cols == 8);
+        // In A.10 bit order the light-time column (bit 2) comes before the
+        // delta T column (bit 3). Halfway between the table's instants at
+        // row 0 (jd): 70 s; a quarter further at row 1: 72.5 s.
+        CHECK(d.cols[7] == doctest::Approx(70.0).epsilon(1e-9));
+        CHECK(d.cols[8 + 7] == doctest::Approx(72.5).epsilon(1e-9)); // row 1: jd+0.25
+        // The light-time column is the tau the engine applied, with the
+        // table's delta T converting the UT1 row, so the check engine gets
+        // the same table.
+        struct DeltaTable : time::DeltaTModel {
+            // The table above by hand: 60 s at 2451599.5, 80 s at 2451601.5.
+            double delta_t_seconds(double jd) const override {
+                return 60.0 + 10.0 * (jd - 2451599.5);
+            }
+        } delta_table;
+        check.set_delta_t_model(&delta_table);
+        CalcOptions o;
+        o.sigma = false;
+        const auto want = check.calc_ut(5, jd, o);
+        check.set_delta_t_model(nullptr);
+        REQUIRE(want.ok());
+        CHECK(d.cols[6] == want.value().provenance.light_time_days);
+    }
+    SUBCASE("an instant list, and a backward grid") {
+        eph::Request list;
+        list.timeScale = eph::kTimeTT;
+        list.timeMode = eph::kTimeList;
+        list.profiles.emplace_back();
+        list.instants = {{2451600.5, 0.0}, {2451601.5, 0.0}, {2451600.0, 0.0}};
+        list.objs = {body_obj(5)};
+        CHECK(s.on_message(request(list, 304), true));
+        const Data d = join(drain(s));
+        REQUIRE(d.meta.size() == 1);
+        CHECK(d.meta[0].rowsOk == 3);
+        const auto p0 = check.calc(5, 2451600.5, CalcOptions{}).value().pos;
+        const auto p2 = check.calc(5, 2451600.0, CalcOptions{}).value().pos;
+        CHECK(d.cols[0] == p0.lon_deg);
+        CHECK(d.cols[2 * 6] == p2.lon_deg);
+
+        eph::Request back = base_request(2451601.0, 3, -1.0);
+        back.objs = {body_obj(5)};
+        CHECK(s.on_message(request(back, 305), true));
+        const Data b = join(drain(s));
+        CHECK(b.meta[0].rowsOk == 3);
+        CHECK(b.cols[0] == check.calc(5, 2451601.0, CalcOptions{}).value().pos.lon_deg);
+        CHECK(b.cols[6] == check.calc(5, 2451600.0, CalcOptions{}).value().pos.lon_deg);
+    }
+}
+
+TEST_CASE("server_limits_and_errors") {
     Fixture f;
     Session& s = *f.session;
     f.welcome();
 
     eph::Request big = base_request(2451545.0, 20000);
-    big.objs = {obj(900), obj(905), obj(900), obj(905), obj(900), obj(905)};
+    big.objs = {body_obj(10), body_obj(5), body_obj(10), body_obj(5), body_obj(10), body_obj(5)};
     CHECK(s.on_message(request(big, 1), true));
     auto r = drain(s);
     REQUIRE(r.size() == 1);
     CHECK(error_of(r[0]).code == eph::kErrLimits);
-    CHECK(error_of(r[0]).text == "REQUEST asks 120000 cells; WELCOME's bound is 100000");
 
     eph::Request over = base_request(2451545.0, 20001);
-    over.objs = {obj(900)};
+    over.objs = {body_obj(10)};
     CHECK(s.on_message(request(over, 2), true));
     CHECK(error_of(drain(s)[0]).code == eph::kErrLimits);
 
     // Answers not yet taken: the fifth is refused before it is computed.
     for (uint32_t i = 0; i < 5; ++i) {
         eph::Request req = base_request(2451545.0 + i, 1);
-        req.objs = {obj(900)};
+        req.objs = {body_obj(10)};
         CHECK(s.on_message(request(req, 10 + i), true));
     }
     CHECK(s.queued_answers() == 4);
     r = drain(s);
     REQUIRE(r.size() == 5);
-    CHECK(error_of(r[0]).requestId == 14); // control replies go first
+    CHECK(r[0].env.requestId == 14); // control replies go first
+    CHECK(error_of(r[0]).code == eph::kErrBusy);
+    CHECK((error_of(r[0]).flags & eph::kErrFlagRetryable) != 0);
+    CHECK(error_of(r[0]).retryAfterMs > 0);
     for (int i = 1; i < 5; ++i) {
         CHECK(r[i].env.type == eph::kMsgData);
         CHECK(r[i].env.requestId == uint32_t(9 + i));
     }
 
-    auto payload = std::vector<uint8_t>(3, 0);
-    CHECK(s.on_message(as_view(eph::makeMessage(eph::kMsgRequest, 30, payload.data(), 3)), true));
-    CHECK(error_of(drain(s)[0]).code == eph::kErrBad);
+    std::vector<uint8_t> junk(3, 0);
+    CHECK(s.on_message(as_view(message(eph::kMsgRequest, 30, junk.data(), 3)), true));
+    CHECK(error_of(drain(s)[0]).code == eph::kErrMalformed);
+
+    SUBCASE("a segments request is refused while segments are dark") {
+        eph::Request seg = base_request(2451545.0, 4);
+        seg.representation = 1;
+        seg.segTargetErrArcsec = 0.01f;
+        seg.objs = {body_obj(5)};
+        CHECK(s.on_message(request(seg, 40), true));
+        CHECK(error_of(drain(s)[0]).code == eph::kErrUnsupported);
+    }
+    SUBCASE("pins are honoured") {
+        eph::Request req = base_request(2451545.0, 1);
+        req.objs = {body_obj(10)};
+        eph::Tlv pin;
+        pin.tag = eph::kReqTagDatasetPin;
+        pin.value = std::string("\x0dsynthetic/x#0", 1 + 13);
+        req.ext.push_back(pin);
+        CHECK(s.on_message(request(req, 50), true));
+        CHECK(error_of(drain(s)[0]).code == eph::kErrSource);
+    }
 }
 
-TEST_CASE("server_cache_budget") {
-    ResultCache cache(1000);
-    auto answer = [](size_t n) {
-        auto a = std::make_shared<Answer>();
-        a->cols.assign(n, 0.0);
-        return a;
+TEST_CASE("server_lookup") {
+    Fixture f;
+    Session& s = *f.session;
+    f.welcome();
+    const auto lookup = [&](const eph::Lookup& l, uint32_t id) {
+        std::vector<uint8_t> payload;
+        eph::EncodeLookup(&payload, l);
+        CHECK(s.on_message(as_view(message(eph::kMsgLookup, id, payload.data(), payload.size())),
+                           true));
+        const auto r = drain(s);
+        REQUIRE(r.size() == 1);
+        if (r[0].env.type == eph::kMsgError) {
+            return eph::LookupResult{};
+        }
+        eph::LookupResult lr;
+        std::string why;
+        REQUIRE_MESSAGE(
+            eph::ParseLookupResult(r[0].payload.data(), r[0].payload.size(), &lr, &why) == eph::kOk,
+            why);
+        return lr;
     };
-    cache.put("a", answer(50)); // 400 + 2
-    cache.put("b", answer(50));
-    CHECK(cache.entries() == 2);
-    CHECK(cache.get("a") != nullptr); // a is now the most recent
-    cache.put("c", answer(50));       // evicts b
-    CHECK(cache.get("b") == nullptr);
-    CHECK(cache.get("a") != nullptr);
-    CHECK(cache.get("c") != nullptr);
-    CHECK(cache.used_bytes() == 804);
-    cache.put("huge", answer(200)); // larger than the budget: not kept
-    CHECK(cache.entries() == 2);
-    CHECK(cache.hits() == 3);
-    CHECK(cache.misses() == 1);
+
+    SUBCASE("a catalog body by name and by designation") {
+        eph::Lookup l;
+        l.queries = {"Ceres", "1"};
+        const eph::LookupResult lr = lookup(l, 1);
+        REQUIRE(lr.queries.size() == 2);
+        REQUIRE(lr.queries[0].size() == 1);
+        const eph::Match& m = lr.queries[0][0];
+        CHECK(m.obj.kind == eph::kObjBody);
+        CHECK(m.obj.naif == 20000001);
+        CHECK(m.canonicalName == "Ceres");
+        CHECK(m.quality == 0); // the canonical name, exactly
+        REQUIRE(lr.queries[1].size() == 1);
+        CHECK(lr.queries[1][0].quality == 1); // a designation, exactly
+        CHECK(lr.queries[1][0].designation == "1");
+        CHECK(lr.queries[1][0].canonicalName == "Ceres");
+    }
+    SUBCASE("stars when asked for, with prefixes; the budget truncates") {
+        eph::Lookup l;
+        l.maxMatches = 3;
+        l.flags = 1 | 4; // prefix, include stars
+        l.queries = {"ald", "Aldebaran"};
+        const eph::LookupResult lr = lookup(l, 2);
+        REQUIRE(lr.queries.size() == 2);
+        CHECK((lr.flags & 1) != 0); // the budget ran out inside the first query
+        CHECK(lr.queries[0].size() == 3);
+        for (const eph::Match& m : lr.queries[0]) {
+            CHECK(m.quality == 2);
+        }
+        CHECK(lr.queries[1].empty());
+        // Exact, the star is there and first.
+        eph::Lookup exact;
+        exact.flags = 4;
+        exact.queries = {"Aldebaran"};
+        const eph::LookupResult ex = lookup(exact, 3);
+        REQUIRE(ex.queries[0].size() >= 1);
+        CHECK(ex.queries[0][0].obj.kind == eph::kObjStar);
+        CHECK(ex.queries[0][0].quality == 0);
+    }
+    SUBCASE("without the stars flag, a star name finds nothing") {
+        eph::Lookup l;
+        l.queries = {"Sirius"};
+        const eph::LookupResult lr = lookup(l, 4);
+        REQUIRE(lr.queries.size() == 1);
+        CHECK(lr.queries[0].empty());
+    }
+}
+
+TEST_CASE("server_dataset_id") {
+    TempFile a{"dataset-a"}, b{"dataset-b"};
+    {
+        std::ofstream out(a.path);
+        out << "one";
+    }
+    {
+        std::ofstream out(b.path);
+        out << "two";
+    }
+    const Dataset d1 = make_dataset("engine", a.path.string(), {}, "");
+    const Dataset d2 = make_dataset("engine", a.path.string(), {}, "");
+    const Dataset d3 = make_dataset("engine", b.path.string(), {}, "");
+    const Dataset d4 = make_dataset("engine2", a.path.string(), {}, "");
+    CHECK(d1.id == d2.id);
+    CHECK(d1.id != d3.id); // the contents changed
+    CHECK(d1.id != d4.id); // the engine changed
+    CHECK(d1.id.find("engine/") == 0);
+    CHECK(d1.id.find('#') != std::string::npos);
+    CHECK(d1.id.size() - d1.id.find('#') == 9); // '#' + 8 hex
+    // Same bytes under another name: the same dataset. The readable prefix
+    // names the file; the digest after '#' is the identity.
+    TempFile c{"dataset-c"};
+    {
+        std::ofstream out(c.path);
+        out << "one";
+    }
+    const std::string c_id = make_dataset("engine", c.path.string(), {}, "").id;
+    CHECK(c_id.substr(c_id.find('#')) == d1.id.substr(d1.id.find('#')));
 }
 
 TEST_CASE("server_ephproto_matches_astrolog") {
@@ -645,7 +947,6 @@ TEST_CASE("server_limits_caps_and_budget") {
 
 TEST_CASE("server_tokens_and_rate_limit") {
     TempFile tf("server-limits");
-    WireMap map = WireMap::parse(kTestMap).value();
     LimitsConfig lc;
     lc.require_token = true;
     lc.cells_per_sec = 10;
@@ -653,13 +954,12 @@ TEST_CASE("server_tokens_and_rate_limit") {
     Limits limits(lc, {"secret"});
     ServerConfig config;
     config.max_cells = 20;
-    LoopContext ctx(synth::open_synthetic(tf), map, config, &limits);
+    config.engine = "test";
+    config.dataset_id = "test#00000000";
+    LoopContext ctx(synth::open_synthetic(tf), config, &limits);
 
     const auto hello_with = [](const char* token) {
-        uint8_t buf[eph::kHelloMaxSize];
-        uint32_t len = 0;
-        eph::buildHello(buf, 0, 1, "test", &len, token);
-        return as_view(eph::makeMessage(eph::kMsgHello, 1, buf, len));
+        return hello(eph::kProtoVersion, eph::kProtoMin, token);
     };
 
     SUBCASE("no token, unknown token: ERROR 7 and close") {
@@ -671,28 +971,53 @@ TEST_CASE("server_tokens_and_rate_limit") {
         auto e = error_of(drain(b)[0]);
         CHECK(e.code == eph::kErrToken);
         CHECK(e.text == "unknown token");
+        CHECK((e.flags & eph::kErrFlagClosing) != 0);
         CHECK(ctx.metrics().errors[eph::kErrToken] == 2);
     }
     SUBCASE("a known token has its own budget; over it, ERROR 6") {
-        Session s(ctx, "10.0.0.1");
-        CHECK(s.on_message(hello_with("secret"), true));
-        CHECK(drain(s)[0].env.type == eph::kMsgWelcome);
+        Session s2(ctx, "10.0.0.1");
+        CHECK(s2.on_message(hello_with("secret"), true));
+        CHECK(drain(s2)[0].env.type == eph::kMsgWelcome);
         eph::Request req = base_request(2451545.0, 20);
-        req.objs = {obj(900)};
-        CHECK(s.on_message(request(req, 1), true));
-        CHECK(drain(s).back().env.type == eph::kMsgData);
-        req.jdStart += 1.0;
-        CHECK(s.on_message(request(req, 2), true));
-        const auto r = drain(s);
+        req.objs = {body_obj(10)};
+        CHECK(s2.on_message(request(req, 1), true));
+        CHECK(drain(s2).back().env.type == eph::kMsgData);
+        req.start.jd1 += 1.0;
+        CHECK(s2.on_message(request(req, 2), true));
+        const auto r = drain(s2);
         REQUIRE(r.size() == 1);
         const auto e = error_of(r[0]);
         CHECK(e.code == eph::kErrRateLimited);
+        CHECK((e.flags & eph::kErrFlagRetryable) != 0);
+        CHECK(e.retryAfterMs >= 1000);
         CHECK(e.text.rfind("rate limited: 10 cells a second; ask again in ", 0) == 0);
         CHECK(ctx.metrics().hellos == 1);
         CHECK(ctx.metrics().requests == 1);
         CHECK(ctx.metrics().cache_misses == 1);
         CHECK(ctx.metrics().cells_computed == 20);
     }
+}
+
+TEST_CASE("server_cache_budget") {
+    ResultCache cache(1000);
+    auto answer = [](size_t n) {
+        auto a = std::make_shared<Answer>();
+        a->cols.assign(n, 0.0);
+        return a;
+    };
+    cache.put("a", answer(50)); // 400 + 2
+    cache.put("b", answer(50));
+    CHECK(cache.entries() == 2);
+    CHECK(cache.get("a") != nullptr); // a is now the most recent
+    cache.put("c", answer(50));       // evicts b
+    CHECK(cache.get("b") == nullptr);
+    CHECK(cache.get("a") != nullptr);
+    CHECK(cache.get("c") != nullptr);
+    CHECK(cache.used_bytes() == 804);
+    cache.put("huge", answer(200)); // larger than the budget: not kept
+    CHECK(cache.entries() == 2);
+    CHECK(cache.hits() == 3);
+    CHECK(cache.misses() == 1);
 }
 
 TEST_CASE("server_metrics_text") {
@@ -704,7 +1029,7 @@ TEST_CASE("server_metrics_text") {
     a.computed(40, 3.0);
     ServerInfo info;
     info.server_version = kServerVersion;
-    info.protocol = 3;
+    info.protocol = 4;
     const std::string text = metrics_text({&a, &b}, info);
     CHECK(text.find("prometheiad_hellos_total 3\n") != std::string::npos);
     CHECK(text.find("prometheiad_errors_total{code=\"2\"} 1\n") != std::string::npos);
@@ -714,95 +1039,6 @@ TEST_CASE("server_metrics_text") {
     CHECK(text.find("prometheiad_compute_seconds_count 1\n") != std::string::npos);
     CHECK(text.find("prometheiad_cells_computed_total 40\n") != std::string::npos);
     CHECK(text.find(
-              "prometheiad_build_info{server=\"prometheiad/0.1.0\",protocol=\"3\",tls=\"0\"} 1") !=
+              "prometheiad_build_info{server=\"prometheiad/0.2.0\",protocol=\"4\",tls=\"0\"} 1") !=
           std::string::npos);
-}
-
-TEST_CASE("server_objects_resolve_once_and_sample_the_same_body") {
-    TempFile tf{"objects"};
-    Engine engine = synth::open_synthetic(tf);
-    const WireMap map = WireMap::parse(kTestMap).value();
-
-    // The wire numbering is resolved away, and what comes back carries the
-    // name the answer's metadata reports.
-    auto sun = resolve_object(obj(900), map);
-    REQUIRE(sun.ok());
-    CHECK(sun.value().kind == ResolvedObject::Kind::Body);
-    CHECK(sun.value().naif_id == 10);
-    CHECK(sun.value().name == "Test Sun");
-
-    eph::ObjSpec star_spec;
-    star_spec.kind = eph::kObjStar;
-    std::strcpy(star_spec.name, "Sirius");
-    auto star = resolve_object(star_spec, map);
-    REQUIRE(star.ok());
-    CHECK(star.value().kind == ResolvedObject::Kind::Star);
-    CHECK(star.value().name == "Sirius");
-
-    eph::ObjSpec node_spec = obj(905);
-    node_spec.kind = eph::kObjNodAps;
-    node_spec.point = eph::kPntNorthNode;
-    node_spec.method = eph::kNodOscu;
-    auto node = resolve_object(node_spec, map);
-    REQUIRE(node.ok());
-    CHECK(node.value().kind == ResolvedObject::Kind::OrbitPoint);
-    CHECK(node.value().naif_id == 5);
-    CHECK(node.value().name == "SPK-ID 5 asc. node");
-
-    // A refusal names no instant, because it is the same for every row.
-    auto missing = resolve_object(obj(123), map);
-    REQUIRE(!missing.ok());
-    CHECK(missing.error().message == "body 123 has no wire-map entry");
-
-    // The sampler is not a second path to the body: it is the row path, in
-    // rectangular form, so the two agree to the bit.
-    const ResolvedObject jupiter = resolve_object(obj(905), map).value();
-    CalcOptions opts;
-    const segments::Sampler sampler = sampler_for(engine, jupiter, opts);
-    for (int i = 0; i < 5; ++i) {
-        const double jd = synth::kJ2000 + i * 3.0;
-        double p[3] = {0, 0, 0}, v[3] = {0, 0, 0};
-        REQUIRE(sampler(jd, p, v).ok());
-        auto row = calc_at(engine, jupiter, jd, true, opts);
-        REQUIRE(row.ok());
-        for (int k = 0; k < 3; ++k) {
-            CHECK(p[k] == row.value().pos.xyz_au[k]);
-            CHECK(v[k] == row.value().pos.vel_au_day[k]);
-        }
-    }
-
-    // And it is what the fitter wants: a lattice cell's worth of it holds to
-    // the residual the fit declares.
-    segments::FitOptions fit_options;
-    fit_options.target_err_arcsec = 0.01;
-    auto report = segments::fit(sampler, synth::kJ2000, synth::kJ2000 + 32.0, fit_options);
-    REQUIRE_MESSAGE(report.ok(), report.error().message);
-    CHECK(report.value().met_target);
-    double worst = 0.0;
-    for (int i = 0; i <= 64; ++i) {
-        const double jd = synth::kJ2000 + i * 0.5;
-        const segments::Segment* seg = nullptr;
-        for (const segments::Segment& s : report.value().segments) {
-            if (jd <= s.mid_jd_tt + s.half_span_days + 1e-9) {
-                seg = &s;
-                break;
-            }
-        }
-        REQUIRE(seg != nullptr);
-        double got[3];
-        seg->position(jd, got);
-        auto want = calc_at(engine, jupiter, jd, true, opts);
-        REQUIRE(want.ok());
-        const double* w = want.value().pos.xyz_au;
-        const double dot = got[0] * w[0] + got[1] * w[1] + got[2] * w[2];
-        const double cx[3] = {got[1] * w[2] - got[2] * w[1], got[2] * w[0] - got[0] * w[2],
-                              got[0] * w[1] - got[1] * w[0]};
-        const double cross = std::sqrt(cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]);
-        worst = std::max(worst, std::atan2(cross, dot) * 180.0 / 3.14159265358979323846 * 3600.0);
-    }
-    CHECK(worst <= fit_options.target_err_arcsec);
-    // The declared residual bounds an outsider's measurement, to the same
-    // slack test_segments allows: the check set is finite, and an instant
-    // between two of its points can sit a hair above what they saw.
-    CHECK(worst <= report.value().worst_err_arcsec * 1.05 + 1e-9);
 }

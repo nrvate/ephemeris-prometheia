@@ -18,7 +18,7 @@ namespace prometheia::server {
 inline constexpr double kComputeBucketsMs[] = {1, 5, 10, 50, 100, 250, 500, 1000, 5000};
 inline constexpr int kComputeBuckets =
     int(sizeof(kComputeBucketsMs) / sizeof(kComputeBucketsMs[0]));
-inline constexpr int kErrorCodes = 9; // index 0 (other) and protocol codes 1-8
+inline constexpr int kErrorCodes = 13; // index 0 (other) and protocol codes 1-12
 
 struct Metrics {
     using Counter = std::atomic<uint64_t>;

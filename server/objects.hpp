@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// What one object of a request resolves to, and the two ways the server asks
-// the engine about it: one instant at a time, for the rows of a DATA answer,
-// or as a sampler, for a segment fit.
+// What one object of a request resolves to, and the ways the server asks the
+// engine about it: one instant at a time, for the rows of a DATA answer, or
+// as a sampler, for a segment fit.
 //
-// This is deliberately a step short of the protocol. A request's fields
-// resolve to CalcOptions once (see the Plan in session.cpp); each object
-// resolves to a ResolvedObject; everything after that is the engine's
-// business. The segment cache needs the second half of that path without the
-// first, which is why it lives here rather than inside the compute loop.
+// This is deliberately a step short of the protocol. A request's profiles
+// resolve to CalcOptions once (in session.cpp); each object resolves to a
+// ResolvedObject; everything after that is the engine's business. The
+// segment fitter needs the second half of that path without the first, which
+// is why it lives here rather than inside the compute loop.
 #ifndef PROMETHEIA_SERVER_OBJECTS_HPP
 #define PROMETHEIA_SERVER_OBJECTS_HPP
 
@@ -17,11 +17,12 @@
 #include "ephproto.h"
 #include "prometheia/engine.hpp"
 #include "prometheia/segments.hpp"
-#include "wire_map.hpp"
 
 namespace prometheia::server {
 
-// An object spec with its wire numbering already resolved away.
+// An object spec with its wire form resolved away. v4 names bodies by their
+// NAIF/SPK-IDs, so there is no map: the ephemeris and catalogs answer the
+// IDs directly.
 struct ResolvedObject {
     enum class Kind { Body, Star, OrbitPoint };
 
@@ -30,17 +31,20 @@ struct ResolvedObject {
     size_t star_index = 0;                        // Star: its place in the catalog
     OrbitPoint point = OrbitPoint::AscendingNode; // OrbitPoint only
     OrbitElements elements = OrbitElements::Osculating;
-    std::string name; // what the answer's metadata calls it
+    std::string name;         // what the answer's metadata calls it
+    bool is_sun = false;      // the object is the Sun itself (no deflection of its own light)
+    bool no_parallax = false; // Star: no parallax in the catalog, so no distance
 };
 
-// Resolves one spec through the wire map and the star catalog. The error's
-// message is what the object's metadata reports as its reason; no instant is
-// named in it, so it is the same for every row.
-Result<ResolvedObject> resolve_object(const eph::ObjSpec& spec, const WireMap& map);
+// Resolves one object spec against the engine's ephemeris and catalogs and
+// the compiled-in star catalog. The error's message is what the object's
+// metadata reports as its reason; no instant is named in it, so it is the
+// same for every row.
+Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine);
 
-// One instant. `jd_is_tt` picks the TT or UT entry point, which is the only
-// thing the caller still has to remember.
-Result<CalcResult> calc_at(Engine& engine, const ResolvedObject& obj, double jd, bool jd_is_tt,
+// One instant, in the request's time scale (0 UT1, 1 TT, 2 TDB; the server
+// has already installed the request's delta T model on the engine).
+Result<CalcResult> calc_at(Engine& engine, const ResolvedObject& obj, double jd, int time_scale,
                            const CalcOptions& opts);
 
 // The same object as a sampler for segments::fit: rectangular coordinates in

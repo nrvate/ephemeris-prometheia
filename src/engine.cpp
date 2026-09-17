@@ -1013,21 +1013,41 @@ struct Engine::Impl {
 
     // Newest-catalog-wins record lookup for a body the planetary
     // ephemeris does not carry. Engaged only after it returned NotFound.
-    Result<std::optional<catalog::Record>> find_record(int id) {
-        if (auto hit = record_cache.find(uint64_t(id)); hit != record_cache.end())
-            return std::optional<catalog::Record>(hit->second);
-        for (auto it = catalogs.rbegin(); it != catalogs.rend(); ++it) {
-            auto rr = (*it)->lookup(uint64_t(id));
+    // The pair's second is the catalog the record came from (its name pool
+    // goes with it).
+    Result<std::optional<std::pair<catalog::Record, size_t>>> find_record_at(int id) {
+        if (auto hit = record_cache.find(uint64_t(id)); hit != record_cache.end()) {
+            // Which catalog carried it is not cached; names() is not a hot
+            // path, so find it again. Newest wins, as everywhere here.
+            for (size_t i = catalogs.size(); i-- > 0;) {
+                if (auto rr = catalogs[i]->lookup(uint64_t(id)); rr.ok())
+                    return std::optional<std::pair<catalog::Record, size_t>>({rr.value(), i});
+            }
+            return std::optional<std::pair<catalog::Record, size_t>>({hit->second, 0});
+        }
+        for (size_t i = catalogs.size(); i-- > 0;) {
+            auto rr = catalogs[i]->lookup(uint64_t(id));
             if (rr.ok()) {
                 if (record_cache.size() >= kRecordCacheMax)
                     record_cache.clear();
                 record_cache[uint64_t(id)] = rr.value();
-                return std::optional<catalog::Record>(rr.value());
+                return std::optional<std::pair<catalog::Record, size_t>>({rr.value(), i});
             }
             if (rr.error().code != ErrorCode::NotFound)
                 return rr.error();
         }
-        return std::optional<catalog::Record>();
+        return std::optional<std::pair<catalog::Record, size_t>>();
+    }
+
+    Result<std::optional<catalog::Record>> find_record(int id) {
+        auto r = find_record_at(id);
+        if (!r.ok()) {
+            return r.error();
+        }
+        if (!r.value()) {
+            return std::optional<catalog::Record>();
+        }
+        return std::optional<catalog::Record>(r.value()->first);
     }
 
     Result<void> small_body_state(int id, double jd_tdb, double out[6]) {
@@ -1373,11 +1393,12 @@ struct Engine::Impl {
             }
         }
 
-        const bool observer_is_sun_or_bary =
-            o.center == Center::Heliocentric || o.center == Center::Barycentric ||
-            (o.center == Center::Body &&
-             (o.center_body == body::kSun || o.center_body == body::kSolarSystemBary));
-        if (o.deflection && !observer_is_sun_or_bary && id != body::kSun) {
+        // Deflection is honoured for every observer that is not the Sun
+        // itself (3.5a): the barycentre sits ~0.005 AU from the Sun's
+        // centre, close enough to deflect, and it is applied there.
+        const bool observer_is_sun = o.center == Center::Heliocentric ||
+                                     (o.center == Center::Body && o.center_body == body::kSun);
+        if (o.deflection && !observer_is_sun && id != body::kSun) {
             double sun[6];
             r = sun_at(jd_tdb, sun);
             if (!r)
@@ -1640,11 +1661,12 @@ struct Engine::Impl {
         // frame those are in. The observer-velocity term is the large one --
         // 21 arcsec on Jupiter's node -- and light time above is worth
         // 0.005 arcsec there; see docs/ORBIT-POINTS.md.
-        const bool observer_is_sun_or_bary =
-            o.center == Center::Heliocentric || o.center == Center::Barycentric ||
-            (o.center == Center::Body &&
-             (o.center_body == body::kSun || o.center_body == body::kSolarSystemBary));
-        if (o.deflection && !observer_is_sun_or_bary && id != body::kSun) {
+        // Deflection is honoured for every observer that is not the Sun
+        // itself (3.5a): the barycentre sits ~0.005 AU from the Sun's
+        // centre, close enough to deflect, and it is applied there.
+        const bool observer_is_sun = o.center == Center::Heliocentric ||
+                                     (o.center == Center::Body && o.center_body == body::kSun);
+        if (o.deflection && !observer_is_sun && id != body::kSun) {
             double sun[6];
             r = sun_at(time::tdb_from_tt(jd_tt - tau), sun);
             if (!r)
@@ -1689,11 +1711,12 @@ struct Engine::Impl {
             pos[i] = (dist_au * u[i] + v * dt) * kAuKm;
         }
         double p[3] = {pos[0] - obs[0], pos[1] - obs[1], pos[2] - obs[2]};
-        const bool observer_is_sun_or_bary =
-            o.center == Center::Heliocentric || o.center == Center::Barycentric ||
-            (o.center == Center::Body &&
-             (o.center_body == body::kSun || o.center_body == body::kSolarSystemBary));
-        if (o.deflection && !observer_is_sun_or_bary) {
+        // Deflection is honoured for every observer that is not the Sun
+        // itself (3.5a): the barycentre sits ~0.005 AU from the Sun's
+        // centre, close enough to deflect, and it is applied there.
+        const bool observer_is_sun = o.center == Center::Heliocentric ||
+                                     (o.center == Center::Body && o.center_body == body::kSun);
+        if (o.deflection && !observer_is_sun) {
             double sun[6];
             r = sun_at(jd_tdb, sun);
             if (!r)
@@ -2028,6 +2051,23 @@ Result<int> Engine::lookup(std::string_view name) const {
             return int(best);
     }
     return make_error(ErrorCode::NotFound, "no loaded catalog answers '" + key + "'");
+}
+
+Result<Engine::BodyNames> Engine::names(int spkid) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    auto r = impl_->find_record_at(spkid);
+    if (!r.ok())
+        return r.error();
+    if (!r.value())
+        return make_error(ErrorCode::NotFound,
+                          "no loaded catalog carries body " + std::to_string(spkid));
+    const auto [rec, catalog_i] = r.value().value();
+    const catalog::Names n = catalog::record_names(impl_->catalogs[catalog_i]->name_pool(), rec);
+    BodyNames out;
+    out.designation = n.pdes;
+    out.name = n.name;
+    return out;
 }
 
 Result<CalcResult> Engine::calc_ut(int id, double jd_ut1, const CalcOptions& o) {

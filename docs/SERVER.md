@@ -1,14 +1,19 @@
 # prometheiad
 
 `prometheiad` serves the engine to Astrolog. It speaks **Astrolog's ephemeris
-protocol (version 3)** over WebSocket, so Astrolog's ephemeris client can
+protocol (version 4)** over WebSocket, so Astrolog's ephemeris client can
 point at it the way it points at Astrolog's own server (`astrolog-ephd`).
 
-- **Protocol.** Astrolog owns it. Its byte-level authority is
-  `ephsrv/ephproto.h` in the Astrolog tree. This repository keeps a pinned,
-  unmodified copy in `third_party/ephproto/`. When an Astrolog checkout is
-  named by `$PROMETHEIA_ASTROLOG`, the test `server_ephproto_matches_astrolog`
-  fails if the copy has drifted from Astrolog's.
+- **Protocol.** Astrolog owns it; §3 of its `EPHEMERIS_PLUGINS_PLAN.md` is
+  the normative spec, locked from both sides (below). The byte-level
+  authority is `ephsrv/ephproto.h` in the Astrolog tree; this repository
+  keeps a pinned, unmodified copy with its generated registries in
+  `third_party/ephproto/v4/`. When an Astrolog checkout is named by
+  `$PROMETHEIA_ASTROLOG`, the test `server_ephproto_matches_astrolog` fails
+  if the copy has drifted, `tests/test_ephproto4.cpp` runs the locked
+  conformance fixtures through the vendored codec (91/91, digest-pinned),
+  and `tools/check/ephproto4_registries.py` (in `tools/gate.sh`) checks the
+  registries against the header by name.
 - **Transport.** Binary WebSocket frames, one protocol message per frame. The
   default port is 47190 (`eph::kDefaultPort`).
 
@@ -17,7 +22,7 @@ point at it the way it points at Astrolog's own server (`astrolog-ephd`).
 ```sh
 prometheiad --ephemeris ephe/linux_p1550p2650.440 \
             --catalog sbdb.epm --perturbers ephe/sb441-n16-de440span.bsp \
-            --wire-map astrolog.wiremap --port 47190
+            --port 47190
 ```
 
 - **Options.** `prometheiad --help` lists them all.
@@ -28,10 +33,17 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
   - `--cache-mb N`: the result cache per loop.
   - `--verbose`: log each connection.
   - Limits, tokens, TLS and draining: see Operations below.
-- **Reference client.** `prometheia-wire-client --port 47190 --obj 0 --jd
+- **Dataset identity.** At startup the daemon digests every data file's
+  contents and prints the dataset id it will serve
+  (`<engine>/<ephemeris>/<catalogs>#<8 hex>`). The id changes whenever any
+  answer could change; clients key their caches on it and may pin it.
+- **Reference client.** `prometheia-wire-client --port 47190 --obj 599 --jd
   2461300.5 --count 3` sends HELLO and one REQUEST, and prints each object's
-  metadata and one line per row. `--token`, `--tls`, `--ca`, `--sni` and
-  `--insecure` cover the options below; `--help` lists the rest.
+  metadata and one line per row. `--obj` takes a NAIF/SPK-ID, `--name` a
+  catalog designation, `--star` a star, `--node N.M` an orbit point;
+  `--helio/--bary/--eq/--j2000/--icrs/--sid/--topo` shape the profile.
+  `--token`, `--tls`, `--ca`, `--sni` and `--insecure` cover the options
+  below; `--help` lists the rest.
 
 ## Operations
 
@@ -46,7 +58,7 @@ behaves the same with either.
   `--hello-seconds N` (default 10; 0 = never) is closed (1008).
 - **Tokens.** `--tokens FILE` lists accepted tokens, one a line (`#` lines
   and blank lines skipped; at most 128 bytes each). The token is HELLO's
-  version-3 field. With `--require-token`, a HELLO without a known token gets
+  HELLO field. With `--require-token`, a HELLO without a known token gets
   ERROR 7 and the connection closes. The log counts tokens and never prints
   them.
 - **Compute budget.** Each peer address, or each known token, has a bucket of
@@ -93,97 +105,90 @@ them and stay GPL-2.0-or-later.
 
 ## The protocol in brief
 
+Version 4 is a clean break from version 3 (`kProtoMin` 4): bodies are named
+by NAIF/SPK-ID, options are typed profile fields, zodiacs are tokens, and
+there is no wire map. The full spec is Astrolog's §3; the shape:
+
 - **Envelope.** Every message starts with a 16-byte little-endian envelope:
   magic `0x1EF0`, the message's version, flags, type, request id and payload
-  length.
-- **HELLO / WELCOME.**
-  - The client's first message is HELLO. The server answers WELCOME in the
-    lower of the two ends' highest versions (2 or 3), and every later message
-    is written in that version.
-  - A client below version 2 gets ERROR 8 in its own version, and the
-    connection closes.
-  - WELCOME advertises the limits: 64 objects, 20,000 rows, 500 rows per
-    chunk, 4 MiB payloads, and the cell bound (objects × rows, default
-    100,000).
-- **REQUEST.**
-  - A request carries up to 64 objects: a body by id, a fixed star by name,
-    or a node/apsis.
-  - The request-wide fields follow: center, a 64-bit `iflag`, the sidereal
-    triple, the topocentric site, a start instant, a step in seconds, a row
-    count, the precision (f64 or f32) and a chunk-size hint.
-  - Row *r* is at `jdStart + r·stepSeconds/86400`: UT, or TT when `iflag`
-    bit 32 is set.
-- **DATA.**
-  - The answer comes back in chunks of contiguous rows.
-  - Each chunk carries every object's 128-byte metadata (return flag, error
-    text, name), then the values: object-major, six per row.
-  - A failed row is six NaNs. An object whose rows all failed has return
-    flag −1.
-- **ERROR.** Whole-request failures only: 1 malformed, 2 over a limit,
-  3 unknown message type, 4 internal, 8 version too old.
-- **PING / PONG.** An application-level heartbeat.
+  length. Version 4 only; a version-3 client gets the legacy ERROR 8
+  refusal in its own layout.
+- **HELLO / WELCOME.** The session version is `min(client.protoMax, 4)`,
+  fixed by the first HELLO. WELCOME advertises the limits (64 objects,
+  20,000 rows, 500 rows per chunk, 16 profiles, 4 MiB payloads, the cell
+  bound), the caps bits (f32, instant lists, lookup, deep sky), the
+  capability TLVs (kinds, observers, planes/forms/frames, per-observer
+  correction masks, orbit points and methods, extra columns, the zodiacs
+  this engine serves, sidereal planes, time scales, the delta T model, the
+  lookup budget, the deep-sky catalogues) and the dataset id.
+- **REQUEST.** A 16-byte delivery block (precision, priority,
+  representation, degree hint, chunk hint, segment target, deadline — all
+  advisory, all outside the cache key) then the question block: time scale
+  and grid or instant list, the delta T (a table TLV, one value, or the
+  canonical NaN for the server's model), up to 16 profiles and up to 64
+  objects, each naming its profile. Objects: bodies by NAIF id, orbit
+  points (node/apsis, mean or osculating), fixed stars by name,
+  hypotheticals and polynomial elements (not served here: per-object
+  error 2), designations (resolved exactly, as a LOOKUP).
+- **DATA.** The answer comes back in chunks of contiguous rows; chunk 0
+  carries the source table and per-object META (rows computed, error code
+  and text, source, flags, `corrApplied`, resolved NAIF id, first failed
+  row, name). Values are object-major, 6 plus the extra columns asked
+  (sigma, ayanamsa, light time, delta T, in bit order). A failed row is all
+  NaN; an object whose rows all failed says so without failing the request.
+- **LOOKUP / LOOKUP_RESULT.** Batched name search with one budget for the
+  whole message: catalog designations exactly, stars by name (prefix when
+  asked), matches ordered by quality, `truncated` when the budget runs out.
+- **ERROR.** 1 malformed, 2 over a limit, 3 unknown type, 4 internal,
+  5 pin not served, 6 rate limited (retryable, with a delay), 7 token,
+  8 version, 9 busy (retryable), 10 cancelled, 11 unsupported,
+  12 draining.
+- **PING / PONG.** An application-level heartbeat, requestId 0.
 
-## The wire map
+## What this server answers
 
-The protocol names bodies, flag bits and sidereal modes by the Swiss
-Ephemeris numbering. This repository is a cleanroom and holds none of those
-numbers: they come from the interface table in Astrolog's protocol
-specification, written into a **wire-map file** that the server loads at
-startup. A number without an entry means nothing here, and the objects that
-use it fail on their own (NaN rows, return flag −1, the reason in the error
-text) while the rest of the request answers.
+The wire map is gone with version 3: bodies are NAIF/SPK-IDs the ephemeris
+and catalogs answer directly, zodiacs are tokens this engine implements
+(`fagan-bradley`, `lahiri`, `user`), and the observers, planes, forms,
+frames and corrections are typed profile fields. What the cleanroom server
+does with them:
 
-One entry per line, whitespace-separated, `#` starts a comment:
-
-| entry | meaning |
-|---|---|
-| `body <wire-id> <naif-id> [name]` | a body the engine knows by NAIF id; the name goes into the DATA metadata |
-| `asteroids <wire-base>` | wire id *base + N* is numbered asteroid *N* (SBDB SPK-ID 20000000 + *N*) |
-| `flag <bit> <meaning>` | bit 0–31 of `iflag` |
-| `sidereal <wire-mode> <zodiac>` | `fagan-bradley`, `lahiri` or `user` |
-
-Flag meanings, applied to the engine's apparent-place defaults (geocentric,
-light time, deflection, aberration, true equator/ecliptic of date, ecliptic
-coordinates):
-
-| meaning | effect |
-|---|---|
-| `speed`, `ignore` | none (rates are always computed and sent) |
-| `heliocentric`, `barycentric`, `topocentric` | the observer; topocentric uses the request's site (degrees east, degrees, metres). More than one fails the objects |
-| `equatorial` | right ascension and declination |
-| `j2000`, `icrs` | mean equator and equinox of J2000; ICRF axes (wins over `j2000`) |
-| `no-nutation` | mean equinox of date |
-| `true-position` | no light time |
-| `no-aberration`, `no-deflection` | switch that correction off |
-| `astrometric` | both of the above off |
-| `sidereal` | the zodiac `sidereal` maps the request's mode to; `user` takes the anchor epoch (TT JD) and its mean ayanamsha (degrees) from the request |
-| `xyz` | rectangular position (AU) and velocity (AU/day) instead of angles |
-| `radians` | angles and angular rates in radians |
-
-Always answered per object, never as an ERROR:
-
-- **Planet-centred positions:** a nonzero request `center`, or center 0
-  with `iflag` bit 33, names the observing body by its wire body id,
-  resolved through the wire map like any object. A center without an
-  entry, or a center together with an observer flag, fails the objects.
-- **Nodes and apsides** (object kind 2): point 1–4 is the ascending node,
-  descending node, perihelion or aphelion, and method 1 osculating or 0 mean.
-  The body is a wire body id. The engine's `calc_orbit_point` answers it
-  (docs/ENGINE.md, "Nodes and apsides"), in the request's observer, frame,
-  flags and zodiac. The metadata name is the body's with " asc. node",
-  " desc. node", " perihelion" or " aphelion" appended.
-- **Fixed stars** (object kind 1): the name is looked up in the compiled-in
-  star catalog. Any IAU or traditional name, Bayer, Flamsteed, HR, HD, HIP
-  or Messier designation works (docs/STARS.md). The metadata name is the
-  catalog's display name.
-- **Unsupported for now:** any bit or mode without a wire-map entry, and
-  bodies neither the ephemeris nor a loaded catalog has.
-- **Return flag:** the request's low 32 bits of `iflag` for an object with at
-  least one computed row.
-- **WELCOME:** reports Swiss Ephemeris version 0.
-
-The wire map for Astrolog is not in this repository yet: its numbers must
-come from Astrolog's specification, written outside this cleanroom.
+- **Profiles** resolve to the engine's `CalcOptions` once per request
+  (session.cpp). Every object names its profile, so one request can mix a
+  geocentric apparent chart with a heliocentric rectangular one. A profile
+  this engine cannot serve (a zodiac it does not implement, a sidereal
+  plane other than the ecliptic of date) refuses the whole REQUEST with
+  ERROR 11; a body the data does not carry fails alone.
+- **Times.** Rows are in the request's time scale (UT1, TT, TDB). The
+  delta T comes from the request's table TLV (piecewise linear, TT
+  instants), its one value, or — the canonical NaN — the engine's observed
+  USNO model, which WELCOME names. The delta T column reports the value
+  used.
+- **corrApplied** reports structural availability per object, never the
+  request's mask (below). Our table: bodies and orbit points carry light
+  time and aberration always; deflection everywhere except an observer at
+  the Sun (this engine cannot bend the Sun's own light, and a barycentric
+  observer is 0.005 AU from the Sun, so it is deflected); stars carry
+  deflection and aberration but no light time (catalog positions are
+  directions of arrival).
+- **Orbit points** (kind 1) answer by the engine's `calc_orbit_point`
+  (docs/ENGINE.md), points 0-3 by methods mean and osculating. The Sun and
+  the barycentre have no orbit (per-object error 2); an undefined point
+  (a node of an orbit in the ecliptic, an apsis of a circle) is error 5.
+- **Fixed stars** (kind 2) resolve through the compiled-in catalog; an
+  ambiguous name ("Beta Sco") is a per-object error 6 rather than a silent
+  choice. A star without a parallax answers distance 0 with the
+  `noDistance` flag. Deep-sky designations resolve for the Messier
+  catalogue, which the caps name.
+- **Designations** (kind 5) resolve exactly as a LOOKUP of quality 0 or 1
+  through the catalogs' name index; no match is per-object error 1.
+- **Speeds** off (profile `speeds` 0): the three rate columns are zero and
+  META carries `noSpeeds`.
+- **Pins.** REQUEST TLVs 0x8001-0x8003 name the ephemeris, catalog or
+  dataset the answer must come from; anything else is ERROR 5.
+- **Segments** (representation 1), CANCEL and priority ordering are not
+  served yet and not advertised; a segments REQUEST gets ERROR 11 until
+  they land.
 
 ## Server internals
 
@@ -239,21 +244,36 @@ The whole suite takes about 0.7 s.
     (ERROR 7) and each REQUEST is charged to its budget (ERROR 6).
 - **`LoopContext`**, one per event-loop thread, owns that thread's `Engine`
   and a least-recently-used **result cache** (64 MiB by default). The cache
-  key is the REQUEST payload minus its two delivery-only fields (precision
-  and chunk size): the same question asked for f32 in large chunks is a hit
+  key is the dataset id plus the question block's bytes, exactly as
+  received: the delivery block (precision, chunking, deadline, priority) is
+  outside it, so the same question asked for f32 in small chunks is a hit
   on the f64 answer.
 - **Answers** are pure functions of the request and the files loaded at
-  startup, so failures are cached with the rest.
+  startup, so failures are cached with the rest. `server/dataset.{hpp,cpp}`
+  digests those files into the dataset id (contents, not names: same bytes,
+  same dataset).
 
 `tests/test_server.cpp` drives `Session` directly on the synthetic linear
-kernel (wire-map numbers invented for the test), in about 10 ms. It covers:
+kernel plus the committed sample catalog, in about 10 ms. It covers:
 
-- negotiation and version refusal;
-- malformed frames and limits;
-- chunking and f32;
-- bit-exact values against `Engine::calc`/`calc_ut`;
-- each flag meaning;
-- per-object failure and cache hits.
+- the handshake: WELCOME's bounds and capability TLVs, the session version,
+  the legacy refusal of a version-3 envelope, malformed frames;
+- the answer: chunking, f32, bit-exact values against `Engine::calc`,
+  `calc_ut`, `calc_star` and `calc_orbit_point`, per-object failure
+  (unknown body, partial coverage with the reason naming no instant), the
+  designation kind, cache hits across deliveries;
+- every profile field: observers and sites, planes, forms, frames,
+  corrections, speeds off, the zodiacs served and refused, the user
+  anchor, the observer-equals-object error;
+- the times: UT1/TT/TDB, the one-value and table delta T (bit-exact
+  against the same model installed on the check engine), instant lists,
+  backward grids, the delta T and light-time columns;
+- LOOKUP: catalog bodies by name and designation, stars with prefixes,
+  the budget and `truncated`;
+- limits and errors: objects/rows/cells/profiles over the bounds, busy,
+  rate limited, the pins, segments refused while dark;
+- the corrApplied table (above) as unit checks, and the dataset id's
+  determinism.
 
 ## Throughput
 
@@ -276,13 +296,13 @@ same host:
 - **Caching:** a new connection may land on another loop, which has its own
   cache.
 
-## Protocol version 4 (agreed with Astrolog; §3 locked from both sides; not yet implemented here)
+## Protocol version 4 (agreed with Astrolog; §3 locked; **served here**)
 
-Astrolog is replacing version 3 with **version 4** on its `ephv4` branch: the
-spec and conformance fixtures are `EPHEMERIS_PLUGINS_PLAN.md` and
+Astrolog replaced version 3 with **version 4** on its `ephv4` branch: the
+spec and conformance fixtures are `EPHEMERIS_PLUGINS_PLAN.md` §3 and
 `ephsrv/conformance/` there. Version 4 names bodies by NAIF/SPK-ID, so the
-wire map goes away. Prometheia reviewed the draft and the two sides agreed
-these semantics (they are what prometheiad must implement):
+wire map went away with the migration. Prometheia reviewed the draft and the
+two sides agreed these semantics:
 
 - **Requests** carry profiles, so one request can mix observers and options;
   instants come as a grid or a list; LOOKUP, CANCEL and segments are new.
@@ -426,9 +446,10 @@ under it knows nothing about the lattice (docs/SEGMENTS.md).
 
 An object's metadata carries `corrApplied`: the corrections this server's
 engine actually applied to that object, as opposed to the ones the request
-asked for. Agreed with the Astrolog project for version 4 and not yet
-implemented here; the byte sits after `metaFlags` in the per-object metadata,
+asked for. The byte sits after `metaFlags` in the per-object metadata,
 three bits used and five reserved, and a client must ignore the high ones.
+This server sends the structural table, pinned by unit checks in
+`tests/test_server.cpp`.
 
 It reports **structural** availability — the corrections the engine is able to
 apply for this kind of object and this observer. A bit is clear when the
@@ -465,6 +486,11 @@ across servers.
 ## Not implemented
 
 - **zstd payloads.** Reserved in the envelope, advertised by no one.
-- **Extra columns** (sigma, ayanamsha). The plan is a negotiated extension,
-  which has to go into Astrolog's specification first.
-- **The wire map for Astrolog** (above) — dropped entirely in version 4.
+- **Segments (SEGDATA), CANCEL and priority** — migration steps 6 and 7
+  above; dark in WELCOME until they land.
+- **Hypothetical bodies and polynomial elements** (kinds 3 and 4): not
+  served, not advertised (per-object error 2). The engine has no models
+  for them; a client that needs a body from particular elements will find
+  them in a later version of this server.
+- **TDB's own timescale machinery**: TDB instants convert to TT through the
+  Fairhead-Bretagnon series (a few ns against its own ~10 us; TIME.md).

@@ -24,7 +24,6 @@
 #include "prometheia/engine.hpp"
 #include "prometheia/error.hpp"
 #include "session.hpp"
-#include "wire_map.hpp"
 
 namespace prometheia::server {
 
@@ -48,7 +47,7 @@ public:
     // Opens one Engine per thread; called on that thread.
     using EngineFactory = std::function<Result<Engine>()>;
 
-    WsServer(WsOptions options, WireMap map, EngineFactory make_engine);
+    WsServer(WsOptions options, EngineFactory make_engine);
     ~WsServer(); // stops and joins
 
     // Starts the loops; returns once every loop listens, or the first error.

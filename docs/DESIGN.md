@@ -304,12 +304,13 @@ tool and script in this repo, and for anyone running them:
     selectable (`ObservedDeltaT::Early::kEspenakMeeus`). It moves ΔT by
     +94 s at 1500, +76 s at 1000 and −265 s at −500.
 - **M6** — transports. Decided 2026-09-17: no HTTP head.
-  - `prometheiad` speaks Astrolog's ephemeris protocol (version 3) over
-    WebSocket, so it serves Astrolog directly. Astrolog owns the protocol;
-    this repository pins a copy.
-  - The Swiss Ephemeris numbers the protocol uses come only from a wire-map
-    file written from Astrolog's specification, outside this cleanroom.
-    Unsupported objects fail alone.
+  - `prometheiad` speaks Astrolog's ephemeris protocol (version 4 since
+    2026-09-18; version 3 before, with a wire map) over WebSocket, so it
+    serves Astrolog directly. Astrolog owns the protocol; this repository
+    pins a copy. Version 4 names bodies by NAIF/SPK-ID and needs no map.
+  - The version-3 Swiss Ephemeris numbering came only from a wire-map file
+    written from Astrolog's specification, outside this cleanroom;
+    unsupported objects failed alone.
   - Details: docs/SERVER.md.
   - Increment 1 (done 2026-09-17): the protocol core (`server/`): HELLO and
     WELCOME negotiation, REQUEST limits, chunked f64/f32 DATA, per-object

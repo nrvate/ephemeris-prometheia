@@ -8,11 +8,11 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "dataset.hpp"
 #include "synthetic_spk.hpp"
 #include "ws_client.hpp"
 #include "ws_server.hpp"
@@ -24,16 +24,13 @@ using synth::TempFile;
 
 namespace {
 
-constexpr const char* kTestMap = "# invented numbers, test only\n"
-                                 "body 900 10 Test Sun\n"
-                                 "body 905 5\n"
-                                 "flag 5 equatorial\n";
-
 WsOptions test_options() {
     WsOptions o;
     o.port = 0;
     o.bind = "127.0.0.1";
     o.threads = 2;
+    o.config.engine = "Prometheia 0.1.0, synthetic kernel";
+    o.config.dataset_id = "synthetic/test#00000000";
     return o;
 }
 
@@ -44,30 +41,38 @@ struct Running {
     explicit Running(WsOptions o = test_options()) {
         synth::write_linear_spk(tf.path);
         const std::string path = tf.path.string();
-        server = std::make_unique<WsServer>(o, WireMap::parse(kTestMap).value(),
-                                            [path] { return Engine::open(path); });
+        server = std::make_unique<WsServer>(o, [path] { return Engine::open(path); });
         const auto r = server->start();
         REQUIRE_MESSAGE(r.ok(), r.error().message);
         REQUIRE(server->port() > 0);
     }
 };
 
-std::vector<uint8_t> hello_message() {
-    uint8_t buf[eph::kHelloMaxSize];
-    uint32_t len = 0;
-    eph::buildHello(buf, eph::kCapFloat32, 1, "test", &len);
-    return eph::makeMessage(eph::kMsgHello, 1, buf, len);
-}
-
-std::vector<uint8_t> request_message(const eph::Request& req, uint32_t id) {
-    std::vector<uint8_t> payload;
-    eph::buildRequest(&payload, req);
-    return eph::makeMessage(eph::kMsgRequest, id, payload.data(), payload.size());
+std::vector<uint8_t> message(uint16_t type, uint32_t request_id, const uint8_t* payload,
+                             size_t len) {
+    std::vector<uint8_t> out;
+    eph::WriteEnvelope(&out, type, request_id, len);
+    out.insert(out.end(), payload, payload + len);
+    return out;
 }
 
 uint16_t type_of(const std::vector<uint8_t>& m) {
     REQUIRE(m.size() >= eph::kEnvelopeSize);
-    return eph::getU16(m.data() + 4);
+    return uint16_t(m[4] | (uint16_t(m[5]) << 8));
+}
+
+uint32_t id_of(const std::vector<uint8_t>& m) {
+    REQUIRE(m.size() >= eph::kEnvelopeSize);
+    return uint32_t(m[8]) | (uint32_t(m[9]) << 8) | (uint32_t(m[10]) << 16) |
+           (uint32_t(m[11]) << 24);
+}
+
+std::vector<uint8_t> hello_message() {
+    eph::Hello h;
+    h.clientName = "test";
+    std::vector<uint8_t> payload;
+    eph::EncodeHello(&payload, h);
+    return message(eph::kMsgHello, 0, payload.data(), payload.size());
 }
 
 void connect_and_hello(WsClient& c, int port) {
@@ -87,67 +92,79 @@ TEST_CASE("prometheiad_round_trip") {
     WsClient c;
     connect_and_hello(c, run.server->port());
 
-    eph::Request req;
-    req.jdStart = 2451545.0;
-    req.stepSeconds = 3600;
+    eph::Request req; // one default profile: geocentric apparent
+    req.profiles.emplace_back();
+    // TT grid, geocentric apparent ecliptic of date, f64
+    req.start.jd1 = 2451545.0;
+    req.stepNs = 3600LL * 1000000000LL;
     req.nTime = 1200;
     req.chunkRows = 500;
-    req.iflag = 1u << 5;
-    eph::ObjSpec sun, jup, unmapped;
-    sun.id = 900;
-    jup.id = 905;
-    unmapped.id = 1;
+    eph::Object sun, jup, unmapped;
+    sun.naif = 10;
+    jup.naif = 5;
+    unmapped.naif = 1;
     req.objs = {sun, jup, unmapped};
-    REQUIRE(c.send(request_message(req, 9)).ok());
+    std::vector<uint8_t> payload;
+    eph::EncodeRequest(&payload, req);
+    const uint32_t request_id = 9;
+    REQUIRE(c.send(message(eph::kMsgRequest, request_id, payload.data(), payload.size())).ok());
 
     std::vector<double> cols(3 * 1200 * 6, -1.0);
+    std::vector<eph::Meta> meta;
     uint32_t rows = 0, chunks = 0;
     while (rows < 1200) {
         const auto m = c.receive();
         REQUIRE_MESSAGE(m.ok(), m.error().message);
         REQUIRE(type_of(m.value()) == eph::kMsgData);
-        CHECK(eph::getU32(m.value().data() + 8) == 9);
-        eph::Reader rd(m.value().data() + eph::kEnvelopeSize,
-                       m.value().size() - eph::kEnvelopeSize);
-        CHECK(rd.u32() == chunks++);
-        const uint32_t i_time = rd.u32(), n = rd.u32();
-        CHECK(i_time == rows);
-        rd.u8();
-        CHECK(rd.u32() == 3);
-        std::vector<int32_t> ret;
-        for (int o = 0; o < 3; ++o) {
-            ret.push_back(rd.i32());
-            rd.skip(eph::kDataMetaSize - 4);
+        CHECK(id_of(m.value()) == request_id);
+        eph::DataChunk d;
+        std::string why;
+        REQUIRE_MESSAGE(eph::ParseData(m.value().data() + eph::kEnvelopeSize,
+                                       m.value().size() - eph::kEnvelopeSize, &d, &why) == eph::kOk,
+                        why);
+        CHECK(d.chunkIndex == chunks++);
+        CHECK(d.iTime == rows);
+        CHECK(d.totalRows == 1200);
+        CHECK(d.nObj == 3);
+        if (d.flags & eph::kChunkMeta) {
+            REQUIRE(d.meta.size() == 3);
+            meta = d.meta;
         }
-        CHECK(ret[0] == int32_t(1u << 5));
-        CHECK(ret[2] == -1);
-        for (int o = 0; o < 3; ++o) {
-            for (uint32_t k = 0; k < n * 6; ++k) {
-                cols[(size_t(o) * 1200 + i_time) * 6 + k] = rd.f64();
+        for (uint32_t o = 0; o < 3; ++o) {
+            for (uint32_t r = 0; r < d.nRows; ++r) {
+                for (int k = 0; k < 6; ++k) {
+                    cols[(size_t(o) * 1200 + d.iTime + r) * 6 + k] =
+                        d.values[(size_t(o) * d.nRows + r) * 6 + k];
+                }
             }
         }
-        CHECK(rd.left() == 0);
-        rows += n;
+        rows += d.nRows;
     }
     CHECK(chunks == 3);
+    REQUIRE(meta.size() == 3);
+    CHECK(meta[0].rowsOk == 1200);
+    CHECK(meta[0].name == "Sun");
+    CHECK(meta[0].errCode == eph::kOErrNone);
+    CHECK(meta[1].name == "Jupiter");
+    CHECK(meta[2].rowsOk == 0);
+    CHECK(meta[2].errCode == eph::kOErrUnknownBody);
 
     CalcOptions o;
     o.sigma = false;
-    o.coords = Coords::Equatorial;
     for (uint32_t r = 0; r < 1200; r += 97) {
         const double jd = 2451545.0 + r * 3600.0 / 86400.0;
-        const Position p = check.calc_ut(5, jd, o).value().pos;
+        const Position p = check.calc(5, jd, o).value().pos;
         CHECK(cols[(1200 + r) * 6] == p.lon_deg);
         CHECK(cols[(1200 + r) * 6 + 5] == p.dist_speed);
         CHECK(std::isnan(cols[(2 * 1200 + r) * 6]));
     }
 
-    // PING is answered on the same connection.
-    REQUIRE(c.send(eph::buildPing(77)).ok());
+    // PING is answered on the same connection (requestId 0, 3.2).
+    REQUIRE(c.send(message(eph::kMsgPing, 0, nullptr, 0)).ok());
     const auto pong = c.receive();
     REQUIRE(pong.ok());
     CHECK(type_of(pong.value()) == eph::kMsgPong);
-    CHECK(eph::getU32(pong.value().data() + 8) == 77);
+    CHECK(id_of(pong.value()) == 0);
 }
 
 TEST_CASE("prometheiad_connections") {
@@ -165,19 +182,28 @@ TEST_CASE("prometheiad_connections") {
                     return;
                 }
                 auto w = c.receive();
-                eph::Request req;
-                req.jdStart = 2451545.0 + i;
-                req.stepSeconds = 60;
+                eph::Request req; // one default profile: geocentric apparent
+                req.profiles.emplace_back();
+
+                req.start.jd1 = 2451545.0 + i;
+                req.stepNs = 60LL * 1000000000LL;
                 req.nTime = 50;
-                eph::ObjSpec sun;
-                sun.id = 900;
+                eph::Object sun;
+                sun.naif = 10;
                 req.objs = {sun};
-                if (!w.ok() || !c.send(request_message(req, 100 + i)).ok()) {
+                if (!w.ok()) {
+                    return;
+                }
+                std::vector<uint8_t> payload;
+                eph::EncodeRequest(&payload, req);
+                if (!c.send(message(eph::kMsgRequest, uint32_t(100 + i), payload.data(),
+                                    payload.size()))
+                         .ok()) {
                     return;
                 }
                 auto d = c.receive();
-                ok[i] = d.ok() && eph::getU16(d.value().data() + 4) == eph::kMsgData &&
-                        eph::getU32(d.value().data() + 8) == uint32_t(100 + i);
+                ok[i] = d.ok() && type_of(d.value()) == eph::kMsgData &&
+                        id_of(d.value()) == uint32_t(100 + i);
             });
         }
         for (auto& t : threads) {
@@ -190,13 +216,16 @@ TEST_CASE("prometheiad_connections") {
     SUBCASE("REQUEST before HELLO: ERROR, then the server closes") {
         WsClient c;
         REQUIRE(c.connect("127.0.0.1", port).ok());
-        eph::Request req;
-        req.jdStart = 2451545.0;
-        req.nTime = 1;
-        eph::ObjSpec sun;
-        sun.id = 900;
+        eph::Request req; // one default profile: geocentric apparent
+        req.profiles.emplace_back();
+
+        req.start.jd1 = 2451545.0;
+        eph::Object sun;
+        sun.naif = 10;
         req.objs = {sun};
-        REQUIRE(c.send(request_message(req, 3)).ok());
+        std::vector<uint8_t> payload;
+        eph::EncodeRequest(&payload, req);
+        REQUIRE(c.send(message(eph::kMsgRequest, 3, payload.data(), payload.size())).ok());
         const auto e = c.receive();
         REQUIRE(e.ok());
         CHECK(type_of(e.value()) == eph::kMsgError);
@@ -252,7 +281,7 @@ TEST_CASE("prometheiad_operations") {
         WsClient d;
         connect_and_hello(d, run.server->port());
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        REQUIRE(d.send(eph::buildPing(1)).ok());
+        REQUIRE(d.send(message(eph::kMsgPing, 0, nullptr, 0)).ok());
         CHECK(d.receive(1000).ok());
     }
     SUBCASE("healthz, readyz, metrics") {
@@ -279,15 +308,19 @@ TEST_CASE("prometheiad_operations") {
         const int port = run.server->port();
         WsClient c;
         connect_and_hello(c, port);
-        eph::Request req;
-        req.jdStart = 2451545.0;
-        req.stepSeconds = 60;
+        eph::Request req; // one default profile: geocentric apparent
+        req.profiles.emplace_back();
+
+        req.start.jd1 = 2451545.0;
+        req.stepNs = 60LL * 1000000000LL;
         req.nTime = 3000;
         req.chunkRows = 100;
-        eph::ObjSpec sun;
-        sun.id = 900;
+        eph::Object sun;
+        sun.naif = 10;
         req.objs = {sun};
-        REQUIRE(c.send(request_message(req, 5)).ok());
+        std::vector<uint8_t> payload;
+        eph::EncodeRequest(&payload, req);
+        REQUIRE(c.send(message(eph::kMsgRequest, 5, payload.data(), payload.size())).ok());
         // Let the request arrive, then drain before reading anything.
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         run.server->drain(5);
@@ -312,7 +345,7 @@ TEST_CASE("prometheiad_operations") {
         Running run;
         WsOptions o = test_options();
         o.port = run.server->port();
-        WsServer second(o, WireMap(), [path = run.tf.path.string()] { return Engine::open(path); });
+        WsServer second(o, [path = run.tf.path.string()] { return Engine::open(path); });
         const auto r = second.start();
         REQUIRE(!r.ok());
         CHECK(r.error().message ==
@@ -405,7 +438,7 @@ TEST_CASE("prometheiad_tls") {
     WsOptions bad = test_options();
     bad.tls_cert = cert.path.string();
     bad.tls_key = other_key.path.string();
-    WsServer refused(bad, WireMap(), [p = run.tf.path.string()] { return Engine::open(p); });
+    WsServer refused(bad, [p = run.tf.path.string()] { return Engine::open(p); });
     const auto e = refused.start();
     REQUIRE(!e.ok());
     CHECK(e.error().message.find("does not match certificate") != std::string::npos);
