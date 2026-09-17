@@ -6,7 +6,7 @@
 
 #include <prometheia/cbor.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using prometheia::cbor_decode;
 using prometheia::cbor_encode;
@@ -29,7 +29,7 @@ bool doubles_equal_exact(double a, double b) {
 
 } // namespace
 
-TEST(unsigned_roundtrip) {
+TEST_CASE("unsigned_roundtrip") {
     for (uint64_t v : {0ull, 23ull, 24ull, 255ull, 256ull, 65535ull, 65536ull, 0xFFFFFFFFull,
                        0x100000000ull, 0xFFFFFFFFFFFFFFFFull}) {
         auto r = roundtrip(CborValue::make_unsigned(v));
@@ -38,7 +38,7 @@ TEST(unsigned_roundtrip) {
     }
 }
 
-TEST(negative_roundtrip) {
+TEST_CASE("negative_roundtrip") {
     const int64_t values[] = {-1, -24, -25, -256, -65536, INT64_MIN / 2};
     for (int64_t v : values) {
         auto r = roundtrip([&] {
@@ -52,7 +52,7 @@ TEST(negative_roundtrip) {
     }
 }
 
-TEST(text_roundtrip) {
+TEST_CASE("text_roundtrip") {
     for (const char* s : {"", "Ceres", "2003 SB220", "quote\"and\\slash", "new\nline"}) {
         auto r = roundtrip(CborValue::make_text(s));
         CHECK(r.type == CborValue::Type::Text);
@@ -60,7 +60,7 @@ TEST(text_roundtrip) {
     }
 }
 
-TEST(double_roundtrip) {
+TEST_CASE("double_roundtrip") {
     for (double v : {0.0, -0.0, 0.5, 3.141592653589793, 1e300, -1e-300, 2461200.5}) {
         auto r = roundtrip(CborValue::make_double(v));
         CHECK(r.type == CborValue::Type::Double);
@@ -69,17 +69,19 @@ TEST(double_roundtrip) {
     // Infinity encodes/decodes through the f64 path.
     auto r = roundtrip(CborValue::make_double(HUGE_VAL));
     CHECK(r.type == CborValue::Type::Double);
-    CHECK(std::isinf(r.d) && r.d > 0);
+    CHECK(std::isinf(r.d));
+    CHECK(r.d > 0);
 }
 
-TEST(bool_null_roundtrip) {
+TEST_CASE("bool_null_roundtrip") {
     auto t = roundtrip(CborValue::make_bool(true));
-    CHECK(t.type == CborValue::Type::Bool && t.b);
+    CHECK(t.type == CborValue::Type::Bool);
+    CHECK(t.b);
     auto n = roundtrip(CborValue{});
     CHECK(n.type == CborValue::Type::Null);
 }
 
-TEST(map_array_roundtrip) {
+TEST_CASE("map_array_roundtrip") {
     CborValue meta = CborValue::make_map();
     meta.items.push_back(CborValue::make_text("frame"));
     meta.items.push_back(CborValue::make_text("ICRF"));
@@ -94,25 +96,27 @@ TEST(map_array_roundtrip) {
     auto r = roundtrip(meta);
     CHECK(r.type == CborValue::Type::Map);
     const CborValue* frame = r.find("frame");
-    CHECK(frame != nullptr && frame->text == "ICRF");
+    CHECK((frame != nullptr && frame->text == "ICRF"));
     const CborValue* counts2 = r.find("counts");
-    CHECK(counts2 != nullptr && counts2->items.size() == 2);
+    CHECK((counts2 != nullptr && counts2->items.size() == 2));
     CHECK(counts2->items[1].u == 3743);
     const CborValue* missing = r.find("nope");
     CHECK(missing == nullptr);
 }
 
-TEST(decode_errors) {
+TEST_CASE("decode_errors") {
     // Truncated buffer.
     std::string out;
     cbor_encode(out, CborValue::make_text("hello world"));
     auto t = cbor_decode(out.data(), out.size() - 3);
-    CHECK(!t.ok() && t.error().code == ErrorCode::FormatError);
+    CHECK(!t.ok());
+    CHECK(t.error().code == ErrorCode::FormatError);
 
     // Trailing bytes rejected.
     out.push_back(char(0x00));
     auto x = cbor_decode(out.data(), out.size());
-    CHECK(!x.ok() && x.error().code == ErrorCode::FormatError);
+    CHECK(!x.ok());
+    CHECK(x.error().code == ErrorCode::FormatError);
 
     // Empty input.
     auto e = cbor_decode(nullptr, 0);
@@ -121,18 +125,16 @@ TEST(decode_errors) {
     // Half-float decode (0x3C00 = 1.0) accepted into Double.
     const unsigned char half[] = {0xF9, 0x3C, 0x00};
     auto h = cbor_decode(reinterpret_cast<const char*>(half), sizeof half);
-    CHECK(h.ok() && h.value().type == CborValue::Type::Double && h.value().d == 1.0);
+    CHECK(h.ok());
+    CHECK(h.value().type == CborValue::Type::Double);
+    CHECK(h.value().d == 1.0);
 }
 
-TEST(debug_string) {
+TEST_CASE("debug_string") {
     CborValue m = CborValue::make_map();
     m.items.push_back(CborValue::make_text("a"));
     m.items.push_back(CborValue::make_unsigned(1));
     const std::string s = prometheia::cbor_to_debug_string(m);
     CHECK(s.find("\"a\"") != std::string::npos);
     CHECK(s.find(": 1") != std::string::npos);
-}
-
-int main() {
-    return ptest::run_all();
 }

@@ -8,7 +8,7 @@
 #include <prometheia/catalog.hpp>
 #include <prometheia/cbor.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 using catalog::BodyClass;
@@ -73,15 +73,19 @@ void expect_records_equal(const Record& a, const Record& b) {
     CHECK(a.body_class == b.body_class);
     CHECK(a.flags == b.flags);
     CHECK(std::memcmp(&a.epoch_jtdb, &b.epoch_jtdb, sizeof(double)) == 0);
-    CHECK(a.a_au == b.a_au && a.e == b.e && a.inc_rad == b.inc_rad);
-    CHECK(a.node_rad == b.node_rad && a.argp_rad == b.argp_rad &&
-          a.mean_anom_rad == b.mean_anom_rad);
+    CHECK(a.a_au == b.a_au);
+    CHECK(a.e == b.e);
+    CHECK(a.inc_rad == b.inc_rad);
+    CHECK(a.node_rad == b.node_rad);
+    CHECK(a.argp_rad == b.argp_rad);
+    CHECK(a.mean_anom_rad == b.mean_anom_rad);
     if (a.has(RecordFlags::kSigmas)) {
         for (int i = 0; i < 6; ++i)
             CHECK(float(a.sigmas[i]) == float(b.sigmas[i]));
     }
     if (a.has(RecordFlags::kHg)) {
-        CHECK(a.h_mag == b.h_mag && a.g_slope == b.g_slope);
+        CHECK(a.h_mag == b.h_mag);
+        CHECK(a.g_slope == b.g_slope);
     }
     if (a.has(RecordFlags::kDiameter)) {
         CHECK(a.diameter_km == b.diameter_km);
@@ -100,7 +104,7 @@ CborValue make_meta() {
 
 } // namespace
 
-TEST(roundtrip_small_mixed) {
+TEST_CASE("roundtrip_small_mixed") {
     const std::string path = temp_path("small");
     {
         auto w = Writer::create(path, WriterOptions{.chunk_records = 3});
@@ -118,13 +122,11 @@ TEST(roundtrip_small_mixed) {
     }
 
     auto r = Reader::open(path);
-    CHECK(r.ok());
-    if (!r.ok())
-        return;
+    REQUIRE(r.ok());
     catalog::Reader& reader = r.value();
     CHECK(reader.record_count() == 10);
     const CborValue* frame = reader.metadata().find("frame");
-    CHECK(frame != nullptr && frame->text == "ICRF");
+    CHECK((frame != nullptr && frame->text == "ICRF"));
 
     int seen = 0;
     auto fe = reader.for_each([&](const Record& rec, const Names& names) {
@@ -150,14 +152,16 @@ TEST(roundtrip_small_mixed) {
             expect_records_equal(rec.value(), expected_for(spkid));
     }
     auto missing = reader.lookup(20000011);
-    CHECK(!missing.ok() && missing.error().code == ErrorCode::NotFound);
+    CHECK(!missing.ok());
+    CHECK(missing.error().code == ErrorCode::NotFound);
     auto below = reader.lookup(1);
-    CHECK(!below.ok() && below.error().code == ErrorCode::NotFound);
+    CHECK(!below.ok());
+    CHECK(below.error().code == ErrorCode::NotFound);
 
     std::filesystem::remove(path);
 }
 
-TEST(empty_catalog) {
+TEST_CASE("empty_catalog") {
     const std::string path = temp_path("empty");
     {
         auto w = Writer::create(path, WriterOptions{});
@@ -169,7 +173,8 @@ TEST(empty_catalog) {
     if (r.ok()) {
         CHECK(r.value().record_count() == 0);
         auto rec = r.value().lookup(1);
-        CHECK(!rec.ok() && rec.error().code == ErrorCode::NotFound);
+        CHECK(!rec.ok());
+        CHECK(rec.error().code == ErrorCode::NotFound);
         int seen = 0;
         r.value().for_each([&](const Record&, const Names&) { ++seen; });
         CHECK(seen == 0);
@@ -177,7 +182,7 @@ TEST(empty_catalog) {
     std::filesystem::remove(path);
 }
 
-TEST(writer_rejects_bad_input) {
+TEST_CASE("writer_rejects_bad_input") {
     const std::string path = temp_path("badinput");
     auto w = Writer::create(path, WriterOptions{});
     CHECK(w.ok());
@@ -187,26 +192,31 @@ TEST(writer_rejects_bad_input) {
     CHECK(writer.add(r, "5").ok());
 
     auto e = writer.add(make_asteroid(20000005), "5"); // duplicate
-    CHECK(!e.ok() && e.error().code == ErrorCode::ArgumentError);
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
 
     e = writer.add(make_asteroid(20000004), "4"); // descending
-    CHECK(!e.ok() && e.error().code == ErrorCode::ArgumentError);
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
 
     Record nan_r = make_asteroid(20000006);
     nan_r.a_au = std::nan("");
     e = writer.add(nan_r, "6");
-    CHECK(!e.ok() && e.error().code == ErrorCode::ArgumentError);
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
 
     Record bad_e = make_asteroid(20000006);
     bad_e.e = 1.0; // parabolic: elements singular
     e = writer.add(bad_e, "6");
-    CHECK(!e.ok() && e.error().code == ErrorCode::ArgumentError);
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
 
     Record bad_ae = make_asteroid(20000006);
     bad_ae.e = 1.5;
     bad_ae.a_au = 2.0; // hyperbolic e must have a < 0
     e = writer.add(bad_ae, "6");
-    CHECK(!e.ok() && e.error().code == ErrorCode::ArgumentError);
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
 
     Record hyper = make_asteroid(20000006);
     hyper.body_class = BodyClass::Comet;
@@ -215,13 +225,14 @@ TEST(writer_rejects_bad_input) {
     CHECK(writer.add(hyper, "P/2006 W3").ok());
 
     e = writer.finish(CborValue{}); // metadata must be a map
-    CHECK(!e.ok() && e.error().code == ErrorCode::ArgumentError);
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
     e = writer.finish(make_meta());
     CHECK(e.ok());
     std::filesystem::remove(path);
 }
 
-TEST(corruption_detected) {
+TEST_CASE("corruption_detected") {
     // Build, then flip a byte inside chunk data and expect a CRC failure.
     const std::string path = temp_path("corrupt");
     {
@@ -248,14 +259,16 @@ TEST(corruption_detected) {
     CHECK(r.ok()); // header/index fine; corruption is in chunk payload
     if (r.ok()) {
         auto fe = r.value().for_each([&](const Record&, const Names&) {});
-        CHECK(!fe.ok() && fe.error().code == ErrorCode::CorruptionError);
+        CHECK(!fe.ok());
+        CHECK(fe.error().code == ErrorCode::CorruptionError);
         auto lk = r.value().lookup(20000003);
-        CHECK(!lk.ok() && lk.error().code == ErrorCode::CorruptionError);
+        CHECK(!lk.ok());
+        CHECK(lk.error().code == ErrorCode::CorruptionError);
     }
     std::filesystem::remove(path);
 }
 
-TEST(truncation_and_magic) {
+TEST_CASE("truncation_and_magic") {
     const std::string path = temp_path("trunc");
     {
         auto w = Writer::create(path, WriterOptions{});
@@ -281,8 +294,8 @@ TEST(truncation_and_magic) {
     }
     auto rt = Reader::open(trunc);
     CHECK(!rt.ok());
-    CHECK(rt.error().code == ErrorCode::CorruptionError ||
-          rt.error().code == ErrorCode::FormatError || rt.error().code == ErrorCode::IoError);
+    CHECK((rt.error().code == ErrorCode::CorruptionError ||
+           rt.error().code == ErrorCode::FormatError || rt.error().code == ErrorCode::IoError));
     std::filesystem::remove(trunc);
 
     const std::string badmagic = temp_path("badmagic");
@@ -299,12 +312,13 @@ TEST(truncation_and_magic) {
         std::fclose(g);
     }
     auto bm = Reader::open(badmagic);
-    CHECK(!bm.ok() && bm.error().code == ErrorCode::FormatError);
+    CHECK(!bm.ok());
+    CHECK(bm.error().code == ErrorCode::FormatError);
     std::filesystem::remove(badmagic);
     std::filesystem::remove(path);
 }
 
-TEST(uncompressed_variant) {
+TEST_CASE("uncompressed_variant") {
     const std::string path = temp_path("raw");
     {
         auto w = Writer::create(path, WriterOptions{.compress = false});
@@ -326,7 +340,7 @@ TEST(uncompressed_variant) {
     std::filesystem::remove(path);
 }
 
-TEST(medium_scale_and_size) {
+TEST_CASE("medium_scale_and_size") {
     const std::string path = temp_path("medium");
     const uint64_t kCount = 50000;
     {
@@ -370,16 +384,14 @@ TEST(medium_scale_and_size) {
     std::filesystem::remove(path);
 }
 
-TEST(real_data_fixture) {
+TEST_CASE("real_data_fixture") {
     // Committed 100-body catalog built from the real SBDB pull (Ceres..100).
     // Guards the reader against real-world data the synthetic tests cannot:
     // full-precision elements, actual sigma magnitudes, genuine name pool.
     const std::string path =
         (std::filesystem::path(__FILE__).parent_path() / "data" / "sample-100.epm").string();
     auto r = Reader::open(path);
-    CHECK(r.ok());
-    if (!r.ok())
-        return;
+    REQUIRE(r.ok());
     catalog::Reader& reader = r.value();
     CHECK(reader.record_count() == 100);
 
@@ -391,13 +403,10 @@ TEST(real_data_fixture) {
         CHECK(rec.value().a_au == 2.765552595034094);
         CHECK(rec.value().e == 0.07969229514816586);
         CHECK(rec.value().body_class == BodyClass::Asteroid);
-        CHECK(rec.value().has(RecordFlags::kSigmas) && rec.value().has(RecordFlags::kHg) &&
-              rec.value().has(RecordFlags::kDiameter));
+        CHECK(rec.value().has(RecordFlags::kSigmas));
+        CHECK(rec.value().has(RecordFlags::kHg));
+        CHECK(rec.value().has(RecordFlags::kDiameter));
     }
     auto fe = reader.for_each([](const Record&, const Names&) {});
     CHECK(fe.ok());
-}
-
-int main() {
-    return ptest::run_all();
 }

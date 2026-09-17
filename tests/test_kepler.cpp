@@ -4,7 +4,7 @@
 
 #include <prometheia/kepler.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 
@@ -28,7 +28,7 @@ double wrap_angle(double x) {
 
 } // namespace
 
-TEST(elements_state_roundtrip) {
+TEST_CASE("elements_state_roundtrip") {
     for (const Elements& el : {
              Elements{2.765552595034094, 0.07969229514816586, 0.1848, 1.4006, 1.2792,
                       4.7895},                          // Ceres-like
@@ -61,7 +61,7 @@ TEST(elements_state_roundtrip) {
     }
 }
 
-TEST(kepler_propagate_period) {
+TEST_CASE("kepler_propagate_period") {
     // One full period later, the state must return to itself (elliptic).
     Elements el{2.765552595034094, 0.07969229514816586, 0.1848, 1.4006, 1.2792, 1.0};
     auto s0 = elements_to_state(kMuSun, el);
@@ -76,7 +76,7 @@ TEST(kepler_propagate_period) {
     }
 }
 
-TEST(kepler_propagate_energy_conserved) {
+TEST_CASE("kepler_propagate_energy_conserved") {
     Elements el{17.0, 0.3, 0.4, 1.0, 2.0, 2.5}; // distant, slow orbit
     auto s0 = elements_to_state(kMuSun, el);
     CHECK(s0.ok());
@@ -89,16 +89,14 @@ TEST(kepler_propagate_energy_conserved) {
     }
 }
 
-TEST(kepler_rejects_bad_elements) {
+TEST_CASE("kepler_rejects_bad_elements") {
     Elements parabolic{3.0, 1.0, 0.1, 0.0, 0.0, 0.0};
     auto r = elements_to_state(kMuSun, parabolic);
-    CHECK(!r.ok() && r.error().code == ErrorCode::ArgumentError);
+    CHECK(!r.ok());
+    CHECK(r.error().code == ErrorCode::ArgumentError);
 
     Elements bad_sign{3.0, 1.5, 0.1, 0.0, 0.0, 0.0}; // hyperbolic e, elliptic a
     r = elements_to_state(kMuSun, bad_sign);
-    CHECK(!r.ok() && r.error().code == ErrorCode::ArgumentError);
-}
-
-int main() {
-    return ptest::run_all();
+    CHECK(!r.ok());
+    CHECK(r.error().code == ErrorCode::ArgumentError);
 }

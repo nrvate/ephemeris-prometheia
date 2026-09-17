@@ -16,7 +16,7 @@
 
 #include <prometheia/frames.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 using namespace prometheia::frames;
@@ -106,7 +106,7 @@ constexpr Fixture kFixtures[] = {
 
 } // namespace
 
-TEST(frames_fundamental_arguments_j2000) {
+TEST_CASE("frames_fundamental_arguments_j2000") {
     double phi[14];
     fundamental_arguments(2451545.0, phi);
     const double deg = 180.0 / 3.14159265358979323846;
@@ -120,11 +120,11 @@ TEST(frames_fundamental_arguments_j2000) {
     CHECK(near(phi[2] * deg, 100.46646, 1e-4));
     // All within [0, 2pi).
     for (int j = 0; j < 14; ++j) {
-        CHECK(phi[j] >= 0.0 && phi[j] < 2.0 * 3.14159265358979323846 + 1e-15);
+        CHECK((phi[j] >= 0.0 && phi[j] < 2.0 * 3.14159265358979323846 + 1e-15));
     }
 }
 
-TEST(frames_nutation_values) {
+TEST_CASE("frames_nutation_values") {
     double dpsi, deps;
     nutation(2451545.0, dpsi, deps);
     // Full-series values at J2000; the SWE differential (true-minus-mean
@@ -137,12 +137,12 @@ TEST(frames_nutation_values) {
     CHECK(std::fabs(deps * kRad2Deg * 3600.0) < 10.0);
 }
 
-TEST(frames_obliquity) {
+TEST_CASE("frames_obliquity") {
     // IAU 2006: 84381.406" at J2000 (swetest prints 23d26'21.4060").
     CHECK(near(mean_obliquity(2451545.0), 84381.406 * kDeg2Rad / 3600.0, 1e-12));
 }
 
-TEST(frames_matrices_are_rotations) {
+TEST_CASE("frames_matrices_are_rotations") {
     const double epochs[] = {2305424.5, 2415020.0, 2451545.0, 2461443.0, 2513392.5};
     for (double jd : epochs) {
         double m[9];
@@ -163,7 +163,7 @@ TEST(frames_matrices_are_rotations) {
     }
 }
 
-TEST(frames_mean_chain_matches_swe) {
+TEST_CASE("frames_mean_chain_matches_swe") {
     for (const Fixture& f : kFixtures) {
         double v[3];
         vec_from_lonlat(f.lon_j2000, f.lat_j2000, f.dist, v);
@@ -182,7 +182,7 @@ TEST(frames_mean_chain_matches_swe) {
     }
 }
 
-TEST(frames_true_chain_matches_swe) {
+TEST_CASE("frames_true_chain_matches_swe") {
     for (const Fixture& f : kFixtures) {
         double v[3];
         vec_from_lonlat(f.lon_j2000, f.lat_j2000, f.dist, v);
@@ -201,7 +201,7 @@ TEST(frames_true_chain_matches_swe) {
     }
 }
 
-TEST(frames_nutation_shift_property) {
+TEST_CASE("frames_nutation_shift_property") {
     // Nutation shifts apparent longitudes by dpsi and leaves latitudes
     // unchanged: the defining property of the true-ecliptic frame.
     const double epochs[] = {2305424.5, 2451545.0, 2461443.0, 2513392.5};
@@ -222,7 +222,7 @@ TEST(frames_nutation_shift_property) {
     }
 }
 
-TEST(frames_sidereal_time) {
+TEST_CASE("frames_sidereal_time") {
     // ERA is a function of UT1 alone; at the J2000 instant, 0.779... turns.
     const double era = earth_rotation_angle(2451545.0);
     CHECK(near(era, 0.7790572732640 * 2.0 * 3.14159265358979323846, 1e-9));
@@ -245,7 +245,7 @@ TEST(frames_sidereal_time) {
     CHECK(near(eq, dpsi * std::cos(mean_obliquity(jd_tt)), 2.5e-6));
 }
 
-TEST(frames_observer_geocentric) {
+TEST_CASE("frames_observer_geocentric") {
     // WGS84: equatorial radius 6378.137 km, polar 6356.752 km.
     double out[3];
     observer_geocentric(GeoSite{0.0, 0.0, 0.0}, 0.0, out);
@@ -265,8 +265,4 @@ TEST(frames_observer_geocentric) {
     observer_geocentric(GeoSite{3.14159265358979323846 / 2.0, 0.0, 0.0}, 0.0, out);
     CHECK(near(out[0], 0.0, 1e-9));
     CHECK(near(out[1], 6378.137, 1e-3));
-}
-
-int main() {
-    return ptest::run_all();
 }

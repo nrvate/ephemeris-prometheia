@@ -28,7 +28,7 @@
 #include <prometheia/frames.hpp>
 
 #include "synthetic_spk.hpp"
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using synth::et_of_tdb;
 using synth::kBodies;
@@ -91,7 +91,7 @@ double wrap360(double d) {
 // Part A1: primitives.
 // ---------------------------------------------------------------------------
 
-TEST(aberration_magnitude_and_direction) {
+TEST_CASE("aberration_magnitude_and_direction") {
     // Observer moving at 29.79 km/s perpendicular to the line of sight:
     // the image shifts towards the velocity by asin(v/c) ~ 20.49".
     const double v_kms = 29.79;
@@ -113,7 +113,7 @@ TEST(aberration_magnitude_and_direction) {
     CHECK(std::fabs(angle_as(p, w) - expect) < 1e-6);
 }
 
-TEST(light_deflection_magnitudes) {
+TEST_CASE("light_deflection_magnitudes") {
     // Sun at the origin, observer 1 AU along -x (so sun->observer = -x).
     const double E = kAuKm;
     const double sun_to_obs[3] = {-E, 0.0, 0.0};
@@ -140,7 +140,7 @@ TEST(light_deflection_magnitudes) {
     CHECK(std::fabs(norm3(out) / norm3(pl) - 1.0) < 1e-12);
 }
 
-TEST(frame_bias_matrix_values) {
+TEST_CASE("frame_bias_matrix_values") {
     double b[9];
     frames::frame_bias_matrix(b);
     // Orthogonal.
@@ -167,7 +167,7 @@ double et_of_tdb(double jd_tdb) {
     return (jd_tdb - kJ2000) * kDay;
 }
 
-TEST(engine_synthetic_geometric) {
+TEST_CASE("engine_synthetic_geometric") {
     TempFile tf("engine-geo");
     Engine e = open_synthetic(tf);
     CalcOptions o = CalcOptions::geometric();
@@ -196,7 +196,7 @@ TEST(engine_synthetic_geometric) {
     CHECK(r.value().provenance.source.find("SPK") != std::string_view::npos);
 }
 
-TEST(engine_synthetic_light_time) {
+TEST_CASE("engine_synthetic_light_time") {
     TempFile tf("engine-lt");
     Engine e = open_synthetic(tf);
     CalcOptions o = CalcOptions::astrometric();
@@ -216,10 +216,11 @@ TEST(engine_synthetic_light_time) {
     const Position& p = r.value().pos;
     for (int i = 0; i < 3; ++i)
         CHECK(std::fabs(p.xyz_au[i] * kAuKm - d[i]) < 1e-3);
-    CHECK(tau > 0.01 && tau < 0.2); // a few AU
+    CHECK(tau > 0.01);
+    CHECK(tau < 0.2); // a few AU
 }
 
-TEST(engine_synthetic_corrections_compose) {
+TEST_CASE("engine_synthetic_corrections_compose") {
     TempFile tf("engine-app");
     Engine e = open_synthetic(tf);
     const double jd_tt = 2461300.25;
@@ -231,7 +232,8 @@ TEST(engine_synthetic_corrections_compose) {
     app.coords = Coords::Equatorial;
     auto ra = e.calc(body::kJupiter, jd_tt, astro);
     auto rp = e.calc(body::kJupiter, jd_tt, app);
-    CHECK(ra.ok() && rp.ok());
+    CHECK(ra.ok());
+    CHECK(rp.ok());
 
     // Rebuild the apparent vector from the astrometric one.
     const double tau = ra.value().provenance.light_time_days;
@@ -256,10 +258,11 @@ TEST(engine_synthetic_corrections_compose) {
     for (int i = 0; i < 3; ++i)
         a[i] = ra.value().pos.xyz_au[i];
     const double shift = angle_as(a, rp.value().pos.xyz_au);
-    CHECK(shift > 1.0 && shift < 21.0);
+    CHECK(shift > 1.0);
+    CHECK(shift < 21.0);
 }
 
-TEST(engine_synthetic_frames_compose) {
+TEST_CASE("engine_synthetic_frames_compose") {
     TempFile tf("engine-frames");
     Engine e = open_synthetic(tf);
     const double jd_tt = 2470000.5; // inside the kernel's +/- 60 yr
@@ -312,7 +315,7 @@ TEST(engine_synthetic_frames_compose) {
     CHECK(std::fabs(z - eq.xyz_au[2]) < 1e-13);
 }
 
-TEST(engine_synthetic_centers_and_errors) {
+TEST_CASE("engine_synthetic_centers_and_errors") {
     TempFile tf("engine-err");
     Engine e = open_synthetic(tf);
     const double jd_tt = 2451545.0;
@@ -343,13 +346,15 @@ TEST(engine_synthetic_centers_and_errors) {
     o.center = Center::Geocentric;
     auto rg = e.calc(body::kJupiter, jd_tt, o);
     auto rt = e.calc(body::kJupiter, jd_tt, t);
-    CHECK(rg.ok() && rt.ok());
+    CHECK(rg.ok());
+    CHECK(rt.ok());
     const Position geo = rg.ok() ? rg.value().pos : Position{};
     const Position top = rt.ok() ? rt.value().pos : Position{};
     double dd[3];
     for (int i = 0; i < 3; ++i)
         dd[i] = (geo.xyz_au[i] - top.xyz_au[i]) * kAuKm;
-    CHECK(norm3(dd) > 6350.0 && norm3(dd) < 6380.0);
+    CHECK(norm3(dd) > 6350.0);
+    CHECK(norm3(dd) < 6380.0);
 
     // Errors.
     o.center = Center::Geocentric;
@@ -377,7 +382,7 @@ TEST(engine_synthetic_centers_and_errors) {
     fs::remove(junk);
 }
 
-TEST(engine_calc_ut_uses_delta_t) {
+TEST_CASE("engine_calc_ut_uses_delta_t") {
     TempFile tf("engine-ut");
     Engine e = open_synthetic(tf);
     struct Fixed final : time::DeltaTModel {
@@ -388,14 +393,18 @@ TEST(engine_calc_ut_uses_delta_t) {
     const double jd_ut = 2455000.5;
     auto a = e.calc_ut(body::kJupiter, jd_ut, o);
     auto b = e.calc(body::kJupiter, jd_ut + 100.0 / 86400.0, o);
-    CHECK(a.ok() && b.ok());
-    CHECK(a.ok() && b.ok() && a.value().pos.lon_deg == b.value().pos.lon_deg);
+    CHECK(a.ok());
+    CHECK(b.ok());
+    CHECK(a.ok());
+    CHECK(b.ok());
+    CHECK(a.value().pos.lon_deg == b.value().pos.lon_deg);
     e.set_delta_t_model(nullptr); // default model again
     auto c = e.calc_ut(body::kJupiter, jd_ut, o);
-    CHECK(c.ok() && c.value().pos.lon_deg != a.value().pos.lon_deg);
+    CHECK(c.ok());
+    CHECK(c.value().pos.lon_deg != a.value().pos.lon_deg);
 }
 
-TEST(ayanamsa_functions_consistency) {
+TEST_CASE("ayanamsa_functions_consistency") {
     // The true ayanamsha is the mean plus the nutation in longitude; a
     // user anchor placed at a mode's mean value reproduces that mode;
     // the mean rate is the IAU 2006 precession in longitude; unknown
@@ -421,10 +430,11 @@ TEST(ayanamsa_functions_consistency) {
     auto hi = frames::ayanamsa(0, kJ2000 + 1826.25);
     const double rate_as = (hi->mean_deg - lo->mean_deg) / 10.0 * 3600.0;
     std::printf("  d(mean ayanamsha)/dt at J2000: %.4f\"/yr\n", rate_as);
-    CHECK(rate_as > 50.27 && rate_as < 50.31);
+    CHECK(rate_as > 50.27);
+    CHECK(rate_as < 50.31);
 }
 
-TEST(sidereal_output_consistency) {
+TEST_CASE("sidereal_output_consistency") {
     TempFile tf("engine-sid");
     Engine e = open_synthetic(tf);
     const double t = kJ2000 + 1234.5;
@@ -437,7 +447,8 @@ TEST(sidereal_output_consistency) {
     sid.sidereal = SiderealMode::Lahiri;
     auto tr = e.calc(body::kSun, t, trop);
     auto sd = e.calc(body::kSun, t, sid);
-    CHECK(tr.ok() && sd.ok());
+    CHECK(tr.ok());
+    CHECK(sd.ok());
     auto aya = frames::ayanamsa(1, t);
     CHECK(sd.value().ayanamsa_deg.has_value());
     CHECK(std::fabs(*sd.value().ayanamsa_deg - aya->true_deg) < 1e-12);
@@ -482,7 +493,8 @@ TEST(sidereal_output_consistency) {
     mods.sidereal = SiderealMode::Lahiri;
     auto mm = e.calc(body::kSun, t, mod);
     auto ms = e.calc(body::kSun, t, mods);
-    CHECK(mm.ok() && ms.ok());
+    CHECK(mm.ok());
+    CHECK(ms.ok());
     CHECK(std::fabs(ms.value().pos.lon_deg - wrap360(mm.value().pos.lon_deg - aya->mean_deg)) <
           1e-12);
     CHECK(std::fabs(*ms.value().ayanamsa_deg - aya->mean_deg) < 1e-12);
@@ -498,7 +510,8 @@ TEST(sidereal_output_consistency) {
     for (double dt : {0.0, 400.0, -3000.0}) {
         auto a = e.calc(body::kJupiter, t + dt, j2);
         auto b = e.calc(body::kJupiter, t + dt, j2s);
-        CHECK(a.ok() && b.ok());
+        CHECK(a.ok());
+        CHECK(b.ok());
         CHECK(b.value().ayanamsa_deg.has_value());
         const double off = wrap180(b.value().pos.lon_deg - a.value().pos.lon_deg);
         if (dt == 0.0)
@@ -600,7 +613,7 @@ const char* mode_name(Mode m) {
     return names[int(m)];
 }
 
-TEST(de440_engine_matches_swetest) {
+TEST_CASE("de440_engine_matches_swetest") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;
     auto opened = Engine::open(kDe440Path);
@@ -656,7 +669,7 @@ TEST(de440_engine_matches_swetest) {
     }
 }
 
-TEST(de440_engine_rates_match_differenced_swetest) {
+TEST_CASE("de440_engine_rates_match_differenced_swetest") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;
     auto opened = Engine::open(kDe440Path);
@@ -685,7 +698,7 @@ TEST(de440_engine_rates_match_differenced_swetest) {
     CHECK(worst_dist < 1e-7);
 }
 
-TEST(de440_sidereal_matches_swetest) {
+TEST_CASE("de440_sidereal_matches_swetest") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;
     auto opened = Engine::open(kDe440Path);
@@ -738,12 +751,13 @@ TEST(de440_sidereal_matches_swetest) {
     CHECK(worst_moon < 0.2);
 }
 
-TEST(de440_binary_and_spk_agree_through_engine) {
+TEST_CASE("de440_binary_and_spk_agree_through_engine") {
     if (!available(kDe440Path, "PROMETHEIA_DE440") || !available(kDe440sPath, "PROMETHEIA_DE440S"))
         return;
     auto a = Engine::open(kDe440Path);
     auto b = Engine::open(kDe440sPath);
-    CHECK(a.ok() && b.ok());
+    CHECK(a.ok());
+    CHECK(b.ok());
     if (!a || !b)
         return;
     Engine ea = std::move(a).value();
@@ -755,7 +769,8 @@ TEST(de440_binary_and_spk_agree_through_engine) {
         for (int id : ids) {
             auto ra = ea.calc(id, jd);
             auto rb = eb.calc(id, jd);
-            CHECK(ra.ok() && rb.ok());
+            CHECK(ra.ok());
+            CHECK(rb.ok());
             if (!ra || !rb)
                 continue;
             const Position& p = ra.value().pos;
@@ -769,7 +784,3 @@ TEST(de440_binary_and_spk_agree_through_engine) {
 }
 
 } // namespace
-
-int main() {
-    return ptest::run_all();
-}

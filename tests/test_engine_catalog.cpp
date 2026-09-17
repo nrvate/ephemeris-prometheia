@@ -33,7 +33,7 @@
 #include <prometheia/spk.hpp>
 
 #include "synthetic_spk.hpp"
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 using synth::open_synthetic;
@@ -94,7 +94,7 @@ double distance_au(const State& a, const double b[6]) {
     return std::sqrt(d);
 }
 
-TEST(barycentric_force_two_body_limit) {
+TEST_CASE("barycentric_force_two_body_limit") {
     StaticSun sun;
     BarycentricForce force{&sun};
     auto s0 = elements_to_state(gm::kSun, kEls);
@@ -119,7 +119,7 @@ TEST(barycentric_force_two_body_limit) {
     CHECK(distance_au(exact.value(), y) < 1e-8);
 }
 
-TEST(barycentric_force_memo_matches_integration) {
+TEST_CASE("barycentric_force_memo_matches_integration") {
     StaticSun sun;
     BarycentricForce force{&sun};
     auto s0 = elements_to_state(gm::kSun, kEls);
@@ -142,7 +142,8 @@ TEST(barycentric_force_memo_matches_integration) {
         IntegrateStats stats;
         CHECK(integrate_dp54(y, kJ2000, t, force, IntegrateOptions{}, &stats).ok());
         const State s = memo.at(t);
-        CHECK(memo.coverage_lo() <= t && t <= memo.coverage_hi());
+        CHECK(memo.coverage_lo() <= t);
+        CHECK(t <= memo.coverage_hi());
         worst_memo = std::max(worst_memo, distance_states_au(s, exact.value()));
         worst_direct = std::max(worst_direct, distance_au(exact.value(), y));
     }
@@ -242,7 +243,7 @@ State oracle_seed(spk::SpkFile& file, const Elements& els) {
     return out;
 }
 
-TEST(engine_overlay_matches_independent_integration) {
+TEST_CASE("engine_overlay_matches_independent_integration") {
     TempFile tf_kernel("cat-kernel");
     TempFile tf_cat("cat-overlay");
     Engine e = open_synthetic(tf_kernel);
@@ -285,7 +286,7 @@ TEST(engine_overlay_matches_independent_integration) {
     }
 }
 
-TEST(engine_overlay_speeds_and_consistency) {
+TEST_CASE("engine_overlay_speeds_and_consistency") {
     TempFile tf_kernel("cat-speed-k");
     TempFile tf_cat("cat-speed-c");
     Engine e = open_synthetic(tf_kernel);
@@ -313,7 +314,8 @@ TEST(engine_overlay_speeds_and_consistency) {
     const double h = 0.001;
     auto tp = e.calc(int(kSpkid), t + h, CalcOptions::geometric());
     auto tm = e.calc(int(kSpkid), t - h, CalcOptions::geometric());
-    CHECK(tp.ok() && tm.ok());
+    CHECK(tp.ok());
+    CHECK(tm.ok());
     CHECK(std::fabs((tp.value().pos.lon_deg - tm.value().pos.lon_deg) / (2 * h) -
                     body_geo.value().pos.lon_speed) < 1e-6);
     CHECK(std::fabs((tp.value().pos.dist_au - tm.value().pos.dist_au) / (2 * h) -
@@ -326,14 +328,15 @@ TEST(engine_overlay_speeds_and_consistency) {
     CHECK(again.value().pos.dist_au == body_geo.value().pos.dist_au);
 }
 
-TEST(engine_overlay_provenance_and_errors) {
+TEST_CASE("engine_overlay_provenance_and_errors") {
     TempFile tf_kernel("cat-err-k");
     TempFile tf_cat("cat-err-c");
     Engine e = open_synthetic(tf_kernel);
 
     // Before any catalog: the body is simply not known.
     auto res = e.calc(int(kSpkid), kEpoch + 10.0, CalcOptions::geometric());
-    CHECK(!res.ok() && res.error().code == ErrorCode::NotFound);
+    CHECK(!res.ok());
+    CHECK(res.error().code == ErrorCode::NotFound);
 
     // Catalog file problems.
     CHECK(!e.add_catalog("/nonexistent/sb.epm").ok());
@@ -359,10 +362,11 @@ TEST(engine_overlay_provenance_and_errors) {
 
     // A body in no catalog and no ephemeris.
     auto missing = e.calc(20009999, kEpoch + 10.0, CalcOptions::geometric());
-    CHECK(!missing.ok() && missing.error().code == ErrorCode::NotFound);
+    CHECK(!missing.ok());
+    CHECK(missing.error().code == ErrorCode::NotFound);
 }
 
-TEST(engine_overlay_newest_catalog_wins) {
+TEST_CASE("engine_overlay_newest_catalog_wins") {
     TempFile tf_kernel("cat-new-k");
     TempFile tf_a("cat-new-a");
     TempFile tf_b("cat-new-b");
@@ -430,7 +434,7 @@ double sky_sigma_arcsec(const double cov[6], const double u_unit[3], double dist
            (180.0 / 3.14159265358979323846) * 3600.0;
 }
 
-TEST(sigma_absent_zero_and_planetary) {
+TEST_CASE("sigma_absent_zero_and_planetary") {
     TempFile tf_kernel("sig-0-k");
     TempFile tf_cat("sig-0-c");
     Engine e = open_synthetic(tf_kernel);
@@ -459,7 +463,7 @@ TEST(sigma_absent_zero_and_planetary) {
     CHECK(!earth.value().sigma_arcsec.has_value());
 }
 
-TEST(sigma_circle_analytic_epoch) {
+TEST_CASE("sigma_circle_analytic_epoch") {
     TempFile tf_kernel("sig-circ-k");
     TempFile tf_cat("sig-circ-c");
     Engine e = open_synthetic(tf_kernel);
@@ -490,7 +494,8 @@ TEST(sigma_circle_analytic_epoch) {
     em.mean_anom -= h;
     auto sp = elements_to_state(gm::kSun, ep);
     auto sm = elements_to_state(gm::kSun, em);
-    CHECK(sp.ok() && sm.ok());
+    CHECK(sp.ok());
+    CHECK(sm.ok());
     const double c_ecl[3] = {(sp.value().pos.x - sm.value().pos.x) / (2 * h),
                              (sp.value().pos.y - sm.value().pos.y) / (2 * h),
                              (sp.value().pos.z - sm.value().pos.z) / (2 * h)};
@@ -530,7 +535,7 @@ TEST(sigma_circle_analytic_epoch) {
     CHECK(std::fabs(*res.value().sigma_arcsec - expect) < 1e-5 * expect);
 }
 
-TEST(sigma_matches_independent_fd) {
+TEST_CASE("sigma_matches_independent_fd") {
     TempFile tf_kernel("sig-ind-k");
     TempFile tf_cat("sig-ind-c");
     Engine e = open_synthetic(tf_kernel);
@@ -605,7 +610,7 @@ TEST(sigma_matches_independent_fd) {
     }
 }
 
-TEST(sigma_growth_symmetry) {
+TEST_CASE("sigma_growth_symmetry") {
     TempFile tf_kernel("sig-grw-k");
     TempFile tf_cat("sig-grw-c");
     Engine e = open_synthetic(tf_kernel);
@@ -633,7 +638,7 @@ TEST(sigma_growth_symmetry) {
     CHECK(std::fabs(sp - sm) < 0.4 * 0.5 * (sp + sm));
 }
 
-TEST(sigma_newest_catalog_rescales) {
+TEST_CASE("sigma_newest_catalog_rescales") {
     TempFile tf_kernel("sig-nc-k");
     TempFile tf_a("sig-nc-a");
     TempFile tf_b("sig-nc-b");
@@ -660,12 +665,13 @@ TEST(sigma_newest_catalog_rescales) {
 
     const double ratio = *second.value().sigma_arcsec / *first.value().sigma_arcsec;
     std::printf("  sigma ratio after 10x sigma_M: %.6f\n", ratio);
-    CHECK(ratio > 9.9 && ratio < 10.1);
+    CHECK(ratio > 9.9);
+    CHECK(ratio < 10.1);
     // The elements did not change: same position as before.
     CHECK(second.value().pos.dist_au == first.value().pos.dist_au);
 }
 
-TEST(lookup_pdes_name_case) {
+TEST_CASE("lookup_pdes_name_case") {
     TempFile tf_kernel("lkp-1-k");
     TempFile tf_cat("lkp-1-c");
     Engine e = open_synthetic(tf_kernel);
@@ -673,28 +679,32 @@ TEST(lookup_pdes_name_case) {
     // Before any catalog: nothing answers (NotFound, not a machinery
     // error).
     auto none = e.lookup("Testbody");
-    CHECK(!none.ok() && none.error().code == ErrorCode::NotFound);
+    CHECK(!none.ok());
+    CHECK(none.error().code == ErrorCode::NotFound);
 
     CHECK(e.add_catalog(write_catalog(tf_cat, kEls.a)).ok());
     const std::string pdes = std::to_string(kSpkid);
     for (const char* q : {pdes.c_str(), "Testbody", "testbody", "TESTBODY"}) {
         auto id = e.lookup(q);
-        CHECK(id.ok() && id.value() == int(kSpkid));
+        CHECK(id.ok());
+        CHECK(id.value() == int(kSpkid));
     }
     auto miss = e.lookup("No such name");
-    CHECK(!miss.ok() && miss.error().code == ErrorCode::NotFound);
+    CHECK(!miss.ok());
+    CHECK(miss.error().code == ErrorCode::NotFound);
 
     // The name resolves to a body calc() answers identically.
     const double t = kEpoch + 200.0;
     auto by_id = e.calc(int(kSpkid), t, bary_geom_icrf());
     auto by_name = e.calc(e.lookup("testbody").value(), t, bary_geom_icrf());
-    CHECK(by_id.ok() && by_name.ok());
+    CHECK(by_id.ok());
+    CHECK(by_name.ok());
     CHECK(by_name.value().pos.lon_deg == by_id.value().pos.lon_deg);
     CHECK(by_name.value().pos.lat_deg == by_id.value().pos.lat_deg);
     CHECK(by_name.value().pos.dist_au == by_id.value().pos.dist_au);
 }
 
-TEST(lookup_newest_catalog_wins) {
+TEST_CASE("lookup_newest_catalog_wins") {
     TempFile tf_kernel("lkp-2-k");
     TempFile tf_a("lkp-2-a");
     TempFile tf_b("lkp-2-b");
@@ -705,10 +715,12 @@ TEST(lookup_newest_catalog_wins) {
     // Both records carry the proper name "Testbody": the newest
     // catalog answers it.
     auto id = e.lookup("Testbody");
-    CHECK(id.ok() && id.value() == int(kSpkid + 1));
+    CHECK(id.ok());
+    CHECK(id.value() == int(kSpkid + 1));
     // The older catalog's designation still resolves.
     auto old = e.lookup(std::to_string(kSpkid));
-    CHECK(old.ok() && old.value() == int(kSpkid));
+    CHECK(old.ok());
+    CHECK(old.value() == int(kSpkid));
 }
 
 } // namespace
@@ -737,7 +749,7 @@ struct CatalogFixture {
 
 namespace {
 
-TEST(de440_ceres_vs_swetest) {
+TEST_CASE("de440_ceres_vs_swetest") {
     const std::string de = env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) +
                                                           "/ephe/linux_p1550p2650.440");
     if (access(de.c_str(), F_OK) != 0) {
@@ -745,9 +757,7 @@ TEST(de440_ceres_vs_swetest) {
         return;
     }
     auto e = Engine::open(de);
-    CHECK(e.ok());
-    if (!e.ok())
-        return;
+    REQUIRE(e.ok());
     CHECK(e.value()
               .add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm")
               .ok());
@@ -755,9 +765,9 @@ TEST(de440_ceres_vs_swetest) {
     // The name index on real data: SBDB's designation "1" and the proper
     // name "Ceres" both answer the fixture's SPK-ID.
     auto by_name = e.value().lookup("Ceres");
-    CHECK(by_name.ok() && by_name.value() == kCatalogFixtures[0].spkid);
+    CHECK((by_name.ok() && by_name.value() == kCatalogFixtures[0].spkid));
     auto by_pdes = e.value().lookup("1");
-    CHECK(by_pdes.ok() && by_pdes.value() == kCatalogFixtures[0].spkid);
+    CHECK((by_pdes.ok() && by_pdes.value() == kCatalogFixtures[0].spkid));
 
     double worst_apparent = 0.0, worst_geometric = 0.0, worst_dist = 0.0, worst_sigma = 0.0;
     for (const CatalogFixture& f : kCatalogFixtures) {
@@ -774,7 +784,9 @@ TEST(de440_ceres_vs_swetest) {
         // (order milliarcsec), published at every epoch.
         CHECK(app.value().sigma_arcsec.has_value());
         const double sig = *app.value().sigma_arcsec;
-        CHECK(std::isfinite(sig) && sig > 0.0 && sig < 0.05);
+        CHECK(std::isfinite(sig));
+        CHECK(sig > 0.0);
+        CHECK(sig < 0.05);
         worst_sigma = std::max(worst_sigma, sig);
 
         // Great-circle separation in arcsec.
@@ -807,7 +819,3 @@ TEST(de440_ceres_vs_swetest) {
 }
 
 } // namespace
-
-int main() {
-    return ptest::run_all();
-}

@@ -39,61 +39,38 @@ endif()
 enable_testing()
 # Real-data tests look for JPL files under ephe/ (gitignored) by default.
 add_compile_definitions(PROMETHEIA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-add_executable(test_cbor tests/test_cbor.cpp)
-target_link_libraries(test_cbor PRIVATE prometheia)
-add_test(NAME cbor COMMAND test_cbor)
 
-add_executable(test_catalog tests/test_catalog.cpp)
-target_link_libraries(test_catalog PRIVATE prometheia)
-add_test(NAME catalog COMMAND test_catalog)
+# Tests use doctest (third_party/doctest, MIT); one shared runner main.
+add_library(prometheia_doctest_main STATIC tests/doctest_main.cpp)
+target_include_directories(prometheia_doctest_main PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
-add_executable(test_kepler tests/test_kepler.cpp)
-target_link_libraries(test_kepler PRIVATE prometheia)
-add_test(NAME kepler COMMAND test_kepler)
+# prometheia_test(<ctest name> <sources...>): executable test_<name>.
+function(prometheia_test name)
+  add_executable(test_${name} ${ARGN})
+  target_link_libraries(test_${name} PRIVATE prometheia prometheia_doctest_main)
+  add_test(NAME ${name} COMMAND test_${name})
+endfunction()
 
-add_executable(test_integrator tests/test_integrator.cpp)
-target_link_libraries(test_integrator PRIVATE prometheia)
-add_test(NAME integrator COMMAND test_integrator)
-
-add_executable(test_mechanics tests/test_mechanics.cpp)
-target_link_libraries(test_mechanics PRIVATE prometheia)
-add_test(NAME mechanics COMMAND test_mechanics)
-
-add_executable(test_radau tests/test_radau.cpp)
-target_link_libraries(test_radau PRIVATE prometheia)
-add_test(NAME radau COMMAND test_radau)
-
-add_executable(test_de tests/test_de.cpp)
-target_link_libraries(test_de PRIVATE prometheia)
-add_test(NAME de COMMAND test_de)
-
-add_executable(test_spk tests/test_spk.cpp)
-target_link_libraries(test_spk PRIVATE prometheia)
-add_test(NAME spk COMMAND test_spk)
-
-add_executable(test_engine tests/test_engine.cpp)
-target_link_libraries(test_engine PRIVATE prometheia)
-add_test(NAME engine COMMAND test_engine)
-
-add_executable(test_engine_catalog tests/test_engine_catalog.cpp)
-target_link_libraries(test_engine_catalog PRIVATE prometheia)
-add_test(NAME engine_catalog COMMAND test_engine_catalog)
+prometheia_test(cbor tests/test_cbor.cpp)
+prometheia_test(catalog tests/test_catalog.cpp)
+prometheia_test(kepler tests/test_kepler.cpp)
+prometheia_test(integrator tests/test_integrator.cpp)
+prometheia_test(mechanics tests/test_mechanics.cpp)
+prometheia_test(radau tests/test_radau.cpp)
+prometheia_test(de tests/test_de.cpp)
+prometheia_test(spk tests/test_spk.cpp)
+prometheia_test(engine tests/test_engine.cpp)
+prometheia_test(engine_catalog tests/test_engine_catalog.cpp)
 
 # The C interface: C++ checks against the engine, plus a translation unit
 # compiled as strict C99 to prove the header and calling pattern are C.
-add_executable(test_c_api tests/test_c_api.cpp tests/c_api_smoke.c)
-target_link_libraries(test_c_api PRIVATE prometheia m)
+prometheia_test(c_api tests/test_c_api.cpp tests/c_api_smoke.c)
+target_link_libraries(test_c_api PRIVATE m)
 set_source_files_properties(tests/c_api_smoke.c PROPERTIES
   COMPILE_OPTIONS "-Wall;-Wextra;-pedantic;-Werror")
-add_test(NAME c_api COMMAND test_c_api)
 
-add_executable(test_time tests/test_time.cpp)
-target_link_libraries(test_time PRIVATE prometheia)
-add_test(NAME time COMMAND test_time)
-
-add_executable(test_frames tests/test_frames.cpp)
-target_link_libraries(test_frames PRIVATE prometheia)
-add_test(NAME frames COMMAND test_frames)
+prometheia_test(time tests/test_time.cpp)
+prometheia_test(frames tests/test_frames.cpp)
 
 add_executable(prometheia-bench tools/bench/bench_main.cpp)
 target_link_libraries(prometheia-bench PRIVATE prometheia)
@@ -109,8 +86,6 @@ add_executable(ephem tools/ephem/ephem.c)
 target_link_libraries(ephem PRIVATE prometheia m)
 target_compile_options(ephem PRIVATE -Wall -Wextra -pedantic -Werror)
 
-add_executable(test_ephem tests/test_ephem.cpp)
-target_link_libraries(test_ephem PRIVATE prometheia)
+prometheia_test(ephem tests/test_ephem.cpp)
 target_compile_definitions(test_ephem PRIVATE EPHEM_BIN="$<TARGET_FILE:ephem>")
 add_dependencies(test_ephem ephem)
-add_test(NAME ephem COMMAND test_ephem)

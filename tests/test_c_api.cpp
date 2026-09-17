@@ -17,7 +17,7 @@
 #include <prometheia/time.hpp>
 
 #include "synthetic_spk.hpp"
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 extern "C" int prometheia_c_smoke(const char* kernel_path);
 
@@ -39,7 +39,7 @@ bool same(const prometheia_result& c, const CalcResult& r) {
               c.dist_au == r.pos.dist_au && c.lon_speed == r.pos.lon_speed &&
               c.lat_speed == r.pos.lat_speed && c.dist_speed == r.pos.dist_speed &&
               c.light_time_days == r.provenance.light_time_days && c.denum == r.provenance.denum &&
-              std::string(c.source) == r.provenance.source;
+              c.source != nullptr && std::string(c.source) == r.provenance.source;
     for (int i = 0; i < 3; ++i)
         eq = eq && c.xyz_au[i] == r.pos.xyz_au[i] && c.vel_au_day[i] == r.pos.vel_au_day[i];
     eq = eq && bool(c.flags & PROMETHEIA_HAS_SIGMA) == r.sigma_arcsec.has_value() &&
@@ -56,7 +56,7 @@ bool zeroed(const prometheia_result& r) {
     return std::memcmp(&r, &z, sizeof r) == 0;
 }
 
-TEST(c_api_library_and_defaults) {
+TEST_CASE("c_api_library_and_defaults") {
     CHECK(std::string(prometheia_version()) == version_string);
     CHECK(prometheia_abi_version() == PROMETHEIA_ABI_VERSION);
 
@@ -65,33 +65,48 @@ TEST(c_api_library_and_defaults) {
     std::memset(&c, 0x5a, sizeof c);
     prometheia_options_init(&c);
     const CalcOptions d;
-    CHECK(c.center == int(d.center) && c.frame == int(d.frame) && c.coords == int(d.coords));
-    CHECK(c.sidereal == int(d.sidereal) && c.sidereal == PROMETHEIA_SIDEREAL_TROPICAL);
-    CHECK(c.frame == PROMETHEIA_FRAME_TRUE_OF_DATE && c.center == PROMETHEIA_CENTER_GEOCENTRIC);
-    CHECK(c.light_time == 1 && c.deflection == 1 && c.aberration == 1 && c.speed == 1);
-    CHECK(c.sidereal_epoch_jd == 0.0 && c.sidereal_ayanamsa_deg == 0.0);
-    CHECK(c.site_lon_deg == 0.0 && c.site_lat_deg == 0.0 && c.site_height_m == 0.0);
+    CHECK(c.center == int(d.center));
+    CHECK(c.frame == int(d.frame));
+    CHECK(c.coords == int(d.coords));
+    CHECK(c.sidereal == int(d.sidereal));
+    CHECK(c.sidereal == PROMETHEIA_SIDEREAL_TROPICAL);
+    CHECK(c.frame == PROMETHEIA_FRAME_TRUE_OF_DATE);
+    CHECK(c.center == PROMETHEIA_CENTER_GEOCENTRIC);
+    CHECK(c.light_time == 1);
+    CHECK(c.deflection == 1);
+    CHECK(c.aberration == 1);
+    CHECK(c.speed == 1);
+    CHECK(c.sidereal_epoch_jd == 0.0);
+    CHECK(c.sidereal_ayanamsa_deg == 0.0);
+    CHECK(c.site_lon_deg == 0.0);
+    CHECK(c.site_lat_deg == 0.0);
+    CHECK(c.site_height_m == 0.0);
     prometheia_options_init(nullptr); // no-op
 
     // The selector constants mirror the C++ enums.
     CHECK(PROMETHEIA_CENTER_TOPOCENTRIC == int(Center::Topocentric));
     CHECK(PROMETHEIA_CENTER_HELIOCENTRIC == int(Center::Heliocentric));
     CHECK(PROMETHEIA_CENTER_BARYCENTRIC == int(Center::Barycentric));
-    CHECK(PROMETHEIA_FRAME_ICRF == int(Frame::ICRF) && PROMETHEIA_FRAME_J2000 == int(Frame::J2000));
+    CHECK(PROMETHEIA_FRAME_ICRF == int(Frame::ICRF));
+    CHECK(PROMETHEIA_FRAME_J2000 == int(Frame::J2000));
     CHECK(PROMETHEIA_FRAME_MEAN_OF_DATE == int(Frame::MeanOfDate));
     CHECK(PROMETHEIA_COORDS_EQUATORIAL == int(Coords::Equatorial));
     CHECK(PROMETHEIA_SIDEREAL_FAGAN_BRADLEY == int(SiderealMode::FaganBradley));
     CHECK(PROMETHEIA_SIDEREAL_LAHIRI == int(SiderealMode::Lahiri));
     CHECK(PROMETHEIA_SIDEREAL_USER == int(SiderealMode::User));
-    CHECK(PROMETHEIA_MOON == body::kMoon && PROMETHEIA_EARTH == body::kEarth &&
-          PROMETHEIA_PLUTO == body::kPluto && PROMETHEIA_SUN == body::kSun);
+    CHECK(PROMETHEIA_MOON == body::kMoon);
+    CHECK(PROMETHEIA_EARTH == body::kEarth);
+    CHECK(PROMETHEIA_PLUTO == body::kPluto);
+    CHECK(PROMETHEIA_SUN == body::kSun);
 }
 
-TEST(c_api_open_errors) {
+TEST_CASE("c_api_open_errors") {
     prometheia_error err;
     prometheia_engine* e = reinterpret_cast<prometheia_engine*>(&err); // must be cleared
     CHECK(prometheia_engine_open("/nonexistent/x.bsp", &e, &err) == PROMETHEIA_ERROR_IO);
-    CHECK(e == nullptr && err.code == PROMETHEIA_ERROR_IO && std::strlen(err.message) > 0);
+    CHECK(e == nullptr);
+    CHECK(err.code == PROMETHEIA_ERROR_IO);
+    CHECK(std::strlen(err.message) > 0);
     CHECK(prometheia_engine_open(nullptr, &e, &err) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(prometheia_engine_open("x", nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(prometheia_engine_open("/nonexistent/x.bsp", &e, nullptr) == PROMETHEIA_ERROR_IO);
@@ -102,7 +117,8 @@ TEST(c_api_open_errors) {
     std::fwrite("definitely not an ephemeris", 1, 27, f);
     std::fclose(f);
     CHECK(prometheia_engine_open(junk.path.c_str(), &e, &err) != PROMETHEIA_OK);
-    CHECK(e == nullptr && err.code != PROMETHEIA_OK);
+    CHECK(e == nullptr);
+    CHECK(err.code != PROMETHEIA_OK);
 
     // Every entry point tolerates a NULL engine.
     prometheia_result res;
@@ -124,7 +140,7 @@ TEST(c_api_open_errors) {
     CHECK(std::strlen(err.message) == PROMETHEIA_ERROR_MESSAGE_SIZE - 1);
 }
 
-TEST(c_api_matches_engine_bit_for_bit) {
+TEST_CASE("c_api_matches_engine_bit_for_bit") {
     TempFile tf("capi-bits");
     synth::write_linear_spk(tf.path);
     auto cpp = Engine::open(tf.path.string());
@@ -132,7 +148,7 @@ TEST(c_api_matches_engine_bit_for_bit) {
     CHandle c;
     prometheia_error err;
     CHECK(prometheia_engine_open(tf.path.c_str(), &c.e, &err) == PROMETHEIA_OK);
-    CHECK(err.code == PROMETHEIA_OK && err.message[0] == '\0');
+    CHECK((err.code == PROMETHEIA_OK && err.message[0] == '\0'));
     if (!cpp.ok() || !c.e)
         return;
     CHECK(!cpp.value().source().empty());
@@ -207,14 +223,15 @@ TEST(c_api_matches_engine_bit_for_bit) {
     prometheia_result a, b;
     CHECK(prometheia_calc(c.e, 5, kJ2000, nullptr, &a, &err) == PROMETHEIA_OK);
     auto r = cpp.value().calc(5, kJ2000);
-    CHECK(r.ok() && same(a, r.value()));
+    CHECK(r.ok());
+    CHECK(same(a, r.value()));
     prometheia_options def;
     prometheia_options_init(&def);
     CHECK(prometheia_calc(c.e, 5, kJ2000, &def, &b, nullptr) == PROMETHEIA_OK);
     CHECK(std::memcmp(&a, &b, sizeof a) == 0);
 }
 
-TEST(c_api_calc_errors) {
+TEST_CASE("c_api_calc_errors") {
     TempFile tf("capi-err");
     synth::write_linear_spk(tf.path);
     CHandle c;
@@ -227,7 +244,10 @@ TEST(c_api_calc_errors) {
     auto expect = [&](int body, double jd, const prometheia_options* o, int code) {
         std::memset(&res, 0x33, sizeof res);
         const int got = prometheia_calc(c.e, body, jd, o, &res, &err);
-        CHECK(got == code && err.code == code && std::strlen(err.message) > 0 && zeroed(res));
+        CHECK(got == code);
+        CHECK(err.code == code);
+        CHECK(std::strlen(err.message) > 0);
+        CHECK(zeroed(res));
     };
     expect(499, kJ2000, nullptr, PROMETHEIA_ERROR_NOT_FOUND); // not in the kernel
     expect(399, kJ2000, nullptr, PROMETHEIA_ERROR_ARGUMENT);  // the observer
@@ -256,7 +276,7 @@ TEST(c_api_calc_errors) {
     // A failing call after a successful one resets the error, and a
     // successful call clears it.
     CHECK(prometheia_calc(c.e, 10, kJ2000, nullptr, &res, &err) == PROMETHEIA_OK);
-    CHECK(err.code == PROMETHEIA_OK && err.message[0] == '\0');
+    CHECK((err.code == PROMETHEIA_OK && err.message[0] == '\0'));
 }
 
 double constant_delta_t(void* user, double) {
@@ -268,7 +288,7 @@ struct FixedDeltaT final : time::DeltaTModel {
     double delta_t_seconds(double) const override { return 64.0; }
 };
 
-TEST(c_api_delta_t_callback) {
+TEST_CASE("c_api_delta_t_callback") {
     TempFile tf("capi-dt");
     synth::write_linear_spk(tf.path);
     auto cpp = Engine::open(tf.path.string());
@@ -294,7 +314,8 @@ TEST(c_api_delta_t_callback) {
     CHECK(prometheia_calc_ut(c.e, 5, kJ2000, &o, &res, nullptr) == PROMETHEIA_OK);
     CHECK(calls > 0); // the user pointer reached the callback
     auto r = cpp.value().calc_ut(5, kJ2000, co);
-    CHECK(r.ok() && same(res, r.value()));
+    CHECK(r.ok());
+    CHECK(same(res, r.value()));
 
     // NULL restores the default model on both sides.
     prometheia_engine_set_delta_t(c.e, nullptr, &calls);
@@ -303,10 +324,11 @@ TEST(c_api_delta_t_callback) {
     CHECK(prometheia_calc_ut(c.e, 5, kJ2000, &o, &res, nullptr) == PROMETHEIA_OK);
     CHECK(calls == before);
     r = cpp.value().calc_ut(5, kJ2000, co);
-    CHECK(r.ok() && same(res, r.value()));
+    CHECK(r.ok());
+    CHECK(same(res, r.value()));
 }
 
-TEST(c_api_catalog_and_lookup) {
+TEST_CASE("c_api_catalog_and_lookup") {
     TempFile tf("capi-cat");
     synth::write_linear_spk(tf.path);
     const std::string catalog = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
@@ -319,7 +341,8 @@ TEST(c_api_catalog_and_lookup) {
 
     int body = -1;
     CHECK(prometheia_engine_lookup(c.e, "Ceres", &body, &err) == PROMETHEIA_ERROR_NOT_FOUND);
-    CHECK(body == 0 && err.code == PROMETHEIA_ERROR_NOT_FOUND);
+    CHECK(body == 0);
+    CHECK(err.code == PROMETHEIA_ERROR_NOT_FOUND);
     CHECK(prometheia_engine_add_catalog(c.e, "/nonexistent/c.epm", &err) == PROMETHEIA_ERROR_IO);
     CHECK(prometheia_engine_add_catalog(c.e, nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(prometheia_engine_lookup(c.e, nullptr, &body, &err) == PROMETHEIA_ERROR_ARGUMENT);
@@ -328,24 +351,29 @@ TEST(c_api_catalog_and_lookup) {
     CHECK(prometheia_engine_add_catalog(c.e, catalog.c_str(), &err) == PROMETHEIA_OK);
     CHECK(cpp.value().add_catalog(catalog).ok());
     CHECK(prometheia_engine_lookup(c.e, "ceres", &body, &err) == PROMETHEIA_OK);
-    CHECK(body == 20000001 && body == cpp.value().lookup("Ceres").value());
+    CHECK(body == 20000001);
+    CHECK(body == cpp.value().lookup("Ceres").value());
 
     const double jd = 2460600.5;
     prometheia_result res;
     CHECK(prometheia_calc(c.e, body, jd, nullptr, &res, &err) == PROMETHEIA_OK);
     auto r = cpp.value().calc(20000001, jd);
-    CHECK(r.ok() && same(res, r.value()));
-    CHECK((res.flags & PROMETHEIA_HAS_SIGMA) && res.sigma_arcsec >= 0.0);
+    CHECK(r.ok());
+    CHECK(same(res, r.value()));
+    CHECK((res.flags & PROMETHEIA_HAS_SIGMA));
+    CHECK(res.sigma_arcsec >= 0.0);
     CHECK(std::string(res.source).find("EPM1") != std::string::npos);
 }
 
-TEST(c_api_time_helpers) {
+TEST_CASE("c_api_time_helpers") {
     CHECK(prometheia_jd_from_ymdhms(2000, 1, 1, 12, 0, 0.0) == kJ2000);
     int y = 0, m = 0;
     double d = 0.0;
     prometheia_civil_from_jd(2461300.25, &y, &m, &d);
     const time::Civil civ = time::civil_from_jd(2461300.25);
-    CHECK(y == civ.year && m == civ.month && d == civ.day);
+    CHECK(y == civ.year);
+    CHECK(m == civ.month);
+    CHECK(d == civ.day);
     prometheia_civil_from_jd(kJ2000, nullptr, nullptr, nullptr);
 
     prometheia_error err;
@@ -354,13 +382,19 @@ TEST(c_api_time_helpers) {
     CHECK(jd_tt == time::utc_to_tt(2017, 1, 1, 0, 0, 0.0).value());
     CHECK(prometheia_utc_to_tt(2017, 1, 1, 0, 0, 0.0, nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(prometheia_utc_to_tt(2017, 2, 30, 0, 0, 0.0, &jd_tt, &err) == PROMETHEIA_ERROR_ARGUMENT);
-    CHECK(jd_tt == 0.0 && std::strlen(err.message) > 0);
+    CHECK(jd_tt == 0.0);
+    CHECK(std::strlen(err.message) > 0);
 
     prometheia_utc u;
     CHECK(prometheia_tt_to_utc(kJ2000, &u, &err) == PROMETHEIA_OK);
     const time::Utc tu = time::tt_to_utc(kJ2000).value();
-    CHECK(u.year == tu.year && u.month == tu.month && u.day == tu.day && u.hour == tu.hour &&
-          u.minute == tu.minute && u.second == tu.second && u.tai_minus_utc == 32.0);
+    CHECK(u.year == tu.year);
+    CHECK(u.month == tu.month);
+    CHECK(u.day == tu.day);
+    CHECK(u.hour == tu.hour);
+    CHECK(u.minute == tu.minute);
+    CHECK(u.second == tu.second);
+    CHECK(u.tai_minus_utc == 32.0);
     CHECK(prometheia_tt_to_utc(2400000.5, &u, &err) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(u.year == 0);
     CHECK(prometheia_tt_to_utc(kJ2000, nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
@@ -369,7 +403,7 @@ TEST(c_api_time_helpers) {
     CHECK(prometheia_tdb_minus_tt(2461300.25) == time::tdb_minus_tt(2461300.25));
 }
 
-TEST(c_api_from_c) {
+TEST_CASE("c_api_from_c") {
     TempFile tf("capi-smoke");
     synth::write_linear_spk(tf.path);
     const int step = prometheia_c_smoke(tf.path.c_str());
@@ -379,7 +413,3 @@ TEST(c_api_from_c) {
 }
 
 } // namespace
-
-int main() {
-    return ptest::run_all();
-}

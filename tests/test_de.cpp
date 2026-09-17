@@ -25,7 +25,7 @@
 #include <prometheia/de.hpp>
 #include <prometheia/frames.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 using prometheia::de::Body;
@@ -280,22 +280,25 @@ double worst_synthetic_delta(const DeFile& f) {
 // Part A: synthetic files (always run).
 // ---------------------------------------------------------------------------
 
-TEST(de_synthetic_errors) {
+TEST_CASE("de_synthetic_errors") {
     const fs::path dir = temp_dir();
     const std::string good = write_modern(dir / "syn.eph", false);
 
     { // missing file
         auto r = DeFile::open((dir / "nope.eph").string());
-        CHECK(!r.ok() && r.error().code == ErrorCode::IoError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::IoError);
     }
     { // not a DE binary
         write_file(dir / "junk.eph", std::string(20000, 'x'));
         auto r = DeFile::open((dir / "junk.eph").string());
-        CHECK(!r.ok() && r.error().code == ErrorCode::FormatError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::FormatError);
     }
     { // DENUM constant disagreeing with the header's NUMDE
         auto r = DeFile::open(write_modern(dir / "denum.eph", false, 440.0));
-        CHECK(!r.ok() && r.error().code == ErrorCode::FormatError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::FormatError);
     }
     { // truncated mid-record: open must fail with a corruption report
         std::string bytes;
@@ -308,21 +311,27 @@ TEST(de_synthetic_errors) {
         bytes.resize(bytes.size() - 10);
         write_file(dir / "trunc.eph", bytes);
         auto r = DeFile::open((dir / "trunc.eph").string());
-        CHECK(!r.ok() && r.error().code == ErrorCode::CorruptionError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::CorruptionError);
     }
     { // out-of-range and absent-body queries
         DeFile f = open_ok(good);
         double out[6];
         auto below = f.state(Body::Mercury, kSynSS - 0.5, out);
-        CHECK(!below.ok() && below.error().code == ErrorCode::ArgumentError);
+        CHECK(!below.ok());
+        CHECK(below.error().code == ErrorCode::ArgumentError);
         auto above = f.state(Body::Mercury, kSynSS + 96.0 + 0.5, out);
-        CHECK(!above.ok() && above.error().code == ErrorCode::ArgumentError);
+        CHECK(!above.ok());
+        CHECK(above.error().code == ErrorCode::ArgumentError);
         auto nonfinite = f.state(Body::Mercury, std::nan(""), out);
-        CHECK(!nonfinite.ok() && nonfinite.error().code == ErrorCode::ArgumentError);
+        CHECK(!nonfinite.ok());
+        CHECK(nonfinite.error().code == ErrorCode::ArgumentError);
         auto mantle = f.state(Body::LunarMantleOmega, kSynSS + 1.0, out);
-        CHECK(!mantle.ok() && mantle.error().code == ErrorCode::NotFound);
+        CHECK(!mantle.ok());
+        CHECK(mantle.error().code == ErrorCode::NotFound);
         auto bad = f.state(Body(16), kSynSS + 1.0, out);
-        CHECK(!bad.ok() && bad.error().code == ErrorCode::ArgumentError);
+        CHECK(!bad.ok());
+        CHECK(bad.error().code == ErrorCode::ArgumentError);
     }
     { // the end epoch itself is in coverage
         DeFile f = open_ok(good);
@@ -348,7 +357,9 @@ void check_modern_header(const DeFile& f, bool swapped) {
     CHECK(h.denum == kModernDenum);
     CHECK(h.record_doubles == m.record_doubles);
     CHECK(h.record_count == 3);
-    CHECK(h.start_jed == kSynSS && h.end_jed == kSynSS + 96.0 && h.interval_days == 32.0);
+    CHECK(h.start_jed == kSynSS);
+    CHECK(h.end_jed == kSynSS + 96.0);
+    CHECK(h.interval_days == 32.0);
     CHECK(h.au_km == kSynAU);
     CHECK(h.emrat == kSynEmrat);
     CHECK(h.title.find("DE999") != std::string::npos);
@@ -367,7 +378,7 @@ void check_modern_header(const DeFile& f, bool swapped) {
     CHECK(!f.has_body(Body::LunarMantleOmega));
 }
 
-TEST(de_synthetic_little_endian) {
+TEST_CASE("de_synthetic_little_endian") {
     const fs::path dir = temp_dir();
     DeFile f = open_ok(write_modern(dir / "modern.eph", false));
     check_modern_header(f, false);
@@ -376,27 +387,29 @@ TEST(de_synthetic_little_endian) {
     std::printf("  worst synthetic |delta| = %.3e\n", worst);
     double out[6];
     CHECK(f.state(Body::TTminusTDB, kSynSS + 5.0, out).ok());
-    CHECK(out[1] == 0.0 && out[2] == 0.0 && out[4] == 0.0 && out[5] == 0.0);
+    CHECK((out[1] == 0.0 && out[2] == 0.0 && out[4] == 0.0 && out[5] == 0.0));
     auto mantle = f.state(Body::LunarMantleOmega, kSynSS + 5.0, out);
-    CHECK(!mantle.ok() && mantle.error().code == ErrorCode::NotFound);
+    CHECK(!mantle.ok());
+    CHECK(mantle.error().code == ErrorCode::NotFound);
 }
 
-TEST(de_synthetic_big_endian) {
+TEST_CASE("de_synthetic_big_endian") {
     const fs::path dir = temp_dir();
     DeFile f = open_ok(write_modern(dir / "modern-be.eph", true));
     check_modern_header(f, true);
     CHECK(worst_synthetic_delta(f) < 1e-9);
 }
 
-TEST(de_synthetic_truncated_by_a_record) {
+TEST_CASE("de_synthetic_truncated_by_a_record") {
     const fs::path dir = temp_dir();
     const std::string path = write_modern(dir / "full.eph", false);
     fs::resize_file(path, fs::file_size(path) - size_t(modern_layout().record_doubles) * 8);
     auto r = DeFile::open(path);
-    CHECK(!r.ok() && r.error().code == ErrorCode::CorruptionError);
+    CHECK(!r.ok());
+    CHECK(r.error().code == ErrorCode::CorruptionError);
 }
 
-TEST(de_relative_state_composition) {
+TEST_CASE("de_relative_state_composition") {
     const fs::path dir = temp_dir();
     DeFile f = open_ok(write_modern(dir / "modern.eph", false));
     const double jed = kSynSS + 20.25;
@@ -435,9 +448,11 @@ TEST(de_relative_state_composition) {
 
     double out[6];
     auto bad = f.relative_state(Target(14), Target::Sun, jed, out);
-    CHECK(!bad.ok() && bad.error().code == ErrorCode::ArgumentError);
+    CHECK(!bad.ok());
+    CHECK(bad.error().code == ErrorCode::ArgumentError);
     auto outside = f.relative_state(Target::Sun, Target::Sun, kSynSS - 1.0, out);
-    CHECK(!outside.ok() && outside.error().code == ErrorCode::ArgumentError);
+    CHECK(!outside.ok());
+    CHECK(outside.error().code == ErrorCode::ArgumentError);
 }
 
 // ---------------------------------------------------------------------------
@@ -495,7 +510,7 @@ double worst_join_km(const DeFile& f, uint64_t record) {
     return worst;
 }
 
-TEST(de200_real_header) {
+TEST_CASE("de200_real_header") {
     if (!available(kDe200Path, "PROMETHEIA_DE200"))
         return;
     DeFile f = open_ok(kDe200Path);
@@ -526,7 +541,7 @@ TEST(de200_real_header) {
     }
 }
 
-TEST(de200_real_earth_and_moon_at_j2000) {
+TEST_CASE("de200_real_earth_and_moon_at_j2000") {
     if (!available(kDe200Path, "PROMETHEIA_DE200"))
         return;
     DeFile f = open_ok(kDe200Path);
@@ -537,10 +552,12 @@ TEST(de200_real_earth_and_moon_at_j2000) {
     // Moon geocentric distance: 402448.6 km from this file; SWE (DE441
     // data) inverts to 402448.9 km at the same epoch.
     const double moon_dist = norm3(moon);
-    CHECK(moon_dist > 402300.0 && moon_dist < 402600.0);
+    CHECK(moon_dist > 402300.0);
+    CHECK(moon_dist < 402600.0);
     const double moon_speed =
         std::sqrt(moon[3] * moon[3] + moon[4] * moon[4] + moon[5] * moon[5]) / 86400.0;
-    CHECK(moon_speed > 0.90 && moon_speed < 1.10);
+    CHECK(moon_speed > 0.90);
+    CHECK(moon_speed < 1.10);
 
     // Analytic velocity agrees with a finite difference of the position.
     double p1[6], p2[6];
@@ -556,7 +573,8 @@ TEST(de200_real_earth_and_moon_at_j2000) {
     double earth_sun[6];
     CHECK(f.relative_state(Target::Earth, Target::Sun, kJ2000, earth_sun).ok());
     const double es = norm3(earth_sun) / au;
-    CHECK(es > 0.98320 && es < 0.98340);
+    CHECK(es > 0.98320);
+    CHECK(es < 0.98340);
 
     // Heliocentric distances at J2000 (planets are barycentric in the
     // file; relative_state removes the Sun).
@@ -572,7 +590,8 @@ TEST(de200_real_earth_and_moon_at_j2000) {
         double s[6];
         CHECK(f.relative_state(r.t, Target::Sun, kJ2000, s).ok());
         const double dist = norm3(s) / au;
-        CHECK(dist > r.lo && dist < r.hi);
+        CHECK(dist > r.lo);
+        CHECK(dist < r.hi);
         if (!(dist > r.lo && dist < r.hi))
             std::printf("  target %d heliocentric distance %.6f AU\n", int(r.t), dist);
     }
@@ -587,13 +606,14 @@ void check_nutation_vs_frames(const DeFile& f, double jed, double tol_arcsec) {
     frames::nutation(jed, dpsi, deps);
     const double d1 = std::fabs(nut[0] - dpsi) / kArcsec;
     const double d2 = std::fabs(nut[1] - deps) / kArcsec;
-    CHECK(d1 < tol_arcsec && d2 < tol_arcsec);
+    CHECK(d1 < tol_arcsec);
+    CHECK(d2 < tol_arcsec);
     std::printf("  nutation at JD %.1f: file dpsi %.4f\" deps %.4f\", vs IAU 2000A "
                 "|d| = %.4f\" / %.4f\"\n",
                 jed, nut[0] / kArcsec, nut[1] / kArcsec, d1, d2);
 }
 
-TEST(de200_real_nutations) {
+TEST_CASE("de200_real_nutations") {
     if (!available(kDe200Path, "PROMETHEIA_DE200"))
         return;
     DeFile f = open_ok(kDe200Path);
@@ -601,7 +621,7 @@ TEST(de200_real_nutations) {
     check_nutation_vs_frames(f, 2461000.5, 0.1);
 }
 
-TEST(de200_real_continuity) {
+TEST_CASE("de200_real_continuity") {
     if (!available(kDe200Path, "PROMETHEIA_DE200"))
         return;
     DeFile f = open_ok(kDe200Path);
@@ -610,7 +630,7 @@ TEST(de200_real_continuity) {
     CHECK(worst < 1e-5); // measured: ~1-2 mm
 }
 
-TEST(de200_real_obliquity_and_last_record) {
+TEST_CASE("de200_real_obliquity_and_last_record") {
     if (!available(kDe200Path, "PROMETHEIA_DE200"))
         return;
     DeFile f = open_ok(kDe200Path);
@@ -620,7 +640,8 @@ TEST(de200_real_obliquity_and_last_record) {
     const double hy = s[2] * s[3] - s[0] * s[5];
     const double hz = s[0] * s[4] - s[1] * s[3];
     const double obl = std::acos(hz / std::sqrt(hx * hx + hy * hy + hz * hz)) * 180.0 / kPi;
-    CHECK(obl > 23.43 && obl < 23.45);
+    CHECK(obl > 23.43);
+    CHECK(obl < 23.45);
     std::printf("  obliquity from Earth orbital pole: %.5f deg\n", obl);
 
     const de::Header& h = f.header();
@@ -630,7 +651,7 @@ TEST(de200_real_obliquity_and_last_record) {
         CHECK(std::isfinite(out[i]));
 }
 
-TEST(de440_real_header) {
+TEST_CASE("de440_real_header") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;
     DeFile f = open_ok(kDe440Path);
@@ -638,7 +659,9 @@ TEST(de440_real_header) {
     CHECK(!h.byte_swapped);
     CHECK(h.denum == 440);
     CHECK(h.title.find("DE440") != std::string::npos);
-    CHECK(h.start_jed == 2287184.5 && h.end_jed == 2688976.5 && h.interval_days == 32.0);
+    CHECK(h.start_jed == 2287184.5);
+    CHECK(h.end_jed == 2688976.5);
+    CHECK(h.interval_days == 32.0);
     CHECK(h.record_count == 12556);
     CHECK(h.record_doubles == 1018); // header.440: NCOEFF = 1018
     CHECK(h.au_km == 149597870.7);
@@ -665,7 +688,7 @@ TEST(de440_real_header) {
 // Targets: 1-11 bodies (3 = Earth, 10 = Moon), 12 = SSB, 13 = EMB,
 // 14 = nutations, 15 = librations. Every point inside the file's
 // coverage is checked.
-TEST(de440_real_matches_jpl_testpo) {
+TEST_CASE("de440_real_matches_jpl_testpo") {
     if (!available(kDe440Path, "PROMETHEIA_DE440") ||
         !available(kTestpoPath, "PROMETHEIA_TESTPO440"))
         return;
@@ -722,7 +745,7 @@ TEST(de440_real_matches_jpl_testpo) {
     CHECK(worst_lib < 1e-10);
 }
 
-TEST(de440_real_nutations_and_continuity) {
+TEST_CASE("de440_real_nutations_and_continuity") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;
     DeFile f = open_ok(kDe440Path);
@@ -738,7 +761,7 @@ TEST(de440_real_nutations_and_continuity) {
 // 2100: geocentric directions agree to about 2" for the Sun, Moon and
 // planets (measured worst: Neptune 2.14", Moon 1.49"); Pluto's 1981
 // orbit is off by 18".
-TEST(de200_vs_de440_geocentric_directions) {
+TEST_CASE("de200_vs_de440_geocentric_directions") {
     if (!available(kDe200Path, "PROMETHEIA_DE200") || !available(kDe440Path, "PROMETHEIA_DE440"))
         return;
     DeFile a = open_ok(kDe200Path);
@@ -767,7 +790,3 @@ TEST(de200_vs_de440_geocentric_directions) {
 }
 
 } // namespace
-
-int main() {
-    return ptest::run_all();
-}

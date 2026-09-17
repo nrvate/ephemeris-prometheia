@@ -19,7 +19,7 @@
 #include <prometheia/time.hpp>
 
 #include "synthetic_spk.hpp"
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 using synth::TempFile;
@@ -147,7 +147,7 @@ struct Kernel {
     }
 };
 
-TEST(ephem_csv_matches_engine) {
+TEST_CASE("ephem_csv_matches_engine") {
     Kernel k;
     const double jd = 2461300.25;
     const Run r = ephem(k.arg + " -j 2461300.25 -f csv sun jupiter 5 10");
@@ -157,23 +157,25 @@ TEST(ephem_csv_matches_engine) {
     CHECK(rows.size() == 4);
     if (rows.size() != 4)
         return;
-    CHECK(rows[0].body == "Sun" && rows[0].id == 10 && rows[1].body == "Jupiter");
-    CHECK(rows[2].body == "Jupiter" && rows[3].body == "Sun"); // IDs take the known label
+    CHECK((rows[0].body == "Sun" && rows[0].id == 10 && rows[1].body == "Jupiter"));
+    CHECK((rows[2].body == "Jupiter" && rows[3].body == "Sun")); // IDs take the known label
     const auto sun = k.engine.calc(10, jd);
     const auto jup = k.engine.calc(5, jd);
-    CHECK(sun.ok() && jup.ok());
-    CHECK(same(rows[0], sun.value()) && same(rows[3], sun.value()));
-    CHECK(same(rows[1], jup.value()) && same(rows[2], jup.value()));
+    CHECK(sun.ok());
+    CHECK(jup.ok());
+    CHECK((same(rows[0], sun.value()) && same(rows[3], sun.value())));
+    CHECK((same(rows[1], jup.value()) && same(rows[2], jup.value())));
     CHECK(rows[0].jd_tt == jd);
     CHECK(rows[0].utc == "2026-09-16 17:58:50.816"); // 18:00 TT - 69.184 s
 }
 
-TEST(ephem_utc_input_and_series) {
+TEST_CASE("ephem_utc_input_and_series") {
     Kernel k;
     const double base = time::utc_to_tt(2017, 1, 1, 0, 0, 0.0).value();
     Run r = ephem(k.arg + " -t 2016-12-31T23:59:60.5Z -f csv sun");
     auto rows = parse_csv(r.out);
-    CHECK(r.status == 0 && rows.size() == 1);
+    CHECK(r.status == 0);
+    CHECK(rows.size() == 1);
     if (rows.size() == 1) {
         const double jd = time::utc_to_tt(2016, 12, 31, 23, 59, 60.5).value();
         CHECK(rows[0].jd_tt == jd);
@@ -184,7 +186,8 @@ TEST(ephem_utc_input_and_series) {
     // Four rows six hours apart, uniform in TT.
     r = ephem(k.arg + " -t '2017-01-01 00:00' -n 4 --step 6h -f csv jupiter");
     rows = parse_csv(r.out);
-    CHECK(r.status == 0 && rows.size() == 4);
+    CHECK(r.status == 0);
+    CHECK(rows.size() == 4);
     for (size_t i = 0; i < rows.size(); ++i) {
         const double jd = base + double(i) * 0.25;
         CHECK(rows[i].jd_tt == jd);
@@ -196,10 +199,10 @@ TEST(ephem_utc_input_and_series) {
     // Steps in other units, and backwards.
     r = ephem(k.arg + " -j 2461300 -n 3 -s -90m -f csv sun");
     rows = parse_csv(r.out);
-    CHECK(rows.size() == 3 && rows[2].jd_tt == 2461300.0 - 2.0 * (1.0 / 1440.0 * 90.0));
+    CHECK((rows.size() == 3 && rows[2].jd_tt == 2461300.0 - 2.0 * (1.0 / 1440.0 * 90.0)));
 }
 
-TEST(ephem_options_map_to_engine) {
+TEST_CASE("ephem_options_map_to_engine") {
     Kernel k;
     const double jd = 2455000.5;
     struct Case {
@@ -243,7 +246,9 @@ TEST(ephem_options_map_to_engine) {
         const Run r = ephem(k.arg + " -j 2455000.5 -f csv jupiter " + c.args);
         auto rows = parse_csv(r.out);
         const auto want = k.engine.calc(5, jd, c.opts);
-        CHECK(r.status == 0 && rows.size() == 1 && want.ok());
+        CHECK(r.status == 0);
+        CHECK(rows.size() == 1);
+        CHECK(want.ok());
         if (rows.size() == 1 && want.ok() && !same(rows[0], want.value())) {
             std::printf("  mismatch for: %s\n", c.args);
             CHECK(false);
@@ -251,7 +256,7 @@ TEST(ephem_options_map_to_engine) {
     }
 }
 
-TEST(ephem_ut1_and_fixed_delta_t) {
+TEST_CASE("ephem_ut1_and_fixed_delta_t") {
     Kernel k;
     struct Fixed final : time::DeltaTModel {
         double delta_t_seconds(double) const override { return 42.5; }
@@ -264,7 +269,9 @@ TEST(ephem_ut1_and_fixed_delta_t) {
     auto rows = parse_csv(r.out);
     k.engine.set_delta_t_model(&fixed);
     auto want = k.engine.calc_ut(10, 2455000.5, topo);
-    CHECK(r.status == 0 && rows.size() == 1 && want.ok());
+    CHECK(r.status == 0);
+    CHECK(rows.size() == 1);
+    CHECK(want.ok());
     if (rows.size() == 1 && want.ok()) {
         CHECK(same(rows[0], want.value()));
         CHECK(std::fabs(rows[0].jd_tt - (2455000.5 + 42.5 / 86400.0)) < 1e-9);
@@ -275,14 +282,15 @@ TEST(ephem_ut1_and_fixed_delta_t) {
     r = ephem(k.arg + " --scale tt -t 1950-06-01T12:00 -f csv jupiter");
     rows = parse_csv(r.out);
     const double jd = time::jd_from_ymdhms(1950, 6, 1, 12, 0, 0.0);
-    CHECK(r.status == 0 && rows.size() == 1);
+    CHECK(r.status == 0);
+    CHECK(rows.size() == 1);
     if (rows.size() == 1) {
-        CHECK(rows[0].jd_tt == jd && rows[0].utc.empty()); // no UTC label before 1972
+        CHECK((rows[0].jd_tt == jd && rows[0].utc.empty())); // no UTC label before 1972
         CHECK(same(rows[0], k.engine.calc(5, jd).value()));
     }
 }
 
-TEST(ephem_catalog_bodies) {
+TEST_CASE("ephem_catalog_bodies") {
     Kernel k;
     const std::string cat = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
     CHECK(k.engine.add_catalog(cat).ok());
@@ -292,21 +300,24 @@ TEST(ephem_catalog_bodies) {
 
     Run r = ephem(k.arg + " -c " + cat + " -j 2460600.5 -f csv Ceres @1 20000001");
     auto rows = parse_csv(r.out);
-    CHECK(r.status == 0 && rows.size() == 3);
+    CHECK(r.status == 0);
+    CHECK(rows.size() == 3);
     for (const CsvRow& row : rows) {
-        CHECK(row.id == 20000001 && row.has_sigma);
-        CHECK(want.ok() && same(row, want.value()));
+        CHECK(row.id == 20000001);
+        CHECK(row.has_sigma);
+        CHECK(want.ok());
+        CHECK(same(row, want.value()));
     }
     if (rows.size() == 3)
-        CHECK(rows[0].body == "Ceres" && rows[1].body == "1");
+        CHECK((rows[0].body == "Ceres" && rows[1].body == "1"));
 
     // The same catalog through the environment.
     r = ephem(k.arg + " -j 2460600.5 -f csv ceres", "PROMETHEIA_CATALOGS=:" + cat + ":");
     rows = parse_csv(r.out);
-    CHECK(r.status == 0 && rows.size() == 1 && want.ok() && same(rows[0], want.value()));
+    CHECK((r.status == 0 && rows.size() == 1 && want.ok() && same(rows[0], want.value())));
 }
 
-TEST(ephem_table_and_json) {
+TEST_CASE("ephem_table_and_json") {
     Kernel k;
     Run r = ephem(k.arg + " -j 2451545 sun jupiter");
     CHECK(r.status == 0);
@@ -314,16 +325,18 @@ TEST(ephem_table_and_json) {
     CHECK(r.out.find("geocentric, apparent, ecliptic and true equinox of date, tropical") !=
           std::string::npos);
     CHECK(r.out.find("2000-01-01 11:58:55.816 UTC, JD 2451545.000000 TT") != std::string::npos);
-    CHECK(r.out.find("\nSun ") != std::string::npos &&
-          r.out.find("\nJupiter ") != std::string::npos);
+    CHECK(r.out.find("\nSun ") != std::string::npos);
+    CHECK(r.out.find("\nJupiter ") != std::string::npos);
 
     r = ephem(k.arg + " -j 2451545 --dms --equatorial jupiter");
     CHECK(r.status == 0);
-    CHECK(r.out.find("RA") != std::string::npos && r.out.find("h") != std::string::npos &&
-          r.out.find("\xC2\xB0") != std::string::npos);
+    CHECK(r.out.find("RA") != std::string::npos);
+    CHECK(r.out.find("h") != std::string::npos);
+    CHECK(r.out.find("\xC2\xB0") != std::string::npos);
 
     r = ephem(k.arg + " -j 2451545 -n 2 sun");
-    CHECK(r.status == 0 && r.out.find("# 2 rows from JD 2451545.000000 TT") != std::string::npos);
+    CHECK(r.status == 0);
+    CHECK(r.out.find("# 2 rows from JD 2451545.000000 TT") != std::string::npos);
 
     r = ephem(k.arg + " -j 2451545 -f json sun 5 --sidereal fb");
     CHECK(r.status == 0);
@@ -335,7 +348,7 @@ TEST(ephem_table_and_json) {
     CHECK(r.out.substr(r.out.size() - 3) == "]}\n");
 }
 
-TEST(ephem_errors_and_status) {
+TEST_CASE("ephem_errors_and_status") {
     Kernel k;
     // Usage and setup errors: status 2, message on stderr, nothing on stdout.
     const char* const usage[] = {
@@ -364,9 +377,11 @@ TEST(ephem_errors_and_status) {
         }
     }
     Run r = ephem("-e /nonexistent/kernel.bsp sun");
-    CHECK(r.status == 2 && r.err.find("cannot open") != std::string::npos);
+    CHECK(r.status == 2);
+    CHECK(r.err.find("cannot open") != std::string::npos);
     r = ephem(k.arg + " -c /nonexistent/cat.epm sun");
-    CHECK(r.status == 2 && r.err.find("catalog") != std::string::npos);
+    CHECK(r.status == 2);
+    CHECK(r.err.find("catalog") != std::string::npos);
 
     // Per-body failures: status 1, the good rows still printed.
     r = ephem(k.arg + " -j 2451545 -f csv sun nosuchbody 499 earth jupiter");
@@ -376,19 +391,19 @@ TEST(ephem_errors_and_status) {
     CHECK(r.err.find("499") != std::string::npos);
     CHECK(r.err.find("Earth") != std::string::npos); // the observer as the body
     r = ephem(k.arg + " -j 2600000 -f csv sun");     // outside the kernel
-    CHECK(r.status == 1 && parse_csv(r.out).empty());
+    CHECK(r.status == 1);
+    CHECK(parse_csv(r.out).empty());
 
     // Help, version, and the environment's ephemeris.
     r = ephem("--help");
-    CHECK(r.status == 0 && r.out.find("Usage: ephem") == 0);
+    CHECK(r.status == 0);
+    CHECK(r.out.find("Usage: ephem") == 0);
     r = ephem("-V");
-    CHECK(r.status == 0 && r.out.find("ephem (Ephemeris Prometheia) 0.1.0") == 0);
+    CHECK(r.status == 0);
+    CHECK(r.out.find("ephem (Ephemeris Prometheia) 0.1.0") == 0);
     r = ephem("-j 2451545 -f csv sun", "PROMETHEIA_EPHEMERIS=" + k.file.path.string());
-    CHECK(r.status == 0 && parse_csv(r.out).size() == 1);
+    CHECK(r.status == 0);
+    CHECK(parse_csv(r.out).size() == 1);
 }
 
 } // namespace
-
-int main() {
-    return ptest::run_all();
-}

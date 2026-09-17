@@ -110,6 +110,12 @@ cd build && ctest
 Requires C++20, CMake ≥ 3.20, `libzstd` and `pkg-config`. Sanitizer build:
 `-DPROMETHEIA_SANITIZE=ON`.
 
+Tests use [doctest](https://github.com/doctest/doctest) 2.5.3, vendored
+under `third_party/` (MIT, test code only — the library itself depends
+only on zstd). Each suite is a doctest binary: `./build/test_engine
+-tc='engine_synthetic*'` runs matching cases, `-s` shows passing
+assertions.
+
 ## First catalog
 
 ```sh

@@ -11,7 +11,7 @@
 #include <prometheia/kepler.hpp>
 #include <prometheia/radau.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 
@@ -35,7 +35,7 @@ struct TwoBody {
 
 } // namespace
 
-TEST(radau_circular_10_orbits) {
+TEST_CASE("radau_circular_10_orbits") {
     auto s0 = elements_to_state(kMuSun, Elements{1.0, 0.0, 0.0, 0.0, 0.0, 0.0});
     CHECK(s0.ok());
     double y[6] = {s0.value().pos.x, s0.value().pos.y, s0.value().pos.z,
@@ -58,7 +58,7 @@ TEST(radau_circular_10_orbits) {
     }
 }
 
-TEST(radau_ceres_55yr_vs_dp54) {
+TEST_CASE("radau_ceres_55yr_vs_dp54") {
     Elements el{2.765552595034094, 0.07969229514816586, 0.1848, 1.4006, 1.2792, 1.0};
     auto s0 = elements_to_state(kMuSun, el);
     CHECK(s0.ok());
@@ -83,7 +83,9 @@ TEST(radau_ceres_55yr_vs_dp54) {
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
 
     auto exact = kepler_propagate(kMuSun, s0.value(), 0.0, span);
-    CHECK(er.ok() && ed.ok() && exact.ok());
+    CHECK(er.ok());
+    CHECK(ed.ok());
+    CHECK(exact.ok());
     if (er.ok() && ed.ok() && exact.ok()) {
         const double dpr = norm(Vec3(yr[0], yr[1], yr[2]) - exact.value().pos);
         const double dpd = norm(Vec3(yd[0], yd[1], yd[2]) - exact.value().pos);
@@ -99,7 +101,7 @@ TEST(radau_ceres_55yr_vs_dp54) {
     }
 }
 
-TEST(radau_hyperbolic_flyby) {
+TEST_CASE("radau_hyperbolic_flyby") {
     Elements el{-5.0, 1.2, 1.1, 0.3, 2.2, -1.0};
     auto s0 = elements_to_state(kMuSun, el);
     CHECK(s0.ok());
@@ -117,7 +119,7 @@ TEST(radau_hyperbolic_flyby) {
     }
 }
 
-TEST(radau_backward_round_trip) {
+TEST_CASE("radau_backward_round_trip") {
     Elements el{2.765552595034094, 0.07969229514816586, 0.1848, 1.4006, 1.2792, 1.0};
     auto s0 = elements_to_state(kMuSun, el);
     CHECK(s0.ok());
@@ -130,14 +132,11 @@ TEST(radau_backward_round_trip) {
     CHECK(dp < 1e-9);
 }
 
-TEST(radau_rejects_bad_options) {
+TEST_CASE("radau_rejects_bad_options") {
     double y[6] = {1, 0, 0, 0, 0.01, 0};
     Radau15Options bad;
     bad.eps_b = -1.0;
     auto e = integrate_radau15(y, 0.0, 1.0, TwoBody{kMuSun}, bad, nullptr);
-    CHECK(!e.ok() && e.error().code == ErrorCode::ArgumentError);
-}
-
-int main() {
-    return ptest::run_all();
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
 }

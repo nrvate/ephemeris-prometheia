@@ -23,7 +23,7 @@
 #include <prometheia/de.hpp>
 #include <prometheia/spk.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 using prometheia::spk::SpkFile;
@@ -270,8 +270,9 @@ void check_synthetic(bool swap) {
     for (size_t k = 0; k < segs.size() && k < f.segments().size(); ++k) {
         const spk::Segment& g = f.segments()[k];
         CHECK(g.name == segs[k].name);
-        CHECK(g.target == segs[k].target && g.center == segs[k].center);
-        CHECK(g.type == segs[k].type && g.frame == 1);
+        CHECK((g.target == segs[k].target && g.center == segs[k].center));
+        CHECK(g.type == segs[k].type);
+        CHECK(g.frame == 1);
         CHECK(g.start_et == segs[k].init);
         CHECK(g.end_et == segs[k].init + segs[k].records * segs[k].interval);
         if (g.type != 1) {
@@ -331,20 +332,21 @@ void check_synthetic(bool swap) {
     }
 }
 
-TEST(spk_synthetic_little_endian) {
+TEST_CASE("spk_synthetic_little_endian") {
     check_synthetic(false);
 }
 
-TEST(spk_synthetic_big_endian) {
+TEST_CASE("spk_synthetic_big_endian") {
     check_synthetic(true);
 }
 
-TEST(spk_synthetic_errors) {
+TEST_CASE("spk_synthetic_errors") {
     const fs::path dir = temp_dir();
     const std::string good = write_spk(dir / "syn.bsp", false);
     { // missing file
         auto r = SpkFile::open((dir / "nope.bsp").string());
-        CHECK(!r.ok() && r.error().code == ErrorCode::IoError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::IoError);
     }
     { // not a DAF/SPK
         FILE* fp = std::fopen((dir / "junk.bsp").string().c_str(), "wb");
@@ -352,35 +354,43 @@ TEST(spk_synthetic_errors) {
         std::fwrite(junk.data(), 1, junk.size(), fp);
         std::fclose(fp);
         auto r = SpkFile::open((dir / "junk.bsp").string());
-        CHECK(!r.ok() && r.error().code == ErrorCode::FormatError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::FormatError);
     }
     { // ASCII-mode transfer damage
         auto r = SpkFile::open(write_spk(dir / "ftp.bsp", false, true));
-        CHECK(!r.ok() && r.error().code == ErrorCode::CorruptionError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::CorruptionError);
     }
     { // truncated: segment data cut off
         const std::string path = (dir / "trunc.bsp").string();
         fs::copy_file(good, path);
         fs::resize_file(path, 3072 + 64);
         auto r = SpkFile::open(path);
-        CHECK(!r.ok() && r.error().code == ErrorCode::CorruptionError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::CorruptionError);
     }
     SpkFile f = open_ok(good);
     double out[6];
     const double inside = jd_of(kInit + 0.5 * kInterval);
     { // unsupported type
         auto r = f.segment_state(4, inside, out);
-        CHECK(!r.ok() && r.error().code == ErrorCode::FormatError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::FormatError);
         auto chained = f.state(499, naif::kSolarSystemBary, inside, out);
-        CHECK(!chained.ok() && chained.error().code == ErrorCode::FormatError);
+        CHECK(!chained.ok());
+        CHECK(chained.error().code == ErrorCode::FormatError);
     }
     { // coverage
         auto r = f.segment_state(0, jd_of(kInit - kDay), out);
-        CHECK(!r.ok() && r.error().code == ErrorCode::ArgumentError);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::ArgumentError);
         auto chained = f.state(naif::kMoon, naif::kSolarSystemBary, jd_of(kInit - kDay), out);
-        CHECK(!chained.ok() && chained.error().code == ErrorCode::ArgumentError);
+        CHECK(!chained.ok());
+        CHECK(chained.error().code == ErrorCode::ArgumentError);
         auto nan = f.state(naif::kMoon, naif::kEarth, std::nan(""), out);
-        CHECK(!nan.ok() && nan.error().code == ErrorCode::ArgumentError);
+        CHECK(!nan.ok());
+        CHECK(nan.error().code == ErrorCode::ArgumentError);
     }
     { // the exact start epoch is in coverage through the et entry point
         CHECK(f.segment_state_et(0, kInit, out).ok());
@@ -388,9 +398,11 @@ TEST(spk_synthetic_errors) {
     }
     { // no path between bodies
         auto r = f.state(12345, naif::kEarth, inside, out);
-        CHECK(!r.ok() && r.error().code == ErrorCode::NotFound);
+        CHECK(!r.ok());
+        CHECK(r.error().code == ErrorCode::NotFound);
         auto bad = f.segment_state(99, inside, out);
-        CHECK(!bad.ok() && bad.error().code == ErrorCode::ArgumentError);
+        CHECK(!bad.ok());
+        CHECK(bad.error().code == ErrorCode::ArgumentError);
     }
 }
 
@@ -415,7 +427,7 @@ const std::string kDe440sPath =
 const std::string kDe440Path =
     env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/linux_p1550p2650.440");
 
-TEST(de440s_real_segments) {
+TEST_CASE("de440s_real_segments") {
     if (!available(kDe440sPath, "PROMETHEIA_DE440S"))
         return;
     SpkFile f = open_ok(kDe440sPath);
@@ -426,27 +438,25 @@ TEST(de440s_real_segments) {
     const int targets[14][2] = {{1, 0}, {2, 0}, {3, 0},  {4, 0},   {5, 0},   {6, 0},   {7, 0},
                                 {8, 0}, {9, 0}, {10, 0}, {301, 3}, {399, 3}, {199, 1}, {299, 2}};
     for (size_t k = 0; k < segs.size() && k < 14; ++k) {
-        CHECK(segs[k].target == targets[k][0] && segs[k].center == targets[k][1]);
-        CHECK(segs[k].type == 2 && segs[k].frame == 1);
+        CHECK((segs[k].target == targets[k][0] && segs[k].center == targets[k][1]));
+        CHECK((segs[k].type == 2 && segs[k].frame == 1));
         CHECK(segs[k].name == "DE-0440LE-0440");
-        CHECK(segs[k].start_et == -4734072000.0 && segs[k].end_et == 4735368000.0);
+        CHECK((segs[k].start_et == -4734072000.0 && segs[k].end_et == 4735368000.0));
     }
     // Mercury barycentre: degree 13 over 8 days; EMB 12 over 16; Moon 12 over 4.
-    CHECK(segs[0].degree == 13 && segs[0].interval_s == 8 * 86400.0);
-    CHECK(segs[2].degree == 12 && segs[2].interval_s == 16 * 86400.0);
-    CHECK(segs[10].degree == 12 && segs[10].interval_s == 4 * 86400.0);
+    CHECK((segs[0].degree == 13 && segs[0].interval_s == 8 * 86400.0));
+    CHECK((segs[2].degree == 12 && segs[2].interval_s == 16 * 86400.0));
+    CHECK((segs[10].degree == 12 && segs[10].interval_s == 4 * 86400.0));
 }
 
 // The same DE440 data in two containers: positions agree to the fitting
 // noise of JPL's re-packaging, far below a metre.
-TEST(de440s_real_matches_de440_binary) {
+TEST_CASE("de440s_real_matches_de440_binary") {
     if (!available(kDe440sPath, "PROMETHEIA_DE440S") || !available(kDe440Path, "PROMETHEIA_DE440"))
         return;
     SpkFile s = open_ok(kDe440sPath);
     auto opened = de::DeFile::open(kDe440Path);
-    CHECK(opened.ok());
-    if (!opened.ok())
-        return;
+    REQUIRE(opened.ok());
     const de::DeFile d = std::move(opened.value());
 
     using de::Target;
@@ -487,7 +497,3 @@ TEST(de440s_real_matches_de440_binary) {
 }
 
 } // namespace
-
-int main() {
-    return ptest::run_all();
-}

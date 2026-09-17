@@ -11,7 +11,7 @@
 #include <prometheia/integrator.hpp>
 #include <prometheia/kepler.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 
@@ -36,7 +36,7 @@ struct TwoBody {
 
 } // namespace
 
-TEST(integrator_matches_kepler_circular) {
+TEST_CASE("integrator_matches_kepler_circular") {
     Elements el{1.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // 1 AU circle
     auto s0 = elements_to_state(kMuSun, el);
     CHECK(s0.ok());
@@ -58,7 +58,7 @@ TEST(integrator_matches_kepler_circular) {
     }
 }
 
-TEST(integrator_matches_kepler_eccentric_long_arc) {
+TEST_CASE("integrator_matches_kepler_eccentric_long_arc") {
     // Ceres-like: 55 years (~30 orbits) heliocentric, tight tolerance.
     Elements el{2.765552595034094, 0.07969229514816586, 0.1848, 1.4006, 1.2792, 1.0};
     auto s0 = elements_to_state(kMuSun, el);
@@ -75,7 +75,8 @@ TEST(integrator_matches_kepler_eccentric_long_arc) {
     const double ms = std::chrono::duration<double, std::milli>(t_end - t_begin).count();
 
     auto exact = kepler_propagate(kMuSun, s0.value(), 0.0, 20089.0);
-    CHECK(e.ok() && exact.ok());
+    CHECK(e.ok());
+    CHECK(exact.ok());
     if (e.ok() && exact.ok()) {
         const Vec3 dp = Vec3(y[0], y[1], y[2]) - exact.value().pos;
         // 1e-8 AU over a 30-orbit arc ~ 0.01" at 2.77 AU — far below every
@@ -91,7 +92,7 @@ TEST(integrator_matches_kepler_eccentric_long_arc) {
     CHECK(ms < 100.0);
 }
 
-TEST(integrator_hyperbolic_flyby) {
+TEST_CASE("integrator_hyperbolic_flyby") {
     // Hyperbolic comet: closed-form comparison through the periapsis turn.
     Elements el{-5.0, 1.2, 1.1, 0.3, 2.2, -1.0}; // inbound branch
     auto s0 = elements_to_state(kMuSun, el);
@@ -109,17 +110,18 @@ TEST(integrator_hyperbolic_flyby) {
     }
 }
 
-TEST(integrator_rejects_bad_options) {
+TEST_CASE("integrator_rejects_bad_options") {
     double y[6] = {1, 0, 0, 0, 0.01, 0};
     IntegrateOptions bad;
     bad.rtol = -1.0;
     auto e = integrate_dp54(y, 0.0, 1.0, TwoBody{kMuSun}, bad, nullptr);
-    CHECK(!e.ok() && e.error().code == ErrorCode::ArgumentError);
+    CHECK(!e.ok());
+    CHECK(e.error().code == ErrorCode::ArgumentError);
     e = integrate_dp54(y, 0.0, 1.0, TwoBody{kMuSun}, {}, nullptr);
     CHECK(e.ok());
 }
 
-TEST(integrator_backward_integration) {
+TEST_CASE("integrator_backward_integration") {
     Elements el{2.765552595034094, 0.07969229514816586, 0.1848, 1.4006, 1.2792, 1.0};
     auto s0 = elements_to_state(kMuSun, el);
     CHECK(s0.ok());
@@ -132,8 +134,4 @@ TEST(integrator_backward_integration) {
     CHECK(back.ok());
     // Round trip drift at RK5(4) increment-1 bar.
     CHECK(norm(Vec3(y[0], y[1], y[2]) - s0.value().pos) < 1e-8);
-}
-
-int main() {
-    return ptest::run_all();
 }

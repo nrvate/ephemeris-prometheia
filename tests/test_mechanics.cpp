@@ -13,7 +13,7 @@
 #include <prometheia/memo.hpp>
 #include <prometheia/trajectory.hpp>
 
-#include "test_main.hpp"
+#include <doctest/doctest.h>
 
 using namespace prometheia;
 
@@ -31,7 +31,7 @@ Elements jupiter_elements() {
 
 } // namespace
 
-TEST(trajectory_tracks_kepler_source) {
+TEST_CASE("trajectory_tracks_kepler_source") {
     // Sample Jupiter's Kepler orbit into a table; evaluation must track the
     // analytic source to Hermite accuracy.
     auto traj = Trajectory::sample_uniform(
@@ -41,9 +41,7 @@ TEST(trajectory_tracks_kepler_source) {
             return s.value();
         },
         0.0, 2.0 * 365.25, 256);
-    CHECK(traj.ok());
-    if (!traj.ok())
-        return;
+    REQUIRE(traj.ok());
     double max_pos_err = 0.0;
     for (int i = 0; i < 200; ++i) {
         const double t = (double(i) / 200.0) * 2.0 * 365.25;
@@ -58,7 +56,7 @@ TEST(trajectory_tracks_kepler_source) {
     CHECK(max_pos_err < 1e-9);
 }
 
-TEST(force_model_reduces_to_two_body_without_perturbers) {
+TEST_CASE("force_model_reduces_to_two_body_without_perturbers") {
     std::vector<Perturber> none;
     HeliocentricForce f{kMuSun, &none};
     State s0 =
@@ -71,7 +69,7 @@ TEST(force_model_reduces_to_two_body_without_perturbers) {
     CHECK(norm(Vec3(y[0], y[1], y[2]) - exact.pos) < 1e-8);
 }
 
-TEST(perturbed_vs_unperturbed_differs_and_reference_agrees) {
+TEST_CASE("perturbed_vs_unperturbed_differs_and_reference_agrees") {
     // Jupiter on its table perturbs a Ceres-like orbit; the perturbed run
     // must (a) differ measurably from the two-body run, and (b) agree with
     // an independent tight-tolerance reference integration of the SAME
@@ -83,9 +81,7 @@ TEST(perturbed_vs_unperturbed_differs_and_reference_agrees) {
                 .value();
         },
         0.0, 2.0 * 365.25, 512);
-    CHECK(jup_traj.ok());
-    if (!jup_traj.ok())
-        return;
+    REQUIRE(jup_traj.ok());
     Trajectory table = std::move(jup_traj.value());
     Perturber jup{kMuJup, &table};
     std::vector<Perturber> one{jup};
@@ -122,7 +118,7 @@ TEST(perturbed_vs_unperturbed_differs_and_reference_agrees) {
     (void)kTol;
 }
 
-TEST(memo_amortizes_and_stays_accurate) {
+TEST_CASE("memo_amortizes_and_stays_accurate") {
     std::vector<Perturber> none;
     HeliocentricForce f{kMuSun, &none};
     WindowMemo memo(&f, IntegrateOptions{});
@@ -153,7 +149,7 @@ TEST(memo_amortizes_and_stays_accurate) {
     CHECK(norm(past.pos - past_exact.pos) < 1e-8);
 }
 
-TEST(memo_rejects_state_beyond_coverage_failure) {
+TEST_CASE("memo_rejects_state_beyond_coverage_failure") {
     // A memo whose integration fails (bad options) must not serve garbage.
     std::vector<Perturber> none;
     HeliocentricForce f{kMuSun, &none};
@@ -165,8 +161,4 @@ TEST(memo_rejects_state_beyond_coverage_failure) {
     const State s = memo.at(10.0);
     (void)s; // failure path: memo stays empty; must not crash (ASan gate)
     CHECK(memo.stats().windows_built == 0);
-}
-
-int main() {
-    return ptest::run_all();
 }
