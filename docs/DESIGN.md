@@ -339,6 +339,10 @@ tool and script in this repo, and for anyone running them:
   - Increment 6 (done 2026-09-17): osculating nodes and apsides
     (`Engine::calc_orbit_point`, `prometheia_calc_orbit_point`,
     `ephem --orbit-point`, prometheiad object kind 2).
+  - Increment 7 (done 2026-09-17): mean nodes and apsides. The Moon's come
+    from the fundamental arguments. The planets' come from mean elements
+    fitted to DE440's own osculating elements
+    (`prometheia-gen-mean-elements`, `src/mean_elements.inc`).
 
 ## Cleanroom policy
 

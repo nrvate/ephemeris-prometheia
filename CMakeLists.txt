@@ -144,6 +144,10 @@ target_link_libraries(prometheia-convert PRIVATE prometheia)
 add_executable(prometheia-info tools/info/info_main.cpp)
 target_link_libraries(prometheia-info PRIVATE prometheia)
 
+# Regenerates src/mean_elements.inc from a DE file (docs/ENGINE.md).
+add_executable(prometheia-gen-mean-elements tools/gen/gen_mean_elements.cpp)
+target_link_libraries(prometheia-gen-mean-elements PRIVATE prometheia)
+
 add_executable(prometheia-spk-trim tools/spktrim/spk_trim_main.cpp)
 target_link_libraries(prometheia-spk-trim PRIVATE prometheia)
 

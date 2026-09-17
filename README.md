@@ -93,6 +93,10 @@ Milestones 0–4 of 6 complete (2026-09-16):
   Jupiter + Saturn perturbers): cold 79 bodies ±1 yr = **10.6 ms**;
   warm memoized evaluation = **18 ns**; 100 bodies × 10 yr = **69 ms**;
   Radau-15 55-yr arc = 671 steps at 3.7e-10 AU.
+- **Nodes and apsides** — osculating and mean ascending/descending nodes,
+  perihelia and aphelia (perigee/apogee for the Moon) as points seen from any
+  observer; mean planetary elements fitted to DE440 itself. Planet-centred
+  observers. [docs/ENGINE.md](docs/ENGINE.md).
 - **Tools** — `ephem`, `prometheia-fetch` (Python), `prometheia-convert`, `prometheia-spk-trim`,
   `prometheia-info`, `prometheia-bench`; `prometheiad` and `prometheia-wire-client`
   ([docs/SERVER.md](docs/SERVER.md)). Seventeen test suites (a ~20 s local gate, `tools/gate.sh`), clean under

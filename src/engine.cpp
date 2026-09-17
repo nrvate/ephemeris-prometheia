@@ -91,6 +91,21 @@ double gm_or_builtin(const Source* s, int id) {
     return 0.0;
 }
 
+// Mean elements of the planets, fitted to DE440 (tools/gen/gen_mean_elements.cpp).
+struct MeanElementsFit {
+    int id;
+    double a[3], h[3], k[3], p[3], q[3]; // quadratics in T; see the table header
+    double rms[5];
+};
+#include "mean_elements.inc"
+
+// The Moon's mean orbit: node and perigee from the fundamental arguments;
+// inclination, eccentricity and semi-major axis as constants (the published
+// mean values of the lunar orbit).
+constexpr double kMoonMeanInclinationDeg = 5.1453964;
+constexpr double kMoonMeanEccentricity = 0.0549006;
+constexpr double kMoonMeanDistanceKm = 384399.0;
+
 class DeSource final : public Source {
 public:
     explicit DeSource(de::DeFile f) : file_(std::move(f)) {
@@ -1427,6 +1442,27 @@ struct Engine::Impl {
         for (int i = 0; i < 3; ++i)
             ev[i] = vxh[i] / mu - x[i] / rn;
         const double semi_latus = h2 / mu;
+        double hi[3], ei[3], rel_point[3];
+        apply_transpose(m, h, hi);
+        apply_transpose(m, ev, ei);
+        r = conic_point(hi, ei, semi_latus, point, m, rel_point);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = c[i] + rel_point[i];
+        return {};
+    }
+
+    // A node or apsis of the conic with angular momentum direction hi and
+    // eccentricity vector ei (both ICRF) and semi-latus rectum semi_latus
+    // (km), on the ecliptic m (a rotation from ICRF); out is relative to the
+    // conic's focus, ICRF km.
+    Result<void> conic_point(const double hi[3], const double ei[3], double semi_latus,
+                             OrbitPoint point, const double m[9], double out[3]) {
+        double h[3], ev[3];
+        apply(m, hi, h);
+        apply(m, ei, ev);
+        const double h2 = h[0] * h[0] + h[1] * h[1] + h[2] * h[2];
         double u[3] = {0.0, 0.0, 0.0};
         switch (point) {
         case OrbitPoint::AscendingNode:
@@ -1462,17 +1498,89 @@ struct Engine::Impl {
         if (!(denom > 1e-12))
             return make_error(ErrorCode::ArgumentError, "the open orbit does not reach this node");
         const double dist = semi_latus / denom;
-        double pe[3], pi[3];
-        for (int i = 0; i < 3; ++i)
-            pe[i] = dist * u[i];
-        apply_transpose(m, pe, pi);
-        for (int i = 0; i < 3; ++i)
-            out[i] = c[i] + pi[i];
+        const double pe[3] = {dist * u[0], dist * u[1], dist * u[2]};
+        apply_transpose(m, pe, out);
         return {};
     }
 
-    Result<void> mean_orbit_point(int, OrbitPoint, double, double, const CalcOptions&, double[3]) {
-        return make_error(ErrorCode::NotFound, "mean elements are not available yet");
+    // Orbit normal and eccentricity vector, in the elements' own ecliptic
+    // frame, from e, the longitude of perihelion, sin i and the node.
+    static void mean_conic(double e, double varpi, double sin_i, double node, double normal[3],
+                           double ev[3]) {
+        const double cos_i = std::sqrt(std::max(0.0, 1.0 - sin_i * sin_i));
+        const double w = varpi - node;
+        const double cn = std::cos(node), sn = std::sin(node), cw = std::cos(w), sw = std::sin(w);
+        normal[0] = sin_i * sn;
+        normal[1] = -sin_i * cn;
+        normal[2] = cos_i;
+        ev[0] = e * (cn * cw - sn * sw * cos_i);
+        ev[1] = e * (sn * cw + cn * sw * cos_i);
+        ev[2] = e * sw * sin_i;
+    }
+
+    Result<void> mean_orbit_point(int id, OrbitPoint point, double jd_tt, double jd_tdb,
+                                  const CalcOptions& o, double out[3]) {
+        double m[9];
+        orbit_ecliptic(jd_tt, o, m);
+        double normal[3], ev[3], hi[3], ei[3], rel[3], focus[6];
+        double semi_latus = 0.0;
+        if (id == body::kMoon) {
+            double phi[14];
+            frames::fundamental_arguments(jd_tt, phi);
+            const double node = phi[13];                     // Omega
+            const double varpi = phi[11] + phi[13] - phi[9]; // L - l, with L = F + Omega
+            const double e = kMoonMeanEccentricity;
+            mean_conic(e, varpi, std::sin(kMoonMeanInclinationDeg / kRad2Deg), node, normal, ev);
+            semi_latus = kMoonMeanDistanceKm * (1.0 - e * e);
+            // Referred to the mean ecliptic and equinox of date.
+            const EpochFrames& f = frames_at(jd_tt, false, o.precession);
+            double date[9], e1[9];
+            rot1(f.eps_mean, e1);
+            matmul(e1, f.pb, date);
+            apply_transpose(date, normal, hi);
+            apply_transpose(date, ev, ei);
+            auto r = source->barycentric(body::kEarth, jd_tdb, focus);
+            if (!r)
+                return r;
+        } else {
+            int key = id;
+            if (id == 1 || id == 2)
+                key = id * 100 + 99;
+            else if (id == body::kEarth)
+                key = body::kEarthMoonBary;
+            else if (id >= 499 && id <= 999 && id % 100 == 99)
+                key = id / 100;
+            const MeanElementsFit* fit = nullptr;
+            for (const MeanElementsFit& f : kMeanElements)
+                if (f.id == key)
+                    fit = &f;
+            if (!fit)
+                return make_error(ErrorCode::NotFound,
+                                  "mean elements exist for the Moon and the major planets only");
+            const double T = (jd_tdb - kJ2000) / 36525.0;
+            const auto poly = [T](const double c[3]) { return c[0] + T * (c[1] + T * c[2]); };
+            const double a = poly(fit->a), hh = poly(fit->h), kk = poly(fit->k);
+            const double pp = poly(fit->p), qq = poly(fit->q);
+            const double e = std::hypot(hh, kk);
+            const double sin_i = std::min(1.0, std::hypot(pp, qq));
+            mean_conic(e, std::atan2(hh, kk), sin_i, std::atan2(pp, qq), normal, ev);
+            semi_latus = a * (1.0 - e * e) * kAuKm;
+            // Referred to the J2000 ecliptic of the fit.
+            double j2000[9], e1[9];
+            rot1(eps_j2000, e1);
+            matmul(e1, bias, j2000);
+            apply_transpose(j2000, normal, hi);
+            apply_transpose(j2000, ev, ei);
+            auto r = sun_at(jd_tdb, focus);
+            if (!r)
+                return r;
+        }
+        auto r = conic_point(hi, ei, semi_latus, point, m, rel);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = focus[i] + rel[i];
+        return {};
     }
 
     // Observer -> orbit point vector in the output frame (km).

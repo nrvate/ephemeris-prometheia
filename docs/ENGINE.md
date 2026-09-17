@@ -222,7 +222,44 @@ geometric state at the instant, relative to the Sun (Earth for the Moon).
 - **Behaviour:** the Moon's osculating perigee swings by degrees a day,
   which is the physical orbit's behaviour; the mean elements smooth it.
 
-**Mean** (`OrbitElements::Mean`): not yet available (NotFound).
+**Mean** (`OrbitElements::Mean`): the orbit without its periodic terms.
+It is available for the Moon and the major planets (NotFound otherwise).
+- **Moon.**
+  - The node is the fundamental argument Ω and the perigee's longitude is
+    ϖ = L − l, with L = F + Ω. These are the Simon et al. (1994) expressions
+    in USNO Circular 179, the same ones the nutation series uses, referred to
+    the mean ecliptic and equinox of date.
+  - Inclination 5.1453964°, eccentricity 0.0549006 and mean distance
+    384,399 km are fixed values; they only set the points' distances and
+    latitudes.
+  - On the mean ecliptic of date the mean node's longitude equals Ω to
+    1e-6″. Its rate is −0.05295° a day.
+- **Planets** (Mercury, Venus, the Earth–Moon barycentre also answering for
+  the Earth, and the Mars–Pluto systems; planet-centre IDs share their
+  system's elements).
+  - The fit: a quadratic in T for each element, fitted by
+    `prometheia-gen-mean-elements` (`tools/gen/gen_mean_elements.cpp`) to
+    DE440's own osculating heliocentric elements every 4 days over
+    1550–2650. The coefficients are compiled in as `src/mean_elements.inc`.
+  - The elements fitted are a and the non-singular h = e sin ϖ,
+    k = e cos ϖ, p = sin i sin Ω, q = sin i cos Ω. These stay well defined
+    for the Earth–Moon barycentre's near-zero inclination to the J2000
+    ecliptic and for small eccentricities.
+  - Short-period terms average out over 1,100 years, and what is left is
+    the secular trend. The table header and the generator's output record
+    each fit's residual rms.
+  - At J2000 the fit gives the familiar mean elements: Mercury a 0.387098
+    AU, e 0.205632, i 7.00498°, Ω 48.3309°, ϖ 77.4561°; the EMB's ϖ
+    102.9371°; Mars Ω 49.5581°; Pluto ϖ 224.08°. Jupiter's ϖ is about 0.2°
+    from classical values: the 900-year great inequality leaks into a fit
+    this short.
+  - The elements are referred to the J2000 ecliptic. For output in the date
+    frames the orbit is carried to the ecliptic of date before its nodes are
+    taken.
+  - The Earth's own orbit defines the ecliptic, so its nodes on the ecliptic
+    of date are nearly degenerate and move quickly.
+  - Regenerate the table with `prometheia-gen-mean-elements DE_FILE
+    src/mean_elements.inc` (2.7 s) when the planetary ephemeris changes.
 
 ## Small bodies: the catalog overlay
 

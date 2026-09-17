@@ -1103,4 +1103,64 @@ TEST_CASE("de440_ceres_osculating_orbit_points_match_elements") {
                 std::fabs(peri.dist_au - ceres.a_au * (1.0 - ceres.e)));
 }
 
+TEST_CASE("de440_mean_orbit_points") {
+    const std::string de = env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) +
+                                                          "/ephe/linux_p1550p2650.440");
+    if (access(de.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s not present\n", de.c_str());
+        return;
+    }
+    auto e = Engine::open(de);
+    REQUIRE(e.ok());
+    REQUIRE(e.value()
+                .add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm")
+                .ok());
+    const double kDeg = 180.0 / 3.14159265358979323846;
+    const auto arcsec = [](double a, double b) {
+        return std::fabs(std::remainder(a - b, 360.0)) * 3600.0;
+    };
+
+    // The Moon's mean node is the fundamental argument Omega itself, on the
+    // mean ecliptic and equinox of date, regressing 0.05295 degrees a day.
+    CalcOptions date = CalcOptions::geometric();
+    date.frame = Frame::MeanOfDate;
+    for (double jd : {2378496.5, 2451545.0, 2461300.5}) {
+        auto node = e.value().calc_orbit_point(body::kMoon, OrbitPoint::AscendingNode,
+                                               OrbitElements::Mean, jd, date);
+        REQUIRE_MESSAGE(node.ok(), node.error().message);
+        double phi[14];
+        frames::fundamental_arguments(jd, phi);
+        CHECK(arcsec(node.value().pos.lon_deg, phi[13] * kDeg) < 1e-6);
+        CHECK(std::fabs(node.value().pos.lat_deg) < 1e-9);
+        CHECK(std::fabs(node.value().pos.lon_speed + 0.052954) < 2e-5);
+        auto peri = e.value().calc_orbit_point(body::kMoon, OrbitPoint::Perihelion,
+                                               OrbitElements::Mean, jd, date);
+        REQUIRE(peri.ok());
+        CHECK(std::fabs(peri.value().pos.dist_au * 149597870.7 - 384399.0 * (1 - 0.0549006)) < 1.0);
+    }
+
+    // Planets at J2000 against the fit's own values (heliocentric, J2000
+    // ecliptic): the published mean elements are Mercury node 48.331 deg,
+    // Mars node 49.558 deg, the Earth-Moon barycentre's perihelion 102.937 deg.
+    CalcOptions h = CalcOptions::geometric();
+    h.center = Center::Heliocentric;
+    h.frame = Frame::J2000;
+    const auto mean = [&](int id, OrbitPoint p) {
+        auto r = e.value().calc_orbit_point(id, p, OrbitElements::Mean, 2451545.0, h);
+        REQUIRE_MESSAGE(r.ok(), r.error().message);
+        return r.value().pos;
+    };
+    CHECK(arcsec(mean(199, OrbitPoint::AscendingNode).lon_deg, 48.3309) < 5.0);
+    CHECK(arcsec(mean(4, OrbitPoint::AscendingNode).lon_deg, 49.5581) < 5.0);
+    CHECK(arcsec(mean(body::kEarth, OrbitPoint::Perihelion).lon_deg, 102.9371) < 5.0);
+    CHECK(std::fabs(mean(body::kEarth, OrbitPoint::Perihelion).dist_au - 0.98329) < 1e-5);
+    // Planet-centre IDs share their system's elements.
+    CHECK(mean(499, OrbitPoint::Aphelion).lon_deg == mean(4, OrbitPoint::Aphelion).lon_deg);
+    // Mean elements exist for the Moon and the major planets only.
+    CHECK(e.value()
+              .calc_orbit_point(20000001, OrbitPoint::Perihelion, OrbitElements::Mean, 2451545.0, h)
+              .error()
+              .code == ErrorCode::NotFound);
+}
+
 } // namespace
