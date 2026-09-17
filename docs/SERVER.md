@@ -369,6 +369,46 @@ match-length, tolerance and request-id changes.
    row blocks that check for cancellation between them; a cancelled request
    caches nothing.
 
+## The segment lattice
+
+`server/segcache.hpp` implements the shape agreed with Astrolog for version 4,
+ahead of the wire format and independent of it.
+
+A client asks for segments over a span. The server does **not** fit that span.
+It fits the fixed lattice cells covering it — 32 days, aligned from J2000 TT —
+and returns those, so two clients asking overlapping spans share everything
+but the ends. The client gets contiguous coverage of what it asked for plus a
+little either side, which costs it nothing.
+
+The requested error is quantised onto a ladder (1″, 0.1″, 0.01″, 0.001″) so
+that two clients asking 0.1″ and 0.12″ are served by one fit. **Quantisation
+only ever moves toward a finer fit.** A request below the last rung is refused
+rather than served coarser: the client asked for a number because something
+downstream depends on it, and the segment's published residual is a promise,
+not a disclaimer. The floor is advertised, so no client has to learn it by
+being refused.
+
+Neither the lattice nor the ladder is client-chosen. A client able to name a
+cell boundary, or to demand an exact error, would defeat the sharing without
+meaning to.
+
+Both work because the cost of an answer is dominated by the **time window** it
+touches rather than by the objects in it: the frame work underneath — chiefly
+the nutation nodes, one per half day — is computed once per window and shared
+by every body, instant and client that touches it (docs/FRAMES.md). Two
+clients scanning the same year therefore share the fits *and* what is beneath
+them.
+
+Cells are cached per event loop, LRU under a byte budget, alongside the
+result cache. A segments request's work scales with its span, which no size
+limit expresses, so the span is bounded in cells (`max_cells`) — this is what
+version 4 advertises as `maxSegSpanDays`.
+
+The cache key is supplied by the caller: everything that identifies the
+dataset, the object and the profile, with the rung and cell index appended as
+raw bytes. `segcache.cpp` knows nothing about any wire format, and the fitter
+under it knows nothing about the lattice (docs/SEGMENTS.md).
+
 ## Not implemented
 
 - **zstd payloads.** Reserved in the envelope, advertised by no one.

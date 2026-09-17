@@ -85,7 +85,7 @@ prometheia_test(horizons tests/test_horizons.cpp)
 # prometheiad's protocol core (docs/SERVER.md): Astrolog's ephemeris protocol
 # (third_party/ephproto, pinned) over the engine, with no sockets in it.
 add_library(prometheia_server STATIC server/session.cpp server/wire_map.cpp server/limits.cpp
-  server/metrics.cpp)
+  server/metrics.cpp server/segcache.cpp)
 target_include_directories(prometheia_server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/server)
 target_include_directories(prometheia_server SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ephproto)
 target_link_libraries(prometheia_server PUBLIC prometheia)
@@ -93,6 +93,8 @@ target_compile_options(prometheia_server PRIVATE -Wall -Wextra -Werror)
 
 prometheia_test(server tests/test_server.cpp)
 target_link_libraries(test_server PRIVATE prometheia_server)
+prometheia_test(segcache tests/test_segcache.cpp)
+target_link_libraries(test_segcache PRIVATE prometheia_server)
 
 # The WebSocket head: uWebSockets + uSockets (third_party, Apache-2.0),
 # without zlib (compression is off). With OpenSSL found, uSockets is built
