@@ -287,37 +287,37 @@ public:
     }
 
     void state(size_t i, double t, double out[6]) override {
-        if (!ok_ || i >= entries_.size()) {
+        if (!ok_ || i >= ids_.size() || rows() == 0) {
             for (int k = 0; k < 6; ++k)
                 out[k] = 0.0;
             return;
         }
-        eval(i, t, out);
+        const Row r = locate(t);
+        if (r.clamped)
+            copy_sample(at(r.lo, i), out);
+        else
+            r.weights.apply(at(r.lo, i), at(r.lo + 1, i), out);
     }
 
-    // Every table holds the same sample epochs (blocks are extended for all
-    // masses together), so one interval search and one set of Hermite
-    // weights serve all of them.
+    // One interval lookup and one set of Hermite weights serve every mass:
+    // all tables share their sample epochs, stored row by row.
     void states(double t, double* out) override {
-        const size_t n = entries_.size();
-        if (!ok_ || n == 0 || entries_[0].samples.size() < 2) {
-            for (size_t i = 0; i < n; ++i)
-                state(i, t, out + 6 * i);
+        const size_t n = ids_.size();
+        if (!ok_ || n == 0 || rows() == 0) {
+            for (size_t k = 0; k < 6 * n; ++k)
+                out[k] = 0.0;
             return;
         }
-        const std::vector<TrajSample>& s0 = entries_[0].samples;
-        if (t <= s0.front().t || t >= s0.back().t) {
-            for (size_t i = 0; i < n; ++i)
-                eval(i, t, out + 6 * i);
-            return;
+        const Row r = locate(t);
+        for (size_t i = 0; i < n; ++i) {
+            if (r.clamped)
+                copy_sample(at(r.lo, i), out + 6 * i);
+            else
+                r.weights.apply(at(r.lo, i), at(r.lo + 1, i), out + 6 * i);
         }
-        const size_t lo = interval(s0, t);
-        const Hermite w(s0[lo].t, s0[lo + 1].t, t);
-        for (size_t i = 0; i < n; ++i)
-            w.apply(entries_[i].samples[lo], entries_[i].samples[lo + 1], out + 6 * i);
     }
 
-    size_t count() const override { return entries_.size(); }
+    size_t count() const override { return ids_.size(); }
     const double* mus() const override { return mus_.data(); }
     bool ok() const override { return ok_; }
     long sun_index() const override { return sun_index_; }
@@ -339,12 +339,12 @@ private:
             double st[6];
             if (source_->barycentric(id, t, st).ok()) {
                 if (id == body::kSun)
-                    sun_index_ = long(entries_.size());
-                entries_.push_back(Entry{id, {}});
+                    sun_index_ = long(ids_.size());
+                ids_.push_back(id);
                 mus_.push_back(gm_or_builtin(source_, id));
             }
         }
-        if (entries_.empty()) {
+        if (ids_.empty()) {
             fail("the ephemeris carries none of the perturbing masses at JD " + std::to_string(t) +
                  " (outside its coverage?)");
             return;
@@ -355,25 +355,26 @@ private:
     }
 
     // Grows coverage by one block in the given direction (positive =
-    // forward). The block boundary sample is shared with the previous
-    // block (or, on the very first block, is the probe epoch itself).
+    // forward). The block boundary sample is shared with the existing rows
+    // (or, on the very first block, is the probe epoch itself).
     void extend(double days) {
         const double from = days > 0.0 ? hi_ : lo_;
         const double to = from + days;
         const int n = kBlockSamples;
         const double step = days / double(n);
-        for (size_t b = 0; b < entries_.size(); ++b) {
-            std::vector<TrajSample> pts;
-            pts.reserve(size_t(n) + 1);
+        const size_t nb = ids_.size();
+        // block[i * nb + b]: sample i of the block (i = 0 is the boundary).
+        std::vector<TrajSample> block(size_t(n + 1) * nb);
+        for (size_t b = 0; b < nb; ++b) {
             for (int i = 0; i <= n; ++i) {
                 const double tt = from + step * double(i);
                 double st[6];
-                auto r = source_->barycentric(entries_[b].id, tt, st);
+                auto r = source_->barycentric(ids_[b], tt, st);
                 if (!r) {
                     fail(r.error().message);
                     return;
                 }
-                TrajSample p;
+                TrajSample& p = block[size_t(i) * nb + b];
                 p.t = tt;
                 p.px = st[0] / kAuKm;
                 p.py = st[1] / kAuKm;
@@ -381,73 +382,29 @@ private:
                 p.vx = st[3] / kAuKm;
                 p.vy = st[4] / kAuKm;
                 p.vz = st[5] / kAuKm;
-                pts.push_back(p);
             }
-            append_block(b, days, std::move(pts));
         }
-        if (days > 0.0)
+        const int first = grid_.empty() ? 0 : 1; // skip the shared boundary
+        if (days > 0.0) {
+            for (int i = first; i <= n; ++i)
+                grid_.insert(grid_.end(), block.begin() + i * nb, block.begin() + (i + 1) * nb);
             hi_ = to;
-        else
-            lo_ = to;
-    }
-
-    // pts holds the new block: ascending in time for a forward block,
-    // descending for a backward one, and always including the boundary
-    // epoch shared with the existing samples (or the probe epoch, when
-    // this is the very first block).
-    void append_block(size_t b, double days, std::vector<TrajSample> pts) {
-        std::vector<TrajSample>& s = entries_[b].samples;
-        if (days < 0.0) {
-            // Ascending again: far end first.
-            std::reverse(pts.begin(), pts.end());
-            // pts = [to, ..., lo_]: the shared boundary is the last sample.
-            if (s.empty()) {
-                s = std::move(pts);
-            } else {
-                s.insert(s.begin(), pts.begin(), pts.end() - 1);
-            }
         } else {
-            // pts = [hi_, ..., to]: the shared boundary is the first sample.
-            s.insert(s.end(), s.empty() ? pts.begin() : pts.begin() + 1, pts.end());
+            // Backward samples run from the boundary down to `to`; the new
+            // rows go in front, ascending.
+            std::vector<TrajSample> rows_in;
+            rows_in.reserve(size_t(n + 1) * nb);
+            for (int i = n; i >= first; --i)
+                rows_in.insert(rows_in.end(), block.begin() + i * nb, block.begin() + (i + 1) * nb);
+            grid_.insert(grid_.begin(), rows_in.begin(), rows_in.end());
+            lo_ = to;
         }
-    }
-
-    void eval(size_t i, double t, double out[6]) const {
-        const std::vector<TrajSample>& s = entries_[i].samples;
-        if (s.empty()) {
-            for (int k = 0; k < 6; ++k)
-                out[k] = 0.0;
-            return;
-        }
-        if (t <= s.front().t) {
-            copy_sample(s.front(), out);
-            return;
-        }
-        if (t >= s.back().t) {
-            copy_sample(s.back(), out);
-            return;
-        }
-        const size_t lo = interval(s, t);
-        Hermite(s[lo].t, s[lo + 1].t, t).apply(s[lo], s[lo + 1], out);
-    }
-
-    // The sample interval [lo, lo + 1] holding t (front().t < t < back().t):
-    // samples are uniformly spaced, so the index is computed and then
-    // nudged past any rounding at the block seams.
-    static size_t interval(const std::vector<TrajSample>& s, double t) {
-        const double h = kBlockDays / double(kBlockSamples);
-        const double k = std::floor((t - s.front().t) / h);
-        size_t lo = k <= 0.0 ? 0 : std::min(size_t(k), s.size() - 2);
-        while (lo > 0 && s[lo].t > t)
-            --lo;
-        while (lo + 2 < s.size() && s[lo + 1].t <= t)
-            ++lo;
-        return lo;
     }
 
     // Cubic Hermite weights for one epoch within [ta, tb].
     struct Hermite {
-        double dt, h00, h10, h01, h11, d00, d10, d01, d11;
+        double dt = 0, h00 = 0, h10 = 0, h01 = 0, h11 = 0, d00 = 0, d10 = 0, d01 = 0, d11 = 0;
+        Hermite() = default;
         Hermite(double ta, double tb, double t) {
             dt = tb - ta;
             const double u = (t - ta) / dt;
@@ -471,6 +428,43 @@ private:
         }
     };
 
+    size_t rows() const { return ids_.empty() ? 0 : grid_.size() / ids_.size(); }
+    const TrajSample& at(size_t row, size_t b) const { return grid_[row * ids_.size() + b]; }
+    double row_time(size_t row) const { return grid_[row * ids_.size()].t; }
+
+    // Where t falls: a clamped row outside the coverage (the first or last
+    // sample, as before), else the interval [lo, lo + 1] and its weights.
+    // Rows are uniformly spaced, so the index is computed and then nudged
+    // past any rounding at the block seams.
+    struct Row {
+        size_t lo = 0;
+        bool clamped = false;
+        Hermite weights;
+    };
+    Row locate(double t) const {
+        const size_t nr = rows();
+        Row r;
+        if (nr < 2 || t <= row_time(0)) {
+            r.clamped = true;
+            return r;
+        }
+        if (t >= row_time(nr - 1)) {
+            r.lo = nr - 1;
+            r.clamped = true;
+            return r;
+        }
+        const double h = kBlockDays / double(kBlockSamples);
+        const double k = std::floor((t - row_time(0)) / h);
+        size_t lo = k <= 0.0 ? 0 : std::min(size_t(k), nr - 2);
+        while (lo > 0 && row_time(lo) > t)
+            --lo;
+        while (lo + 2 < nr && row_time(lo + 1) <= t)
+            ++lo;
+        r.lo = lo;
+        r.weights = Hermite(row_time(lo), row_time(lo + 1), t);
+        return r;
+    }
+
     static void copy_sample(const TrajSample& p, double out[6]) {
         out[0] = p.px;
         out[1] = p.py;
@@ -480,18 +474,14 @@ private:
         out[5] = p.vz;
     }
 
-    struct Entry {
-        int id; // the NAIF id this table samples
-        std::vector<TrajSample> samples;
-    };
-
     Source* source_ = nullptr;
     bool ok_ = true;
     long sun_index_ = -1;
     bool built_ = false;
     std::string error_;
     double lo_ = 0.0, hi_ = 0.0;
-    std::vector<Entry> entries_;
+    std::vector<int> ids_;         // NAIF ids of the masses, table order
+    std::vector<TrajSample> grid_; // rows of ids_.size() samples, ascending epochs
     std::vector<double> mus_;
 
 public:
