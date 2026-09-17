@@ -1,0 +1,206 @@
+# Traditional star names beyond the IAU Catalog of Star Names (docs/STARS.md).
+#
+# One object per line: KEY: NAME, NAME, ...
+#   KEY is a Bayer designation with the catalog's abbreviations ("bet1 Sco",
+#   "alp Cen"), a Flamsteed one ("80 UMa"), "HR n", "HIP n" or "M n".
+#   NAMEs are alternates to the IAU name (which the generator adds itself).
+#   A name belongs to one object only: names Allen gives to several stars
+#   (Scheat for delta Aqr as well as beta Peg, Deneb for several "tails")
+#   stay with the star that SIMBAD and the IAU give them to.
+# Every name must occur in R. H. Allen, Star-Names and Their Meanings (1899):
+# tools/gen/gen_star_catalog.py looks for it in the book's OCR text and
+# refuses a name it cannot find. The OCR is damaged, so a name of 6-10
+# letters may differ from the text by one letter and a longer one by two;
+# names of 5 letters or fewer must match exactly. The generator prints the
+# passage each name matched. Common modern spellings of Allen's names are
+# used.
+
+# Andromeda
+alp And: Sirrah
+bet And: Mirach
+gam1 And: Almach, Alamak
+
+# Aquarius
+alp Aqr: Sadalmelik
+bet Aqr: Sadalsuud
+del Aqr: Skat
+gam Aqr: Sadachbia
+
+# Aquila
+alp Aql: Atair
+gam Aql: Tarazed
+
+# Aries
+alp Ari: Hamal
+bet Ari: Sharatan
+gam1 Ari: Mesarthim
+
+# Auriga
+alp Aur: Capella
+bet Aur: Menkalinan
+
+# Bootes
+alp Boo: Arcturus
+eta Boo: Muphrid
+eps Boo: Izar
+
+# Cancer
+alp Cnc: Acubens, Sertan
+gam Cnc: Asellus Borealis
+del Cnc: Asellus Australis
+
+# Canis Major
+alp CMa: Sirius
+bet CMa: Mirzam
+eps CMa: Adara
+
+# Canis Minor
+alp CMi: Procyon
+bet CMi: Gomeisa
+
+# Capricornus
+alp1 Cap: Prima Giedi
+alp2 Cap: Secunda Giedi, Giedi
+bet Cap: Dabih
+gam Cap: Nashira
+del Cap: Deneb Algedi
+
+# Cassiopeia
+alp Cas: Schedar
+bet Cas: Caph
+
+# Centaurus
+alp1 Cen: Bungula
+bet Cen: Agena
+
+# Cepheus
+alp Cep: Alderamin
+
+# Cetus
+alp Cet: Menkar
+bet Cet: Deneb Kaitos
+omi Cet: Mira
+
+# Corona Borealis
+alp CrB: Gemma
+
+# Corvus
+del Crv: Algorab
+gam Crv: Gienah
+
+# Crater
+alp Crt: Alkes
+
+# Cygnus
+alp Cyg: Deneb, Arided
+bet1 Cyg: Albireo
+
+# Draco
+alp Dra: Thuban
+bet Dra: Rastaban
+gam Dra: Etamin, Eltanin
+
+# Eridanus
+alp Eri: Achernar
+bet Eri: Cursa
+the1 Eri: Acamar
+
+# Gemini
+alp Gem: Castor
+bet Gem: Pollux
+gam Gem: Alhena
+
+# Hercules
+alp1 Her: Rasalgethi
+bet Her: Rutilicus
+
+# Hydra
+alp Hya: Alphard, Cor Hydrae
+
+# Leo
+alp Leo: Regulus, Cor Leonis
+bet Leo: Denebola
+gam1 Leo: Algieba
+del Leo: Zosma
+the Leo: Chort
+
+# Libra
+alp2 Lib: Zuben Elgenubi, Kiffa Australis
+bet Lib: Zuben Eschamali, Kiffa Borealis
+
+# Lyra
+alp Lyr: Vega, Wega
+
+# Ophiuchus
+alp Oph: Rasalhague
+eta Oph: Sabik
+bet Oph: Cebalrai
+
+# Orion
+alp Ori: Betelgeuse
+bet Ori: Rigel
+gam Ori: Bellatrix
+eps Ori: Alnilam
+zet Ori: Alnitak
+del Ori: Mintaka
+kap Ori: Saiph
+
+# Pegasus
+alp Peg: Markab
+bet Peg: Scheat
+gam Peg: Algenib
+eps Peg: Enif
+
+# Perseus
+alp Per: Marfak
+bet Per: Algol
+
+# Piscis Austrinus
+alp PsA: Fomalhaut
+
+# Sagittarius
+sig Sgr: Nunki
+zet Sgr: Ascella
+eps Sgr: Kaus Australis
+del Sgr: Kaus Meridionalis
+lam Sgr: Kaus Borealis
+
+# Scorpius
+alp Sco: Antares, Cor Scorpii
+bet1 Sco: Graffias, Elacrab
+del Sco: Dschubba
+lam Sco: Shaula
+ups Sco: Lesath
+
+# Serpens
+alp Ser: Unukalhai, Cor Serpentis
+
+# Taurus
+alp Tau: Aldebaran
+bet Tau: Elnath, Nath
+eta Tau: Alcyone
+eps Tau: Ain
+
+# Ursa Major
+alp UMa: Dubhe
+bet UMa: Merak
+gam UMa: Phecda, Phad
+del UMa: Megrez
+eps UMa: Alioth
+zet UMa: Mizar
+eta UMa: Alkaid, Benetnasch
+80 UMa: Alcor
+
+# Ursa Minor
+alp UMi: Polaris, Cynosura
+bet UMi: Kochab
+
+# Virgo
+alp Vir: Spica, Azimech
+bet Vir: Zavijava
+gam Vir: Porrima
+eps Vir: Vindemiatrix
+
+# Deep sky
+M 44: Praesepe
+M 45: Pleiades

@@ -33,7 +33,7 @@ import urllib.parse
 import urllib.request
 
 USER_AGENT = ("prometheia-fetch/0.1.0 "
-              "(Ephemeris Prometheia fixed-star catalog; sequential, 8 requests)")
+              "(Ephemeris Prometheia fixed-star catalog; sequential, 12 requests)")
 PAUSE_S = 5.0
 
 CDS = "https://cdsarc.cds.unistra.fr/ftp/"
@@ -67,6 +67,19 @@ SOURCES = [
      tap("SELECT a.id AS hr, b.id AS hip FROM ident AS a JOIN ident AS b "
          "ON a.oidref = b.oidref WHERE a.id LIKE 'HR %' AND b.id LIKE 'HIP %'"),
      "4efb245a74e52a7bba1619fc5b98c52dee38aa801d1e770c510021e865c70b91", "SIMBAD (Wenger et al. 2000), CDS: free use with acknowledgement"),
+    ("simbad-names", "simbad-names.csv",
+     tap("SELECT a.id AS hr, b.id AS name FROM ident AS a JOIN ident AS b "
+         "ON a.oidref = b.oidref WHERE a.id LIKE 'HR %' AND b.id LIKE 'NAME %'"),
+     "85bcb9f0cfff72dd96b1f33fe697bd1ff878ea2477539d60efb5977421e58509", "as simbad-hr-hip; cross-checks which star each curated name belongs to"),
+    ("heasarc-messier", "heasarc-messier.txt",
+     "https://heasarc.gsfc.nasa.gov/xamin/query?table=messier"
+     "&fields=name,ra,dec,constell,object_type&format=text&resultmax=0&sortvar=name",
+     "1ca05beaece80b825d55c00074980a23920a0f97c7b684faffe3daf4c098ed68", "NASA HEASARC Messier Nebulae table (from Sky Catalogue 2000.0 vol. 2), "
+     "US Government service; cross-checks the Messier positions, gives constellations"),
+    ("roman-1987-readme", "VI_42_ReadMe", CDS + "VI/42/ReadMe", "b6a3e9ec21f902df084406e97d71754671c5787bee1cf49c109b3bc8cfc50ab9",
+     "Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42; "
+     "CDS: free use with acknowledgement"),
+    ("roman-1987", "VI_42_data.dat", CDS + "VI/42/data.dat", "daf9e2b39ec57446d862a445276ae2ea50490ee455540972906098f5f9187957", "as roman-1987-readme"),
     ("simbad-messier", "simbad-messier.csv",
      tap("SELECT i.id AS messier, b.main_id, b.ra, b.dec, b.otype, b.galdim_majaxis, "
          "b.galdim_minaxis FROM ident AS i JOIN basic AS b ON i.oidref = b.oid "
