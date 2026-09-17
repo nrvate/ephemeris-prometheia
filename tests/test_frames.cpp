@@ -438,3 +438,28 @@ TEST_CASE("nutation_interpolator") {
     }
     CHECK(sweep.evaluations() == 21); // nodes 0 .. 20 over ten days
 }
+
+// nutation() composes each term's sine and cosine from per-argument
+// multiples instead of calling libm twice a term. That is arithmetic
+// rearrangement, so it must agree with the printed form to roundoff, not to
+// a tolerance anyone had to choose.
+TEST_CASE("nutation_fast_form_matches_printed") {
+    double worst_psi = 0.0, worst_eps = 0.0, worst_rates = 0.0;
+    for (int i = 0; i < 300; ++i) {
+        const double jd = 2305448.0 + i * 1333.0; // 1600 through 2700
+        double fast_psi, fast_eps, ref_psi, ref_eps;
+        nutation(jd, fast_psi, fast_eps);
+        nutation_printed_form(jd, ref_psi, ref_eps);
+        worst_psi = std::max(worst_psi, std::fabs(fast_psi - ref_psi));
+        worst_eps = std::max(worst_eps, std::fabs(fast_eps - ref_eps));
+        double n[6];
+        nutation_with_rates(jd, n);
+        worst_rates = std::max(worst_rates, std::fabs(n[0] - ref_psi));
+        worst_rates = std::max(worst_rates, std::fabs(n[1] - ref_eps));
+    }
+    // 1e-18 rad is 2e-13 arcsec: five orders below the 0.004 uas the
+    // half-day interpolator already costs, and ten below anything observable.
+    CHECK(worst_psi < 1e-18);
+    CHECK(worst_eps < 1e-18);
+    CHECK(worst_rates < 1e-18);
+}

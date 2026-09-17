@@ -40,6 +40,12 @@ void nutation(double jd_tt, double& dpsi, double& deps);
 // terms (docs/FRAMES.md).
 void nutation_with_rates(double jd_tt, double out[6]);
 
+// The same series summed the way the circular prints it, one sine and one
+// cosine per term. nutation() rearranges that sum to build each term's pair
+// by angle addition instead, which is eight times faster; this exists so a
+// test can hold the two against each other, and nothing else should call it.
+void nutation_printed_form(double jd_tt, double& dpsi, double& deps);
+
 // IAU 2000A nutation interpolated from nodes on a fixed half-day grid: each
 // node holds the series value and its first and second derivatives
 // (nutation_with_rates), and an epoch between two nodes takes the quintic

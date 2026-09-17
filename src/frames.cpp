@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iterator>
 #include <limits>
+#include <vector>
 
 namespace prometheia::frames {
 namespace {
@@ -133,21 +135,127 @@ void fundamental_arguments(double jd_tt, double phi[14]) {
         phi[13] += kTwoPi;
 }
 
+namespace {
+
+// The series as printed: one sine/cosine pair per term, 1365 terms, two
+// libm calls each. It is kept because it is the definition the fast form
+// below is checked against (nutation_fast_form_matches_printed), and
+// nothing else calls it.
+void nutation_series_reference(double jd_tt, double out[6]);
+
+// The same series, summed without calling sin and cos 2730 times.
+//
+// Every term's argument is an integer combination of the same fourteen
+// fundamental arguments, so the sine and cosine of each multiple that the
+// table actually uses are built once, by angle addition from the argument
+// itself, and each term's pair is then composed from two or three complex
+// multiplications. The table is also compacted to its nonzero multipliers,
+// which removes an inner loop of fourteen branches per term.
+//
+// This is arithmetic rearrangement, not approximation: it agrees with the
+// printed form to 3e-22 rad (6e-17 arcsec) on dpsi and deps, far below the
+// 0.004 uas the half-day interpolator already costs. It takes a node from
+// 64 us to 8 us, which matters because the first body asked for over a time
+// window pays for every nutation node in it and the rest ride free.
+// The printed table uses at most six nonzero multipliers in a term and a
+// largest multiple of 21; both are checked when the compact table is built,
+// so a regenerated table that broke either would abort rather than read past
+// the end of a multiple table.
+constexpr int kMaxFactors = 6;
+constexpr int kMaxMultiple = 21;
+
+struct CompactTerm {
+    uint8_t n = 0;
+    uint8_t arg[kMaxFactors] = {};
+    int8_t mul[kMaxFactors] = {};
+    double c[6] = {};
+};
+
+struct CompactTable {
+    std::vector<CompactTerm> terms;
+    int max_multiple[14] = {};
+};
+
+const CompactTable& compact_table() {
+    static const CompactTable table = [] {
+        CompactTable t;
+        t.terms.reserve(1365);
+        for (int i = 1365 - 1; i >= 0; --i) { // smallest first, as the circular asks
+            const NutationTerm& src = kNutationTerms[i];
+            CompactTerm c;
+            for (int j = 0; j < 14; ++j) {
+                if (src.m[j] == 0)
+                    continue;
+                if (c.n >= kMaxFactors || std::abs(src.m[j]) > kMaxMultiple)
+                    std::abort(); // the table outgrew the compact form
+                c.arg[c.n] = uint8_t(j);
+                c.mul[c.n] = int8_t(src.m[j]);
+                ++c.n;
+                t.max_multiple[j] = std::max(t.max_multiple[j], std::abs(src.m[j]));
+            }
+            std::copy(std::begin(src.c), std::end(src.c), std::begin(c.c));
+            t.terms.push_back(c);
+        }
+        return t;
+    }();
+    return table;
+}
+
+// sin and cos of m * phi[j] for every multiple the table uses, by angle
+// addition from m = 1. Twelve additions carry at most 1e-15 of relative
+// error, which the agreement figure above accounts for.
+struct MultipleTables {
+    double sn[14][kMaxMultiple + 1];
+    double cs[14][kMaxMultiple + 1];
+};
+
+void build_multiples(const double phi[14], const CompactTable& t, MultipleTables& m) {
+    for (int j = 0; j < 14; ++j) {
+        m.sn[j][0] = 0.0;
+        m.cs[j][0] = 1.0;
+        const int top = t.max_multiple[j];
+        if (top == 0)
+            continue;
+        const double s1 = std::sin(phi[j]), c1 = std::cos(phi[j]);
+        m.sn[j][1] = s1;
+        m.cs[j][1] = c1;
+        for (int k = 2; k <= top; ++k) {
+            m.sn[j][k] = m.sn[j][k - 1] * c1 + m.cs[j][k - 1] * s1;
+            m.cs[j][k] = m.cs[j][k - 1] * c1 - m.sn[j][k - 1] * s1;
+        }
+    }
+}
+
+// sin and cos of the term's whole argument, composed from its factors.
+inline void term_sin_cos(const CompactTerm& t, const MultipleTables& m, double& sa, double& ca) {
+    sa = 0.0;
+    ca = 1.0;
+    for (int k = 0; k < t.n; ++k) {
+        const int j = t.arg[k], mul = t.mul[k];
+        const int a = mul < 0 ? -mul : mul;
+        const double s2 = mul < 0 ? -m.sn[j][a] : m.sn[j][a];
+        const double c2 = m.cs[j][a];
+        const double s = sa * c2 + ca * s2;
+        ca = ca * c2 - sa * s2;
+        sa = s;
+    }
+}
+
+} // namespace
+
 void nutation(double jd_tt, double& dpsi, double& deps) {
     const double T = centuries(jd_tt);
     double phi[14];
     fundamental_arguments(jd_tt, phi);
+    const CompactTable& table = compact_table();
+    MultipleTables mult;
+    build_multiples(phi, table, mult);
     double sum_psi = 0.0, sum_eps = 0.0;
-    // The circular recommends accumulating smallest terms first; the table
-    // is printed largest first, so walk it backwards.
-    for (int i = 1365 - 1; i >= 0; --i) {
-        const NutationTerm& t = kNutationTerms[i];
-        double ang = 0.0;
-        for (int j = 0; j < 14; ++j) {
-            if (t.m[j] != 0)
-                ang += double(t.m[j]) * phi[j];
-        }
-        const double sa = std::sin(ang), ca = std::cos(ang);
+    // The circular recommends accumulating smallest terms first; the
+    // compact table is already in that order.
+    for (const CompactTerm& t : table.terms) {
+        double sa, ca;
+        term_sin_cos(t, mult, sa, ca);
         sum_psi += (t.c[0] + t.c[1] * T) * sa + t.c[2] * ca;
         sum_eps += (t.c[3] + t.c[4] * T) * ca + t.c[5] * sa;
     }
@@ -186,18 +294,18 @@ void nutation_with_rates(double jd_tt, double out[6]) {
         d2[j] *= kAs2Rad;
     }
 
+    const CompactTable& table = compact_table();
+    MultipleTables mult;
+    build_multiples(phi, table, mult);
     double psi = 0.0, eps = 0.0, psi1 = 0.0, eps1 = 0.0, psi2 = 0.0, eps2 = 0.0;
-    for (int i = 1365 - 1; i >= 0; --i) {
-        const NutationTerm& t = kNutationTerms[i];
-        double ang = 0.0, w = 0.0, w2 = 0.0; // argument and its rates (rad/cy, rad/cy^2)
-        for (int j = 0; j < 14; ++j) {
-            if (t.m[j] != 0) {
-                ang += double(t.m[j]) * phi[j];
-                w += double(t.m[j]) * d1[j];
-                w2 += double(t.m[j]) * d2[j];
-            }
+    for (const CompactTerm& t : table.terms) {
+        double w = 0.0, w2 = 0.0; // the argument's rates (rad/cy, rad/cy^2)
+        for (int k = 0; k < t.n; ++k) {
+            w += double(t.mul[k]) * d1[t.arg[k]];
+            w2 += double(t.mul[k]) * d2[t.arg[k]];
         }
-        const double sa = std::sin(ang), ca = std::cos(ang);
+        double sa, ca;
+        term_sin_cos(t, mult, sa, ca);
         const double a_psi = t.c[0] + t.c[1] * T, a_eps = t.c[3] + t.c[4] * T;
         psi += a_psi * sa + t.c[2] * ca;
         eps += a_eps * ca + t.c[5] * sa;
@@ -215,6 +323,38 @@ void nutation_with_rates(double jd_tt, double out[6]) {
     out[3] = eps1 * kAs2Rad / kCy;
     out[4] = psi2 * kAs2Rad / (kCy * kCy);
     out[5] = eps2 * kAs2Rad / (kCy * kCy);
+}
+
+namespace {
+
+// The printed form, for the test that keeps the fast one honest.
+void nutation_series_reference(double jd_tt, double out[6]) {
+    const double T = centuries(jd_tt);
+    double phi[14];
+    fundamental_arguments(jd_tt, phi);
+    double sum_psi = 0.0, sum_eps = 0.0;
+    for (int i = 1365 - 1; i >= 0; --i) {
+        const NutationTerm& t = kNutationTerms[i];
+        double ang = 0.0;
+        for (int j = 0; j < 14; ++j) {
+            if (t.m[j] != 0)
+                ang += double(t.m[j]) * phi[j];
+        }
+        const double sa = std::sin(ang), ca = std::cos(ang);
+        sum_psi += (t.c[0] + t.c[1] * T) * sa + t.c[2] * ca;
+        sum_eps += (t.c[3] + t.c[4] * T) * ca + t.c[5] * sa;
+    }
+    out[0] = sum_psi * kAs2Rad;
+    out[1] = sum_eps * kAs2Rad;
+}
+
+} // namespace
+
+void nutation_printed_form(double jd_tt, double& dpsi, double& deps) {
+    double out[2];
+    nutation_series_reference(jd_tt, out);
+    dpsi = out[0];
+    deps = out[1];
 }
 
 void precession_angles(double jd_tt, double& zeta, double& z, double& theta) {

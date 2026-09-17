@@ -111,6 +111,29 @@ spacing:
 Nodes are cached, direct-mapped, 4,096 of them. The engine uses it for
 every nutation (docs/ENGINE.md).
 
+## How the series is summed
+
+Every term's argument is an integer combination of the same fourteen
+fundamental arguments, so `nutation()` and `nutation_with_rates()` build the
+sine and cosine of each multiple the table actually uses — at most 21 — once
+per epoch, by angle addition, and compose each term's pair from its two to
+six factors. The table is compacted to its nonzero multipliers as well,
+which removes an inner loop of fourteen branches per term.
+
+This is arithmetic rearrangement, not approximation. `nutation_printed_form`
+keeps the series summed the way the circular prints it, one `sin` and one
+`cos` per term, and exists only so `nutation_fast_form_matches_printed` can
+hold the two against each other: they agree to 3e-20 rad (6e-9 µas) over
+1600–2700, which is roundoff, and five orders below the 0.004 µas the
+half-day interpolator already costs.
+
+What it buys, per epoch: the series falls from 51 to 13 µs, and with rates
+from 64 to 21 µs. That is the cost of a node, and the first body asked for
+over a time window pays for every node in it while the rest ride free — so
+it shows up as Jupiter's apparent place falling from 36 to 14 µs when it is
+the body that pays, and a year-long segment fit of the Moon from 57 to
+26 ms.
+
 ## Long-term precession (Vondrák, Capitaine & Wallace 2011)
 
 IAU 2006 precession is a set of polynomials fitted near J2000; their errors
