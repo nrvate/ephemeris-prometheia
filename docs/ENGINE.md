@@ -193,7 +193,11 @@ not indexed (address those by their NAIF IDs).
 - **Memo:** one M2 `WindowMemo` per body — year windows of integrated
   samples, warm evaluations are spline reads. The integration error is
   ~1e-8 AU over ±26 yr (0.001″); practical accuracy is set by the
-  catalog's elements. Keplerian singulars (e = 1) are rejected at the
+  catalog's elements. Each force evaluation reads all perturber tables through one
+  interval lookup: the tables share uniformly spaced epochs, so the
+  sample index is computed rather than searched and one set of Hermite
+  weights serves every mass (2.75× faster than per-body binary searches,
+  bit-identical results). Keplerian singulars (e = 1) are rejected at the
   container, so the engine never sees them.
 - **Uncertainty (`sigma_arcsec`):** records carrying element sigmas
   (treated as uncorrelated) give `CalcResult::sigma_arcsec`: the

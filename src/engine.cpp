@@ -295,6 +295,28 @@ public:
         eval(i, t, out);
     }
 
+    // Every table holds the same sample epochs (blocks are extended for all
+    // masses together), so one interval search and one set of Hermite
+    // weights serve all of them.
+    void states(double t, double* out) override {
+        const size_t n = entries_.size();
+        if (!ok_ || n == 0 || entries_[0].samples.size() < 2) {
+            for (size_t i = 0; i < n; ++i)
+                state(i, t, out + 6 * i);
+            return;
+        }
+        const std::vector<TrajSample>& s0 = entries_[0].samples;
+        if (t <= s0.front().t || t >= s0.back().t) {
+            for (size_t i = 0; i < n; ++i)
+                eval(i, t, out + 6 * i);
+            return;
+        }
+        const size_t lo = interval(s0, t);
+        const Hermite w(s0[lo].t, s0[lo + 1].t, t);
+        for (size_t i = 0; i < n; ++i)
+            w.apply(entries_[i].samples[lo], entries_[i].samples[lo + 1], out + 6 * i);
+    }
+
     size_t count() const override { return entries_.size(); }
     const double* mus() const override { return mus_.data(); }
     bool ok() const override { return ok_; }
@@ -405,34 +427,49 @@ private:
             copy_sample(s.back(), out);
             return;
         }
-        size_t lo = 0, hi = s.size();
-        while (lo + 1 < hi) {
-            const size_t mid = (lo + hi) / 2;
-            if (s[mid].t <= t)
-                lo = mid;
-            else
-                hi = mid;
-        }
-        const TrajSample& a = s[lo];
-        const TrajSample& b = s[lo + 1];
-        const double dt = b.t - a.t;
-        const double u = (t - a.t) / dt;
-        const double u2 = u * u, u3 = u2 * u;
-        const double h00 = 2 * u3 - 3 * u2 + 1;
-        const double h10 = u3 - 2 * u2 + u;
-        const double h01 = -2 * u3 + 3 * u2;
-        const double h11 = u3 - u2;
-        out[0] = h00 * a.px + h10 * dt * a.vx + h01 * b.px + h11 * dt * b.vx;
-        out[1] = h00 * a.py + h10 * dt * a.vy + h01 * b.py + h11 * dt * b.vy;
-        out[2] = h00 * a.pz + h10 * dt * a.vz + h01 * b.pz + h11 * dt * b.vz;
-        const double d00 = (6 * u2 - 6 * u) / dt;
-        const double d10 = 3 * u2 - 4 * u + 1;
-        const double d01 = (-6 * u2 + 6 * u) / dt;
-        const double d11 = 3 * u2 - 2 * u;
-        out[3] = d00 * a.px + d10 * a.vx + d01 * b.px + d11 * b.vx;
-        out[4] = d00 * a.py + d10 * a.vy + d01 * b.py + d11 * b.vy;
-        out[5] = d00 * a.pz + d10 * a.vz + d01 * b.pz + d11 * b.vz;
+        const size_t lo = interval(s, t);
+        Hermite(s[lo].t, s[lo + 1].t, t).apply(s[lo], s[lo + 1], out);
     }
+
+    // The sample interval [lo, lo + 1] holding t (front().t < t < back().t):
+    // samples are uniformly spaced, so the index is computed and then
+    // nudged past any rounding at the block seams.
+    static size_t interval(const std::vector<TrajSample>& s, double t) {
+        const double h = kBlockDays / double(kBlockSamples);
+        const double k = std::floor((t - s.front().t) / h);
+        size_t lo = k <= 0.0 ? 0 : std::min(size_t(k), s.size() - 2);
+        while (lo > 0 && s[lo].t > t)
+            --lo;
+        while (lo + 2 < s.size() && s[lo + 1].t <= t)
+            ++lo;
+        return lo;
+    }
+
+    // Cubic Hermite weights for one epoch within [ta, tb].
+    struct Hermite {
+        double dt, h00, h10, h01, h11, d00, d10, d01, d11;
+        Hermite(double ta, double tb, double t) {
+            dt = tb - ta;
+            const double u = (t - ta) / dt;
+            const double u2 = u * u, u3 = u2 * u;
+            h00 = 2 * u3 - 3 * u2 + 1;
+            h10 = u3 - 2 * u2 + u;
+            h01 = -2 * u3 + 3 * u2;
+            h11 = u3 - u2;
+            d00 = (6 * u2 - 6 * u) / dt;
+            d10 = 3 * u2 - 4 * u + 1;
+            d01 = (-6 * u2 + 6 * u) / dt;
+            d11 = 3 * u2 - 2 * u;
+        }
+        void apply(const TrajSample& a, const TrajSample& b, double out[6]) const {
+            out[0] = h00 * a.px + h10 * dt * a.vx + h01 * b.px + h11 * dt * b.vx;
+            out[1] = h00 * a.py + h10 * dt * a.vy + h01 * b.py + h11 * dt * b.vy;
+            out[2] = h00 * a.pz + h10 * dt * a.vz + h01 * b.pz + h11 * dt * b.vz;
+            out[3] = d00 * a.px + d10 * a.vx + d01 * b.px + d11 * b.vx;
+            out[4] = d00 * a.py + d10 * a.vy + d01 * b.py + d11 * b.vy;
+            out[5] = d00 * a.pz + d10 * a.vz + d01 * b.pz + d11 * b.vz;
+        }
+    };
 
     static void copy_sample(const TrajSample& p, double out[6]) {
         out[0] = p.px;

@@ -96,6 +96,13 @@ struct PerturberStates {
     // ensure(t) has been called for this t.
     virtual void state(size_t index, double t, double out[6]) = 0;
 
+    // All count() states at once into out[6 * index .. 6 * index + 5]; the
+    // force model's per-evaluation call. The default loops over state().
+    virtual void states(double t, double* out) {
+        for (size_t i = 0; i < count(); ++i)
+            state(i, t, out + 6 * i);
+    }
+
     virtual size_t count() const = 0;
     // GM per perturber (AU^3/day^2), count() entries.
     virtual const double* mus() const = 0;
@@ -136,10 +143,17 @@ struct BarycentricForce {
         const size_t n = perturbers->count();
         const double* mu = perturbers->mus();
         const long sun = relativity ? perturbers->sun_index() : -1;
+        double buffer[6 * 32];
+        std::vector<double> large;
+        double* all = buffer;
+        if (n > 32) {
+            large.resize(6 * n);
+            all = large.data();
+        }
+        perturbers->states(t, all);
         double ax = 0.0, ay = 0.0, az = 0.0;
-        double ps[6];
         for (size_t i = 0; i < n; ++i) {
-            perturbers->state(i, t, ps);
+            const double* ps = all + 6 * i;
             const double dx = ps[0] - y[0], dy = ps[1] - y[1], dz = ps[2] - y[2];
             const double d2 = dx * dx + dy * dy + dz * dz;
             const double k = mu[i] / (d2 * std::sqrt(d2));
