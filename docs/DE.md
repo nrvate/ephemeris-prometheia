@@ -89,7 +89,7 @@ plausible, DENUM matches NUMDE, and the first data record starts at SS.
 
 ### Correction to the first reader increment
 
-The first increment (9b97337) treated `lnxm1600p2170.200` as an
+The first increment (7ddc606) treated `lnxm1600p2170.200` as an
 "old-format" file without an embedded pointer table, supplied the table
 from `header.200`, and labelled column 12 a libration block absent from
 the file. All three were wrong: the binary embeds the full table at the

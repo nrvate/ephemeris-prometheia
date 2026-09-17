@@ -121,12 +121,12 @@ tool and script in this repo, and for anyone running them:
 - **M0** — bootstrap: repo, CMake, GPL, CI, docs. *(done)*
 - **M1** — EPM1 container + SBDB ingest pipeline + tools. *(done)*
 - **M2** — mechanics core. *(done 2026-09-16, three increments)*
-  - Increment 1: Kepler engine + adaptive DP5(4) with FSAL (dc91102).
+  - Increment 1: Kepler engine + adaptive DP5(4) with FSAL (3495d52).
   - Increment 2: cubic-Hermite perturber tables, heliocentric force
-    model, WindowMemo, benchmark harness (18475f9).
+    model, WindowMemo, benchmark harness (87fc18d).
   - Increment 3: Radau-15, the IAS15-class collocation integrator, with
     constants derived from theory and verified against the paper
-    (18af083).
+    (0fd9f64).
   - Increment 4 (parked): Everhart's triangular b-sequence in place of
     the monomial Vandermonde solve — better conditioning, fewer
     corrector iterations, lower noise floor.
@@ -137,7 +137,7 @@ tool and script in this repo, and for anyone running them:
   - Increment 1 (done 2026-09-16): DE reader (`prometheia::de`,
     docs/DE.md) — header/constant parsing, lazy record decode with
     cache, Chebyshev state+velocity, validated against the real 43 MB
-    lnxm1600p2170.200 (9b97337). Its "old format without an embedded
+    lnxm1600p2170.200 (7ddc606). Its "old format without an embedded
     pointer table" premise was wrong; corrected in increment 4.
   - Increment 2 (done 2026-09-16): time scales (`prometheia::time`,
     docs/TIME.md) — Hinnant exact calendar↔JD; the USNO leap-second
