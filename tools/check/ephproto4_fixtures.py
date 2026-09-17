@@ -272,8 +272,6 @@ def parse_object(r, n_profiles):
 
 
 def parse_request(r, request_id):
-    if request_id == 0:
-        raise Malformed("a REQUEST needs a nonzero requestId")
     precision = r.u8()
     priority = r.u8()
     representation = r.u8()
@@ -371,10 +369,10 @@ def parse_meta(r, n_obj):
         r.u32()          # firstFailedRow
         r.str8("meta name")
         r.str8("meta errText")
-        if err_code > 8:
-            raise Unsupported(f"per-object error code {err_code} is not in A.17")
-        if meta_flags & ~0x7F:
-            raise Unsupported(f"META flags {meta_flags:#04x} are not in A.18")
+        # §3.1, the answering direction: an unknown per-object error code means
+        # the object failed for an unknown reason, and unknown META flag bits
+        # are ignored. Neither is malformed.
+        _ = (err_code, meta_flags)
 
 
 def parse_data(r):
@@ -391,7 +389,10 @@ def parse_data(r):
     if chunk_flags & ~0x07:
         raise Malformed(f"chunkFlags {chunk_flags:#04x}")
     if columns & ~0x0F:
-        raise Unsupported(f"columnsPresent {columns:#010x} are not in A.10")
+        # The exception to the answering direction's tolerance (§3.1): an
+        # unadvertised column bit changes the row width, so the message cannot
+        # be read at all.
+        raise Malformed(f"columnsPresent {columns:#010x} are not in A.10")
     if i_time + n_rows > total_rows:
         raise Malformed("this chunk's rows run past totalRows")
     if chunk_flags & 0x04:
@@ -453,7 +454,17 @@ def parse_segdata(r):
     r.done("SEGDATA")
 
 
+# §3.2: requestId is 0 on connection-level messages and nonzero on a request
+# and its answers.
+ID_MUST_BE_ZERO = {1, 2, 6, 7}
+ID_MUST_BE_NONZERO = {3, 4, 8, 9, 10, 15}
+
+
 def parse_payload(version, mtype, request_id, payload):
+    if mtype in ID_MUST_BE_ZERO and request_id != 0:
+        raise Malformed(f"requestId must be 0 on message type {mtype}")
+    if mtype in ID_MUST_BE_NONZERO and request_id == 0:
+        raise Malformed(f"requestId must be nonzero on message type {mtype}")
     r = Reader(payload)
     if mtype == 1:
         proto_max = r.u32()
@@ -493,16 +504,15 @@ def parse_payload(version, mtype, request_id, payload):
         r.str8("error text")
         r.tlv(set(), "ERROR TLV")
         r.done("ERROR")
-        if not 1 <= code <= 12:
-            raise Unsupported(f"ERROR code {code} is not in A.19")
+        # An unknown ERROR code is a failure of unknown kind (§3.1); its flags
+        # still say whether the connection closes and whether a retry may work.
+        _ = code
         if flags & ~0x03:
             raise Malformed(f"ERROR flags {flags:#06x}")
     elif mtype in (6, 7):
         r.done("PING/PONG")
     elif mtype == 8:
         r.done("CANCEL")
-        if request_id == 0:
-            raise Malformed("CANCEL needs the request's id")
     elif mtype == 9:
         max_matches = r.u16()
         flags = r.u8()
@@ -524,8 +534,10 @@ def parse_payload(version, mtype, request_id, payload):
             quality = r.u8()
             r.u8()  # sourceIdx
             r.zero(2, "MATCH reserved")
-            if quality > 2:
-                raise Malformed(f"match quality {quality}")
+            _ = quality  # an unknown quality is tolerated (§3.1)
+            # An unknown object kind here cannot be skipped: its payload length
+            # is unknown, so the rest of the message cannot be read. See the
+            # note sent to Astrolog; the reader follows the layout as written.
             parse_object(r, 1)
             r.str8("canonicalName")
             r.str8("designation")
