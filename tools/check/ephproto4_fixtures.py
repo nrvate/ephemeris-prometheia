@@ -617,31 +617,25 @@ def main():
             cells = line.rstrip("\n").split("\t")
             rows.append(cells)
 
-    # The manifest is written last and carries a checksum over the set, so a
-    # directory read while the generator is writing is caught rather than
-    # reported against. Two readings of "the fixtures' bytes" are possible;
-    # accept either and say which matched.
-    def digest(transform):
-        h = hashlib.sha256()
-        for cells in rows:
-            with open(os.path.join(args.dir, cells[0]), "rb") as fh:
-                h.update(transform(fh.read()))
-        return h.hexdigest()
-
-    decoded = digest(lambda raw: bytes.fromhex(raw.decode().replace("\n", "").replace(" ", "")))
-    verbatim = digest(lambda raw: raw)
+    # §3.10: the manifest is written last and carries a checksum over the set,
+    # so a directory read while the generator is writing is caught rather than
+    # reported against. The input is each fixture file's bytes exactly as
+    # committed, concatenated in the manifest's row order; the manifest itself
+    # is not part of it.
+    h = hashlib.sha256()
+    for cells in rows:
+        with open(os.path.join(args.dir, cells[0]), "rb") as fh:
+            h.update(fh.read())
+    computed = h.hexdigest()
     if set_sha is None:
         print("note: the manifest carries no '# set-sha256' line; the set cannot be "
               "checked for consistency")
-    elif set_sha == decoded:
-        print(f"set-sha256 matches the decoded message bytes ({set_sha[:16]}…)")
-    elif set_sha == verbatim:
-        print(f"set-sha256 matches the hex files verbatim ({set_sha[:16]}…)")
-    else:
-        print(f"set-sha256 MISMATCH: manifest {set_sha[:16]}…, decoded {decoded[:16]}…, "
-              f"verbatim {verbatim[:16]}… — the set is inconsistent (half-written?), "
-              "so the verdicts below mean nothing")
+    elif set_sha != computed:
+        print(f"set-sha256 MISMATCH: manifest {set_sha[:16]}…, computed {computed[:16]}… — "
+              "the set is inconsistent (half-written?), so no verdict is reported")
         return 2
+    else:
+        print(f"set-sha256 ok ({set_sha[:16]}…)")
 
     agree = 0
     disagreements = []
