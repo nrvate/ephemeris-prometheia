@@ -125,6 +125,20 @@ by construction, and segment boundaries (e.g. 1986.0, 2005.0) have
 genuine jumps of ~2 s. Inversion (`jd_tt_from_ut1`) is therefore
 ill-defined within ~ΔT of those steps.
 
+### Considered, not adopted: Stephenson–Morrison–Hohenkerk 2016
+
+The modern long-term reconstruction (Stephenson, Morrison & Hohenkerk 2016,
+*Proc. R. Soc. A* 472: 20160404, with a 2020 addendum) would replace the
+Espenak–Meeus polynomials before 1657, where published reconstructions
+disagree by seconds. Its terms were checked on 2026-09-17:
+- the paper is published under CC BY 4.0, which requires crediting the authors and source;
+- the ΔT tables and spline data are published on HM Nautical Almanac Office's
+  website (UK Hydrographic Office, Crown copyright).
+
+Both carry attribution conditions, the same kind that keeps MPC data out of
+the project ([DESIGN.md](DESIGN.md), data sources). Not adopted pending a
+maintainer decision.
+
 ### Refreshing the tables
 
 `tools/gen/gen_earth_orientation.py` regenerates `src/delta_t_table.inc`
