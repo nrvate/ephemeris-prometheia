@@ -1599,16 +1599,62 @@ struct Engine::Impl {
 
     // Observer -> orbit point vector in the output frame (km).
     Result<void> orbit_point_vector_at(int id, OrbitPoint point, OrbitElements elements,
-                                       double jd_tt, const CalcOptions& o, double out[3]) {
+                                       double jd_tt, const CalcOptions& o, double out[3],
+                                       double& tau) {
         const double jd_tdb = time::tdb_from_tt(jd_tt);
         double obs[6], pt[3];
         auto r = observer(o, jd_tt, jd_tdb, obs);
         if (!r)
             return r;
-        r = orbit_point(id, point, elements, jd_tt, jd_tdb, o, pt);
+        if (!o.light_time || !(tau >= 0.0 && tau < 1.0))
+            tau = 0.0;
+        r = orbit_point(id, point, elements, jd_tt - tau, time::tdb_from_tt(jd_tt - tau), o, pt);
         if (!r)
             return r;
-        const double p[3] = {pt[0] - obs[0], pt[1] - obs[1], pt[2] - obs[2]};
+        double p[3];
+        for (int i = 0; i < 3; ++i)
+            p[i] = pt[i] - obs[i];
+        if (o.light_time) {
+            // A node or apsis is very nearly fixed in inertial space -- it
+            // moves with the orbit's precession, not with the body -- so the
+            // light-time equation contracts by v/c a pass rather than needing
+            // Newton's method as a body does. Three passes are already at
+            // roundoff; the loop stops on the step.
+            for (int it = 0; it < 8; ++it) {
+                const double d = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+                const double next = d / apparent::kLightKmPerDay;
+                const double step = next - tau;
+                tau = next;
+                const double back = jd_tt - tau;
+                r = orbit_point(id, point, elements, back, time::tdb_from_tt(back), o, pt);
+                if (!r)
+                    return r;
+                for (int i = 0; i < 3; ++i)
+                    p[i] = pt[i] - obs[i];
+                if (std::fabs(step) < 1e-15)
+                    break;
+            }
+        }
+        // The same two terms a body gets, for the same reason: a node exists
+        // to be compared against apparent positions, so it has to be in the
+        // frame those are in. The observer-velocity term is the large one --
+        // 21 arcsec on Jupiter's node -- and light time above is worth
+        // 0.005 arcsec there; see docs/ORBIT-POINTS.md.
+        const bool observer_is_sun_or_bary =
+            o.center == Center::Heliocentric || o.center == Center::Barycentric ||
+            (o.center == Center::Body &&
+             (o.center_body == body::kSun || o.center_body == body::kSolarSystemBary));
+        if (o.deflection && !observer_is_sun_or_bary && id != body::kSun) {
+            double sun[6];
+            r = sun_at(time::tdb_from_tt(jd_tt - tau), sun);
+            if (!r)
+                return r;
+            const double sun_to_point[3] = {pt[0] - sun[0], pt[1] - sun[1], pt[2] - sun[2]};
+            const double sun_to_obs[3] = {obs[0] - sun[0], obs[1] - sun[1], obs[2] - sun[2]};
+            apparent::light_deflection(p, sun_to_point, sun_to_obs, apparent::kSunGmOverC2Km, p);
+        }
+        if (o.aberration)
+            apparent::aberration(p, obs + 3, p);
         return to_output(jd_tt, o, p, out);
     }
 
@@ -2003,14 +2049,15 @@ Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitEleme
     double tau = 0.0;
     auto r = impl_->position(
         jd_tt, o, tau,
-        [&](double jd, double out[3], double&) {
-            return impl_->orbit_point_vector_at(id, point, elements, jd, o, out);
+        [&](double jd, double out[3], double& t) {
+            return impl_->orbit_point_vector_at(id, point, elements, jd, o, out, t);
         },
         res.pos);
     if (!r)
         return r.error();
     res.provenance.source = impl_->source->description;
     res.provenance.denum = impl_->source->denum;
+    res.provenance.light_time_days = tau;
     if (o.sidereal != SiderealMode::Tropical) {
         auto s = impl_->sidereal_shift(o, jd_tt);
         if (!s)

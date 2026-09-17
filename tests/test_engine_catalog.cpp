@@ -1163,4 +1163,108 @@ TEST_CASE("de440_mean_orbit_points") {
               .code == ErrorCode::NotFound);
 }
 
+TEST_CASE("de440_orbit_points_carry_the_observer_velocity_term") {
+    // A node is asked for so it can be compared against apparent body
+    // positions, so it is answered in the frame those are in: the same light
+    // time, deflection and aberration a body gets, applied when the caller
+    // asks for them. The magnitudes matter and are not intuitive, which is
+    // why they are pinned here rather than left to a tolerance.
+    //
+    // Agreed with the Astrolog side for protocol v4 (docs/ORBIT-POINTS.md);
+    // their Swiss-backed server measures 20.8370" for Jupiter's ascending
+    // node against the 20.837" below, reached by a different route.
+    const std::string de = env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) +
+                                                          "/ephe/linux_p1550p2650.440");
+    if (access(de.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s not present\n", de.c_str());
+        return;
+    }
+    auto opened = Engine::open(de);
+    REQUIRE(opened.ok());
+    Engine& e = opened.value();
+    const double jd = 2451545.0;
+
+    CalcOptions geom = CalcOptions::geometric();
+    geom.speed = false;
+    CalcOptions lt = geom;
+    lt.light_time = true;
+    CalcOptions apparent = lt;
+    apparent.aberration = true;
+
+    const auto sep = [](const Position& a, const Position& b) {
+        const double *p = a.xyz_au, *q = b.xyz_au;
+        const double dot = p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
+        const double cx[3] = {p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2],
+                              p[0] * q[1] - p[1] * q[0]};
+        const double cross = std::sqrt(cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]);
+        return std::atan2(cross, dot) * (180.0 / 3.14159265358979323846) * 3600.0;
+    };
+    const auto at = [&](int id, OrbitPoint p, OrbitElements el, const CalcOptions& o) {
+        auto r = e.calc_orbit_point(id, p, el, jd, o);
+        REQUIRE_MESSAGE(r.ok(), r.error().message);
+        return r.value().pos;
+    };
+
+    // A point of a distant orbit is very nearly fixed in inertial space, so
+    // light time moves it by almost nothing and the observer's velocity moves
+    // it by the full aberration constant. The two differ by four orders of
+    // magnitude, which is the whole reason the distinction had to be settled.
+    struct Far {
+        const char* name;
+        int id;
+        OrbitPoint point;
+        OrbitElements elements;
+        double want_arcsec;
+    };
+    const Far far[] = {
+        {"Jupiter asc node (oscu)", 5, OrbitPoint::AscendingNode, OrbitElements::Osculating,
+         20.837},
+        {"Jupiter asc node (mean)", 5, OrbitPoint::AscendingNode, OrbitElements::Mean, 20.843},
+        {"Saturn asc node (oscu)", 6, OrbitPoint::AscendingNode, OrbitElements::Osculating, 20.145},
+        // Near the apex, so the same constant times a small sine: small
+        // because of WHERE it is, not because the correction is small.
+        {"Jupiter perihelion (mean)", 5, OrbitPoint::Perihelion, OrbitElements::Mean, 2.673},
+    };
+    for (const Far& f : far) {
+        const Position g = at(f.id, f.point, f.elements, geom);
+        const Position l = at(f.id, f.point, f.elements, lt);
+        const Position a = at(f.id, f.point, f.elements, apparent);
+        CHECK_MESSAGE(sep(g, l) < 0.01, f.name);                            // light time: nothing
+        CHECK_MESSAGE(std::fabs(sep(g, a) - f.want_arcsec) < 0.01, f.name); // aberration: all of it
+    }
+
+    // The Moon is the opposite case and the one a naive implementation gets
+    // wrong. Its points are computed barycentrically like everything else, so
+    // retarding them drags in the Earth's orbital motion: light time alone
+    // moves the node 19", which aberration then very nearly takes back. Only
+    // the sum means anything. An engine working geocentrically instead would
+    // land on the same small total from a small light-time step, so the large
+    // intermediate is pinned too -- it is what tells the two routes apart.
+    struct Near {
+        const char* name;
+        OrbitPoint point;
+        OrbitElements elements;
+        double want_total_arcsec;
+    };
+    const Near close[] = {
+        {"Moon true node", OrbitPoint::AscendingNode, OrbitElements::Osculating, 0.0029},
+        {"Moon mean node", OrbitPoint::AscendingNode, OrbitElements::Mean, 0.0031},
+        {"Moon oscu apogee", OrbitPoint::Aphelion, OrbitElements::Osculating, 0.0928},
+    };
+    for (const Near& n : close) {
+        const Position g = at(body::kMoon, n.point, n.elements, geom);
+        const Position l = at(body::kMoon, n.point, n.elements, lt);
+        const Position a = at(body::kMoon, n.point, n.elements, apparent);
+        CHECK_MESSAGE(sep(g, l) > 15.0, n.name); // the large intermediate
+        CHECK_MESSAGE(std::fabs(sep(g, a) - n.want_total_arcsec) < 0.002, n.name);
+    }
+
+    // Corrections off is still exactly the geometry the elements test pins,
+    // so asking for the geometric point remains free and exact.
+    const Position g1 = at(5, OrbitPoint::AscendingNode, OrbitElements::Osculating, geom);
+    const Position g2 =
+        at(5, OrbitPoint::AscendingNode, OrbitElements::Osculating, CalcOptions::geometric());
+    CHECK(sep(g1, g2) == 0.0);
+}
+
 } // namespace
