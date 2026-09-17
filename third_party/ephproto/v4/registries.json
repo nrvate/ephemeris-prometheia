@@ -1,0 +1,1030 @@
+{
+  "$comment": "The protocol version 4 registries, generated from EPHEMERIS_PLUGINS_PLAN.md Appendix A by tools/gen-registries.py. Do not edit by hand: edit the appendix and regenerate. Values are appended and never reused (3.6), so a consumer may pin this file.",
+  "protocol": 4,
+  "source": "EPHEMERIS_PLUGINS_PLAN.md Appendix A",
+  "registries": {
+    "caps_bits": {
+      "appendix": "A.2",
+      "title": "caps bits",
+      "kind": "bit",
+      "entries": [
+        {
+          "bit": 0,
+          "mask": 1,
+          "name": "f32"
+        },
+        {
+          "bit": 1,
+          "mask": 2,
+          "name": "zstd"
+        },
+        {
+          "bit": 2,
+          "mask": 4,
+          "name": "cancel"
+        },
+        {
+          "bit": 3,
+          "mask": 8,
+          "name": "lookup"
+        },
+        {
+          "bit": 4,
+          "mask": 16,
+          "name": "instant lists"
+        },
+        {
+          "bit": 5,
+          "mask": 32,
+          "name": "priority"
+        },
+        {
+          "bit": 6,
+          "mask": 64,
+          "name": "segments"
+        },
+        {
+          "bit": 7,
+          "mask": 128,
+          "name": "designations (kind 5)"
+        },
+        {
+          "bit": 8,
+          "mask": 256,
+          "name": "\u0394T tables (REQUEST TLV 0x8004)"
+        },
+        {
+          "bit": 9,
+          "mask": 512,
+          "name": "deep sky (kind 2 also resolves M n, NGC n, IC n)"
+        }
+      ]
+    },
+    "correction_bits": {
+      "appendix": "A.7",
+      "title": "Correction bits",
+      "kind": "mask",
+      "entries": [
+        {
+          "value": 1,
+          "name": "light time"
+        },
+        {
+          "value": 2,
+          "name": "gravitational deflection"
+        },
+        {
+          "value": 4,
+          "name": "aberration"
+        }
+      ]
+    },
+    "element_centres": {
+      "appendix": "A.21",
+      "title": "Element centres",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "Sun"
+        },
+        {
+          "value": 1,
+          "name": "Earth"
+        }
+      ]
+    },
+    "element_equinoxes": {
+      "appendix": "A.16",
+      "title": "Element equinoxes",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "J2000"
+        },
+        {
+          "value": 1,
+          "name": "B1950"
+        },
+        {
+          "value": 2,
+          "name": "J1900"
+        },
+        {
+          "value": 3,
+          "name": "of date"
+        },
+        {
+          "value": 4,
+          "name": "explicit JD (equinoxJd)"
+        }
+      ]
+    },
+    "error_codes": {
+      "appendix": "A.19",
+      "title": "ERROR codes",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 1,
+          "name": "malformed or non-canonical"
+        },
+        {
+          "value": 2,
+          "name": "over a WELCOME limit"
+        },
+        {
+          "value": 3,
+          "name": "unknown message type"
+        },
+        {
+          "value": 4,
+          "name": "internal"
+        },
+        {
+          "value": 5,
+          "name": "source, data or pin unavailable"
+        },
+        {
+          "value": 6,
+          "name": "rate limited"
+        },
+        {
+          "value": 7,
+          "name": "token required or unknown"
+        },
+        {
+          "value": 8,
+          "name": "version"
+        },
+        {
+          "value": 9,
+          "name": "busy (too many unread answers)"
+        },
+        {
+          "value": 10,
+          "name": "cancelled"
+        },
+        {
+          "value": 11,
+          "name": "unsupported (a value, capability or critical extension not advertised)"
+        },
+        {
+          "value": 12,
+          "name": "draining (retry elsewhere)"
+        }
+      ]
+    },
+    "extra_column_bits": {
+      "appendix": "A.10",
+      "title": "Extra column bits",
+      "kind": "bit",
+      "entries": [
+        {
+          "bit": 0,
+          "mask": 1,
+          "name": "\u03c3, arcsec"
+        },
+        {
+          "bit": 1,
+          "mask": 2,
+          "name": "ayanamsa applied, deg"
+        },
+        {
+          "bit": 2,
+          "mask": 4,
+          "name": "light time, days"
+        },
+        {
+          "bit": 3,
+          "mask": 8,
+          "name": "\u0394T used, s"
+        }
+      ]
+    },
+    "forms": {
+      "appendix": "A.6",
+      "title": "Forms",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "spherical"
+        },
+        {
+          "value": 1,
+          "name": "rectangular"
+        }
+      ]
+    },
+    "frames": {
+      "appendix": "A.6",
+      "title": "Frames",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "true of date"
+        },
+        {
+          "value": 1,
+          "name": "mean of date"
+        },
+        {
+          "value": 2,
+          "name": "J2000 (mean)"
+        },
+        {
+          "value": 3,
+          "name": "ICRF"
+        }
+      ]
+    },
+    "hypothetical_tokens": {
+      "appendix": "A.15",
+      "title": "Named hypotheticals",
+      "kind": "token",
+      "entries": [
+        {
+          "index": 0,
+          "token": "cupido",
+          "seorbel_entry": "Uranians, 1\u20138"
+        },
+        {
+          "index": 1,
+          "token": "hades",
+          "seorbel_entry": "Uranians, 1\u20138"
+        },
+        {
+          "index": 2,
+          "token": "zeus",
+          "seorbel_entry": "Uranians, 1\u20138"
+        },
+        {
+          "index": 3,
+          "token": "kronos",
+          "seorbel_entry": "Uranians, 1\u20138"
+        },
+        {
+          "index": 4,
+          "token": "apollon",
+          "seorbel_entry": "Uranians, 1\u20138"
+        },
+        {
+          "index": 5,
+          "token": "admetos",
+          "seorbel_entry": "Uranians, 1\u20138"
+        },
+        {
+          "index": 6,
+          "token": "vulcanus",
+          "seorbel_entry": "Uranians, 1\u20138"
+        },
+        {
+          "index": 7,
+          "token": "poseidon",
+          "seorbel_entry": "Uranians, 1\u20138"
+        },
+        {
+          "index": 8,
+          "token": "isis-transpluto",
+          "seorbel_entry": "9"
+        },
+        {
+          "index": 9,
+          "token": "nibiru",
+          "seorbel_entry": "10"
+        },
+        {
+          "index": 10,
+          "token": "harrington",
+          "seorbel_entry": "11"
+        },
+        {
+          "index": 11,
+          "token": "neptune-leverrier",
+          "seorbel_entry": "12"
+        },
+        {
+          "index": 12,
+          "token": "neptune-adams",
+          "seorbel_entry": "13"
+        },
+        {
+          "index": 13,
+          "token": "pluto-lowell",
+          "seorbel_entry": "14"
+        },
+        {
+          "index": 14,
+          "token": "pluto-pickering",
+          "seorbel_entry": "15"
+        },
+        {
+          "index": 15,
+          "token": "vulcan",
+          "seorbel_entry": "16"
+        },
+        {
+          "index": 16,
+          "token": "white-moon",
+          "seorbel_entry": "17 (Selena, the T-term form)"
+        },
+        {
+          "index": 17,
+          "token": "proserpina",
+          "seorbel_entry": "18"
+        },
+        {
+          "index": 18,
+          "token": "waldemath",
+          "seorbel_entry": "19"
+        }
+      ]
+    },
+    "message_types": {
+      "appendix": "A.1",
+      "title": "Message types",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 1,
+          "name": "HELLO"
+        },
+        {
+          "value": 2,
+          "name": "WELCOME"
+        },
+        {
+          "value": 3,
+          "name": "REQUEST"
+        },
+        {
+          "value": 4,
+          "name": "DATA"
+        },
+        {
+          "value": 5,
+          "name": "ERROR"
+        },
+        {
+          "value": 6,
+          "name": "PING"
+        },
+        {
+          "value": 7,
+          "name": "PONG"
+        },
+        {
+          "value": 8,
+          "name": "CANCEL"
+        },
+        {
+          "value": 9,
+          "name": "LOOKUP"
+        },
+        {
+          "value": 10,
+          "name": "LOOKUP_RESULT"
+        },
+        {
+          "value": 11,
+          "name": "SUBSCRIBE",
+          "reserved": true
+        },
+        {
+          "value": 12,
+          "name": "UNSUBSCRIBE",
+          "reserved": true
+        },
+        {
+          "value": 13,
+          "name": "LIST",
+          "reserved": true
+        },
+        {
+          "value": 14,
+          "name": "LIST_RESULT",
+          "reserved": true
+        },
+        {
+          "value": 15,
+          "name": "SEGDATA"
+        },
+        {
+          "first": 16,
+          "last": 31,
+          "name": "event searches",
+          "reserved": true
+        },
+        {
+          "first": 32,
+          "last": 28671,
+          "name": "unassigned"
+        },
+        {
+          "first": 28672,
+          "last": 32767,
+          "name": "experimental"
+        }
+      ]
+    },
+    "meta_flags": {
+      "appendix": "A.18",
+      "title": "META flags",
+      "kind": "bit",
+      "entries": [
+        {
+          "bit": 0,
+          "mask": 1,
+          "name": "approximated (resolvedNaif differs from the request, e.g. 499 answered as 4)"
+        },
+        {
+          "bit": 1,
+          "mask": 2,
+          "name": "extrapolated"
+        },
+        {
+          "bit": 2,
+          "mask": 4,
+          "name": "hasSigma"
+        },
+        {
+          "bit": 3,
+          "mask": 8,
+          "name": "partial"
+        },
+        {
+          "bit": 4,
+          "mask": 16,
+          "name": "noSpeeds"
+        },
+        {
+          "bit": 5,
+          "mask": 32,
+          "name": "noDistance (a star without a parallax)"
+        },
+        {
+          "bit": 6,
+          "mask": 64,
+          "name": "ratesApprox (rates may exceed the \u00a73.5a tolerance; see A.3 0x0013)"
+        }
+      ]
+    },
+    "object_error_codes": {
+      "appendix": "A.17",
+      "title": "Per-object error codes",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "none"
+        },
+        {
+          "value": 1,
+          "name": "unknown body or name"
+        },
+        {
+          "value": 2,
+          "name": "unsupported by this source (kind, observer, option or body)"
+        },
+        {
+          "value": 3,
+          "name": "outside the data's time coverage"
+        },
+        {
+          "value": 4,
+          "name": "data unavailable (for example a missing file)"
+        },
+        {
+          "value": 5,
+          "name": "point undefined (for example the node of a zero-inclination orbit)"
+        },
+        {
+          "value": 6,
+          "name": "ambiguous name"
+        },
+        {
+          "value": 7,
+          "name": "numerical failure"
+        },
+        {
+          "value": 8,
+          "name": "internal"
+        }
+      ]
+    },
+    "object_kinds": {
+      "appendix": "A.12",
+      "title": "Object kinds",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "body"
+        },
+        {
+          "value": 1,
+          "name": "orbit point"
+        },
+        {
+          "value": 2,
+          "name": "fixed star"
+        },
+        {
+          "value": 3,
+          "name": "named hypothetical"
+        },
+        {
+          "value": 4,
+          "name": "elements"
+        },
+        {
+          "value": 5,
+          "name": "designation"
+        }
+      ]
+    },
+    "observers": {
+      "appendix": "A.5",
+      "title": "Observers",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "geocentric"
+        },
+        {
+          "value": 1,
+          "name": "topocentric"
+        },
+        {
+          "value": 2,
+          "name": "heliocentric"
+        },
+        {
+          "value": 3,
+          "name": "solar-system barycentre"
+        },
+        {
+          "value": 4,
+          "name": "body"
+        }
+      ]
+    },
+    "orbit_methods": {
+      "appendix": "A.14",
+      "title": "Orbit methods",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "mean"
+        },
+        {
+          "value": 1,
+          "name": "osculating"
+        },
+        {
+          "value": 2,
+          "name": "interpolated (\"natural\"; the Moon only in Swiss)"
+        },
+        {
+          "value": 3,
+          "name": "osculating, barycentric"
+        },
+        {
+          "value": 4,
+          "name": "focal point"
+        }
+      ]
+    },
+    "orbit_points": {
+      "appendix": "A.13",
+      "title": "Orbit points",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "ascending node"
+        },
+        {
+          "value": 1,
+          "name": "descending node"
+        },
+        {
+          "value": 2,
+          "name": "perihelion (perigee)"
+        },
+        {
+          "value": 3,
+          "name": "aphelion (apogee)"
+        }
+      ]
+    },
+    "planes": {
+      "appendix": "A.6",
+      "title": "Planes",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "ecliptic"
+        },
+        {
+          "value": 1,
+          "name": "equator"
+        }
+      ]
+    },
+    "precession_model_tokens": {
+      "appendix": "A.20",
+      "title": "Precession model tokens",
+      "kind": "token",
+      "entries": [
+        {
+          "index": 0,
+          "token": "iau2006",
+          "note": "Capitaine et al. 2003, IAU 2006 (the default)"
+        },
+        {
+          "index": 1,
+          "token": "vondrak2011",
+          "note": "Vondr\u00e1k, Capitaine & Wallace 2011, long-term"
+        }
+      ]
+    },
+    "request_tlvs": {
+      "appendix": "A.4",
+      "title": "REQUEST TLVs",
+      "kind": "tlv",
+      "entries": [
+        {
+          "tag": 3,
+          "critical": false,
+          "payload": "precession model, str8 (non-critical; an unknown model falls back and sets ignoredExt)"
+        },
+        {
+          "tag": 32769,
+          "critical": true,
+          "payload": "ephemeris pin, str8 (critical)"
+        },
+        {
+          "tag": 32770,
+          "critical": true,
+          "payload": "catalog pin, str8 (critical)"
+        },
+        {
+          "tag": 32771,
+          "critical": true,
+          "payload": "datasetId pin, str8 (critical) \u2014 the whole identity in one string; ERROR 5 if the server's datasetId differs"
+        },
+        {
+          "tag": 32772,
+          "critical": true,
+          "payload": "\u0394T table (critical; requires the \u0394T tables cap): u32 n (2..65535 entries allowed by the TLV length), n \u00d7 {TIME t, f64 deltaTSec}, **instants in TT** whatever the request's time scale (\u00a73.5), strictly ascending, all finite. When present the REQUEST's deltaTSec MUST be the canonical NaN."
+        }
+      ]
+    },
+    "sidereal_planes": {
+      "appendix": "A.8",
+      "title": "Sidereal planes",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "ecliptic of date"
+        },
+        {
+          "value": 1,
+          "name": "ecliptic of the anchor epoch"
+        },
+        {
+          "value": 2,
+          "name": "invariable plane of the solar system"
+        }
+      ]
+    },
+    "time_scales": {
+      "appendix": "A.9",
+      "title": "Time scales",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "UT1"
+        },
+        {
+          "value": 1,
+          "name": "TT"
+        },
+        {
+          "value": 2,
+          "name": "TDB"
+        }
+      ]
+    },
+    "welcome_capability_tlvs": {
+      "appendix": "A.3",
+      "title": "WELCOME capability TLVs",
+      "kind": "tlv",
+      "entries": [
+        {
+          "tag": 1,
+          "critical": false,
+          "payload": "object kinds, u32 bitmask of A.12"
+        },
+        {
+          "tag": 2,
+          "critical": false,
+          "payload": "observers, u32 bitmask of A.5"
+        },
+        {
+          "tag": 3,
+          "critical": false,
+          "payload": "planes u32, forms u32, frames u32 (bitmasks of A.6)"
+        },
+        {
+          "tag": 4,
+          "critical": false,
+          "payload": "correction masks per observer: u8 n, n \u00d7 {u32 observers (A.5 bitmask), u8 mask (A.7)} \u2014 each pair says that mask is honoured for those observers"
+        },
+        {
+          "tag": 5,
+          "critical": false,
+          "payload": "orbit points u32 (A.13), orbit methods u32 (A.14)"
+        },
+        {
+          "tag": 6,
+          "critical": false,
+          "payload": "extra columns u32 (A.10)"
+        },
+        {
+          "tag": 7,
+          "critical": false,
+          "payload": "zodiacs: u16 n, n \u00d7 str8 (A.11 tokens)"
+        },
+        {
+          "tag": 8,
+          "critical": false,
+          "payload": "sidereal planes u32 (A.8)"
+        },
+        {
+          "tag": 9,
+          "critical": false,
+          "payload": "time scales u32 (A.9)"
+        },
+        {
+          "tag": 10,
+          "critical": false,
+          "payload": "coverage: u16 n, n \u00d7 {str8 id, TIME min, TIME max}"
+        },
+        {
+          "tag": 11,
+          "critical": false,
+          "payload": "catalogs: u16 n, n \u00d7 {str8 id, str8 snapshot}"
+        },
+        {
+          "tag": 12,
+          "critical": false,
+          "payload": "\u0394T model: str8"
+        },
+        {
+          "tag": 13,
+          "critical": false,
+          "payload": "precession models: u16 n, n \u00d7 str8"
+        },
+        {
+          "tag": 14,
+          "critical": false,
+          "payload": "rate: u32 cellsPerSec, u32 burst"
+        },
+        {
+          "tag": 15,
+          "critical": false,
+          "payload": "segments: u8 maxDegree, u8 \u00d73 reserved, u32 maxSegmentsPerObject, f32 minErrArcsec, u32 kinds (A.12 bitmask of what it will fit), u32 maxSegSpanDays (the widest span it will fit in one request; 0 = no stated bound)"
+        },
+        {
+          "tag": 16,
+          "critical": false,
+          "payload": "lookup: u16 maxMatches"
+        },
+        {
+          "tag": 17,
+          "critical": false,
+          "payload": "hypotheticals: u16 n, n \u00d7 str8 (A.15 tokens served)"
+        },
+        {
+          "tag": 18,
+          "critical": false,
+          "payload": "equinoxes for elements: u32 bitmask of A.16"
+        },
+        {
+          "tag": 19,
+          "critical": false,
+          "payload": "rates bound: f32 degPerDay, f32 auPerDay \u2014 the largest difference of the server's rates from central differences of its positions (\u00a73.5a); absent means rates meet the 1e-5 \u00b0/day, 1e-9 AU/day tolerance"
+        }
+      ]
+    },
+    "zodiac_tokens": {
+      "appendix": "A.11",
+      "title": "Zodiac tokens",
+      "kind": "token",
+      "entries": [
+        {
+          "index": 0,
+          "token": "fagan-bradley"
+        },
+        {
+          "index": 1,
+          "token": "lahiri"
+        },
+        {
+          "index": 2,
+          "token": "deluce"
+        },
+        {
+          "index": 3,
+          "token": "raman"
+        },
+        {
+          "index": 4,
+          "token": "usha-shashi"
+        },
+        {
+          "index": 5,
+          "token": "krishnamurti"
+        },
+        {
+          "index": 6,
+          "token": "djwhal-khul"
+        },
+        {
+          "index": 7,
+          "token": "yukteshwar"
+        },
+        {
+          "index": 8,
+          "token": "jn-bhasin"
+        },
+        {
+          "index": 9,
+          "token": "babyl-kugler1"
+        },
+        {
+          "index": 10,
+          "token": "babyl-kugler2"
+        },
+        {
+          "index": 11,
+          "token": "babyl-kugler3"
+        },
+        {
+          "index": 12,
+          "token": "babyl-huber"
+        },
+        {
+          "index": 13,
+          "token": "babyl-etpsc"
+        },
+        {
+          "index": 14,
+          "token": "aldebaran-15tau"
+        },
+        {
+          "index": 15,
+          "token": "hipparchos"
+        },
+        {
+          "index": 16,
+          "token": "sassanian"
+        },
+        {
+          "index": 17,
+          "token": "galcent-0sag"
+        },
+        {
+          "index": 18,
+          "token": "j2000"
+        },
+        {
+          "index": 19,
+          "token": "j1900"
+        },
+        {
+          "index": 20,
+          "token": "b1950"
+        },
+        {
+          "index": 21,
+          "token": "suryasiddhanta"
+        },
+        {
+          "index": 22,
+          "token": "suryasiddhanta-msun"
+        },
+        {
+          "index": 23,
+          "token": "aryabhata"
+        },
+        {
+          "index": 24,
+          "token": "aryabhata-msun"
+        },
+        {
+          "index": 25,
+          "token": "ss-revati"
+        },
+        {
+          "index": 26,
+          "token": "ss-citra"
+        },
+        {
+          "index": 27,
+          "token": "true-citra"
+        },
+        {
+          "index": 28,
+          "token": "true-revati"
+        },
+        {
+          "index": 29,
+          "token": "true-pushya"
+        },
+        {
+          "index": 30,
+          "token": "galcent-rgilbrand"
+        },
+        {
+          "index": 31,
+          "token": "galequ-iau1958"
+        },
+        {
+          "index": 32,
+          "token": "galequ-true"
+        },
+        {
+          "index": 33,
+          "token": "galequ-mula"
+        },
+        {
+          "index": 34,
+          "token": "galalign-mardyks"
+        },
+        {
+          "index": 35,
+          "token": "true-mula"
+        },
+        {
+          "index": 36,
+          "token": "galcent-mula-wilhelm"
+        },
+        {
+          "index": 37,
+          "token": "aryabhata-522"
+        },
+        {
+          "index": 38,
+          "token": "babyl-britton"
+        },
+        {
+          "index": 39,
+          "token": "true-sheoran"
+        },
+        {
+          "index": 40,
+          "token": "galcent-cochrane"
+        },
+        {
+          "index": 41,
+          "token": "galequ-fiorenza"
+        },
+        {
+          "index": 42,
+          "token": "valens-moon"
+        },
+        {
+          "index": 43,
+          "token": "lahiri-1940"
+        },
+        {
+          "index": 44,
+          "token": "lahiri-vp285"
+        },
+        {
+          "index": 45,
+          "token": "krishnamurti-vp291"
+        },
+        {
+          "index": 46,
+          "token": "lahiri-icrc"
+        },
+        {
+          "index": 47,
+          "token": "user"
+        }
+      ]
+    }
+  }
+}
