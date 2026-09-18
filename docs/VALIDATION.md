@@ -5,6 +5,15 @@ in [ENGINE.md](ENGINE.md) show agreement with another implementation. Horizons
 is JPL's own reduction of the same DE ephemerides and SBDB orbits, so it
 separates *our* errors from *model choices*.
 
+That distinction is the whole reason this corpus exists, and it is why
+[CROSS-TEST.md](CROSS-TEST.md) makes Horizons the adjudicator rather than the
+other server: agreement with another implementation is evidence, but two
+implementations can converge on the same wrong answer, and once they have,
+nothing in either codebase can tell. Note in particular the two rows below
+that are *not* usable as an anchor — Horizons' apparent place carries a
+documented −53 mas equinox offset and a 42 mas obliquity difference, and its
+Sun-centred "apparent" is referred to the Sun's equator.
+
 - **Corpus:** 39 requests, declared in `tools/fetch/horizons_fetch.py` and
   fetched on 2026-09-17, strictly sequentially with 5 s pauses.
   `tools/gen/gen_horizons_corpus.py` turns the responses into

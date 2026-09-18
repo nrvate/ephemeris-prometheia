@@ -118,16 +118,22 @@ All six milestones complete, plus protocol version 4 (2026-09-17):
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
 decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0–M3 done
-(DE + SPK readers, time scales, frames); M4 done (engine,
-catalog overlay with sigma and name lookup, sidereal ayanamshas, C
-ABI, `ephem` CLI); M5 in progress (JPL Horizons corpus: planets to
-6 µas, small bodies 0.04″ rms within 10 years with the Sun's relativistic
-term, 0.005″ with JPL's asteroid perturbers, uncertainties matching JPL's
-from on-demand covariances, see [docs/VALIDATION.md](docs/VALIDATION.md);
-full-catalog benchmark; optional Vondrák 2011 long-term precession);
-M6 in progress
-(`prometheiad`, serving Astrolog's binary ephemeris protocol over WebSocket,
-[docs/SERVER.md](docs/SERVER.md)).
+(DE + SPK readers, time scales, frames); M4 done (engine, catalog overlay
+with sigma and name lookup, sidereal ayanamshas, C ABI, `ephem` CLI);
+M5 done (JPL Horizons corpus: planets to 6 µas, small bodies 0.04″ rms
+within 10 years with the Sun's relativistic term, 0.005″ with JPL's
+asteroid perturbers, uncertainties matching JPL's from on-demand
+covariances, see [docs/VALIDATION.md](docs/VALIDATION.md); full-catalog
+benchmark); M6 done (`prometheiad`, serving Astrolog's binary ephemeris
+protocol over WebSocket, [docs/SERVER.md](docs/SERVER.md)), followed by
+protocol version 4 end to end. Optional Vondrák 2011 long-term precession
+remains unstarted by choice.
+
+The next milestone is not a feature: it is the first live session against
+the Astrolog project's own v4 daemon, planned in
+[docs/CROSS-TEST.md](docs/CROSS-TEST.md) — including the rule that neither
+side changes code to match the other until an independent anchor has
+adjudicated.
 
 ## Build
 

@@ -574,6 +574,12 @@ and the interesting failures are self-inconsistencies anyway. The wire client
 grew `--corrections MASK` and `--center NAIF` for it, which are also the two
 flags you want when probing a correction question by hand.
 
+It is one item on a larger plan: [CROSS-TEST.md](CROSS-TEST.md) covers the
+first live session against the Astrolog project's daemon — the four pairings,
+which anchors adjudicate which disagreements, the tolerance tiers that say in
+advance which differences are defects and which are model choices, and the
+bisection ladder for when a number disagrees.
+
 ## Not implemented
 
 - **zstd payloads.** Reserved in the envelope, advertised by no one.
