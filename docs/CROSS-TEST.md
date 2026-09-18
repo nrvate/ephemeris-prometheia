@@ -625,7 +625,7 @@ Verdicts (901 rows): 675 agree, 203 expected-difference (each row gives
 its reason), no findings, 1 unadjudicated (the 1800 Moon, whose anchor is
 outside `astrolog-ephd`'s coverage).
 
-### After the per-kind drop, 2026-09-18
+### After the per-kind drop, 2026-09-18 (`docs/crosstest/2026-09-18e.tsv`)
 
 The refusal leg now covers every (observer, kind, mask) for bodies and
 orbit points: a listed mask (0x0004 union 0x0014) must be served, and an
@@ -635,7 +635,9 @@ and the barycentre. All 160 checks agree. Fault-injected two ways:
 treating every mask as listed gives 48 findings, and ignoring 0x0014
 misjudges exactly the six orbit-point pairs it exists for. The
 "permissive by decision" expected-difference is gone, because the
-divergence it recorded is retired.
+divergence it recorded is retired. The whole record has 1034 rows: 831
+agree, 180 expected-difference, no findings, and 1 unadjudicated (the
+1800 Moon).
 
 ### What it leaves behind
 

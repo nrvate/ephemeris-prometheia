@@ -35,7 +35,8 @@ reader of the client's output. The first full run is
   ephv4 `eed6429`, SERVER.md "Per-kind correction masks"). Fixtures 98/98
   from the text first, the vendored pair re-pinned, and no server change.
   The client reads the tag, and the cross-test's refusal leg checks every
-  (observer, kind, mask) on both servers, 160/160.
+  (observer, kind, mask) on both servers, 160/160. Latest record:
+  `docs/crosstest/2026-09-18e.tsv` (1034 rows, no findings).
 - **Also done this stretch:**
   - the per-object error contract, written into SERVER.md;
   - correction masks advertised exactly, with ERROR 11 for the rest;
