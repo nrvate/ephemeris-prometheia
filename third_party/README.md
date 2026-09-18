@@ -5,8 +5,8 @@ directory keeps its upstream license.
 
 | directory | what | version | license | source |
 |-----------|------|---------|---------|--------|
-| `ephproto/` | Astrolog's ephemeris protocol (version 3) — historical; deleted 2026-09-18 when prometheiad moved to version 4 | | | |
-| `ephproto/v4/` | Astrolog's ephemeris protocol **version 4** (`ephproto.h`, the byte-level authority prometheiad speaks) + its generated `registries.json` | Astrolog `ephv4` commit `0fbc863` | GPL-2.0 (Astrolog, `license.htm` in its tree) | the corrApplied drop, verified: set-sha256 `1c934c7da19965f21ded99a0a53e36eaa3c45434cfbfaeabddafaf154ea454ec` over the 92 conformance fixtures, and the fixture gate ran 91/91 (`tools/check/ephproto4_fixtures.py`, verdicts agreed with Astrolog 2026-09-18) |
+| `ephproto/` | Astrolog's ephemeris protocol (version 3) — historical; deleted 2026-09-17 when prometheiad moved to version 4 | | | |
+| `ephproto/v4/` | Astrolog's ephemeris protocol **version 4** (`ephproto.h`, the byte-level authority prometheiad speaks) + its generated `registries.json` | Astrolog `ephv4` commit `0fbc863` | GPL-2.0 (Astrolog, `license.htm` in its tree) | the corrApplied drop, verified: set-sha256 `1c934c7da19965f21ded99a0a53e36eaa3c45434cfbfaeabddafaf154ea454ec` over the 92 conformance fixtures, and the fixture gate ran 91/91 (`tools/check/ephproto4_fixtures.py`, verdicts agreed with Astrolog 2026-09-17) |
 | `uWebSockets/` | WebSocket server library, prometheiad's transport (`src/` and `LICENSE` only) | v20.80.0, commit `3ffd6f44c9c3c92c96345d9f96bd01ba9c025ab5` | Apache-2.0 (`uWebSockets/LICENSE`) | https://github.com/uNetworking/uWebSockets |
 | `uSockets/` | its event-loop and socket layer (`src/` and `LICENSE` only), with `uSockets-write2.patch` applied | commit `86097c490263ab662d62e8e7b541390bdec7d149`, the one v20.80.0 pins | Apache-2.0 (`uSockets/LICENSE`) | https://github.com/uNetworking/uSockets |
 | `doctest/` | single-header C++ test framework (test code only; not linked into `libprometheia`) | 2.5.3 | MIT (`doctest/LICENSE.txt`) | https://github.com/doctest/doctest, tag `v2.5.3`, `doctest/doctest.h` |

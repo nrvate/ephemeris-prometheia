@@ -305,7 +305,7 @@ tool and script in this repo, and for anyone running them:
     +94 s at 1500, +76 s at 1000 and −265 s at −500.
 - **M6** — transports. Decided 2026-09-17: no HTTP head.
   - `prometheiad` speaks Astrolog's ephemeris protocol (version 4 since
-    2026-09-18; version 3 before, with a wire map) over WebSocket, so it
+    2026-09-17; version 3 before, with a wire map) over WebSocket, so it
     serves Astrolog directly. Astrolog owns the protocol; this repository
     pins a copy. Version 4 names bodies by NAIF/SPK-ID and needs no map.
   - The version-3 Swiss Ephemeris numbering came only from a wire-map file
@@ -330,7 +330,7 @@ tool and script in this repo, and for anyone running them:
     - wss:// with SIGHUP certificate reload (OpenSSL, optional at build).
     - Refusing a port already served.
     Remaining then: zstd, the extra-columns extension, and the Astrolog
-    wire map — the extension shipped with version 4 (2026-09-18) and the
+    wire map — the extension shipped with version 4 (2026-09-17) and the
     map was deleted with it; zstd stays unimplemented by design.
   - Increment 4 (done 2026-09-17): speed. Nutation interpolation, Newton
     light time, per-instant memos, time-major server loop. 55 → 2.95 µs per
@@ -355,7 +355,7 @@ tool and script in this repo, and for anyone running them:
     - The C interface, `ephem star:NAME`, and prometheiad object kind 1.
     - SIMBAD radial velocities, cross-checked against the Bright Star
       Catalogue.
-  - Increments 9–11 (done 2026-09-18): protocol version 4, whose §3 was
+  - Increments 9–11 (done 2026-09-17): protocol version 4, whose §3 was
     co-designed with the Astrolog session and locked from both sides
     (91/91 conformance fixtures, digest-pinned, run in-tree through the
     vendored codec).

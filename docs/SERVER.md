@@ -408,7 +408,7 @@ disagreement between the two readings means the spec, one parser or one
 fixture is wrong. Run it against the conformance directory in Astrolog's
 tree; it reports the verdict (ok, malformed, unsupported) for every fixture
 and exits nonzero on a disagreement. Runs: 74/74 on the first drop, 85/85 on
-the second, and — 2026-09-18, after the reader learned `deadlineMs`, the
+the second, and — 2026-09-17, after the reader learned `deadlineMs`, the
 batched LOOKUP, `u8 nQueries` and `corrApplied` (all its own staleness, not
 the drop's bytes) — **91/91 on the corrApplied drop** (ephv4 `0fbc863`,
 `set-sha256 1c934c7d…` verified independently). **§3 is locked** on that
@@ -423,7 +423,7 @@ migration, below.
 
 **Our migration** — complete. Steps 1–5 landed with the codec and the
 session rewrite; steps 6–7 are SEGDATA, row-block compute, CANCEL and
-priority (2026-09-18):
+priority (2026-09-17):
 1. The v4 header and `registries.json` are vendored with checksums at
    `third_party/ephproto/v4/`.
 2. The v4 codec runs the locked fixtures in `tests/test_ephproto4.cpp`.

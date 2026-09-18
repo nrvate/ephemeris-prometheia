@@ -7,7 +7,7 @@ translates options and units, checks arguments and contains exceptions,
 and adds no behaviour. Every answer is bit-identical to the C++ engine
 given the same inputs, and the tests enforce that.
 
-**Cross-repo contract (2026-09-18):** Astrolog's phase-7 Prometheia
+**Cross-repo contract (2026-09-17):** Astrolog's phase-7 Prometheia
 plugin is built against this document with pkg-config detection
 (trajectory note from the Astrolog ephv4 session; their Status records
 the approval). Treat changes to this ABI as a protocol change: they are
