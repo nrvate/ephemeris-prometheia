@@ -19,13 +19,16 @@ reader of the client's output. The first full run is
   --threads 1 --ephe "/nvm/work/ephv4/ephem;/nvm/work/ephv4"`. Then
   `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`, and
   stop both with `pkill -x`.
-- **Latest record:** `docs/crosstest/2026-09-18d.tsv` (CROSS-TEST.md,
-  "Fourth record"). 901 rows: 675 agree, 203 expected-difference (each row
-  gives its reason), no findings, and 1 unadjudicated (the 1800 Moon).
-  Anchors: geocentric, heliocentric, topocentric (ΔT solved from Horizons'
-  sidereal time by `build/prometheia-ut1`), barycentric (`bary-sun`), and
-  a textbook deflection referee from a planet centre. The Swiss refit's
-  bands are lengths (`REFIT_KM`), with the 2 mas angle as a floor.
+- **Latest record:** `docs/crosstest/2026-09-18f.tsv`, every leg including
+  `points` and `sidereal`. 1474 rows: 1122 agree, 210 expected-difference
+  (each row gives its reason), 103 unadjudicated (the giant planets' mean
+  points, the invariable plane's origin, the 1800 Moon), 9 unanswered
+  (their file edge), and 8 findings, all theirs and sent: J2000-frame
+  nodes off the J2000 ecliptic (7), and the descending node's fallback at
+  1800 (1). Anchors: geocentric, heliocentric, topocentric (ΔT from
+  Horizons' sidereal time by `build/prometheia-ut1`), barycentric
+  (`bary-sun`), and the textbook deflection. The Swiss refit's bands are
+  lengths (`REFIT_KM`), with the 2 mas angle as a floor.
 - **Upstream Swiss behaviours, recorded as expected:** heliocentric light
   time, and the topocentric site about the mean pole (0.165″ on the Moon,
   confirmed in source by the Astrolog side, reported upstream by them).
