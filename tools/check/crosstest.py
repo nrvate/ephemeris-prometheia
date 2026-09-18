@@ -26,6 +26,8 @@ running daemons:
              anchor leg from the same observer, where there is one
   bary       the Sun from the barycentre, mask 0, against Horizons'
              geometric vectors, judged as a length (km)
+  deflection from Jupiter's centre, each server's bending of the light
+             (mask 3 against its own mask 1) against the textbook formula
   topo       each server against Horizons from a site on the Earth: mask 1,
              ICRF, equatorial, with the Delta T that reproduces Horizons'
              local apparent sidereal time (build/prometheia-ut1), then
@@ -72,21 +74,46 @@ import gen_horizons_corpus as gen  # noqa: E402  (its reader of a Horizons table
 
 # Bands, in arcseconds, and where each comes from.  A band is the difference
 # the named cause accounts for; beyond it a row is a finding, not a failure.
-SAME_BAND = 0.002  # Swiss .se1 files: a refit of DE441, ~0.001" stated for the planets
+SAME_BAND = 0.002  # the Moon, and anything REFIT_KM does not name
 # Each server against Horizons (which integrates DE441), astrometric ICRF:
 OURS_HORIZONS = {"planets": 1e-4, "moon": 0.03}  # docs/VALIDATION.md gates
-THEIRS_HORIZONS = {"planets": 0.002, "moon": 0.03}  # the refit's fidelity, and the Moon's gate
+THEIRS_HORIZONS = {"moon": 0.03}  # the Moon's gate; the planets use REFIT_KM
+# The Swiss .se1 files' error is fixed in POSITION, not in angle: the
+# Astrolog side measured the same third of a kilometre on Mars at 0.37 AU
+# and at 1.85 AU (tools/se1-fit-error.c in their tree), so "1 mas" is only a
+# typical figure at typical distances. Measured here against Horizons over
+# the corpus (2026-09-18): worst 0.44 km Sun, 0.46 Mercury, 0.55 Venus, 0.74
+# Mars, 1.9 Jupiter, 4.9 Saturn, 4.5 Uranus, 7.4 Neptune, 8.3 Pluto; the Sun
+# from the barycentre 1.05. Each band is that worst with about a third added.
+REFIT_KM = {10: 1.5, 199: 0.7, 299: 0.75, 399: 0.75, 4: 1.0, 5: 2.5, 6: 6.5, 7: 6.5,
+            8: 10.0, 9: 11.0}
+# From a planet's centre, that planet's own position error adds.
+OBSERVER_KM = {"jupiter": REFIT_KM[5]}
 HAMBURG_BAND = 0.002  # same elements; the J1900 precession models differ sub-mas
 # The Sun from the barycentre, as a length: ours is DE440, the same fit as
 # Horizons' DE441 over the corpus (measured 3e-7 km); theirs is the refit's
-# 2 mas planet band expressed at 1 AU, since a position error does not care
-# which observer it is seen from.
-BARY_SUN_KM = {"ours": 0.001, "theirs": 1.45}
+# band for the Sun, since a position error does not care which observer it
+# is seen from.
+BARY_SUN_KM = {"ours": 0.001, "theirs": REFIT_KM[10]}
 AU_KM = 149597870.7
 DELTA_T = 69.2  # sent explicitly; a TT request does not use it, a UT1 one would
 
 HAMBURG = ["cupido", "hades", "zeus", "kronos", "apollon", "admetos", "vulcanus", "poseidon"]
 HAMBURG_EPOCHS = [2415020.0, 2451545.0, 2488070.0]
+
+
+def refit_band(body, dist_au, observer="geo", anchor=False):
+    """The band (arcsec) for astrolog-ephd's answer on one body at this
+    distance: REFIT_KM as an angle, plus the observer's own error. The Moon
+    and unknown bodies keep their angular bands."""
+    if body == 301 or body not in REFIT_KM or not dist_au or math.isnan(dist_au):
+        return THEIRS_HORIZONS["moon"] if anchor and body == 301 else SAME_BAND
+    km = REFIT_KM[body] + OBSERVER_KM.get(observer, 0.0)
+    # The larger of the two: the length widens the band only at close range,
+    # where a fixed angle is wrong. It does not tighten it for far bodies,
+    # because the length was measured geocentrically, and from the
+    # barycentre the refit's errors are larger (Neptune ~21 km).
+    return max(SAME_BAND, math.degrees(km / (dist_au * AU_KM)) * 3600.0)
 
 
 def endpoint(s):
@@ -267,9 +294,10 @@ def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observe
                 row = dict(leg=leg, epoch_tt=jd, object=body, observer=observer, frame="ICRF",
                            plane="equator", mask=mask, deltat=DELTA_T, ours=pa, theirs=pb,
                            sep_servers=s)
+                band = refit_band(body, va[2], observer)
                 if leg0 == "same":
-                    row.update(band=SAME_BAND, tier=2,
-                               verdict="agree" if s <= SAME_BAND else "finding",
+                    row.update(band=band, tier=2,
+                               verdict="agree" if s <= band else "finding",
                                note="DE440 against Swiss .se1 (DE441 refit)")
                     worst[("same", body)] = max(worst.get(("same", body), 0.0), s)
                 else:
@@ -278,8 +306,9 @@ def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observe
                     so = sep_arcsec(pa, anc)
                     st = sep_arcsec(pb, anc)
                     ok_o = so <= OURS_HORIZONS[cls]
-                    ok_t = st <= THEIRS_HORIZONS[cls]
-                    both_agree = s <= SAME_BAND
+                    band_t = refit_band(body, va[2], observer, anchor=True)
+                    ok_t = st <= band_t
+                    both_agree = s <= band
                     if ok_o and ok_t:
                         verdict = "agree"
                     elif both_agree:
@@ -288,7 +317,7 @@ def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observe
                         verdict = "finding (ours)" if not ok_o else "finding (theirs)"
                     row.update(anchor=anc, anchor_source=f"Horizons {name} q1",
                                sep_ours_anchor=so, sep_theirs_anchor=st,
-                               band=f"ours {OURS_HORIZONS[cls]} theirs {THEIRS_HORIZONS[cls]}",
+                               band=f"ours {OURS_HORIZONS[cls]} theirs {band_t:.6f}",
                                tier=2, verdict=verdict)
                     worst[("ours", body)] = max(worst.get(("ours", body), 0.0), so)
                     worst[("theirs", body)] = max(worst.get(("theirs", body), 0.0), st)
@@ -370,8 +399,8 @@ def leg_apparent(client, ours, theirs, wel_a, wel_b, table, verbose):
                 table.add(leg="apparent", epoch_tt=jd, object=b, observer=obs,
                           frame="true of date", plane="ecliptic", mask=mask, deltat=DELTA_T,
                           ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=sep,
-                          band=SAME_BAND, tier=2,
-                          verdict="agree" if sep <= SAME_BAND else "finding",
+                          band=refit_band(b, va[2], obs), tier=2,
+                          verdict="agree" if sep <= refit_band(b, va[2], obs) else "finding",
                           note="no anchor: Horizons' apparent place carries frame offsets")
         print(f"  {obs:8s} " + "  ".join(f"{b}:{w:.4f}" for b, w in sorted(worst.items())))
 
@@ -437,6 +466,95 @@ def leg_bary(client, ours, theirs, table, verbose):
         print(f"  {jd:.1f}  ours {so:.5f}\" {eo:8.3f} km   theirs {st:.5f}\" {et:8.3f} km")
 
 
+# 2GM/c^2 of the Sun in AU (IAU 2015 nominal GM), for the textbook deflection.
+SUN_2GM_C2_AU = 2.0 * 1.3271244e20 / 299792458.0 ** 2 / 1000.0 / AU_KM
+DEFLECTION_BAND = 0.0002  # arcsec: retardation choices, not models, beyond this
+
+
+def vector(v):
+    """(RA deg, Dec deg, distance AU) -> cartesian AU."""
+    ra, de = math.radians(v[0]), math.radians(v[1])
+    return (v[2] * math.cos(de) * math.cos(ra), v[2] * math.cos(de) * math.sin(ra),
+            v[2] * math.sin(de))
+
+
+def textbook_deflection(obs_to_body, obs_to_sun):
+    """The Sun's light deflection of a body, as in USNO Circular 179 (the
+    NOVAS form): the observer-to-body direction bent by 2GM/(c^2 |E|) with E
+    the Sun-to-observer vector. Written here from the formula, not from
+    either engine, so it can referee the two. Returns the bent unit vector."""
+    def unit3(v):
+        n = math.sqrt(sum(x * x for x in v))
+        return tuple(x / n for x in v)
+
+    def dot(a, b):
+        return sum(x * y for x, y in zip(a, b))
+
+    e_vec = tuple(-x for x in obs_to_sun)
+    q_vec = tuple(b - s for b, s in zip(obs_to_body, obs_to_sun))
+    p, e, q = unit3(obs_to_body), unit3(e_vec), unit3(q_vec)
+    fac1 = SUN_2GM_C2_AU / math.sqrt(dot(e_vec, e_vec))
+    fac2 = 1.0 + dot(q, e)
+    return tuple(p[i] + fac1 * (dot(p, q) * e[i] - dot(e, p) * q[i]) / fac2 for i in range(3))
+
+
+def angle(a, b):
+    cx = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    return math.degrees(math.atan2(math.sqrt(sum(c * c for c in cx)),
+                                   sum(x * y for x, y in zip(a, b)))) * 3600.0
+
+
+def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
+    """Deflection seen from Jupiter's centre, where no Horizons table observes:
+    each server's mask-3 answer against the textbook deflection applied to its
+    own mask-1 answer. Light time is in both, so what is compared is the
+    bending alone; each server is judged against its own geometry."""
+    if not ({1, 3} <= advertised(wel_a.corrmasks, 4) & advertised(wel_b.corrmasks, 4)):
+        print("\n== deflection: skipped, masks 1 and 3 are not both listed from a body centre")
+        return
+    epochs = sorted({p[0] for _, _, pts in corpus() for p in pts})
+    bodies = [b for b in APPARENT_BODIES if b != 5]  # the Sun included: its bending is nil
+    print("\n== deflection: from Jupiter's centre, mask 3 against mask 1 + the textbook bending")
+    worst = {}
+    for jd in epochs:
+        def ask_all(srv, mask, extra):
+            args = ["--jd", repr(jd), "--icrs", "--eq", "--corrections", str(mask), "--deltat",
+                    str(DELTA_T), "--center", "5"] + extra
+            return ask(client, srv, args, verbose)
+        objs = [a for b in bodies for a in ("--obj", str(b))]
+        sun_a = ask_all(ours, 0, ["--obj", "10"]).row(0)
+        sun_b = ask_all(theirs, 0, ["--obj", "10"]).row(0)
+        got = {(who, m): ask_all(srv, m, objs) for who, srv in (("ours", ours), ("theirs", theirs))
+               for m in (1, 3)}
+        for k, b in enumerate(bodies):
+            base = dict(leg="deflection", epoch_tt=jd, object=b, observer="jupiter", frame="ICRF",
+                        plane="equator", mask=3, deltat=DELTA_T, tier=3,
+                        anchor_source="textbook deflection (USNO Circular 179) on each "
+                                      "server's own mask-1 answer")
+            rows = {key: rep.row(k) for key, rep in got.items()}
+            if (sun_a is None or sun_b is None or
+                    any(v is None or math.isnan(v[0]) for v in rows.values())):
+                ea = got[("ours", 3)].objects[k].err if k < len(got[("ours", 3)].objects) else -1
+                eb = got[("theirs", 3)].objects[k].err if k < len(got[("theirs", 3)].objects) else -1
+                table.add(**base, verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
+                continue
+            res = {}
+            for who, sun in (("ours", sun_a), ("theirs", sun_b)):
+                bent = (vector(rows[(who, 1)]) if b == 10 else  # the Sun does not bend its own light
+                        textbook_deflection(vector(rows[(who, 1)]), vector(sun)))
+                res[who] = angle(vector(rows[(who, 3)]), bent)
+                worst[who] = max(worst.get(who, 0.0), res[who])
+            ok_o, ok_t = res["ours"] <= DEFLECTION_BAND, res["theirs"] <= DEFLECTION_BAND
+            verdict = ("agree" if ok_o and ok_t else "finding" if not ok_o and not ok_t else
+                       "finding (ours)" if not ok_o else "finding (theirs)")
+            table.add(**base, sep_servers=angle(vector(rows[("ours", 3)]),
+                                                vector(rows[("theirs", 3)])),
+                      sep_ours_anchor=res["ours"], sep_theirs_anchor=res["theirs"],
+                      band=DEFLECTION_BAND, verdict=verdict)
+    for who, w in sorted(worst.items()):
+        print(f"  worst {who} vs textbook: {w:.6f}\"")
+
+
 def delta_t_from_sidereal_time(ut1_tool, lines):
     """TT - UT1 (s) per (jd_tt, tdb_minus_ut, last_hours, lon_deg), solved by
     prometheia-ut1 so Horizons' own Earth rotation is what both servers get."""
@@ -464,14 +582,14 @@ def mean_pole_site(client, ours, theirs, jd, body, st, verbose):
     agree within the same-question band, and the gap is no larger than the
     nutation offset can make it. Anything else stays a finding."""
     cls = "moon" if body == 301 else "planets"
-    if st > MEAN_POLE_BAND[cls] + THEIRS_HORIZONS[cls]:
-        return False
     args = ["--jd", repr(jd), "--corrections", "1", "--icrs", "--eq", "--obj", str(body),
             "--deltat", str(DELTA_T)]
     va, vb = ask(client, ours, args, verbose).row(0), ask(client, theirs, args, verbose).row(0)
     if va is None or vb is None:
         return False
-    return sep_arcsec((va[0], va[1]), (vb[0], vb[1])) <= SAME_BAND
+    if st > MEAN_POLE_BAND[cls] + refit_band(body, va[2], anchor=True):
+        return False
+    return sep_arcsec((va[0], va[1]), (vb[0], vb[1])) <= refit_band(body, va[2])
 
 
 def leg_topo(client, ut1_tool, ours, theirs, wel_a, wel_b, table, verbose):
@@ -508,22 +626,24 @@ def leg_topo(client, ut1_tool, ours, theirs, wel_a, wel_b, table, verbose):
                 continue
             pa, pb = (va[0], va[1]), (vb[0], vb[1])
             s = sep_arcsec(pa, pb)
+            band = refit_band(body, va[2])
             if leg == "apparent-topo":
-                verdict = "agree" if s <= SAME_BAND else "finding"
+                verdict = "agree" if s <= band else "finding"
                 note = "Earth rotation from Horizons' LAST; see this row's horizons-topo"
                 if verdict == "finding" and mean_pole_site(client, ours, theirs, jd, body, s,
                                                            verbose):
                     verdict, note = "expected-difference", note + "; " + MEAN_POLE_NOTE
-                table.add(**base, ours=pa, theirs=pb, sep_servers=s, band=SAME_BAND, tier=2,
+                table.add(**base, ours=pa, theirs=pb, sep_servers=s, band=band, tier=2,
                           verdict=verdict, note=note)
                 worst[("apparent", body)] = max(worst.get(("apparent", body), 0.0), s)
                 continue
             so, st = sep_arcsec(pa, anc), sep_arcsec(pb, anc)
-            ok_o, ok_t = so <= OURS_HORIZONS[cls], st <= THEIRS_HORIZONS[cls]
+            band_t = refit_band(body, va[2], anchor=True)
+            ok_o, ok_t = so <= OURS_HORIZONS[cls], st <= band_t
             note = ""
             if ok_o and ok_t:
                 verdict = "agree"
-            elif s <= SAME_BAND:
+            elif s <= band:
                 verdict = "finding"
             else:
                 verdict = "finding (ours)" if not ok_o else "finding (theirs)"
@@ -533,7 +653,7 @@ def leg_topo(client, ut1_tool, ours, theirs, wel_a, wel_b, table, verbose):
                 note = MEAN_POLE_NOTE
             table.add(**base, ours=pa, theirs=pb, anchor=anc, anchor_source=f"Horizons {name} q1",
                       sep_servers=s, sep_ours_anchor=so, sep_theirs_anchor=st,
-                      band=f"ours {OURS_HORIZONS[cls]} theirs {THEIRS_HORIZONS[cls]}", tier=2,
+                      band=f"ours {OURS_HORIZONS[cls]} theirs {band_t:.6f}", tier=2,
                       verdict=verdict, note=note)
             worst[("ours", body)] = max(worst.get(("ours", body), 0.0), so)
             worst[("theirs", body)] = max(worst.get(("theirs", body), 0.0), st)
@@ -588,6 +708,7 @@ def adjudicate_same(table):
     the anchor could not be asked, the row is left unadjudicated.
     """
     anchored = {(r["epoch_tt"], r["object"]): r for r in table.rows if r["leg"] == "horizons"}
+    deflected = {(r["epoch_tt"], r["object"]): r for r in table.rows if r["leg"] == "deflection"}
     geo_apparent = {(r["epoch_tt"], r["object"]): r for r in table.rows
                     if r["leg"] == "apparent" and r["observer"] == "geo"}
     anchored_bary = {r["epoch_tt"]: r for r in table.rows if r["leg"] == "horizons-bary"}
@@ -600,9 +721,13 @@ def adjudicate_same(table):
         # geocentric Moon agreeing says nothing about a topocentric or a
         # barycentric gap, and borrowing it would wave real findings through.
         if r["leg"] == "apparent" and r["observer"] == "jupiter":
-            r["verdict"] = "unadjudicated"
-            r["note"] += ("; no anchor observes from Jupiter. astrolog-ephd reports Swiss "
-                          "deflects the target as seen from the Earth, then re-centres")
+            d = deflected.get((r["epoch_tt"], r["object"]))
+            if d is None or d["verdict"] == "unanswered":
+                r["verdict"] = "unadjudicated"
+                r["note"] += "; no deflection anchor at this row"
+            else:
+                r["verdict"] = {"agree": "unadjudicated"}.get(d["verdict"], d["verdict"])
+                r["note"] += f"; deflection against the textbook: {d['verdict']}"
             continue
         if r["leg"] == "apparent" and r["observer"] == "bary" and r["object"] == 10:
             h = anchored_bary.get(r["epoch_tt"])
@@ -663,7 +788,7 @@ def main():
     ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary")
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvm/work/ephv4", help="the Astrolog tree, for its commit")
     ap.add_argument("--astrolog-bin", default="/nvm/work/ephv4/astrolog-ephd",
@@ -701,6 +826,8 @@ def main():
                                corpus("helio-", "'500@10'"), ["--helio"], "helio", True, True)
     if "apparent" in legs:
         leg_apparent(client, ours, theirs, a, b, table, args.verbose)
+    if "deflection" in legs:
+        leg_deflection(client, ours, theirs, a, b, table, args.verbose)
     if "bary" in legs:
         leg_bary(client, ours, theirs, table, args.verbose)
     if "topo" in legs:

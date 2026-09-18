@@ -25,6 +25,9 @@ documented, not that it is frozen.
 - The cross-test gained a topocentric anchor, a barycentric anchor and
   refusal checks, and sends only masks both servers list. Deliberate
   differences are recorded as expected-difference with their reason.
+- The cross-test judges the Swiss refit by position (km), not a fixed
+  angle. It also referees deflection from a planet centre against the
+  textbook formula, where Horizons has no observer.
 - `frames::ut1_from_sidereal_time` recovers UT1 from a published local
   apparent sidereal time. `prometheia-ut1` exposes it on the command line
   for the harness.

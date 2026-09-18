@@ -19,18 +19,20 @@ reader of the client's output. The first full run is
   --threads 1 --ephe "/nvm/work/ephv4/ephem;/nvm/work/ephv4"`. Then
   `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`, and
   stop both with `pkill -x`.
-- **Latest record:** `docs/crosstest/2026-09-18b.tsv` (CROSS-TEST.md, "The
-  record"). 540 agree, 209 expected-difference (each row gives its reason),
-  7 findings (the Venus and Mercury rows just over the 2 mas band), 49
-  unadjudicated (deflection seen from Jupiter). Anchors: geocentric,
-  heliocentric, topocentric (ΔT solved from Horizons' sidereal time by
-  `build/prometheia-ut1`) and barycentric (`bary-sun`).
+- **Latest record:** `docs/crosstest/2026-09-18c.tsv` (CROSS-TEST.md,
+  "Third record"). 899 rows: 555 agree, 210 expected-difference (each row
+  gives its reason), 111 findings, all of them `astrolog-ephd`'s deflection
+  from a planet centre, which a textbook referee now judges, and 1
+  unadjudicated. Anchors: geocentric, heliocentric, topocentric (ΔT
+  solved from Horizons' sidereal time by `build/prometheia-ut1`),
+  barycentric (`bary-sun`), and the textbook deflection. The Swiss refit's
+  bands are lengths (`REFIT_KM`), with the 2 mas angle as a floor.
 - **Upstream Swiss behaviours, recorded as expected:** heliocentric light
   time, and the topocentric site about the mean pole (0.165″ on the Moon,
   confirmed in source by the Astrolog side, reported upstream by them).
-- **Open:** the §3.5a question of per-kind correction masks, which the
-  Astrolog side will put to its maintainer for the next drop; the 2 mas
-  edge rows; Jupiter-centred deflection.
+- **Open:** the §3.5a question of per-kind correction masks, with the
+  Astrolog maintainer for the next drop; their deflection from a planet
+  centre (sent).
 - **Also done this stretch:**
   - the per-object error contract, written into SERVER.md;
   - correction masks advertised exactly, with ERROR 11 for the rest;

@@ -570,6 +570,42 @@ machine one harness ended up testing the other's daemon. `crosstest.py`
 now refuses to run when both endpoints answer with the same server and
 dataset.
 
+### Third record, 2026-09-18 (`docs/crosstest/2026-09-18c.tsv`)
+
+Two changes closed everything but one row.
+
+- **Bands that follow the refit's actual error.** The Astrolog side
+  measured Swiss's `.se1` against the DE file inside one process. The
+  compression error is fixed in *position*: the same third of a kilometre
+  on Mars at 0.37 AU and at 1.85 AU. So Swiss's documented "1 mas" is a
+  typical figure at typical distances, not a bound. Our own sweep against
+  Horizons gives worst values of 0.44–0.74 km for the Sun through Mars,
+  1.9 km for Jupiter, 4.5–8.3 km beyond. `REFIT_KM` in `crosstest.py`
+  holds those values plus about a third. The band is the larger of that
+  length and the old 2 mas angle. The length widens it only at close
+  range: from the barycentre the refit's errors are larger (about 21 km
+  on Neptune), so the geocentric length must not tighten it. The Venus and
+  Mercury edge rows are inside the band now: the compression, seen close up.
+- **A deflection referee where Horizons cannot observe.** The `deflection`
+  leg takes each server's mask-3 answer from Jupiter's centre. It compares
+  that answer with the textbook solar deflection (USNO Circular 179, the
+  NOVAS form, written in Python from the formula) applied to the same
+  server's mask-1 answer. `prometheiad` agrees to 3 × 10⁻¹⁰″;
+  `astrolog-ephd` is off by up to 0.54″, with Mars in 2075 bent 800 times
+  more than the geometry allows. It also bends the Sun's own light (22 mas
+  from Jupiter in 2075), which the Sun cannot do to itself. The Astrolog
+  side's account was that Swiss deflects as if the observer were the
+  Earth. Modelled that way (Earth-seen deflection as a displacement,
+  re-centred on Jupiter), it does not reproduce their numbers either, so
+  the cause is theirs to find. Fault-injected: a 1% change in the
+  textbook's GM turns the largest of our rows red (0.65 mas against a
+  0.2 mas band).
+
+Verdicts (899 rows): 555 agree, 210 expected-difference, 111 findings
+attributed to the Astrolog server (all deflection from a planet centre:
+63 in the deflection leg, 48 apparent-place rows it adjudicates), 1
+unadjudicated (the 1800 Moon, whose anchor is outside their coverage).
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
