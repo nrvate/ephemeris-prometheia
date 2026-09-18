@@ -423,11 +423,13 @@ side's. No Swiss file was opened here.
   zodiac's zero point, `fixed_sidereal_matrix` in `src/engine.cpp`)
   predates the message and is unchanged. Swiss's constants are not used:
   the plane comes from DE440's angular momentum.
-- **Proposed handling, pending the maintainer's ruling:** as with the
-  kind-4 exposure. If the protocol text adopts a different definition of
-  the zero point, the change is written from that text by a session that
-  never saw the message. The Astrolog side is asked to send only a proposed
-  specification sentence on this question.
+- **The maintainer's ruling (2026-09-18): as with the kind-4 exposure.**
+  If the protocol text adopts a different definition of the zero point, the
+  change is written from that text by a session that never saw the message.
+  The firebreak must not change the result: the clean session implements
+  the same sentence, so the answer is the one the text defines. The Astrolog
+  side is asked to send only a proposed specification sentence on this
+  question.
 
 **2026-09-18: the Hamburg points' elements, a deliberate exception.** The
 maintainer, a Uranian astrologer, decided that the shipped elements for the
