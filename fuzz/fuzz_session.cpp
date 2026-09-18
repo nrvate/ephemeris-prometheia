@@ -110,7 +110,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     Session s(context(), "10.0.0.1", "0.0");
     if (data[0] & 1) {
         const std::vector<uint8_t> h = hello_frame();
-        if (!s.on_message(std::string_view(reinterpret_cast<const char*>(h.data()), h.size()), true)) {
+        if (!s.on_message(std::string_view(reinterpret_cast<const char*>(h.data()), h.size()),
+                          true)) {
             std::abort(); // a valid HELLO must be accepted
         }
         drain(s);
@@ -123,8 +124,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         if (len > size - i) {
             len = size - i;
         }
-        const bool open =
-            s.on_message(std::string_view(reinterpret_cast<const char*>(data + i), len), !(kind & 1));
+        const bool open = s.on_message(
+            std::string_view(reinterpret_cast<const char*>(data + i), len), !(kind & 1));
         i += len;
         drain(s);
         // Bounded: the config's small limits keep a request to a few slices.

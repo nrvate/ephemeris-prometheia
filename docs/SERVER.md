@@ -811,6 +811,42 @@ every field.
   Reported to the Astrolog side, whose codec it is. This server only sends
   through that encoder, so it sends nothing non-canonical.
 
+## Load and soak
+
+`prometheia-load` opens `--conns N` connections to a server and sends
+REQUESTs back to back for `--seconds S`. Each connection sends HELLO once,
+then asks for a chart: the Sun, Moon, planets and Pluto at one instant, or
+`--rows R` daily instants. Every request asks for a fresh random instant
+between 1900 and 2100, so the result cache does not flatter the numbers.
+`--cached` asks for the same instant every time.
+- **What it reports:** throughput, latency percentiles, ERRORs by code, and
+  upgrades refused with 503.
+- **With `--pid`:** the server's resident memory and open files, sampled
+  once a second, and again after every connection has closed.
+- **Exit status:** it exits 1 on any other failure (a transport error, or a
+  message that does not parse).
+- It runs by hand, never in the gate.
+
+**Measured 2026-09-18** on this machine, against `prometheiad` with DE440
+and `--threads 4`. The client ran on the same host.
+- **Soak:** 64 connections for 300 s, with `--cells-per-sec 0` so the
+  budget does not throttle.
+  - 10.7 million requests answered, about 35,600 a second. Latency p50
+    1.81 ms, p99 2.94 ms, max 25 ms. No errors and no failures.
+  - Resident memory reached 368 MB within 30 s and stayed there to the end,
+    as the result caches filled (64 MB per loop) and then recycled.
+  - Open files peaked at 96 and went back to 31 after every connection
+    closed. No growth and no leak over the run.
+- **Limits, at their defaults:** 100 connections from one address for 10 s.
+  - 36 were refused at the upgrade with 503, which is the 64-per-address
+    cap.
+  - The compute budget of 10,000 cells a second held to the request:
+    exactly 20,000 ten-cell requests were answered. That is the 100,000-cell
+    bucket's 10,000, then 1,000 a second.
+  - Everything else, 559,116 requests, was answered ERROR 6. The client
+    waited out each ERROR's `retryAfterMs` before asking again.
+  - No failures, and memory stayed at 55 MB.
+
 ## Not implemented
 
 - **zstd payloads.** Reserved in the envelope, advertised by no one, and

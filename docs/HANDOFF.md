@@ -63,8 +63,11 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    - The session is clean over 2.36 million inputs.
    - The codec finding (DATA accepts non-finite values, and there is no
      canonical f32 NaN) is with the Astrolog side.
-   - Next, if wanted: longer runs, and a load/soak harness (CROSS-TEST.md,
-     "What this does not test").
+   - Load and soak are done too (`prometheia-load`, SERVER.md "Load and
+     soak"): 64 connections for 5 minutes, flat memory, no leak, and the
+     limits hold.
+   - Next, if wanted: longer fuzz runs, and pointing the load tool at
+     `astrolog-ephd`.
 
 ## The cross-test
 

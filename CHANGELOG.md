@@ -22,6 +22,11 @@ documented, not that it is frozen.
   - One codec finding, reported upstream: DATA accepts non-finite values.
   - The tree now also builds with clang: `src/hypotheticals.cpp`'s JSON
     value, and an unused session field.
+- **Load and soak** (docs/SERVER.md, "Load and soak"): `prometheia-load`
+  runs N connections of chart requests for a while and samples the server's
+  memory and open files. 64 connections for 5 minutes: about 35,600
+  requests a second, p99 2.94 ms, memory flat at 368 MB, no leak. The
+  per-address connection cap and compute budget hold at their defaults.
 - **The `sidsweep` leg** grades an explicit refusal of a zodiac on a fixed
   plane as `refused`. Only a silent plane-0 answer is a finding.
 

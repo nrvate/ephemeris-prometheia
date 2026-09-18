@@ -169,6 +169,12 @@ add_executable(prometheia-wire-client server/wire_client_main.cpp)
 target_link_libraries(prometheia-wire-client PRIVATE prometheia_ws)
 target_compile_options(prometheia-wire-client PRIVATE -Wall -Wextra -Werror)
 
+# Many connections for a while (docs/SERVER.md, "Load and soak"); by hand,
+# never in the gate.
+add_executable(prometheia-load server/load_main.cpp)
+target_link_libraries(prometheia-load PRIVATE prometheia_ws)
+target_compile_options(prometheia-load PRIVATE -Wall -Wextra -Werror)
+
 prometheia_test(prometheiad tests/test_prometheiad.cpp)
 target_link_libraries(test_prometheiad PRIVATE prometheia_ws)
 

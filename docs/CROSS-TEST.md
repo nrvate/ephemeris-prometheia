@@ -805,8 +805,11 @@ Worth stating so nobody reads a green matrix as more than it is.
   10-minute runs gave 2.36 million session inputs with no failure, and one
   codec finding: DATA's non-finite values. It runs by hand, not in the gate,
   and it is single-connection, so it says nothing about the next item.
-- **Load and duration.** Single-client, short-session. No soak, no concurrent
-  clients, no memory-growth measurement.
+- **Load and duration.** Not in these legs, which are single-client and
+  short-session. Since 2026-09-18, `prometheia-load` covers `prometheiad`
+  (SERVER.md, "Load and soak"): 64 connections for 5 minutes at about 35,600
+  requests a second, with memory flat and nothing leaked, and the
+  per-address caps holding. It has not been pointed at `astrolog-ephd`.
 - **Kinds 3 and 4 against the Astrolog client.** This server now serves
   named hypotheticals and bodies from elements; the Astrolog client does not
   request them from any server, because its user's own element file defines
