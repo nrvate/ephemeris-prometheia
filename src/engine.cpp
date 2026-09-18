@@ -1510,29 +1510,16 @@ struct Engine::Impl {
         return to_output(jd_tt, o, p, out);
     }
 
-    // The ecliptic an orbit point is defined on: the output frame's (mean
-    // ecliptic of date for the date frames, of J2000 otherwise), as a
-    // rotation from ICRF.
+    // The ecliptic an orbit point is defined on: the mean ecliptic of date,
+    // whatever the output frame, as a rotation from ICRF. Protocol v4
+    // 3.5a (the 2026-09-18 amendment): a frame gives the coordinates a point
+    // is expressed in and does not change which point it is, so a node asked
+    // in J2000 or ICRF is the node of date, rotated.
     void orbit_ecliptic(double jd_tt, const CalcOptions& o, double m[9]) {
-        switch (o.frame) {
-        case Frame::ICRF:
-            rot1(eps_j2000, m);
-            return;
-        case Frame::J2000: {
-            double e[9];
-            rot1(eps_j2000, e);
-            matmul(e, bias, m);
-            return;
-        }
-        case Frame::MeanOfDate:
-        case Frame::TrueOfDate: {
-            const EpochFrames& f = frames_at(jd_tt, false, o.precession);
-            double e[9];
-            rot1(f.eps_mean, e);
-            matmul(e, f.pb, m);
-            return;
-        }
-        }
+        const EpochFrames& f = frames_at(jd_tt, false, o.precession);
+        double e[9];
+        rot1(f.eps_mean, e);
+        matmul(e, f.pb, m);
     }
 
     // Barycentric position (km, ICRF) of a node or apsis of body `id`.

@@ -29,8 +29,8 @@ running daemons:
   deflection from Jupiter's centre, each server's bending of the light
              (mask 3 against its own mask 1) against the textbook formula
   points     orbit points (Moon and planets, mean and osculating) by
-             direction and distance, mask 0, and the node-on-its-frame's-
-             ecliptic rule checked where it is exact
+             direction and distance, mask 0, and the node of date asked in
+             the J2000 frame (3.5a as amended)
   sidereal   the three A.8 sidereal planes for two zodiacs
   stars      29 fixed stars by name, tropical and sidereal, and the two
              IAU names of alpha Centauri
@@ -635,9 +635,9 @@ def point_class(spec):
 
 def leg_points(client, ours, theirs, table, verbose):
     """Orbit points by direction AND distance, mask 0, true ecliptic of date;
-    then the rule that a node lies on the ecliptic of the profile's frame
-    (3.5a), checked where it is exact: the Moon's geocentric node has zero
-    latitude on its ecliptic, which for frames 2 and 3 is the J2000 one."""
+    then 3.5a's rule, as amended on 2026-09-18, that a node lies on the mean
+    ecliptic of date whatever the frame: the Moon's mean node asked in J2000
+    must be the same point on both servers."""
     epochs = sorted({p[0] for _, _, pts in corpus() for p in pts})
     print("\n== points: orbit points, mask 0, true ecliptic of date, direction and distance")
     worst = {}
@@ -673,7 +673,8 @@ def leg_points(client, ours, theirs, table, verbose):
     for spec, (s, d) in worst.items():
         print(f"  {spec:8s} worst {s:9.3f}\"  {d:11.1f} km  ({point_class(spec)})")
 
-    print("  node on the frame's ecliptic (Moon's mean node, J2000 frame: latitude must be 0)")
+    print("  node of date in the J2000 frame (3.5a as amended: the frame gives the coordinates)")
+    band_s, _ = POINT_BANDS["moon"]
     for jd in epochs:
         args = ["--jd", repr(jd), "--corrections", "0", "--deltat", str(DELTA_T), "--j2000",
                 "--node", "301.a.m"]
@@ -681,18 +682,16 @@ def leg_points(client, ours, theirs, table, verbose):
         table.asked(ra, rb)
         va, vb = ra.row(0), rb.row(0)
         base = dict(leg="points-frame", epoch_tt=jd, object="301.a.m", observer="geo",
-                    frame="J2000", plane="ecliptic", mask=0, deltat=DELTA_T, tier=1)
+                    frame="J2000", plane="ecliptic", mask=0, deltat=DELTA_T, tier=2)
         if va is None or vb is None:
             table.add(**base, verdict="unanswered")
             continue
-        lo, lt = abs(va[1]) * 3600.0, abs(vb[1]) * 3600.0
-        band = 0.001  # rounding: the node is on its plane by construction
-        verdict = ("agree" if lo <= band and lt <= band else
-                   "finding (ours)" if lo > band else "finding (theirs)")
-        table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), band=band,
-                  verdict=verdict,
-                  note=f"latitude on the J2000 ecliptic: ours {lo:.4f}\" theirs {lt:.4f}\"; "
-                       "3.5a puts a node on the frame's ecliptic, the J2000 one for frames 2-3")
+        s = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+        table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
+                  band=band_s, verdict="agree" if s <= band_s else "finding",
+                  note=f"J2000 latitude ours {va[1] * 3600.0:+.4f}\" theirs {vb[1] * 3600.0:+.4f}\"; "
+                       "a node lies on the ecliptic of date in every frame (3.5a, amended "
+                       "2026-09-18), so a server on the J2000 ecliptic misses by up to 680\"")
 
 
 # Fixed stars by name, apparent place. Both sides read Hipparcos-derived

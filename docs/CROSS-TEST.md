@@ -702,10 +702,14 @@ its names mean:
   reading (the zero-point direction projected onto the plane), and the
   Astrolog side will change. When they do, those rows should agree, and the
   leg's plane-2 branch then judges like planes 0 and 1.
-- **The node-frame rule** (the `points-frame` rows): the proposed amendment
-  puts a node on the mean ecliptic of date in every frame, which is what
-  `astrolog-ephd` already does. If this maintainer approves it, Prometheia
-  changes, and the check flips to require a node on the ecliptic of date.
+- **The node-frame rule** (the `points-frame` rows): the amendment puts a
+  node on the mean ecliptic of date in every frame, and both maintainers
+  approved it. Prometheia changed, and the check now compares the two
+  servers' J2000-frame node of date. It found that `astrolog-ephd`'s
+  J2000-frame node is not the node of date rotated. Its J2000 latitude is
+  0.9″ at 1900, where the tilt between the ecliptics of 1900 and 2000 puts
+  ours at 47″, and the servers differ by 6–51″ away from 2000. Ours is held
+  to the rule by an engine test built from the public frame matrices.
 - **α Centauri:** the Astrolog side's `sefstars.txt` now puts Toliman at
   α Cen B and Proxima Centauri at α Cen C (ephv4 `9e9e5c4`). Their file is
   deliberately no longer byte-identical to Swiss's. The `stars` leg's

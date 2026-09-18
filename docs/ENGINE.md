@@ -188,11 +188,14 @@ central differences as `calc`.
     Earth–Moon barycentre and catalog bodies: heliocentric.
   - For the Moon: geocentric.
   - The Sun and the barycentre have none (ArgumentError).
-- **The reference plane:** the output frame's ecliptic, the mean ecliptic of
-  date for the date frames and of J2000 for J2000 and ICRF. A node is where
-  the orbit crosses it. (A protocol amendment approved on the Astrolog side
-  would make it the ecliptic of date in every frame, with the frame
-  choosing only the coordinates: [HANDOFF.md](HANDOFF.md), "Next".)
+- **The reference plane:** the mean ecliptic of date, in every frame. A
+  node is where the orbit crosses it; the output frame gives only the
+  coordinates the point is expressed in. This is protocol v4 §3.5a as
+  amended on 2026-09-18, approved by both maintainers. Before that, a node
+  asked in J2000 or ICRF lay on the J2000 ecliptic, a different point: up
+  to 680″ away on the Moon's mean node at 1800 and 2100. For an astrologer
+  the node of date is the one that matters, because it is where eclipses
+  fall.
 - **The corrections apply as sent, exactly as to a body.** Light time (the
   point's slow fixed-point), deflection (Sun-observer skip) and aberration
   mean the same here as in `calc`, and `CalcOptions::geometric()` answers

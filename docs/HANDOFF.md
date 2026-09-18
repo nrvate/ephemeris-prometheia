@@ -21,9 +21,13 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Next
 
-1. **Decide the two-part protocol drop** ("the §3.5a sentences",
+1. **The two-part protocol drop** ("the §3.5a sentences",
    `/nvm/work/ephv4-drop-planes/DROP.md`, ephv4 `9e9e5c4`). The Astrolog
-   maintainer approved both parts; this side's maintainer has not yet.
+   maintainer approved both parts. **Part B is approved here and done**:
+   nodes lie on the ecliptic of date in every frame. The `points-frame`
+   rows then showed `astrolog-ephd`'s J2000-frame node is not the node of
+   date rotated either (J2000 latitude 0.9″ at 1900 where ours reaches the
+   ~47″ tilt): sent to them. Part A still wants this maintainer's word.
    - **Part A, the invariable plane's zero point:** the zodiac's zero-point
      direction projected onto the plane. This is what Prometheia already
      does, so nothing changes here. The Astrolog side settled it by
@@ -31,10 +35,10 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
      which a plane cannot. They change.
    - **Part B, what a frame changes about a node:** "A node lies on the
      mean ecliptic of date; the profile's frame gives the coordinates it is
-     expressed in." Prometheia changes: today a node asked in the J2000 and
-     ICRF frames lies on the J2000 ecliptic (ORBIT-POINTS.md). The change
-     is to find it on the ecliptic of date and rotate it. The `points`
-     leg's node-frame check then flips to test the new rule.
+     expressed in." Done here: `orbit_ecliptic` in `src/engine.cpp`, with a
+     test that the ICRF node rotated by the public frame matrices is the
+     date-frame node. The `points` leg's J2000 check now compares the two
+     servers' node of date.
 2. **Star positions against an outside source** (maintainer's next ask).
    Both servers agree on 29 stars to 0.008″, but both use Hipparcos-derived
    catalogues, so a shared error would pass. Compare a handful of stars'

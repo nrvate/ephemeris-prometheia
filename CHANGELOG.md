@@ -13,6 +13,13 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **A node lies on the mean ecliptic of date in every frame** (protocol v4
+  §3.5a, amended 2026-09-18, approved by both maintainers). A node asked in
+  J2000 or ICRF is now the node of date, rotated; before, it lay on the
+  J2000 ecliptic, a different point up to 680″ away on the Moon's mean node
+  at 1800 and 2100. The node of date is where eclipses fall, which is what
+  an astrologer means by the node. The frame of date is unchanged.
+
 - **C ABI version 6:** `prometheia_options.sidereal_plane` and the
   `PROMETHEIA_SIDEREAL_PLANE_*` constants, which take the protocol's A.8
   values. The field is appended, so bindings must rebuild: the ABI check is

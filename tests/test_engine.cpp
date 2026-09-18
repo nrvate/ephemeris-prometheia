@@ -427,7 +427,7 @@ TEST_CASE("engine_orbit_points_geometry") {
     const double jd = 2451600.5;
     CalcOptions o = CalcOptions::geometric();
     o.center = Center::Heliocentric;
-    o.frame = Frame::J2000;
+    o.frame = Frame::MeanOfDate;
     o.speed = false;
     const auto at = [&](OrbitPoint point) {
         auto r = e.calc_orbit_point(body::kEarth, point, OrbitElements::Osculating, jd, o);
@@ -435,15 +435,40 @@ TEST_CASE("engine_orbit_points_geometry") {
         return r.value();
     };
     const CalcResult asc = at(OrbitPoint::AscendingNode), desc = at(OrbitPoint::DescendingNode);
-    // Nodes sit on the ecliptic, opposite each other as seen from the Sun.
+    // Nodes sit on the (mean) ecliptic of date, opposite each other as seen
+    // from the Sun.
     CHECK(std::fabs(asc.pos.lat_deg) < 1e-9);
     CHECK(std::fabs(desc.pos.lat_deg) < 1e-9);
     CHECK(std::fabs(std::fmod(desc.pos.lon_deg - asc.pos.lon_deg + 720.0, 360.0) - 180.0) < 1e-9);
+    // The frame changes the coordinates, not the point (3.5a, amended
+    // 2026-09-18): the node asked in ICRF, rotated into the mean ecliptic of
+    // date by the public frame matrices, is the node asked in that frame.
+    {
+        CalcOptions oi = o;
+        oi.frame = Frame::ICRF;
+        oi.coords = Coords::Equatorial;
+        auto ri = e.calc_orbit_point(body::kEarth, OrbitPoint::AscendingNode,
+                                     OrbitElements::Osculating, jd, oi);
+        REQUIRE(ri.ok());
+        double ecl[9], bias[9], v[3] = {0, 0, 0};
+        frames::mean_ecliptic_of_date_matrix(jd, ecl);
+        frames::frame_bias_matrix(bias);
+        const double* x = ri.value().pos.xyz_au;
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c)
+                for (int k = 0; k < 3; ++k)
+                    v[r] += ecl[3 * r + k] * bias[3 * k + c] * x[c];
+        const double* want = asc.pos.xyz_au;
+        const double n = std::sqrt(want[0] * want[0] + want[1] * want[1] + want[2] * want[2]);
+        for (int k = 0; k < 3; ++k)
+            CHECK(std::fabs(v[k] - want[k]) < 1e-12 * n);
+    }
     const CalcResult peri = at(OrbitPoint::Perihelion);
     // The body's own state and the conic through it: vis-viva gives a, the
     // apsides give q and Q, and they must agree.
     CalcOptions os = o;
     os.speed = true;
+    os.frame = Frame::J2000; // vis-viva needs an inertial frame's velocity
     const auto state = e.calc(body::kEarth, jd, os);
     REQUIRE(state.ok());
     const double* x = state.value().pos.xyz_au;

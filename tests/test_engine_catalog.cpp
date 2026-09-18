@@ -1089,7 +1089,20 @@ TEST_CASE("de440_ceres_osculating_orbit_points_match_elements") {
     const Position asc = point(OrbitPoint::AscendingNode);
     const Position peri = point(OrbitPoint::Perihelion);
     const Position aph = point(OrbitPoint::Aphelion);
-    CHECK(arcsec(asc.lon_deg, ceres.node_rad * kDeg) < 0.5);
+    // SBDB's node is on the J2000 ecliptic; ours is on the ecliptic of date
+    // (3.5a, amended 2026-09-18), a different point of the same orbit. It
+    // lies on that ecliptic, and within the ecliptic's motion since J2000 of
+    // SBDB's value (the plane tilts ~47"/century; over a 10.6 deg inclined
+    // orbit the node slides by up to a few hundred arcsec).
+    {
+        CalcOptions od = o;
+        od.frame = Frame::MeanOfDate;
+        auto rd = e.value().calc_orbit_point(20000001, OrbitPoint::AscendingNode,
+                                             OrbitElements::Osculating, jd_tt, od);
+        REQUIRE(rd.ok());
+        CHECK(std::fabs(rd.value().pos.lat_deg) * 3600.0 < 1e-6);
+    }
+    CHECK(arcsec(asc.lon_deg, ceres.node_rad * kDeg) < 300.0);
     // Perihelion direction from the elements.
     const double w = ceres.argp_rad, i = ceres.inc_rad, node = ceres.node_rad;
     const double peri_lon = node * kDeg + std::atan2(std::sin(w) * std::cos(i), std::cos(w)) * kDeg;
