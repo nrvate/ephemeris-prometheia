@@ -13,8 +13,11 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
   library and tools are 0.2.0; `prometheiad` is 0.3.0.
 - **Since then (Unreleased):** C ABI version 6,
   `prometheia_options.sidereal_plane` (`76f588d`). The Astrolog side
-  reviewed it and the maintainer approved it. Their plugin is rebuilding
-  against it so it can serve Astrolog's solar-system-plane charts.
+  reviewed it and the maintainer approved it. Their plugin consumes it
+  (ephv4 `1be4518`) and now serves all three sidereal planes, including
+  Astrolog's solar-system-plane charts. In one real chart on that plane,
+  Swiss and Prometheia differ by 31″ (Sun) and 27″ (Moon), with latitudes
+  within 1″: Part A's zero point, below.
 
 ## Next
 
