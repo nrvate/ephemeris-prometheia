@@ -498,7 +498,9 @@ two sides agreed these semantics:
   planes"). Segments serve plane 0 only: they carry the ayanamsa as a
   longitude shift, and a fixed plane is a rotation. A fixed plane asked as
   segments is ERROR 11, and rows are the way to ask.
-- **Orbit points** lie on the ecliptic of the profile's frame, heliocentric
+- **Orbit points** lie on the ecliptic of the profile's frame (a pending
+  §3.5a amendment would make it the ecliptic of date in every frame;
+  HANDOFF.md, "Next"), heliocentric
   for planets and geocentric for the Moon, and take the profile's corrections
   exactly as a body does (3.5a): they are interoperable applied in full or
   not at all ([ORBIT-POINTS.md](ORBIT-POINTS.md)). A mean model must name

@@ -208,12 +208,17 @@ Mars, Jupiter and Saturn at 1900, 2000 and 2026, Fagan-Bradley and Lahiri:
   agree, but every longitude differs by a constant −31.51″ (Fagan-Bradley)
   or −30.42″ (Lahiri).
 
-The protocol says the zero point is "carried onto" the plane and does not
-say how. Projection (ours) and a rotation about the planes' common node
-line (which preserves arcs) differ by 8–10″ here and reproduce the 1.1″
-difference between the two zodiacs, but not the rest. The definition is
-open with the Astrolog side, and the Astrolog application's
-solar-system-plane chart shows the same −31.51″.
+The protocol said the zero point is "carried onto" the plane and did not
+say how. The Astrolog side settled it by measurement on its own server
+(ephv4 `9e9e5c4`). Fitting the rotation between its planes 0 and 2 over six
+stars puts a different sky direction at 0° for each zodiac (+31.47″ for
+Fagan-Bradley, +30.39″ for Lahiri). A plane cannot know which zodiac was
+asked for, so an origin tied to the sky must be the same direction for
+every zodiac, which is what projection gives (0 by construction). The
+proposed §3.5a sentence adopts Prometheia's reading: "the zodiac's own
+zero-point direction … projected onto the plane". It was approved on the
+Astrolog side and awaits this maintainer (HANDOFF.md, "Next"). The Astrolog
+side then changes its answers by ~31″; nothing changes here.
 
 ## Accuracy notes
 

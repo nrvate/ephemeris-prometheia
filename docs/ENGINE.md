@@ -190,7 +190,9 @@ central differences as `calc`.
   - The Sun and the barycentre have none (ArgumentError).
 - **The reference plane:** the output frame's ecliptic, the mean ecliptic of
   date for the date frames and of J2000 for J2000 and ICRF. A node is where
-  the orbit crosses it.
+  the orbit crosses it. (A protocol amendment approved on the Astrolog side
+  would make it the ecliptic of date in every frame, with the frame
+  choosing only the coordinates: [HANDOFF.md](HANDOFF.md), "Next".)
 - **The corrections apply as sent, exactly as to a body.** Light time (the
   point's slow fixed-point), deflection (Sun-observer skip) and aberration
   mean the same here as in `calc`, and `CalcOptions::geometric()` answers

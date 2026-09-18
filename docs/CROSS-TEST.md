@@ -693,6 +693,24 @@ its names mean:
   catalogue convention: the system against component A). Toliman is a
   finding on their side, since a client asking for B gets something else.
 
+### The §3.5a sentences, and α Centauri, 2026-09-18 (evening)
+
+- **The invariable plane's origin** (the `sidereal` leg's plane-2 rows):
+  the Astrolog side measured its own plane 2 against its own plane 0 and
+  found its zero point moves with the zodiac. A plane cannot know which
+  zodiac was asked for. The proposed §3.5a sentence takes Prometheia's
+  reading (the zero-point direction projected onto the plane), and the
+  Astrolog side will change. When they do, those rows should agree, and the
+  leg's plane-2 branch then judges like planes 0 and 1.
+- **The node-frame rule** (the `points-frame` rows): the proposed amendment
+  puts a node on the mean ecliptic of date in every frame, which is what
+  `astrolog-ephd` already does. If this maintainer approves it, Prometheia
+  changes, and the check flips to require a node on the ecliptic of date.
+- **α Centauri:** the Astrolog side's `sefstars.txt` now puts Toliman at
+  α Cen B and Proxima Centauri at α Cen C (ephv4 `9e9e5c4`). Their file is
+  deliberately no longer byte-identical to Swiss's. The `stars` leg's
+  Toliman row should then agree; not yet re-run.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

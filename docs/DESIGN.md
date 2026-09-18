@@ -430,6 +430,9 @@ side's. No Swiss file was opened here.
   the same sentence, so the answer is the one the text defines. The Astrolog
   side is asked to send only a proposed specification sentence on this
   question.
+- **Outcome (2026-09-18, ephv4 `9e9e5c4`):** the proposed sentence adopts
+  Prometheia's reading, settled by a measurement on the Astrolog server
+  alone, so the firebreak has nothing to rewrite.
 
 **2026-09-18: the Hamburg points' elements, a deliberate exception.** The
 maintainer, a Uranian astrologer, decided that the shipped elements for the

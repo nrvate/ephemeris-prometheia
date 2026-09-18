@@ -8,8 +8,8 @@ precomputing and storing positions (the Swiss-Ephemeris bake-then-read
 model, where file size grows with objects × time-span until 800,000+
 asteroids become tens of gigabytes across thousands of files), Prometheia
 stores **initial conditions** and integrates on demand. File size scales
-with the number of objects, period — the whole 1.56-million-body catalog is
-a ~40 MB file with no time axis at all.
+with the number of objects, period — the whole 1.57-million-body catalog is
+a 137 MB file with no time axis at all.
 
 **License: GPL-2.0-or-later** (matching Astrolog, this project's host
 application). The ephemeris *data* it ingests is US-government public domain
@@ -21,7 +21,8 @@ version and a plain statement of what is *not* in it:
 
 ## Status
 
-All six milestones complete, plus protocol version 4 (2026-09-17):
+All six milestones complete, plus protocol version 4 (2026-09-17) and, in
+release 0.2.0 (2026-09-18), the work below the list:
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
@@ -117,8 +118,25 @@ All six milestones complete, plus protocol version 4 (2026-09-17):
   [docs/SERVER.md](docs/SERVER.md), [docs/SEGMENTS.md](docs/SEGMENTS.md).
 - **Tools** — `ephem`, `prometheia-fetch` (Python), `prometheia-convert`, `prometheia-spk-trim`,
   `prometheia-info`, `prometheia-bench`; `prometheiad` and `prometheia-wire-client`
-  ([docs/SERVER.md](docs/SERVER.md)). Twenty-one test suites (a ~20 s local gate, `tools/gate.sh`), clean under
+  ([docs/SERVER.md](docs/SERVER.md)). Twenty-three test suites (a ~20 s local gate, `tools/gate.sh`), clean under
   ASan/UBSan/LeakSan.
+- **Hypothetical bodies** — bodies from polynomial orbital elements (the
+  protocol's kind 4) and named ones (kind 3), with the Hamburg School's
+  eight Uranian points and Le Verrier's Neptune shipped; they match
+  `swetest` to 0.00076″. [docs/HYPOTHETICALS.md](docs/HYPOTHETICALS.md).
+- **Sidereal planes** — the ecliptic of date, the ecliptic of a zodiac's
+  anchor epoch, and the solar system's invariable plane (derived from
+  DE440's angular momentum), in the engine, the C ABI (version 6) and
+  `prometheiad`. [docs/FRAMES.md](docs/FRAMES.md).
+- **Client-server cross-testing** — the reference client against
+  `prometheiad` and the Astrolog project's own server, refereed by JPL
+  Horizons and textbook formulas, across bodies, observers, corrections,
+  orbit points, sidereal planes, fixed stars and the Uranian points, and an
+  application-level test that casts real Astrolog charts through
+  `prometheiad`. [docs/CROSS-TEST.md](docs/CROSS-TEST.md).
+- **Logging and traceability** — one timestamped line per connection,
+  request and error, joined to the client by request id, and never a
+  birth date or place. [docs/SERVER.md](docs/SERVER.md), "Logging".
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
 decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0–M3 done
@@ -130,14 +148,11 @@ asteroid perturbers, uncertainties matching JPL's from on-demand
 covariances, see [docs/VALIDATION.md](docs/VALIDATION.md); full-catalog
 benchmark); M6 done (`prometheiad`, serving Astrolog's binary ephemeris
 protocol over WebSocket, [docs/SERVER.md](docs/SERVER.md)), followed by
-protocol version 4 end to end. Optional Vondrák 2011 long-term precession
-remains unstarted by choice.
+protocol version 4 end to end, with the optional Vondrák 2011 long-term
+precession ([docs/FRAMES.md](docs/FRAMES.md)).
 
-The next milestone is not a feature: it is the first live session against
-the Astrolog project's own v4 daemon, planned in
-[docs/CROSS-TEST.md](docs/CROSS-TEST.md) — including the rule that neither
-side changes code to match the other until an independent anchor has
-adjudicated.
+Where the work stands now, and what is next:
+[docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Build
 
