@@ -196,9 +196,16 @@ implementations carry k as a truncated decimal in degrees per day,
 one-cause difference**, worth about 2 × 10⁻⁷″ on the Hamburg points (under
 half an orbit a century). It is recorded rather than "fixed", because fixing
 it on the Astrolog side would put that one Swiss consumer out of step with
-every other. A cross-test that sees it should stop, not chase it. The
-committed fixture, with a generator and a digest, is still to come from the
-Astrolog side.
+every other. A cross-test that sees it should stop, not chase it.
+
+**Now a gate.** The committed fixture arrived the same day, with its
+generator and digest. It is vendored at
+`third_party/ephproto/v4/elements/FIXTURE.tsv`, and
+`ephproto4_kind4_elements_fixture` holds the engine to all eight rows. The
+bound is derived from the known difference's cause, not tuned: 1.446 × 10⁻¹²
+times the mean anomaly the row accumulates, with 20% headroom, over a
+roundoff floor. Nudging the Earth mass ratio by 1.5 × 10⁻⁷ fails it by four
+orders of magnitude.
 
 ## The bisection ladder
 
