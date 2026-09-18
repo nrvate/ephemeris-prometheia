@@ -191,18 +191,18 @@ does with them:
   portable comparison. A body observer that is the Sun cannot be told apart
   in a capability that names observer kinds; there the answer's
   `corrApplied` shows that deflection did not apply.
-- **Per-kind correction masks (approved, not yet landed).** The next
-  named drop adds WELCOME tag 0x0014, `CORRECTIONS_BY_KIND`. It is
-  non-critical and can only add masks per (observer, kind) to 0x0004,
-  which becomes the intersection over kinds. A profile's mask is then
-  checked against the kinds of the objects that reference it, still
-  ERROR 11 for the whole request. The Astrolog maintainer approved it,
-  and this project's maintainer approved it on 2026-09-18, at revision 3
-  of the drop text. This engine honours the same masks for every kind, so
-  `prometheiad` sends no 0x0014 and its WELCOME does not change. The work
-  here is vendoring the drop's bytes, verdicting its fixtures from the
-  text, and teaching the wire client, `wirelib.py` and `crosstest.py` to
-  read the tag.
+- **Per-kind correction masks** (landed 2026-09-18, ephv4 `eed6429`).
+  WELCOME tag 0x0014, `CORRECTIONS_BY_KIND`, is non-critical and can only
+  add masks per (observer, kind) to 0x0004. 0x0004 is now the
+  intersection over kinds, and a pair no 0x0014 entry names falls back to
+  it. A profile's mask is checked against the kinds of the objects that
+  reference it, ERROR 11 for the whole request; an unreferenced profile is
+  checked against 0x0004 alone. Both maintainers approved revision 3 of
+  the drop text. This engine honours the same masks for every kind, so
+  `prometheiad` sends no 0x0014, its WELCOME is byte-identical, and its
+  per-profile check already is the drop's rule. The wire client prints
+  0x0014 entries as `# corrkind` lines. `wirelib.py` reads them.
+  `crosstest.py` asks which masks are listed per (observer, kind).
 - **corrApplied** reports structural availability per object, never the
   request's mask (below). Our table: bodies and orbit points carry light
   time and aberration always; deflection everywhere except an observer at
@@ -503,6 +503,22 @@ unchanged): §3 is locked from both sides, their corrApplied now sends the
 capability set whole instead of intersecting it with the request's mask,
 and no further round is owed on §3 — the remaining work here is our
 migration, below.
+
+**The per-kind drop, 2026-09-18:** 98/98 at ephv4 `eed6429`
+(`set-sha256 934d3a0d…`, verified independently), with the reader taught
+0x0014 from the drop text before the codec was read. The reader validates
+what is inside that capability entry: count, layout, and correction bits
+above 0x07 as malformed. A reader that stored capability payloads raw
+would have passed the reserved-bit fixture; removing the check makes
+exactly that fixture disagree. The set's three request fixtures are
+well-formed messages whose refusal depends on a server's WELCOME, which a
+standalone fixture does not carry. `--judge REQUEST WELCOME` renders the
+drop's section-2 verdict for such a pair: the shared profile is ERROR 11
+under `welcome_corrkind`, the split profiles are served, and the
+unreferenced heliocentric mask-7 profile is ERROR 11, checked against
+0x0004 alone. The vendored header also gained a check the drop text does
+not name: `ValidateWelcome` refuses `maxPayload = 0`, the reading rule
+this side recommended at the §3 lock.
 
 **Our migration** — complete. Steps 1–5 landed with the codec and the
 session rewrite; steps 6–7 are SEGDATA, row-block compute, CANCEL and

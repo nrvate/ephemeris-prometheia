@@ -824,6 +824,11 @@
           "tag": 19,
           "critical": false,
           "payload": "rates bound: f32 degPerDay, f32 auPerDay \u2014 the largest difference of the server's rates from central differences of its positions (\u00a73.5a); absent means rates meet the 1e-5 \u00b0/day, 1e-9 AU/day tolerance"
+        },
+        {
+          "tag": 20,
+          "critical": false,
+          "payload": "corrections by kind: u8 n, n \u00d7 {u32 observers (A.5), u32 kinds (A.4), u8 mask (A.7)} \u2014 ADDS to tag 0x0004 per (observer, kind). 0x0004 is the intersection over kinds; a pair no entry names falls back to it, so a kind-uniform server sends nothing and the two cannot contradict. A profile's mask is checked against every (observer, kind) of the objects referencing it, ERROR 11 for the whole request; an unreferenced profile against 0x0004 alone. Mask bits above 0x07 are reserved and MUST be zero (\u00a73.1: reject, do not normalise); unknown observer and kind bits are ignored"
         }
       ]
     },

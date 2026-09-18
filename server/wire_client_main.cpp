@@ -340,12 +340,19 @@ int main(int argc, char** argv) {
                             w.serverName.c_str(), w.protoSession, w.engine.c_str(),
                             w.datasetId.c_str(), w.maxCells);
                 // A.3 0x0004, one line per entry: what the server says it can
-                // honour, for which observers. A checker compares the
-                // corrApplied it reports against this.
+                // honour, for which observers, then 0x0014's additions per
+                // object kind. A checker compares the corrApplied it reports
+                // against these.
                 eph::Capabilities caps;
                 if (eph::ParseCapabilities(w.caps_, &caps, &why) == eph::kOk) {
                     for (const auto& e : caps.corrMasks) {
                         std::printf("# corrmask observers %u corrections %u\n", e.first, e.second);
+                    }
+                    // A.3 0x0014: masks added per (observer, kind), on top of
+                    // the 0x0004 lines above (which hold for every kind).
+                    for (const auto& e : caps.corrByKind) {
+                        std::printf("# corrkind observers %u kinds %u corrections %u\n",
+                                    e.observers, e.kinds, e.mask);
                     }
                     // One line of the rest, for tools comparing two servers'
                     // surfaces side by side.

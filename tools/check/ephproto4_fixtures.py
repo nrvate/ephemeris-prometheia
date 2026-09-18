@@ -14,6 +14,8 @@ with the version 4 migration.
 Usage:
   ephproto4_fixtures.py --dir /nvm/work/ephv4/ephsrv/conformance
   ephproto4_fixtures.py --dir ... --verbose      # print every fixture
+  ephproto4_fixtures.py --dir ... --judge REQUEST.hex WELCOME.hex
+      # the per-kind drop, section 2: is this request served under that WELCOME?
 """
 import argparse
 import hashlib
@@ -223,7 +225,8 @@ def parse_profile(r, request_id_unused=None):
         raise Malformed("the anchor must be zero unless the zodiac is 'user'")
     if zodiac == "user" and anchor == (0.0, 0.0):
         raise Malformed("zodiac 'user' requires a nonzero anchor epoch")
-    return {"form": form, "columns": columns, "zodiac": zodiac}
+    return {"form": form, "columns": columns, "zodiac": zodiac, "observer": observer,
+            "corrections": corrections}
 
 
 def parse_object(r, n_profiles):
@@ -271,6 +274,7 @@ def parse_object(r, n_profiles):
         r.str8("elements name")
     elif kind == 5:
         r.str8("designation")
+    return kind, profile
 
 
 def parse_request(r, request_id):
@@ -330,8 +334,7 @@ def parse_request(r, request_id):
     n_obj = r.u16()
     if n_obj == 0:
         raise Malformed("nObj is 0")
-    for _ in range(n_obj):
-        parse_object(r, n_profiles)
+    objects = [parse_object(r, n_profiles) for _ in range(n_obj)]
     tlvs = r.tlv(REQUEST_TLVS, "REQUEST TLV")
 
     if segments:
@@ -357,6 +360,7 @@ def parse_request(r, request_id):
         if not math.isnan(delta_t):
             raise Malformed("with a delta T table, deltaTSec must be the canonical NaN")
     r.done("REQUEST")
+    return {"profiles": profiles, "objects": objects, "segments": segments}
 
 
 def parse_meta(r, n_obj):
@@ -470,6 +474,64 @@ ID_MUST_BE_ZERO = {1, 2, 6, 7}
 ID_MUST_BE_NONZERO = {3, 4, 8, 9, 10, 15}
 
 
+def parse_corrections_by_kind(value):
+    """WELCOME tag 0x0014, CORRECTIONS_BY_KIND (the per-kind drop, revision 3,
+    section 1): u8 n, then n entries of {u32 observerMask, u32 kindMask,
+    u8 correctionMask}. Unknown observer and kind bits are ignored (1.4);
+    correction bits above 0x07 are reserved, must be zero, and make the
+    WELCOME non-canonical (1.4, 3.1). Entries only add to 0x0004 (1.1), so
+    nothing about them can contradict it."""
+    r = Reader(value)
+    n = r.u8()
+    entries = []
+    for _ in range(n):
+        observers, kinds, mask = r.u32(), r.u32(), r.u8()
+        if mask & ~0x07:
+            raise Malformed(f"CORRECTIONS_BY_KIND: reserved correction bits {mask:#04x}")
+        entries.append((observers, kinds, mask))
+    r.done("CORRECTIONS_BY_KIND")
+    return entries
+
+
+def welcome_corrections(tlvs):
+    """(0x0004 entries, 0x0014 entries) of a WELCOME's TLVs."""
+    t = Reader(tlvs[0x0004])
+    by_observer = [(t.u32(), t.u8()) for _ in range(t.u8())]
+    t.done("CORRECTIONS")
+    by_kind = parse_corrections_by_kind(tlvs[0x0014]) if 0x0014 in tlvs else []
+    return {"corrections": by_observer, "corrections_by_kind": by_kind}
+
+
+def permitted(caps, observer, kind, mask):
+    """The per-kind drop, section 1.1: the masks a client may send for an
+    (observer, kind) pair are 0x0004's masks for the observer, union every
+    0x0014 entry naming the pair. A pair no entry names falls back to 0x0004
+    (1.3), which the union already says."""
+    if any(o & (1 << observer) and m == mask for o, m in caps["corrections"]):
+        return True
+    return any(o & (1 << observer) and k & (1 << kind) and m == mask
+               for o, k, m in caps["corrections_by_kind"])
+
+
+def judge(caps, request):
+    """The per-kind drop, section 2: each profile's mask is checked against
+    every (observer, kind) of the objects that reference it; an unreferenced
+    profile against 0x0004 alone. Any failure refuses the whole request with
+    ERROR 11, whatever the representation. Returns 'served' or 'ERROR 11 ...'."""
+    for idx, p in enumerate(request["profiles"]):
+        kinds = {k for k, prof in request["objects"] if prof == idx}
+        if not kinds:
+            if not any(o & (1 << p["observer"]) and m == p["corrections"]
+                       for o, m in caps["corrections"]):
+                return f"ERROR 11: unreferenced profile {idx} mask {p['corrections']}"
+            continue
+        for k in sorted(kinds):
+            if not permitted(caps, p["observer"], k, p["corrections"]):
+                return (f"ERROR 11: profile {idx} mask {p['corrections']} not permitted "
+                        f"for observer {p['observer']} kind {k}")
+    return "served"
+
+
 def parse_payload(version, mtype, request_id, payload):
     if mtype in ID_MUST_BE_ZERO and request_id != 0:
         raise Malformed(f"requestId must be 0 on message type {mtype}")
@@ -497,14 +559,15 @@ def parse_payload(version, mtype, request_id, payload):
         r.str8("serverName")
         r.str8("engine")
         r.str8("datasetId")
-        tlvs = r.tlv(set(range(0x0001, 0x0014)), "WELCOME TLV")
+        tlvs = r.tlv(set(range(0x0001, 0x0015)), "WELCOME TLV")
         r.done("WELCOME")
         missing = [t for t in (1, 2, 3, 4, 5, 6, 8, 9) if t not in tlvs]
         if missing:
             raise Malformed("WELCOME is missing required capability tags "
                             + ", ".join(f"{t:#06x}" for t in missing))
+        return welcome_corrections(tlvs)
     elif mtype == 3:
-        parse_request(r, request_id)
+        return parse_request(r, request_id)
     elif mtype == 4:
         parse_data(r)
     elif mtype == 5:
@@ -623,6 +686,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dir", required=True, help="the conformance directory")
+    ap.add_argument("--judge", nargs=2, action="append", metavar=("REQUEST", "WELCOME"),
+                    default=[], help="judge a REQUEST fixture against a WELCOME fixture's "
+                    "correction capabilities (the per-kind drop, section 2); repeatable")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -678,6 +744,13 @@ def main():
                   + (f" — {why}" if why else ""))
             print(f"       note: {note}")
     print(f"\n{agree}/{len(rows)} agree; {len(disagreements)} disagreements")
+    for req, wel in args.judge:
+        def load(name):
+            with open(os.path.join(args.dir, name)) as fh:
+                version, _f, _t, rid, payload = parse_envelope(
+                    bytes.fromhex("".join(fh.read().split())))
+            return parse_payload(version, _t, rid, payload)
+        print(f"  judge {req} under {wel}: {judge(load(wel), load(req))}")
     return 1 if disagreements else 0
 
 

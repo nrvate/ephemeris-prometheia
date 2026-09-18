@@ -25,6 +25,11 @@ documented, not that it is frozen.
 - The cross-test gained a topocentric anchor, a barycentric anchor and
   refusal checks, and sends only masks both servers list. Deliberate
   differences are recorded as expected-difference with their reason.
+- Protocol v4 per-kind correction masks (WELCOME tag 0x0014, ephv4
+  `eed6429`): vendored and verdicted 98/98. `prometheia-wire-client` prints
+  `# corrkind` lines, and the fixture reader gained `--judge` for request
+  fixtures whose refusal depends on a WELCOME. `prometheiad`'s WELCOME
+  does not change.
 - The cross-test judges the Swiss refit by position (km), not a fixed
   angle. It also referees deflection from a planet centre against the
   textbook formula, where Horizons has no observer.

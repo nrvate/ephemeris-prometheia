@@ -6,7 +6,7 @@ directory keeps its upstream license.
 | directory | what | version | license | source |
 |-----------|------|---------|---------|--------|
 | `ephproto/` | Astrolog's ephemeris protocol (version 3) — historical; deleted 2026-09-17 when prometheiad moved to version 4 | | | |
-| `ephproto/v4/` | Astrolog's ephemeris protocol **version 4** (`ephproto.h`, the byte-level authority prometheiad speaks) + its generated `registries.json` | Astrolog `ephv4` commit `0fbc863` | GPL-2.0 (Astrolog, `license.htm` in its tree) | the corrApplied drop, verified: set-sha256 `1c934c7da19965f21ded99a0a53e36eaa3c45434cfbfaeabddafaf154ea454ec` over the 92 conformance fixtures, and the fixture gate ran 91/91 (`tools/check/ephproto4_fixtures.py`, verdicts agreed with Astrolog 2026-09-17) |
+| `ephproto/v4/` | Astrolog's ephemeris protocol **version 4** (`ephproto.h`, the byte-level authority prometheiad speaks) + its generated `registries.json` | Astrolog `ephv4` commit `eed6429` | GPL-2.0 (Astrolog, `license.htm` in its tree) | the per-kind correction mask drop (WELCOME tag 0x0014, drop text revision 3), verified: set-sha256 `934d3a0d49d3439740c0e8d063addba662354946e9686c85111032ddbc858f43` over the 98 conformance fixtures, and the fixture gate ran 98/98 (`tools/check/ephproto4_fixtures.py`, verdicts agreed with Astrolog 2026-09-18). Previously `0fbc863`, the corrApplied drop (set `1c934c7d…`, 91/91) |
 | `uWebSockets/` | WebSocket server library, prometheiad's transport (`src/` and `LICENSE` only) | v20.80.0, commit `3ffd6f44c9c3c92c96345d9f96bd01ba9c025ab5` | Apache-2.0 (`uWebSockets/LICENSE`) | https://github.com/uNetworking/uWebSockets |
 | `uSockets/` | its event-loop and socket layer (`src/` and `LICENSE` only), with `uSockets-write2.patch` applied | commit `86097c490263ab662d62e8e7b541390bdec7d149`, the one v20.80.0 pins | Apache-2.0 (`uSockets/LICENSE`) | https://github.com/uNetworking/uSockets |
 | `doctest/` | single-header C++ test framework (test code only; not linked into `libprometheia`) | 2.5.3 | MIT (`doctest/LICENSE.txt`) | https://github.com/doctest/doctest, tag `v2.5.3`, `doctest/doctest.h` |
@@ -16,8 +16,8 @@ To verify: `sha256sum third_party/doctest/*`.
 ```
 cfd518a3ef90f67e1f3ba514df23fb3627437de1a2feeba78cf5062a40021421  doctest/doctest.h
 0fe0b331fa1513dcce8604ff1fa925f32d1cea17d8aeb1c2471fad40d291adc5  doctest/LICENSE.txt
-f69bed1dd0c0200cc606f17b041254454123ab03aff45ce5d68dddcefbc6c6de  ephproto/v4/ephproto.h
-587c15168d319639b1f138a1dd58fea9a91787085ab2b9c7d60346e455cb2e45  ephproto/v4/registries.json
+e141aeebf9a7309b38859f189fb3c2f10494003558ac3b10d7643bb9829cba66  ephproto/v4/ephproto.h
+84104b8b3f70c4b694ea23bf137b37ddfd15868dbf643fbe2830dceb251ca9a0  ephproto/v4/registries.json
 121ab3c6f9bed858b3f8aa949843f8e045850680054ca11aa184e289b58b3e63  ephproto/v4/elements/FIXTURE.tsv
 ```
 

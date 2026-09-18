@@ -138,7 +138,7 @@ enum WelcomeTag : uint16_t {
   kCapTagCoverage = 0x000A, kCapTagCatalogs = 0x000B, kCapTagDeltaT = 0x000C,
   kCapTagPrecession = 0x000D, kCapTagRate = 0x000E, kCapTagSegments = 0x000F,
   kCapTagLookup = 0x0010, kCapTagHypotheticals = 0x0011, kCapTagEquinoxes = 0x0012,
-  kCapTagRatesBound = 0x0013,
+  kCapTagRatesBound = 0x0013, kCapTagCorrectionsByKind = 0x0014,
 };
 enum RequestTag : uint16_t {
   kReqTagPrecession = 0x0003, kReqTagEphemerisPin = 0x8001, kReqTagCatalogPin = 0x8002,
@@ -510,6 +510,7 @@ inline const uint16_t kWelcomeTags[] = {
   kCapTagTimeScales, kCapTagCoverage, kCapTagCatalogs, kCapTagDeltaT,
   kCapTagPrecession, kCapTagRate, kCapTagSegments, kCapTagLookup,
   kCapTagHypotheticals, kCapTagEquinoxes, kCapTagRatesBound,
+  kCapTagCorrectionsByKind,
 };
 
 inline Outcome ParseWelcome(const uint8_t *p, size_t n, Welcome *w, std::string *why) {
@@ -533,7 +534,8 @@ inline Outcome ParseWelcome(const uint8_t *p, size_t n, Welcome *w, std::string 
   else if (r.left()) v.Malformed("bytes after WELCOME");
   if (res8 || res16) v.Malformed("WELCOME reserved fields nonzero");
   if (w->protoSession < kProtoMin) v.Malformed("WELCOME session below 4");
-  if (!w->maxObjs || !w->maxRows || !w->maxChunkRows || !w->maxCells || !w->maxProfiles)
+  if (!w->maxObjs || !w->maxRows || !w->maxChunkRows || !w->maxPayload ||
+      !w->maxCells || !w->maxProfiles)
     v.Malformed("a WELCOME limit is zero");
   *why = v.why();
   return v.outcome();
@@ -560,6 +562,14 @@ struct Capabilities {
   // observers (an A.5 bitmask). 3.5a: corrections are honoured as sent, so
   // an engine that cannot honour one for an observer says so here.
   std::vector<std::pair<uint32_t, uint8_t>> corrMasks;
+  // A.3 0x0014 (the per-kind drop): {observers, kinds, mask}. 0x0004 above
+  // is the INTERSECTION over kinds -- the masks that hold for every kind
+  // the server computes from that observer -- and this ADDS to it per
+  // (observer, kind). A pair no entry names falls back to 0x0004, so a
+  // server lists only its exceptions and a kind-uniform server sends
+  // nothing. The two therefore cannot contradict each other.
+  struct CorrByKind { uint32_t observers, kinds; uint8_t mask; };
+  std::vector<CorrByKind> corrByKind;
   uint32_t orbitPoints = 0, orbitMethods = 0;
   uint32_t columns = 0;
   std::vector<std::string> zodiacs;      // A.11 tokens
@@ -593,6 +603,15 @@ struct Capabilities {
       if (e.second == m && Bit(e.first, observer)) return true;
     return false;
   }
+  // Whether this (observer, kind) pair may be sent with mask m: 0x0004
+  // for the observer, union every 0x0014 entry naming the pair.
+  bool CorrectionMaskFor(uint8_t observer, uint8_t kind, uint8_t m) const {
+    if (CorrectionMask(observer, m)) return true;
+    for (const CorrByKind &e : corrByKind)
+      if (Bit(e.observers, observer) && Bit(e.kinds, kind) && e.mask == m)
+        return true;
+    return false;
+  }
   bool Zodiac(const std::string &s) const {
     for (const std::string &z : zodiacs)
       if (z == s) return true;
@@ -617,6 +636,11 @@ inline void EncodeCapabilities(const Capabilities &c, TlvList *out) {
   w.u8((uint8_t)c.corrMasks.size());
   for (const auto &e : c.corrMasks) { w.u32(e.first); w.u8(e.second); }
   add(kCapTagCorrections);
+  if (!c.corrByKind.empty()) {
+    w.u8((uint8_t)c.corrByKind.size());
+    for (const auto &e : c.corrByKind) { w.u32(e.observers); w.u32(e.kinds); w.u8(e.mask); }
+    add(kCapTagCorrectionsByKind);
+  }
   w.u32(c.orbitPoints); w.u32(c.orbitMethods); add(kCapTagOrbit);
   w.u32(c.columns); add(kCapTagColumns);
   if (!c.zodiacs.empty()) {
@@ -665,6 +689,26 @@ inline Outcome ParseCapabilities(const TlvList &caps, Capabilities *c, std::stri
         for (uint8_t i = 0; i < n && r.ok(); i++) {
           uint32_t obs = r.u32();
           c->corrMasks.push_back({obs, r.u8()});
+        }
+        break;
+      }
+      case kCapTagCorrectionsByKind: {
+        uint8_t n = r.u8();
+        for (uint8_t i = 0; i < n && r.ok(); i++) {
+          Capabilities::CorrByKind e;
+          e.observers = r.u32();
+          e.kinds = r.u32();
+          e.mask = r.u8();
+          // 1.4 of the drop: bits above the A.7 mask are reserved and MUST
+          // be zero. 3.1's canonical-input rule then applies as it does to
+          // any receiver -- reject rather than normalise -- so a WELCOME
+          // carrying one is refused rather than quietly masked off.
+          // Unknown OBSERVER and KIND bits are ignored, by contrast,
+          // because those registries are open and a future member must not
+          // break an older client.
+          if ((e.mask & ~(uint8_t)kCorrMask) != 0)
+            v.Malformed("corrections-by-kind mask has reserved bits set");
+          c->corrByKind.push_back(e);
         }
         break;
       }
@@ -1684,7 +1728,18 @@ inline Outcome ParseFrame(const uint8_t *p, size_t n, Envelope *env, std::string
   // read as version 4 here, the session check being the caller's.
   switch (env->type) {
     case kMsgHello: { Hello h; return ParseHello(pay, len, &h, why); }
-    case kMsgWelcome: { Welcome w; return ParseWelcome(pay, len, &w, why); }
+    case kMsgWelcome: {
+      Welcome w;
+      Outcome oW = ParseWelcome(pay, len, &w, why);
+      if (oW != kOk) return oW;
+      // And its capability TLVs' PAYLOADS. ParseWelcome stores them raw,
+      // so until the per-kind drop nothing checked what was inside one --
+      // a capability entry could carry any bytes at all and every fixture
+      // still read "ok". That gap is why 0x0014's reserved-bit rule had no
+      // way to be expressed as a fixture.
+      Capabilities c;
+      return ParseCapabilities(w.caps_, &c, why);
+    }
     case kMsgRequest: { Request q; return ParseRequest(pay, len, &q, why); }
     case kMsgData: { DataChunk d; return ParseData(pay, len, &d, why); }
     case kMsgError: { Error e; return ParseError(pay, len, &e, why); }

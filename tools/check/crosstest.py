@@ -7,8 +7,8 @@ legs of its runbook that need nothing but the reference client and two
 running daemons:
 
   surfaces   each server's WELCOME, side by side (a record, not a verdict),
-             then every (observer, mask) a server does NOT list, which
-             3.5a says must draw ERROR 11
+             then every (observer, kind, mask): a listed mask (0x0004
+             and 0x0014) must be served, an unlisted one must draw ERROR 11
   same       both servers, the same question: mask 0, ICRF, equatorial,
              geocentric, the Horizons corpus's bodies at its epochs
   horizons   each server against JPL Horizons at the corpus's own points:
@@ -36,9 +36,8 @@ running daemons:
 Differences the two projects have agreed are deliberate are marked
 expected-difference with the reason in the row's note: Swiss's heliocentric
 light time, Swiss's topocentric site about the mean pole (only where the
-geocentric answers agree at that instant), astrolog-ephd accepting
-unlisted masks, and a row one server refuses as outside its coverage
-(errCode 3).
+geocentric answers agree at that instant), and a row one server refuses as
+outside its coverage (errCode 3).
 
 Every comparison is an angular separation (atan2 of cross and dot), never a
 difference of longitudes.  A leg is green when the servers agree AND the
@@ -193,47 +192,53 @@ OBSERVERS = [("geo", 0, []), ("topo", 1, ["--topo", "8.55,47.37,500.0"]), ("heli
              ("bary", 3, ["--bary"]), ("jupiter", 4, ["--center", "5"])]
 
 
-def advertised(corrmasks, bit):
-    """The exact masks WELCOME lists for one observer (A.3 0x0004)."""
-    return {m for o, m in corrmasks if o & (1 << bit)}
+def advertised(rep, bit, kind=0):
+    """The exact masks a server lists for one observer and object kind: 0x0004
+    for the observer, union 0x0014's additions for the pair (the per-kind
+    drop, 1.1). Kind 0 is a body, which is what the numeric legs ask for."""
+    return {m for m in range(8) if rep.permitted(bit, kind, m)}
 
 
 def common_mask(a, b, bit):
     """The fullest mask both servers list for this observer: the apparent
     leg sends only what both advertise, because 3.5a makes anything else
     ERROR 11 and a lenient server's answer to it is not a comparison."""
-    both = advertised(a.corrmasks, bit) & advertised(b.corrmasks, bit)
+    both = advertised(a, bit) & advertised(b, bit)
     return max(both, key=lambda m: (bin(m).count("1"), m)) if both else None
 
 
+REFUSAL_KINDS = [("body", 0, ["--obj", "4"]), ("orbit point", 1, ["--node", "4.a"])]
+
+
 def leg_refusals(client, ours, theirs, a, b, table, verbose):
-    """3.5a from the wire: every mask a server does NOT list for an observer
-    must draw ERROR 11. Accepting one is a finding even when the answer looks
-    right, because the other server refuses it and a client cannot know
-    which behaviour it will meet."""
-    print("\n== refusals: every unlisted (observer, mask) must draw ERROR 11")
+    """3.5a and the per-kind drop, from the wire: for every observer and
+    object kind, a mask the server lists must be served and one it does not
+    list must draw ERROR 11. Bodies and orbit points both, because 0x0014
+    exists for the pair where they differ (an orbit point from the Sun's
+    centre). Either failure is a finding: a client cannot know which
+    behaviour it will meet."""
+    print("\n== refusals: every (observer, kind, mask): listed is served, unlisted is ERROR 11")
     for who, srv, rep in (("ours", ours, a), ("theirs", theirs, b)):
         for obs, bit, obs_args in OBSERVERS:
-            listed = advertised(rep.corrmasks, bit)
-            for mask in range(8):
-                if mask in listed:
-                    continue
-                r = ask(client, srv, ["--obj", "4", "--jd", "2451545.0", "--corrections", str(mask),
-                                      "--deltat", str(DELTA_T)] + obs_args, verbose)
-                refused = "ERROR 11" in r.stderr
-                what = "ERROR 11" if refused else (
-                    f"answered, errCode {r.objects[0].err}" if r.objects else r.stderr[:60])
-                verdict, note = "agree", "unlisted in WELCOME; 3.5a requires ERROR 11"
-                if not refused and who == "theirs":
-                    verdict = "expected-difference"
-                    note += ("; astrolog-ephd accepts unlisted masks by decision (an orbit point "
-                             "from the Sun honours bits a body there cannot), a spec question")
-                elif not refused:
-                    verdict = "finding (ours)"
-                table.add(leg="refusals", object=4, observer=obs, mask=mask,
-                          **{who: what}, verdict=verdict, note=note)
-                if not refused:
-                    print(f"  {who:6s} {obs:8s} mask {mask}: {what}")
+            for kind_name, kind, obj_args in REFUSAL_KINDS:
+                listed = advertised(rep, bit, kind)
+                for mask in range(8):
+                    r = ask(client, srv, obj_args + ["--jd", "2451545.0", "--corrections",
+                                                     str(mask), "--deltat", str(DELTA_T)]
+                            + obs_args, verbose)
+                    refused = "ERROR 11" in r.stderr
+                    what = "ERROR 11" if refused else (
+                        f"answered, errCode {r.objects[0].err}" if r.objects else r.stderr[:60])
+                    if mask in listed:
+                        verdict = "agree" if not refused else f"finding ({who})"
+                        note = "listed in WELCOME, so it must be served"
+                    else:
+                        verdict = "agree" if refused else f"finding ({who})"
+                        note = "unlisted in WELCOME; 3.5a requires ERROR 11"
+                    table.add(leg="refusals", object=kind_name, observer=obs, mask=mask,
+                              **{who: what}, verdict=verdict, note=note)
+                    if verdict != "agree":
+                        print(f"  {who:6s} {obs:8s} {kind_name:11s} mask {mask}: {what} ({note})")
 
 
 def corpus(prefix="geo-", center="'500@399'"):
@@ -374,8 +379,8 @@ def leg_apparent(client, ours, theirs, wel_a, wel_b, table, verbose):
         if mask is None:
             print(f"  {obs:8s} no mask both servers list")
             continue
-        print(f"  {obs:8s} mask {mask} (ours lists {sorted(advertised(wel_a.corrmasks, bit))}, "
-              f"theirs {sorted(advertised(wel_b.corrmasks, bit))})")
+        print(f"  {obs:8s} mask {mask} (ours lists {sorted(advertised(wel_a, bit))}, "
+              f"theirs {sorted(advertised(wel_b, bit))})")
         bodies = [b for b in APPARENT_BODIES
                   if not (obs == "helio" and b == 10) and not (obs == "jupiter" and b == 5)]
         worst = {}
@@ -511,7 +516,7 @@ def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
     bending alone; each server is judged against its own geometry."""
     # Each server is judged only if it lists both masks from a body centre; one
     # that does not is recorded as not advertising the term, not as passing.
-    judged = {who: {1, 3} <= advertised(wel.corrmasks, 4)
+    judged = {who: {1, 3} <= advertised(wel, 4)
               for who, wel in (("ours", wel_a), ("theirs", wel_b))}
     if not any(judged.values()):
         print("\n== deflection: FAIL, neither server lists masks 1 and 3 from a body centre")

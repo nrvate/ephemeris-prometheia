@@ -145,7 +145,7 @@ def main():
                                     "kCapTagCoverage", "kCapTagCatalogs", "kCapTagDeltaT",
                                     "kCapTagPrecession", "kCapTagRate", "kCapTagSegments",
                                     "kCapTagLookup", "kCapTagHypotheticals", "kCapTagEquinoxes",
-                                    "kCapTagRatesBound"],
+                                    "kCapTagRatesBound", "kCapTagCorrectionsByKind"],
     }
     token_map = {"zodiac_tokens": "kZodiacTokens", "hypothetical_tokens": "kHypotheticalTokens"}
     # Reserved by design: the registry holds the value, the header implements

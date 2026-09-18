@@ -14,6 +14,7 @@ import sys
 
 WELCOME_RE = re.compile(r'^# WELCOME (\S+) protocol (\d+) engine "(.*)" dataset (.*) maxCells (\d+)$')
 CORRMASK_RE = re.compile(r"^# corrmask observers (\d+) corrections (\d+)$")
+CORRKIND_RE = re.compile(r"^# corrkind observers (\d+) kinds (\d+) corrections (\d+)$")
 CAPS_RE = re.compile(r"^# caps (.*)$")
 META_RE = re.compile(r'^# object (\d+) name "(.*)" rowsOk (-?\d+) corr (\d+) err (\d+) "(.*)"$')
 ROW_RE = re.compile(r"^(\d+) (\d+) (.+)$")
@@ -42,11 +43,21 @@ class Reply:
         self.dataset = None
         self.caps = {}
         self.corrmasks = []  # (observer bitmask, exact mask), A.3 0x0004
+        self.corrkinds = []  # (observer bitmask, kind bitmask, exact mask), A.3 0x0014
         self.objects = []  # Meta, in request order
         self.rows = {}  # (object, row) -> [six floats]
 
     def ok(self):
         return self.returncode == 0 and bool(self.objects)
+
+    def permitted(self, observer_bit, kind, mask):
+        """Whether this server lists mask for an (observer, kind) pair: 0x0004
+        for the observer, union every 0x0014 entry naming the pair (the
+        per-kind drop, 1.1). A pair no 0x0014 entry names falls back to 0x0004."""
+        if any(o & (1 << observer_bit) and m == mask for o, m in self.corrmasks):
+            return True
+        return any(o & (1 << observer_bit) and k & (1 << kind) and m == mask
+                   for o, k, m in self.corrkinds)
 
     def row(self, obj, r=0):
         return self.rows.get((obj, r))
@@ -82,6 +93,10 @@ def run(client, host, port, args, verbose=False, timeout=120):
         m = CORRMASK_RE.match(line)
         if m:
             rep.corrmasks.append((int(m.group(1)), int(m.group(2))))
+            continue
+        m = CORRKIND_RE.match(line)
+        if m:
+            rep.corrkinds.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
             continue
         m = CAPS_RE.match(line)
         if m:
