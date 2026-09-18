@@ -11,6 +11,30 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+### Hypothetical bodies (in progress)
+
+- **Bodies from polynomial orbital elements**, `Engine::calc_elements`, the
+  protocol's kind 4: pure two-body motion about the Sun or the Earth, with
+  elements in any of five equinoxes, and the corrections applied as for a
+  body. The mean anomaly and mean motion follow the protocol owner's
+  normative rule, which was corrected before release: M's own nonzero
+  coefficients decide its meaning, and n comes from the Gaussian constant,
+  so an answer does not depend on the loaded ephemeris.
+  [docs/HYPOTHETICALS.md](docs/HYPOTHETICALS.md).
+- **Named hypothetical bodies**, `Engine::calc_hypothetical`, the protocol's
+  kind 3, defined in JSON Lines element files: one strictly checked body per
+  line, in Prometheia's own format. A shipped set is compiled in, and
+  `add_hypotheticals()` adds an operator's file, whose definitions win.
+- Orbit points and bodies from elements share one correction path; the
+  orbit-point results are unchanged.
+- Not yet: the C API, `ephem` and `prometheiad` surfaces; the shipped
+  element values.
+- 0.1.0's notes called kinds 3 and 4 a settled end state. That reflected
+  one client's needs and has been reversed; see
+  [docs/SERVER.md](docs/SERVER.md).
+
 ## 0.1.0 — 2026-09-18
 
 First release. A cleanroom successor to the Swiss Ephemeris, written without

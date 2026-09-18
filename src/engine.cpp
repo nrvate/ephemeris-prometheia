@@ -9,7 +9,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -17,7 +19,9 @@
 #include "prometheia/apparent.hpp"
 #include "prometheia/catalog.hpp"
 #include "prometheia/de.hpp"
+#include "prometheia/elements.hpp"
 #include "prometheia/forces.hpp"
+#include "prometheia/hypotheticals.hpp"
 #include "prometheia/kepler.hpp"
 #include "prometheia/memo.hpp"
 #include "prometheia/spk.hpp"
@@ -32,6 +36,10 @@ constexpr double kJplEclipticObliquityArcsec = 84381.448;
 constexpr double kRad2Deg = 180.0 / 3.14159265358979323846;
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 constexpr double kJ2000 = 2451545.0;
+constexpr double kB1950 = 2433282.42345905; // Besselian B1950.0, TT
+constexpr double kJ1900 = 2415020.0;
+
+#include "hypotheticals_shipped.inc"
 // Earth rotation rate in rad per UT1 day (the ERA rate, Circular 179).
 constexpr double kEarthRotationRadPerDay = kTwoPi * 1.00273781191135448;
 // SBDB SPK-IDs of numbered asteroids are 20000000 + number; older NAIF
@@ -736,6 +744,31 @@ struct SmallBody {
 
 struct Engine::Impl {
     std::unique_ptr<Source> source;
+
+    // Named hypothetical bodies: every definition ever added (a deque, so the
+    // set names answers point at stay put), the current one per token, and
+    // the order tokens were first defined in.
+    std::deque<hypotheticals::Body> hypothetical_bodies;
+    std::unordered_map<std::string, const hypotheticals::Body*> hypothetical_by_token;
+    std::vector<std::string> hypothetical_order;
+
+    void define_hypotheticals(std::vector<hypotheticals::Body> bodies) {
+        for (hypotheticals::Body& b : bodies) {
+            const hypotheticals::Body& kept = hypothetical_bodies.emplace_back(std::move(b));
+            auto [it, fresh] = hypothetical_by_token.try_emplace(kept.token, &kept);
+            if (fresh)
+                hypothetical_order.push_back(kept.token);
+            else
+                it->second = &kept;
+        }
+    }
+
+    // The element frame's rotation for the fixed equinoxes, kept apart from
+    // the three-slot date cache, which a light-time solve and its rate
+    // stencil already fill.
+    double element_frame_jd = NAN;
+    Precession element_frame_model = Precession::IAU2006;
+    double element_frame[9] = {};
     std::unique_ptr<AsteroidSource> asteroids; // optional asteroid perturber kernel
     const time::DeltaTModel* delta_t = nullptr;
     time::ObservedDeltaT default_delta_t;
@@ -1618,10 +1651,13 @@ struct Engine::Impl {
         return {};
     }
 
-    // Observer -> orbit point vector in the output frame (km).
-    Result<void> orbit_point_vector_at(int id, OrbitPoint point, OrbitElements elements,
-                                       double jd_tt, const CalcOptions& o, double out[3],
-                                       double& tau) {
+    // Observer -> a point that is computed rather than read from the
+    // ephemeris -- an orbit point, a body from elements -- in the output
+    // frame (km), with the corrections a body gets. `at(jd_tt, pt)` gives
+    // the point's barycentric ICRF position (km) at an instant.
+    template <class PointFn>
+    Result<void> computed_point_vector_at(double jd_tt, const CalcOptions& o, PointFn&& at,
+                                          bool point_is_sun, double out[3], double& tau) {
         const double jd_tdb = time::tdb_from_tt(jd_tt);
         double obs[6], pt[3];
         auto r = observer(o, jd_tt, jd_tdb, obs);
@@ -1629,25 +1665,26 @@ struct Engine::Impl {
             return r;
         if (!o.light_time || !(tau >= 0.0 && tau < 1.0))
             tau = 0.0;
-        r = orbit_point(id, point, elements, jd_tt - tau, time::tdb_from_tt(jd_tt - tau), o, pt);
+        r = at(jd_tt - tau, pt);
         if (!r)
             return r;
         double p[3];
         for (int i = 0; i < 3; ++i)
             p[i] = pt[i] - obs[i];
         if (o.light_time) {
-            // A node or apsis is very nearly fixed in inertial space -- it
-            // moves with the orbit's precession, not with the body -- so the
-            // light-time equation contracts by v/c a pass rather than needing
-            // Newton's method as a body does. Three passes are already at
-            // roundoff; the loop stops on the step.
+            // These points move slowly against light -- an orbit point with
+            // its orbit's precession, a hypothetical planet on a period of
+            // centuries -- so the light-time equation contracts by the
+            // point's radial speed over c each pass, and a fixed-point
+            // iteration needs no derivative where a body uses Newton's
+            // method. Three passes are already at roundoff; the loop stops
+            // on the step.
             for (int it = 0; it < 8; ++it) {
                 const double d = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
                 const double next = d / apparent::kLightKmPerDay;
                 const double step = next - tau;
                 tau = next;
-                const double back = jd_tt - tau;
-                r = orbit_point(id, point, elements, back, time::tdb_from_tt(back), o, pt);
+                r = at(jd_tt - tau, pt);
                 if (!r)
                     return r;
                 for (int i = 0; i < 3; ++i)
@@ -1656,17 +1693,12 @@ struct Engine::Impl {
                     break;
             }
         }
-        // The same two terms a body gets, for the same reason: a node exists
-        // to be compared against apparent positions, so it has to be in the
-        // frame those are in. The observer-velocity term is the large one --
-        // 21 arcsec on Jupiter's node -- and light time above is worth
-        // 0.005 arcsec there; see docs/ORBIT-POINTS.md.
         // Deflection is honoured for every observer that is not the Sun
         // itself (3.5a): the barycentre sits ~0.005 AU from the Sun's
         // centre, close enough to deflect, and it is applied there.
         const bool observer_is_sun = o.center == Center::Heliocentric ||
                                      (o.center == Center::Body && o.center_body == body::kSun);
-        if (o.deflection && !observer_is_sun && id != body::kSun) {
+        if (o.deflection && !observer_is_sun && !point_is_sun) {
             double sun[6];
             r = sun_at(time::tdb_from_tt(jd_tt - tau), sun);
             if (!r)
@@ -1678,6 +1710,104 @@ struct Engine::Impl {
         if (o.aberration)
             apparent::aberration(p, obs + 3, p);
         return to_output(jd_tt, o, p, out);
+    }
+
+    // Observer -> orbit point vector in the output frame (km). A node exists
+    // to be compared against apparent body positions, so it gets the
+    // corrections they get. The observer-velocity term is the large one --
+    // 21 arcsec on Jupiter's node against 0.005 arcsec of light time; see
+    // docs/ORBIT-POINTS.md.
+    Result<void> orbit_point_vector_at(int id, OrbitPoint point, OrbitElements elements,
+                                       double jd_tt, const CalcOptions& o, double out[3],
+                                       double& tau) {
+        return computed_point_vector_at(
+            jd_tt, o,
+            [&](double t, double pt[3]) {
+                return orbit_point(id, point, elements, t, time::tdb_from_tt(t), o, pt);
+            },
+            id == body::kSun, out, tau);
+    }
+
+    // ICRF -> the mean ecliptic and equinox of an epoch.
+    static void ecliptic_of(const EpochFrames& f, double out[9]) {
+        double e1[9];
+        rot1(f.eps_mean, e1);
+        matmul(e1, f.pb, out);
+    }
+
+    // A body from polynomial elements (v4 kind 4): its barycentric ICRF
+    // position (km) at jd_tt. docs/HYPOTHETICALS.md has the conventions.
+    Result<void> elements_point(const PolynomialElements& el, double jd_tt, const CalcOptions& o,
+                                double out[3]) {
+        const double T = (jd_tt - el.epoch_jd_tt) / 36525.0;
+        const auto poly = [&](const double c[5]) { return elements::evaluate(c, el.n_terms, T); };
+        Elements ke;
+        ke.a = poly(el.semi_major_axis);
+        ke.e = poly(el.eccentricity);
+        if (!(ke.a > 0.0) || !(ke.e >= 0.0 && ke.e < 1.0))
+            return make_error(ErrorCode::ArgumentError,
+                              "the elements do not describe a bound orbit at this instant");
+        ke.argp = poly(el.arg_perihelion) / kRad2Deg;
+        ke.node = poly(el.ascending_node) / kRad2Deg;
+        ke.inc = poly(el.inclination) / kRad2Deg;
+        ke.mean_anom = std::fmod(elements::mean_anomaly_deg(el, jd_tt), 360.0) / kRad2Deg;
+        // Only the position is used, which does not depend on mu; the rates
+        // are those of the returned position, as for any body.
+        auto state = elements_to_state(elements::kGaussK * elements::kGaussK, ke);
+        if (!state)
+            return state.error();
+        const Vec3& q = state.value().pos;
+        const double ecl[3] = {q.x * kAuKm, q.y * kAuKm, q.z * kAuKm};
+
+        // The elements' plane is the mean ecliptic and equinox of their
+        // equinox epoch; the engine's own precession carries it to the ICRF.
+        double eq = kJ2000;
+        switch (el.equinox) {
+        case ElementEquinox::J2000:
+            eq = kJ2000;
+            break;
+        case ElementEquinox::B1950:
+            eq = kB1950;
+            break;
+        case ElementEquinox::J1900:
+            eq = kJ1900;
+            break;
+        case ElementEquinox::OfDate:
+            eq = jd_tt;
+            break;
+        case ElementEquinox::Explicit:
+            eq = el.equinox_jd_tt;
+            break;
+        }
+        double date_frame[9], rel[3];
+        const double* to_ecliptic = element_frame;
+        if (el.equinox == ElementEquinox::OfDate) {
+            ecliptic_of(frames_at(eq, false, o.precession), date_frame);
+            to_ecliptic = date_frame;
+        } else if (!(element_frame_jd == eq && element_frame_model == o.precession)) {
+            ecliptic_of(frames_at(eq, false, o.precession), element_frame);
+            element_frame_jd = eq;
+            element_frame_model = o.precession;
+        }
+        apply_transpose(to_ecliptic, ecl, rel);
+
+        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        double centre[6];
+        auto r = el.centre == ElementCentre::Earth
+                     ? source->barycentric(body::kEarth, jd_tdb, centre)
+                     : sun_at(jd_tdb, centre);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = centre[i] + rel[i];
+        return {};
+    }
+
+    Result<void> elements_vector_at(const PolynomialElements& el, double jd_tt,
+                                    const CalcOptions& o, double out[3], double& tau) {
+        return computed_point_vector_at(
+            jd_tt, o, [&](double t, double pt[3]) { return elements_point(el, t, o, pt); }, false,
+            out, tau);
     }
 
     // Observer -> catalog object vector in the output frame (km).
@@ -1911,6 +2041,10 @@ Result<Engine> Engine::open(const std::string& path) {
     e.impl_->perturbers.attach(e.impl_->source.get());
     frames::frame_bias_matrix(e.impl_->bias);
     e.impl_->eps_j2000 = frames::mean_obliquity(kJ2000);
+    auto shipped = hypotheticals::parse(kShippedHypotheticals, "data/hypotheticals.jsonl");
+    if (!shipped)
+        return shipped.error(); // a build defect: the file is checked by the tests
+    e.impl_->define_hypotheticals(std::move(shipped).value());
     return e;
 }
 
@@ -2105,6 +2239,99 @@ Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitEleme
         res.ayanamsa_deg = s.value();
     }
     return res;
+}
+
+Result<CalcResult> Engine::calc_elements(const PolynomialElements& el, double jd_tt,
+                                         const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite time");
+    if (el.n_terms < 1 || el.n_terms > 5)
+        return make_error(ErrorCode::ArgumentError, "elements take 1 to 5 polynomial terms");
+    if (int(el.equinox) < 0 || int(el.equinox) > int(ElementEquinox::Explicit) ||
+        int(el.centre) < 0 || int(el.centre) > int(ElementCentre::Earth))
+        return make_error(ErrorCode::ArgumentError, "unknown element equinox or centre");
+    if (!std::isfinite(el.epoch_jd_tt) ||
+        (el.equinox == ElementEquinox::Explicit && !std::isfinite(el.equinox_jd_tt)))
+        return make_error(ErrorCode::ArgumentError, "non-finite element epoch or equinox");
+    CalcResult res;
+    double tau = 0.0;
+    auto r = impl_->position(
+        jd_tt, o, tau,
+        [&](double jd, double out[3], double& t) {
+            return impl_->elements_vector_at(el, jd, o, out, t);
+        },
+        res.pos);
+    if (!r)
+        return r.error();
+    res.provenance.source = "two-body orbital elements";
+    res.provenance.light_time_days = tau;
+    if (o.sidereal != SiderealMode::Tropical) {
+        auto s = impl_->sidereal_shift(o, jd_tt);
+        if (!s)
+            return s.error();
+        res.ayanamsa_deg = s.value();
+    }
+    return res;
+}
+
+Result<CalcResult> Engine::calc_elements_ut(const PolynomialElements& el, double jd_ut1,
+                                            const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc_elements(el, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+Result<void> Engine::add_hypotheticals(const std::string& path) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    std::ifstream f(path, std::ios::binary);
+    if (!f)
+        return make_error(ErrorCode::IoError, "cannot open " + path);
+    const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    auto bodies = hypotheticals::parse(text, path);
+    if (!bodies)
+        return bodies.error();
+    impl_->define_hypotheticals(std::move(bodies).value());
+    return {};
+}
+
+std::vector<std::string> Engine::hypothetical_tokens() const {
+    return impl_ ? impl_->hypothetical_order : std::vector<std::string>{};
+}
+
+const hypotheticals::Body* Engine::hypothetical(std::string_view token) const {
+    if (!impl_)
+        return nullptr;
+    std::string key(token);
+    for (char& c : key)
+        if (c >= 'A' && c <= 'Z')
+            c = char(c - 'A' + 'a');
+    auto it = impl_->hypothetical_by_token.find(key);
+    return it == impl_->hypothetical_by_token.end() ? nullptr : it->second;
+}
+
+Result<CalcResult> Engine::calc_hypothetical(std::string_view token, double jd_tt,
+                                             const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    const hypotheticals::Body* b = hypothetical(token);
+    if (!b)
+        return make_error(ErrorCode::NotFound,
+                          "hypothetical body \"" + std::string(token) + "\" is not defined");
+    auto r = calc_elements(b->elements, jd_tt, o);
+    if (!r)
+        return r;
+    r.value().provenance.source = b->set;
+    return r;
+}
+
+Result<CalcResult> Engine::calc_hypothetical_ut(std::string_view token, double jd_ut1,
+                                                const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc_hypothetical(token, impl_->ut1_to_tt(jd_ut1), o);
 }
 
 Result<CalcResult> Engine::calc_star(size_t star_index, double jd_tt, const CalcOptions& o) {

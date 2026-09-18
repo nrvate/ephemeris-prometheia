@@ -37,6 +37,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "prometheia/error.hpp"
 #include "prometheia/frames.hpp"
@@ -120,6 +121,44 @@ enum class OrbitElements {
     Osculating,
 };
 
+// The reference plane and equinox a set of orbital elements is given in
+// (ephemeris protocol v4, A.16).
+enum class ElementEquinox {
+    J2000,    // mean ecliptic and equinox of J2000.0
+    B1950,    // ... of B1950.0 (JD 2433282.4235 TT), dynamically; not FK4
+    J1900,    // ... of J1900.0 (JD 2415020.0 TT)
+    OfDate,   // ... of the instant the elements are evaluated at
+    Explicit, // ... of PolynomialElements::equinox_jd_tt
+};
+
+// The body the elements' orbit is about (v4 A.21).
+enum class ElementCentre {
+    Sun,
+    Earth,
+};
+
+// A body defined by its orbital elements rather than by an ephemeris: a
+// hypothetical planet, a predicted one, a fictitious moon. Each element is a
+// polynomial in T = (t_TT - epoch) / 36525 Julian centuries, and the motion is
+// pure two-body Keplerian about the centre, with no perturbations. This is
+// ephemeris protocol v4's kind 4; docs/HYPOTHETICALS.md has the conventions.
+struct PolynomialElements {
+    double epoch_jd_tt = 2451545.0;
+    ElementEquinox equinox = ElementEquinox::J2000;
+    double equinox_jd_tt = 0.0; // ElementEquinox::Explicit only
+    ElementCentre centre = ElementCentre::Sun;
+    int n_terms = 1; // 1..5: the terms each polynomial below uses
+    // Coefficients of T^0 .. T^(n_terms-1), in the protocol's order: mean
+    // anomaly (deg), semi-major axis (AU), eccentricity, argument of
+    // perihelion (deg), ascending node (deg), inclination (deg).
+    double mean_anomaly[5] = {};
+    double semi_major_axis[5] = {};
+    double eccentricity[5] = {};
+    double arg_perihelion[5] = {};
+    double ascending_node[5] = {};
+    double inclination[5] = {};
+};
+
 struct CalcOptions {
     Center center = Center::Geocentric;
     Frame frame = Frame::TrueOfDate;
@@ -201,6 +240,10 @@ struct CalcResult {
     // tropical request.
     std::optional<double> ayanamsa_deg;
 };
+
+namespace hypotheticals {
+struct Body;
+}
 
 class Engine {
 public:
@@ -298,6 +341,31 @@ public:
     // directions of arrival. Distance is the parallax distance in AU, or
     // kStarNoParallaxAu for objects without a parallax. sigma is never set.
     static constexpr double kStarNoParallaxAu = 1e10;
+    // A body from polynomial orbital elements (PolynomialElements). The
+    // corrections apply exactly as for a body: light time is solved through
+    // the same two-body motion, and rates are those of the returned position.
+    Result<CalcResult> calc_elements(const PolynomialElements& elements, double jd_tt,
+                                     const CalcOptions& opts = {});
+    Result<CalcResult> calc_elements_ut(const PolynomialElements& elements, double jd_ut1,
+                                        const CalcOptions& opts = {});
+
+    // Named hypothetical bodies (docs/HYPOTHETICALS.md). The shipped element
+    // set is loaded when the engine opens; add_hypotheticals() adds an element
+    // file (JSON Lines), whose bodies win over any earlier definition of the
+    // same token. Adding invalidates the source strings of earlier results.
+    Result<void> add_hypotheticals(const std::string& element_file_path);
+    // The tokens defined, in the order they were first defined.
+    std::vector<std::string> hypothetical_tokens() const;
+    // A token's current definition (name, set, citation, elements), or
+    // nullptr. Matched ASCII case-insensitively, like every name here.
+    const hypotheticals::Body* hypothetical(std::string_view token) const;
+    // A named body, computed from its elements exactly as calc_elements()
+    // does; the result's provenance source is the element set's name.
+    Result<CalcResult> calc_hypothetical(std::string_view token, double jd_tt,
+                                         const CalcOptions& opts = {});
+    Result<CalcResult> calc_hypothetical_ut(std::string_view token, double jd_ut1,
+                                            const CalcOptions& opts = {});
+
     Result<CalcResult> calc_star(size_t star_index, double jd_tt, const CalcOptions& opts = {});
     Result<CalcResult> calc_star_ut(size_t star_index, double jd_ut1, const CalcOptions& opts = {});
 

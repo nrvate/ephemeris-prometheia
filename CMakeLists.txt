@@ -22,7 +22,9 @@ add_library(prometheia
   src/catalog.cpp
   src/cbor.cpp
   src/de.cpp
+  src/elements.cpp
   src/engine.cpp
+  src/hypotheticals.cpp
   src/segments.cpp
   src/spk.cpp
   src/stars.cpp
@@ -33,6 +35,17 @@ target_include_directories(prometheia PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(prometheia PUBLIC PkgConfig::ZSTD)
+
+# The shipped hypothetical-body element set (docs/HYPOTHETICALS.md) is compiled
+# in from data/hypotheticals.jsonl, read at configure time and re-read whenever
+# the file changes; the engine parses it with the same reader an operator's
+# element file goes through.
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/data/hypotheticals.jsonl PROMETHEIA_HYPOTHETICALS_JSONL)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_SOURCE_DIR}/data/hypotheticals.jsonl)
+configure_file(src/hypotheticals_shipped.inc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/hypotheticals_shipped.inc @ONLY)
+target_include_directories(prometheia PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_compile_options(prometheia PRIVATE -Wall -Wextra -Werror)
 
 option(PROMETHEIA_SANITIZE "Build with ASan+UBSan" OFF)
@@ -59,6 +72,8 @@ endfunction()
 prometheia_test(cbor tests/test_cbor.cpp)
 prometheia_test(catalog tests/test_catalog.cpp)
 prometheia_test(kepler tests/test_kepler.cpp)
+prometheia_test(elements tests/test_elements.cpp)
+prometheia_test(hypotheticals tests/test_hypotheticals.cpp)
 prometheia_test(integrator tests/test_integrator.cpp)
 prometheia_test(mechanics tests/test_mechanics.cpp)
 prometheia_test(radau tests/test_radau.cpp)

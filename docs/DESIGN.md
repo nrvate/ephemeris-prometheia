@@ -382,3 +382,28 @@ output-only oracle testing — comparing our published answers to theirs —
 which is standard cleanroom verification practice. All astronomy comes from
 published, citable theory (JPL DE documentation, IAU standards, IAS15 paper,
 published ayanamsa definitions).
+
+### Exposures and how they were handled
+
+A cleanroom is only as good as its record of the times the wall was crossed,
+so crossings are written down here rather than quietly absorbed.
+
+**2026-09-18: Swiss source quoted in a cross-project message.** While the
+kind-4 (orbital elements) semantics of ephemeris protocol v4 were being
+clarified, the Astrolog project's session answered an ambiguity in the
+protocol text by reading its linked Swiss library (which it is entitled to
+do) and quoting a few fragments of Swiss's element-handling source verbatim
+into its message to this project's session. The fragments concerned one rule:
+how a body's mean anomaly and mean motion follow from its polynomial
+elements. No file was opened on this side, and nothing had yet been written
+for that rule.
+
+The maintainer's ruling: the one function the exposure touches — the mean
+anomaly and mean motion of a body from polynomial elements — is written by a
+fresh session that never saw the message, working only from the behavioural
+specification in [HYPOTHETICALS.md](HYPOTHETICALS.md), whose wording comes
+from the protocol owner's normative sentences, which is the channel a
+cleanroom uses. The exposed session writes everything else. The Astrolog side
+has adopted, in its own words, the rule that only specification sentences,
+fixtures and numbers cross between the projects, and that anything else is
+asked about first.
