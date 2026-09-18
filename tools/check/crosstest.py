@@ -702,6 +702,10 @@ STARS = ["Aldebaran", "Regulus", "Spica", "Antares", "Fomalhaut", "Sirius", "Alg
          "Pollux", "Castor", "Procyon", "Capella", "Alcyone", "Zubenelgenubi", "Zubeneschamali",
          "Bellatrix", "Acrux", "Hadar", "Mirach", "Alphecca", "Scheat"]
 STAR_BAND = 0.02
+# alpha Cen A and B: the two sides take them from different catalogues (ours
+# Hipparcos, theirs SIMBAD), for the fastest-moving bright pair in the sky; an
+# estimate, measured 0.007" (A) and 0.040" (B) at J2000, 2026-09-18.
+ALCEN_BAND = 0.1
 STAR_EPOCHS = [2415020.5, 2451545.0, 2488069.5]
 
 
@@ -751,23 +755,25 @@ def leg_stars(client, ours, theirs, table, verbose):
     table.add(leg="stars-alcen", epoch_tt=2451545.0, object="Rigil Kentaurus", frame="ICRF",
               plane="equator", mask=0, ours=(a_o[0], a_o[1]), theirs=(a_t[0], a_t[1]),
               sep_servers=sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])), tier=3,
-              verdict="unadjudicated",
-              note="catalogue convention: ours is alpha Cen A (the IAU's Rigil Kentaurus); "
-                   "theirs one alpha Cen entry, between A and B")
+              verdict="agree" if sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])) <= ALCEN_BAND
+              else "finding (theirs)",
+              note="the IAU's Rigil Kentaurus is alpha Cen A itself (astrolog 554288b; before it,"
+                   " their entry sat 38% of the way to B)")
     table.add(leg="stars-alcen", epoch_tt=2451545.0, object="Toliman", frame="ICRF",
               plane="equator", mask=0, ours=(b_o[0], b_o[1]), theirs=(b_t[0], b_t[1]),
               sep_servers=sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1])), tier=3,
-              verdict="agree" if theirs_split > 1.0 else "finding (theirs)",
+              verdict="agree" if theirs_split > 1.0 and sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1]))
+              <= ALCEN_BAND else "finding (theirs)",
               note=f"the IAU's Toliman is alpha Cen B; A to B is {ours_split:.2f}\" here "
                    f"and {theirs_split:.2f}\" on theirs (0 = both names answer one star)")
     print(f"  alpha Cen: A-B {ours_split:.2f}\" ours, {theirs_split:.2f}\" theirs")
 
 
 # Sidereal planes (A.8). Planes 0 and 1 are the same question on both sides
-# and are judged by the refit band. Plane 2's longitude origin is open (the
-# protocol's "carried onto"): a row there is unadjudicated when the planes
-# themselves agree (latitude) and the longitudes differ by one constant
-# across bodies, which is a difference of origin and nothing else.
+# and are judged by the refit band. Plane 2's origin is 3.5a Part A (approved
+# 2026-09-18): the zodiac's zero point projected onto the plane. A constant
+# offset across bodies with the planes agreeing in latitude is the Astrolog
+# side's pending fix, and agrees once the offset closes.
 SIDEREAL_BODIES = [10, 301, 4, 5, 6]
 # What a sidereal rotation may add to the tropical gap: the two ayanamsa
 # series differ by their precession models, 0.0026" over 1800-2200

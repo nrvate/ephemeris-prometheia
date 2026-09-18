@@ -758,6 +758,25 @@ unadjudicated 2 and unanswered 9.
     2.5″ from theirs, and ours runs to 28.6″ by 1900: the 80-year AB orbit
     against a straight line (STARS.md, "Known limits").
 
+### Two Astrolog fixes verified, 2026-09-18 (`docs/crosstest/2026-09-18h.tsv`)
+
+Against Astrolog `qt` at `b89f510`: agree 1,817, expected-difference 313,
+finding (theirs) 64, unadjudicated 1 (the 1800 Moon) and unanswered 9.
+- **The J2000-frame node** (their `b89f510`, registry §4.2): all 8
+  `points-frame` rows agree. The 7 findings of record g are gone.
+- **α Cen A** (their `554288b`): Rigil Kentaurus is 0.007″ from ours, where
+  it was 6.23″.
+  - Their old entry sat 38% of the way from A to B. The Astrolog side
+    measured that it was neither A, nor the photocentre, nor the centre of
+    mass: a ground-based centroid of the unresolved pair.
+  - The `stars-alcen` rows now judge both names against `ALCEN_BAND`
+    (0.1″, an estimate). The two sides read the pair from different
+    catalogues.
+- **Still open, theirs:** the 64 `sidsweep` rows and the plane-2 offset,
+  both pending their registry §4.1. They will refuse the zodiacs whose zero
+  point is defined at the instant (errCode 2) on planes 1 and 2, and the
+  sweep grades such a refusal `refused`.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

@@ -52,9 +52,11 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    - their `9bb48a5`: the 1800 descending node answers errCode 3;
    - their `9e9e5c4`: Toliman agrees (0.04″).
 
-   **Still to re-run, when they land:**
-   - their plane-2 zero point and the 16 ignored tokens (their registry §4.1);
-   - their J2000-frame node (§4.2).
+   - their `b89f510`: the J2000-frame node agrees (record h);
+   - their `554288b`: α Cen A agrees to 0.007″ (record h).
+
+   **Still to re-run, when it lands:** their plane-2 zero point and the 16
+   ignored tokens (their registry §4.1), in progress.
 
 4. **Fuzzing (started 2026-09-18).** `tools/fuzz.sh [SECONDS]` (SERVER.md,
    "Fuzzing").
@@ -85,11 +87,9 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `bary`, `deflection` (textbook formula);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18g.tsv`, 2,226 rows, against
-  Astrolog `qt` `91e427e`. The only findings are ones they already know
-  about (CROSS-TEST.md, "The sidereal sweep"):
-  - the J2000-frame node (7 rows);
-  - the 16 tokens that ignore planes 1 and 2 (64 rows).
+- **Latest record:** `docs/crosstest/2026-09-18h.tsv`, against Astrolog `qt`
+  `b89f510`. The only findings are the 64 `sidsweep` rows their registry
+  §4.1 fix will close (CROSS-TEST.md, "Two Astrolog fixes verified").
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;
