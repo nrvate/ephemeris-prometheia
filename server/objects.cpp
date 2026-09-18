@@ -127,8 +127,7 @@ Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine) {
         // names the set, which the engine sets from the definition.
         const hypotheticals::Body* b = engine.hypothetical(spec.name);
         if (!b) {
-            return make_error(ErrorCode::NotFound,
-                              "hypothetical body \"" + spec.name + "\" is not served");
+            return make_error(ErrorCode::NotFound, "that hypothetical body is not served");
         }
         out.kind = ResolvedObject::Kind::Hypothetical;
         out.token = b->token;

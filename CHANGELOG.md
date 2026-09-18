@@ -68,6 +68,12 @@ documented, not that it is frozen.
   server's WELCOME honours, reports what it cannot ask as inapplicable, and
   fails when nothing, or under half, was checked, or when a check never ran.
   Against the Astrolog server it had printed OK after checking zero cases.
+- **Fixes from a review of this session's own work:** a client's name can no
+  longer steer the per-object error code (NotFound is classified by its code
+  before any message text is read); an element file's `"equinox": 0` is
+  refused at load; `ephem` keeps a 64-character token whole; and the wire
+  client's `--helio` asks for the mask the Sun's centre honours, and its
+  `--jd` defaults to J2000.0 as its help text always said, not JD 0.
 - The kind-4 rule is released on the protocol side as "the kind-4 elements
   rule" (Astrolog `176e333`).
 - **Shipped element set:** the eight Hamburg points, and Le Verrier's

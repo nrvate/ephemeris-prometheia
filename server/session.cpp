@@ -236,6 +236,12 @@ bool has_naif(eph::ObjKind kind) {
 
 // 3.9a: errors by meaning, not convenience; 3.8: the text names no instant.
 eph::ObjErr obj_err_of(const Error& e) {
+    // The code first where it decides: a NotFound message quotes the name the
+    // client sent (a star, a designation, a token), and text the client chose
+    // must never steer the classification below.
+    if (e.code == ErrorCode::NotFound) {
+        return eph::kOErrUnknownBody;
+    }
     const std::string& m = e.message;
     if (m.find("is ambiguous") != std::string::npos) {
         return eph::kOErrAmbiguous;

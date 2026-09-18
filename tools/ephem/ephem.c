@@ -80,7 +80,7 @@ typedef struct config {
 typedef struct body_ref {
     int id;         /* NAIF ID / SPK-ID, or the catalog star index when star */
     int star;       /* nonzero: a fixed star or deep-sky object */
-    char token[64]; /* non-empty: a named hypothetical body, by its token */
+    char token[65]; /* non-empty: a named hypothetical body's token (up to 64 chars) */
     char label[64];
 } body_ref;
 

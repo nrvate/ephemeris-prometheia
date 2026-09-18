@@ -1635,6 +1635,26 @@ TEST_CASE("server_error_text_never_quotes_the_request") {
     CHECK(d.meta[0].errCode == eph::kOErrUnknownBody);
     CHECK(d.meta[4].errCode == eph::kOErrUnknownBody);
 
+    // Nor may what the client sends steer the classification: unknown names
+    // that contain the words the classifier listens for are still unknown.
+    eph::Request steer = base_request(2451545.0, 1);
+    eph::Object sneaky_hyp;
+    sneaky_hyp.kind = eph::kObjHypothetical;
+    sneaky_hyp.name = "x is ambiguous";
+    eph::Object sneaky_star;
+    sneaky_star.kind = eph::kObjStar;
+    sneaky_star.name = "Zz nodes are undefined";
+    eph::Object sneaky_name;
+    sneaky_name.kind = eph::kObjDesignation;
+    sneaky_name.name = "integration failed";
+    steer.objs = {sneaky_hyp, sneaky_star, sneaky_name};
+    CHECK(s.on_message(request(steer, 5), true));
+    const Data st = join(drain(s));
+    REQUIRE(st.meta.size() == 3);
+    for (const eph::Meta& m : st.meta) {
+        CHECK_MESSAGE(m.errCode == eph::kOErrUnknownBody, m.errText);
+    }
+
     // And a whole-request refusal: an unserved zodiac is ERROR 11, and its
     // text does not repeat the token either.
     eph::Request zod = base_request(2451545.0, 1);

@@ -347,6 +347,10 @@ std::string body_of(const Value& v, Body& b) {
         } else if (key == "equinox") {
             seen_equinox = true;
             if (x.kind == Value::Kind::Number) {
+                // The protocol's canonical form (A.16): an explicit equinox
+                // names a date, and zero is none.
+                if (x.number == 0.0)
+                    return "\"equinox\" as a number is a Julian date (TT), not zero";
                 el.equinox = ElementEquinox::Explicit;
                 el.equinox_jd_tt = x.number;
             } else if (x.kind == Value::Kind::String && x.str == "J2000") {

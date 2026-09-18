@@ -364,7 +364,10 @@ TEST_CASE("element_files_read_strictly") {
     CHECK(!why_rejected(swap(kInvented, "10.0", "0x10")).empty());  // not JSON
     CHECK(!why_rejected(swap(kInvented, "10.0", "+10.0")).empty()); // not JSON
     CHECK(!why_rejected(std::string(40, '[') + std::string(40, ']')).empty()); // too deep
-    CHECK(!why_rejected("[1,2,3]").empty());                                   // not an object
+    // An explicit equinox of zero names no date: refused at load, with the
+    // line, rather than failing every later calculation.
+    CHECK(why_rejected(swap(kInvented, "\"J1900\"", "0")).find("not zero") != std::string::npos);
+    CHECK(!why_rejected("[1,2,3]").empty()); // not an object
 }
 
 TEST_CASE("the_shipped_element_set_parses") {

@@ -368,6 +368,24 @@ TEST_CASE("ephem_hypothetical_bodies") {
     CHECK(r.status == 0);
     CHECK(parse_csv(r.out).size() == k.engine.hypothetical_tokens().size());
 
+    // The longest token the format allows, 64 characters, survives intact.
+    {
+        const std::string long_token(64, 'q');
+        TempFile longfile("ephem-hyp-long");
+        FILE* f = std::fopen(longfile.path.c_str(), "wb");
+        REQUIRE(f);
+        std::fprintf(f,
+                     "{\"token\":\"%s\",\"set\":\"Invented\",\"citation\":\"t\","
+                     "\"epoch\":2451545.0,\"equinox\":\"J2000\",\"M\":[1],\"a\":[40],"
+                     "\"e\":[0],\"w\":[0],\"node\":[0],\"i\":[0]}\n",
+                     long_token.c_str());
+        std::fclose(f);
+        Run lr = ephem(k.arg + " --hypotheticals " + longfile.path.string() +
+                       " -j 2452000.5 -f csv hyp:" + long_token);
+        CHECK_MESSAGE(lr.status == 0, lr.err);
+        CHECK(parse_csv(lr.out).size() == 1);
+    }
+
     r = ephem(k.arg + opt + " -j 2452000.5 hyp:nosuch");
     CHECK(r.status == 1);
     CHECK(r.err.find("unknown hypothetical body 'nosuch'") != std::string::npos);

@@ -39,7 +39,9 @@ constexpr const char* kUsage =
     "  --ut                rows are UT1 (server's delta T)\n"
     "  --step SECONDS      between rows (default 86400)\n"
     "  --count N           rows (default 1)\n"
-    "  --helio | --bary    the observer (default geocentric)\n"
+    "  --helio | --bary    the observer (default geocentric); --helio asks for light\n"
+    "                      time and aberration unless --corrections says otherwise,\n"
+    "                      since the Sun's centre cannot be deflected (ERROR 11)\n"
     "  --center NAIF       observer at a body's centre\n"
     "  --eq                equatorial plane (default ecliptic)\n"
     "  --j2000 | --icrs    the frame (default true of date)\n"
@@ -85,11 +87,13 @@ int main(int argc, char** argv) {
     int port = eph::kDefaultPort;
     std::string token;
     WsTlsOptions tls;
-    eph::Request req; // defaults: TT grid, one profile, f64
+    eph::Request req;          // defaults: TT grid, one profile, f64
+    req.start.jd1 = 2451545.0; // the documented --jd default; the codec's own is JD 0
     eph::Profile& pf = req.profiles.emplace_back();
     double step_seconds = 86400.0;
     double target_arcsec = 0.1;
     int cancel_after_ms = -1;
+    bool corrections_given = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const auto value = [&]() -> const char* {
@@ -191,6 +195,7 @@ int main(int argc, char** argv) {
             pf.frame = eph::kFrameIcrf;
         } else if (arg == "--no-corrections") {
             pf.corrections = 0;
+            corrections_given = true;
         } else if (arg == "--corrections") {
             const long m = std::strtol(value(), nullptr, 0);
             if (m < 0 || m > eph::kCorrMask) {
@@ -198,6 +203,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
             pf.corrections = uint8_t(m);
+            corrections_given = true;
         } else if (arg == "--sid") {
             pf.zodiac = value();
         } else if (arg == "--sidu") {
@@ -243,6 +249,11 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "bad option %s\n%s", arg.c_str(), kUsage);
             return 2;
         }
+    }
+    // The apparent place at the Sun's centre is light time and aberration:
+    // deflection is not honoured there, and asking for it is ERROR 11 (3.5a).
+    if (pf.observer == eph::kObsHelio && !corrections_given) {
+        pf.corrections = eph::kCorrLightTime | eph::kCorrAberration;
     }
     if (req.objs.empty()) {
         std::fprintf(stderr, "no objects\n%s", kUsage);
