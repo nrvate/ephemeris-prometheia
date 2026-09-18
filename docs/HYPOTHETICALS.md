@@ -188,8 +188,9 @@ from its semi-major axis, which is how the source means them. The maintainer
 chose them so that a Uranian chart from Prometheia matches the Swiss-based
 programs it will be compared with. One caveat: Swiss's compiled-in fallback
 table, which it uses when the file is not found, has a different Kronos,
-15.5″ away in 2000 and 31″ in 2100. Prometheia matches the file
-([DESIGN.md](DESIGN.md), "Exposures"). They do match `swetest`, to
+15.5″ away in 2000 and 31″ in 2100. Prometheia matches the file, which is
+what every supported Astrolog install uses ([DESIGN.md](DESIGN.md),
+"Exposures"). They do match `swetest`, to
 0.00076″ at 1900, 2000 and 2100 (`the_shipped_hamburg_points_match_swetest`).
 Answers name the set "Hamburg School (Swiss Ephemeris seorbel.txt)", because
 the set is the definition. A practitioner who works from another set

@@ -444,4 +444,11 @@ Two consequences, measured on 2026-09-18:
   the same run otherwise, the compiled-in Kronos sits 0.0027 AU further
   out, so it moves more slowly: identical at the 1900 epoch, 15.5″ apart in
   2000, 31″ in 2100. The other seven agree. A Swiss user's Kronos therefore
-  depends on whether the file is found. Prometheia follows the file.
+  depends on whether the file is found. Prometheia follows the file. Per the
+  Astrolog side, **every supported Astrolog layout finds it**. The directory
+  of the executable is on the ephemeris path ahead of anything the user
+  sets, the file sits beside the binary in a source build, and the Windows
+  and macOS packages are gated on containing it. A differently sized copy
+  under the maintainer's `/swe` mount has identical Hamburg rows. So
+  Prometheia agrees with what Astrolog users see. Only a deleted file, or a
+  binary moved out of its tree, reaches the compiled-in table.
