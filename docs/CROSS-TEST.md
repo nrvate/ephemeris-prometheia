@@ -407,10 +407,12 @@ Astrolog server by the anchor, 1 unadjudicated, 66 unanswered.
     Geometric positions agree to 0.3 mas, and light time alone moves Venus
     24.208″ on one server and 24.452″ on the other: the retardation itself
     differs by 1%.
-  - **The ΔT a request sends is ignored** by `astrolog-ephd`. Changing it by
-    100 s moves `prometheiad`'s topocentric Moon by 16.9″ and
-    `astrolog-ephd`'s by 0.000″. §3.5 makes the request's ΔT govern, and
-    this is the whole of the 12″ topocentric Moon gap.
+  - **Earth rotation ignored the ΔT a request sends.** Rows are asked at
+    TT, so ΔT enters only through the observer's Earth rotation (UT1 =
+    TT − ΔT). Changing the ΔT sent by 100 s moved `prometheiad`'s
+    topocentric Moon by 16.9″ and `astrolog-ephd`'s by 0.000″: its
+    topocentric rotation used Swiss's own ΔT. §3.5 makes the request's ΔT
+    govern, and this was the whole of the 12″ topocentric Moon gap.
   - **Deflection advertised but not applied** for barycentric and
     planet-centred observers. Masks 0, 1 and 5 agree, and the gap appears
     only with the deflection bit: 3.2″ on Venus from the barycentre at
@@ -429,6 +431,34 @@ Astrolog server by the anchor, 1 unadjudicated, 66 unanswered.
 - **Not yet run:** legs 3–5, which the Astrolog client can drive, and the
   topocentric anchor, which needs Horizons' UT1 recovered from its sidereal
   time first.
+
+### Rerun, 2026-09-18 (Astrolog fixes cd92ffd and 8a7ba36)
+
+Against an `astrolog-ephd` built at 10:01, which carries the ΔT and
+error-code fixes but not e9d406e (WELCOME narrowing). Output kept in
+`build/xtest/rerun.tsv`, not committed. Verdicts: 411 agree, 6
+expected-difference, 188 findings, 40 findings attributed to the Astrolog
+server, 1 unadjudicated, 66 unanswered.
+
+- **Topocentric Earth rotation: fixed.** Worst topocentric Moon gap 12″ →
+  0.129″, topocentric findings 25 → 8. The residue is plausibly the two
+  sidereal-time models and awaits the topocentric anchor.
+- **Error codes: mostly fixed.** At 1800-01-01, outside `astrolog-ephd`'s
+  coverage, 57 rows now answer 3. Nine still answer 4: every
+  Jupiter-centred row at that instant, where the other observers answer 3.
+- **Unchanged, as expected from this binary:** heliocentric light time (the
+  40 attributed rows), and the deflection gap from the barycentre and from
+  Jupiter.
+- **The Astrolog side's position on those, not yet settled:**
+  - heliocentric light time is Swiss's model, and their golden gate is
+    bit-exact against Swiss. The anchor still puts `prometheiad` at µas and
+    theirs at 0.38″ from Horizons; they asked for this side's definition.
+  - WELCOME is narrowed, but their server still *accepts* masks it no
+    longer advertises (heliocentric mask 7). `prometheiad` answers those
+    with ERROR 11 as §3.5a requires, so a client that sends heliocentric
+    mask 7 works against one server and fails against the other.
+  - Jupiter-centred keeps its full advertisement. The 7 mas deflection gap
+    on Mars remains unadjudicated: no anchor observes from Jupiter.
 
 ### What it leaves behind
 

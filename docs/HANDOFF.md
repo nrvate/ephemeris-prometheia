@@ -19,12 +19,15 @@ reader of the client's output. The first full run is
   --threads 1 --ephe "/nvm/work/ephv4/ephem;/nvm/work/ephv4"`. Then
   `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`, and
   stop both with `pkill -x`.
-- **Waiting on the Astrolog side:** fixes for the three defects the run
-  found in `astrolog-ephd`: heliocentric light time about 1% off; the
-  request's ΔT ignored; deflection advertised but not applied for
-  barycentric and planet-centred observers. Also: error 4 where 3 is meant,
-  and a question about Venus at 2 mas. A rerun after their fixes takes
-  about a minute. Legs 3–5 are theirs to drive.
+- **Rerun after the Astrolog fixes** (CROSS-TEST.md, "Rerun"): topocentric
+  Earth rotation now honours the request's ΔT (Moon 12″ → 0.13″), and
+  error 3 replaces 4 except on the nine Jupiter-centred rows at 1800.
+- **Still open with the Astrolog side:** heliocentric light time (they say
+  it is Swiss's model; the anchor puts them 0.38″ from Horizons, us at µas);
+  their server accepts heliocentric mask 7, which it no longer advertises
+  and ours refuses with ERROR 11, an interop split; deflection from the
+  barycentre and Jupiter (7 mas on Mars, unadjudicated); Venus at 2 mas.
+  Rerun once e9d406e is built. Legs 3–5 are theirs to drive.
 - **Open on this side:** the topocentric anchor, which needs Horizons' UT1
   recovered from its sidereal time (tests/test_horizons.cpp does this).
 - **Also done this stretch:**
