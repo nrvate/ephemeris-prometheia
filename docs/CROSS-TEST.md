@@ -123,7 +123,9 @@ validates JPL's interpolation, and the refit is a generation downstream.
 So a tier 1 leg **must put `astrolog-ephd` in its JPL mode, reading the same
 DE440 file this server reads**, and must say so in the leg row. It is not the
 default, and a leg that forgets it silently becomes a tier 2 leg wearing a
-tier 1 label.
+tier 1 label. *As of 2026-09-18 `astrolog-ephd` has no JPL mode at all* (it
+always reads `.se1`), so no tier 1 leg can run against it yet. The runbook
+says what runs instead.
 
 **Tier 2 — must agree to ~1 mas.** Astrometric and apparent places of bodies;
 osculating orbit points. Measured precedent between these two engines: Jupiter's
@@ -316,9 +318,11 @@ Astrolog side owns everything that drives its client or its daemon.
 - **Versions.** Both servers' `datasetId`, the Prometheia commit and the
   Astrolog `ephv4` commit.
 - **Files.** `prometheiad` reads `ephe/linux_p1550p2650.440` (DE440).
-  `astrolog-ephd` runs twice: in its default configuration (the `.se1`
-  refit of DE441) for tier 2, and in JPL mode on the *same* DE440 file for
-  tier 1. The leg row names which.
+  `astrolog-ephd` always reads Swiss `.se1` files (the refit of DE441); it
+  has **no JPL mode**. Launch it as `astrolog-ephd --bind 127.0.0.1 --port N
+  --threads 1 --ephe "<tree>/ephem;<tree>"`. `--ephe` is its whole search
+  path, and the tree root holds `sefstars.txt` and `seorbel.txt`: without it,
+  stars and the hypothetical bodies do not compute.
 - **Time.** Every numeric leg is a TT grid or instant list and sends its own
   ΔT, so no ΔT model enters.
 - **Their client** runs a single-source chain, and every numeric leg asserts
@@ -335,15 +339,17 @@ Astrolog side owns everything that drives its client or its daemon.
 
 ### Legs, in order (each is cheap to stop at)
 
-1. **Surfaces.** Each side parses the other's WELCOME. The output is a table
+1. **Error contract first** (the cheapest leg: one object per case, and a
+   disagreement about what an error *means* would otherwise surface
+   misattributed inside a numeric leg). Both directions, each daemon against
+   its written contract. **Run once, 2026-09-18**, with the Astrolog client
+   against `prometheiad`. Every case matched except "Beta Sco", where the
+   *documentation* was wrong: SERVER.md called it ambiguous, while STARS.md
+   and the server resolve it to the brightest component.
+2. **Surfaces.** Each side parses the other's WELCOME. The output is a table
    of advertised capabilities side by side (kinds, masks per observer,
    zodiacs, segments, limits). It is a record, not a verdict: it says which
    of the legs below can run against which daemon.
-2. **Error contract.** Both directions, each daemon against its written
-   contract ([SERVER.md](SERVER.md), "Per-object errors"; the Astrolog
-   equivalent). Unknown star, designation and id; the barycentre; an
-   undefined orbit point; out of coverage; an ambiguous star; an unhonoured
-   mask. Also: no errText may echo the request (§3.8).
 3. **Silent fallback.** An out-of-coverage instant and an uncovered object
    must come back as error 3 or 4, or with a truthful source string.
 4. **Delivery equivalence.** The same question as one grid, in chunks, and
@@ -351,23 +357,29 @@ Astrolog side owns everything that drives its client or its daemon.
    on its implied times.
 5. **CANCEL and priority**, their client against `prometheiad`: ERROR 10
    before the answer is whole, nothing cached, interactive before prefetch.
-6. **Tier 1: geometric, same file.** Mask 0, ICRF, geocentric, with the
-   ten Horizons corpus bodies at its eight epochs, against `astrolog-ephd` in
-   JPL mode. Roundoff expected; `testpo.440` adjudicates.
-7. **Anchor legs: astrometric ICRF at the corpus's own points.** Mask 1,
+6. **Both servers, the same question** (split from the anchor leg: agreement
+   between the two and agreement with the sky are different claims, with
+   different failure modes). Mask 0, ICRF, geocentric, with the ten corpus
+   bodies at its eight epochs. With no JPL mode in `astrolog-ephd`, this is
+   tier 2: DE440 against Swiss's `.se1` refit of DE441, within the refit's
+   documented fidelity. A true tier-1 leg waits on a JPL mode, which is a
+   feature for the maintainer to decide on.
+7. **Each server against Horizons: astrometric ICRF at the corpus's own points.** Mask 1,
    equatorial ICRF, at exactly the corpus's instants, bodies and observers
    (geocentric, heliocentric, three topocentric sites). Each server is
    compared with Horizons as well as with the other. This server's own
    agreement with Horizons is 6 µas geocentric ([VALIDATION.md](VALIDATION.md)).
 8. **Tier 2: apparent of date** for every observer kind, with the
    bisection ladder on any break.
-9. **Hamburg points by name** (kind 3), if `astrolog-ephd` serves kind 3.
+9. **Hamburg points by name** (kind 3). `astrolog-ephd` serves kind 3: its
+   token table is compiled in, and the elements come from `seorbel.txt` on
+   `--ephe`.
    Expect about 10⁻⁷″: the same elements, differing only by k. Kronos
    carries the compiled-in-table trap (HYPOTHETICALS.md), so the
    `astrolog-ephd` leg records which table it read.
-10. **Segments**, if their client consumes SEGDATA. `prometheiad`'s fitted
-    cells are evaluated against their own direct samples, within each cell's
-    declared error.
+10. **Segments.** The Astrolog client has no SEGDATA decoder yet, so this
+    leg waits on one. Until then, `prometheia-wire-client --segments` covers
+    `prometheiad`'s side.
 
 ### What it leaves behind
 

@@ -203,9 +203,14 @@ does with them:
   (docs/ENGINE.md), points 0-3 by methods mean and osculating. The Sun and
   the barycentre have no orbit (per-object error 2); an undefined point
   (a node of an orbit in the ecliptic, an apsis of a circle) is error 5.
-- **Fixed stars** (kind 2) resolve through the compiled-in catalog; an
-  ambiguous name ("Beta Sco") is a per-object error 6 rather than a silent
-  choice. A star without a parallax answers distance 0 with the
+- **Fixed stars** (kind 2) resolve through the compiled-in catalog by
+  `stars::find`'s rules ([STARS.md](STARS.md)). A Bayer designation without
+  its component number ("Beta Sco") means every component, and resolves to
+  the brightest, Acrab. Only different stars matching a name equally well
+  are ambiguous, and that is per-object error 6 rather than a silent choice.
+  (An earlier version of this line gave "Beta Sco" as the ambiguous example,
+  contradicting STARS.md. The Astrolog suite had copied it, and a
+  cross-client probe found the disagreement.) A star without a parallax answers distance 0 with the
   `noDistance` flag. Deep-sky designations resolve for the Messier
   catalogue, which the caps name.
 - **Named hypotheticals** (kind 3) resolve a token against the element set
