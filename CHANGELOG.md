@@ -29,6 +29,10 @@ documented, not that it is frozen.
   close, each with a connection id and the request id, at `--log-level
   quiet|info|debug` (default `info`). It never logs instants, sites, names
   or tokens (SERVER.md, "Logging").
+- `prometheia-wire-client --node` asked for the ascending node whatever
+  point was named, and read the point letter as the method. It is now
+  `NAIF.P[.M]`: point `a|d|p|A`, method `m`, `o` or 0–4, and a bad point is
+  refused.
 - Traceability: `prometheia-wire-client` picks a fresh request id per run
   (`# request N`, the daemon's `req=N`), and the cross-test TSV records the
   ids behind every row. The fetch tools log each GET with a UTC timestamp,

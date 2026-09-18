@@ -139,13 +139,22 @@ scenario "fails". Read the sizes, not the verdicts. First run against
 astrolog d80a6b3:
 - Earth differs by 0.0004–0.0012″ in every scenario: DE440 against the
   refit, as the wire legs measured.
-- The North Node seen from Mars differs by 4.18″. At wire level the two
-  servers disagree by ~31° on that orbit point, so the definition is open
-  with the Astrolog side.
+- The North Node seen from Mars differs by 4.18″. The app never asks a
+  Mars-centred node: Astrolog computes nodes geocentrically. The two
+  servers' geocentric mean and true nodes agree in direction to 0.003–0.055″.
+  They differ in the mean node's DISTANCE: ours is the distance on the mean
+  orbit (0.0024608 AU at J2000), theirs the Moon's mean distance, a
+  constant (0.0025696 AU). If the app re-centres the node on Mars, 4%
+  of distance is a few arcseconds there. Both are conventions; the Astrolog
+  side is confirming. The ~31° gap at wire level is a separate question:
+  what a Mars-centred node means, which Astrolog never asks. It stays open
+  as a gap in the orbit-point rules.
 - Sidereal on the solar-system plane is refused here (ERROR 11): a
   capability gap, not yet planned.
-- No scenario uses `-u`, so the Uranian points have not yet crossed the
-  wire from the app. A `-u` scenario is requested.
+- The Uranian points, measured (scenario 10, astrolog f0f3488): the app
+  sends all eight as kind 3 (daemon log: `hyp:8`). Asked the way the app
+  asks (geocentric, full corrections), our server and theirs agree to
+  ≤ 0.0013″ at 1900, 2000, 2026 and 2100.
 
 ## Queued (maintainer request, 2026-09-18)
 

@@ -51,7 +51,7 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
 - **Reference client.** `prometheia-wire-client --port 47190 --obj 599 --jd
   2461300.5 --count 3` sends HELLO and one REQUEST, and prints each object's
   metadata and one line per row. `--obj` takes a NAIF/SPK-ID, `--name` a
-  catalog designation, `--star` a star, `--node N.M` an orbit point;
+  catalog designation, `--star` a star, `--node N.P[.M]` an orbit point (P = `a|d|p|A`, M = `m`, `o` or 0–4);
   `--helio/--bary/--center NAIF/--eq/--j2000/--icrs/--sid/--topo` shape the
   profile, and `--corrections MASK` asks for a chosen subset of the three
   correction terms (`--no-corrections` is `--corrections 0`).

@@ -36,7 +36,8 @@ constexpr const char* kUsage =
     "  --hyp TOKEN         a named hypothetical body, kind 3 (repeatable)\n"
     "  --elements FILE     every body in a JSON Lines element file, sent as kind 4\n"
     "                      with exactly its elements (docs/HYPOTHETICALS.md)\n"
-    "  --node NAIF.M       an orbit point, M = a|d|p|A (asc, desc, peri, apo)\n"
+    "  --node NAIF.P[.M]   an orbit point: P = a|d|p|A (asc, desc, peri, apo),\n"
+    "                      M = m (mean, default), o (osculating) or 0..4 (A.14)\n"
     "  --jd JD             first row, TT (default 2451545.0)\n"
     "  --ut                rows are UT1 (server's delta T)\n"
     "  --deltat SEC        send TT-UT1 explicitly (one value), so the server's own\n"
@@ -172,17 +173,34 @@ int main(int argc, char** argv) {
                 req.objs.push_back(std::move(o));
             }
         } else if (arg == "--node") {
-            std::string spec = value();
+            // NAIF.P[.M]: the point (A.13) a|d|p|A, then the method (A.14)
+            // m|o or its registry number; mean when absent.
+            const std::string spec = value();
             const size_t dot = spec.find('.');
-            int method = 0;
-            if (dot != std::string::npos) {
-                method = spec[dot + 1] == 'o' ? 1 : 0; // .m mean, .o osculating
-                spec = spec.substr(0, dot);
-            }
+            const std::string point = dot == std::string::npos ? "" : spec.substr(dot + 1, 1);
+            const size_t dot2 = dot == std::string::npos ? dot : spec.find('.', dot + 1);
+            const std::string method = dot2 == std::string::npos ? "m" : spec.substr(dot2 + 1);
+            const std::string points = "adpA";
             eph::Object o;
             o.kind = eph::kObjOrbitPoint;
-            o.naif = std::atoi(spec.c_str());
-            o.method = uint8_t(method);
+            o.naif = std::atoi(spec.substr(0, dot).c_str());
+            if (point.size() != 1 || points.find(point[0]) == std::string::npos) {
+                std::fprintf(stderr, "--node %s: the point must be a, d, p or A\n%s", spec.c_str(),
+                             kUsage);
+                return 2;
+            }
+            o.point = uint8_t(points.find(point[0]));
+            if (method == "m") {
+                o.method = 0;
+            } else if (method == "o") {
+                o.method = 1;
+            } else if (method.size() == 1 && method[0] >= '0' && method[0] <= '4') {
+                o.method = uint8_t(method[0] - '0');
+            } else {
+                std::fprintf(stderr, "--node %s: the method must be m, o or 0..4\n%s", spec.c_str(),
+                             kUsage);
+                return 2;
+            }
             req.objs.push_back(o);
         } else if (arg == "--jd") {
             req.start.jd1 = std::strtod(value(), nullptr);
