@@ -847,6 +847,18 @@ and `--threads 4`. The client ran on the same host.
   - Everything else, 559,116 requests, was answered ERROR 6. The client
     waited out each ERROR's `retryAfterMs` before asking again.
   - No failures, and memory stayed at 55 MB.
+- **A large answer to a reader that stops** (the stall the Astrolog side
+  found in their own server, 2026-09-18). A connection's replies pause once
+  4 MB sit unsent, and resume from uWS's drain callback. The pump stops
+  rescheduling once no session has compute left, so drain is the only
+  resume path.
+  - It cannot strand an answer: the pause needs uWS itself to hold 4 MB
+    unsent, and uWS writes that out on the socket's next writable event,
+    which calls drain.
+  - Measured: a 61 MB answer (64 objects × 20,000 rows) to a
+    `prometheia-wire-client` frozen with SIGSTOP for 12 s from its first
+    second. The server hit backpressure three times, and every one of the
+    1,280,000 rows arrived within 3 s of the client resuming.
 
 ## Not implemented
 
