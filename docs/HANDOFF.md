@@ -27,8 +27,11 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    nodes lie on the ecliptic of date in every frame. The `points-frame`
    rows then showed `astrolog-ephd`'s J2000-frame node is not the node of
    date rotated either (J2000 latitude 0.9″ at 1900 where ours reaches the
-   ~47″ tilt): sent to them. Part A still wants this maintainer's word.
-   - **Part A, the invariable plane's zero point:** the zodiac's zero-point
+   ~47″ tilt). They confirmed it (their `eacaadb`, registry §4.2);
+   their fix is not in yet. **Part A is approved here too** (2026-09-18)
+   and relayed; nothing changes here, and the `sidereal` leg's plane-2
+   rows can be graded once their fix lands.
+   - **Part A, the invariable plane's zero point (approved):** the zodiac's zero-point
      direction projected onto the plane. This is what Prometheia already
      does, so nothing changes here. The Astrolog side settled it by
      measurement on their own server: their origin moves with the zodiac,

@@ -216,9 +216,9 @@ Fagan-Bradley, +30.39″ for Lahiri). A plane cannot know which zodiac was
 asked for, so an origin tied to the sky must be the same direction for
 every zodiac, which is what projection gives (0 by construction). The
 proposed §3.5a sentence adopts Prometheia's reading: "the zodiac's own
-zero-point direction … projected onto the plane". It was approved on the
-Astrolog side and awaits this maintainer (HANDOFF.md, "Next"). The Astrolog
-side then changes its answers by ~31″; nothing changes here.
+zero-point direction … projected onto the plane". Both maintainers approved
+it on 2026-09-18. The Astrolog side changes its answers by ~31″; nothing
+changes here.
 
 ## Accuracy notes
 
