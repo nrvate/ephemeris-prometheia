@@ -139,16 +139,19 @@ scenario "fails". Read the sizes, not the verdicts. First run against
 astrolog d80a6b3:
 - Earth differs by 0.0004–0.0012″ in every scenario: DE440 against the
   refit, as the wire legs measured.
-- The North Node seen from Mars differs by 4.18″. The app never asks a
-  Mars-centred node: Astrolog computes nodes geocentrically. The two
-  servers' geocentric mean and true nodes agree in direction to 0.003–0.055″.
-  They differ in the mean node's DISTANCE: ours is the distance on the mean
-  orbit (0.0024608 AU at J2000), theirs the Moon's mean distance, a
-  constant (0.0025696 AU). If the app re-centres the node on Mars, 4%
-  of distance is a few arcseconds there. Both are conventions; the Astrolog
-  side is confirming. The ~31° gap at wire level is a separate question:
-  what a Mars-centred node means, which Astrolog never asks. It stays open
-  as a gap in the orbit-point rules.
+- The North Node seen from Mars differed by 4.18″: an Astrolog-side
+  defect, fixed in their 477ad49. The app computes nodes geocentrically and
+  re-centres them on Mars using the distance the server returns.
+  `astrolog-ephd` served Swiss's named mean-node body, whose distance is a
+  constant (384,400 km), instead of Swiss's own `swe_nod_aps` mean node,
+  which agrees with ours to 1 km. An earlier note here called it a
+  convention difference; it was not. Now the chart passes the suite's
+  1e-5° tolerance.
+  - Still open on their side: the true DESCENDING node's distance equals
+    their ascending node's (26,000–30,000 km off ours; the direction
+    agrees). Sent.
+  - The ~31° gap at wire level on a Mars-CENTRED node is a separate,
+    unasked question.
 - Sidereal on the solar-system plane is refused here (ERROR 11): a
   capability gap, not yet planned.
 - The Uranian points, measured (scenario 10, astrolog f0f3488): the app
