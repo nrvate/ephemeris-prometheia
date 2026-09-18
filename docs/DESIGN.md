@@ -410,9 +410,12 @@ asked about first.
 
 **2026-09-18: the Hamburg points' elements, a deliberate exception.** The
 maintainer, a Uranian astrologer, decided that the shipped elements for the
-eight Hamburg School points (Cupido through Poseidon) are the ones Astrolog
-distributes in its copy of Swiss's `seorbel.txt`. Uranian charts from
-Prometheia then match Astrolog and every other Swiss-based program. No clean
+eight Hamburg School points (Cupido through Poseidon) are the ones in the
+Swiss Ephemeris distribution's `seorbel.txt`, which Astrolog redistributes
+unmodified. (The file's own header says it has been part of the Swiss
+Ephemeris since version 1.52. The bond is to that Swiss artefact, not to a
+choice Astrolog made.) Uranian charts from Prometheia then match
+Swiss-based programs that read that file. No clean
 source exists for the elements in current use: the originals of 1923–37
 are not scanned anywhere, and the Hamburg School's own publisher names
 Neely's later refinement as the standard.
@@ -431,3 +434,14 @@ and none of that was copied. The exception is bounded:
   to 0.00076″), with the check pinned as a test.
 
 No code, format knowledge or other data came across.
+
+Two consequences, measured on 2026-09-18:
+- **Our set is frozen at this transcription.** If Swiss revises `seorbel.txt`,
+  Swiss-based programs will drift from Prometheia without either side
+  having changed anything.
+- **Swiss carries a second, compiled-in table.** It uses that table when no
+  `seorbel.txt` is on its path, and the two tables disagree on Kronos. On
+  the same run otherwise, the compiled-in Kronos sits 0.0027 AU further
+  out, so it moves more slowly: identical at the 1900 epoch, 15.5″ apart in
+  2000, 31″ in 2100. The other seven agree. A Swiss user's Kronos therefore
+  depends on whether the file is found. Prometheia follows the file.

@@ -179,14 +179,17 @@ the transcription to it.
 |---|---|---|
 | `neptune-leverrier` | Le Verrier, *Comptes rendus* 23 (1846), p. 432 | shipped |
 | `neptune-adams`, `pluto-lowell`, `isis-transpluto` | — | not planned (maintainer, 2026-09-18) |
-| `cupido` … `poseidon` (the eight Hamburg points) | the Hamburg School's elements as distributed in Swiss's `seorbel.txt`, copy shipped with Astrolog (Witte and Sieggrün's planets, refined by Neely) | shipped; a recorded exception, [DESIGN.md](DESIGN.md) "Exposures" |
+| `cupido` … `poseidon` (the eight Hamburg points) | the Hamburg School's elements as distributed in the Swiss Ephemeris `seorbel.txt`, which Astrolog redistributes unmodified (Witte and Sieggrün's planets, refined by Neely) | shipped; a recorded exception, [DESIGN.md](DESIGN.md) "Exposures" |
 | the others in A.15 | — | no clean source found; served only from an operator's element file |
 
 **The Hamburg points.** Eight one-term element sets at epoch J1900.0,
 referred to the equinox of J1900, each moving at the Gaussian mean motion
 from its semi-major axis, which is how the source means them. The maintainer
-chose them so that a Uranian chart from Prometheia matches Astrolog and the
-Swiss-based programs it will be compared with. They do match `swetest`, to
+chose them so that a Uranian chart from Prometheia matches the Swiss-based
+programs it will be compared with. One caveat: Swiss's compiled-in fallback
+table, which it uses when the file is not found, has a different Kronos,
+15.5″ away in 2000 and 31″ in 2100. Prometheia matches the file
+([DESIGN.md](DESIGN.md), "Exposures"). They do match `swetest`, to
 0.00076″ at 1900, 2000 and 2100 (`the_shipped_hamburg_points_match_swetest`).
 Answers name the set "Hamburg School (Swiss Ephemeris seorbel.txt)", because
 the set is the definition. A practitioner who works from another set
