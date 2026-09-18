@@ -225,6 +225,26 @@ does with them:
   value, and a body observer is never "the object".
 - **Designations** (kind 5) resolve exactly as a LOOKUP of quality 0 or 1
   through the catalogs' name index; no match is per-object error 1.
+- **Per-object errors** (A.17). One object failing never fails the request.
+  The code is classified from the engine's error *type* first, and message
+  text is consulted only for types that carry no client text. `errText` is a
+  fixed sentence per code (§3.8), except for the reasons the server writes
+  itself, which are content-free.
+
+  | code | when | `errText` |
+  |---|---|---|
+  | 1 unknown | a NAIF/SPK-ID no loaded data answers; no star, designation or token of that name | not a body, name or token this server knows |
+  | 2 unsupported | a NAIF id that is not a body id, or the barycentre; an orbit method or object kind not served; elements not a bound orbit at the instant; a kind not fitted as segments; the Moon's osculating apsides as segments | not supported by this server for this object (or the server's own reason) |
+  | 2 unsupported | a body observer that is the object | the observer is the object |
+  | 3 coverage | outside the ephemeris's time span, or its perturbers' | outside the ephemeris's time coverage |
+  | 4 data | a data file unreadable or corrupt | the data this object needs is not loaded |
+  | 5 undefined | a node of an orbit in the ecliptic, an apsis of a circle, the aphelion of an open orbit | the point is undefined for this orbit |
+  | 6 ambiguous | a star name several stars answer equally | the name is ambiguous |
+  | 7 numerical | a small body's integration failed | the computation failed numerically |
+  | 8 internal | anything else | internal error |
+
+  Whole-request refusals are ERROR 11: a zodiac, sidereal plane or
+  correction mask this server does not advertise.
 - **Speeds** off (profile `speeds` 0): the three rate columns are zero and
   META carries `noSpeeds`.
 - **Pins.** REQUEST TLVs 0x8001-0x8003 name the ephemeris, catalog or
