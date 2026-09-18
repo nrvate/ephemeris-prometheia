@@ -31,10 +31,13 @@ reader of the client's output. The first full run is
   confirmed in source by the Astrolog side, reported upstream by them).
   Swiss's planet-centred deflection (no coherent observer) is no longer
   claimed by `astrolog-ephd`.
-- **Open:** the per-kind correction mask drop (WELCOME tag 0x0014), which
-  the Astrolog maintainer approved. It is written up in
-  `/nvm/work/ephv4-drop-corrkind/DROP.md` and sent here for review before
-  either side builds it.
+- **Next:** the per-kind correction mask drop (WELCOME tag 0x0014). Both
+  maintainers approved it on 2026-09-18, at revision 3 of
+  `/nvm/work/ephv4-drop-corrkind/DROP.md` (SERVER.md, "Per-kind correction
+  masks"). The Astrolog side implements it and sends fixtures from its
+  spec-written generator. Here: verdict the fixtures from the text before
+  reading their codec, vendor the bytes with checksums, and parse the tag
+  in the wire client, `wirelib.py` and `crosstest.py`. No server change.
 - **Also done this stretch:**
   - the per-object error contract, written into SERVER.md;
   - correction masks advertised exactly, with ERROR 11 for the rest;

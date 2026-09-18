@@ -191,6 +191,18 @@ does with them:
   portable comparison. A body observer that is the Sun cannot be told apart
   in a capability that names observer kinds; there the answer's
   `corrApplied` shows that deflection did not apply.
+- **Per-kind correction masks (approved, not yet landed).** The next
+  named drop adds WELCOME tag 0x0014, `CORRECTIONS_BY_KIND`. It is
+  non-critical and can only add masks per (observer, kind) to 0x0004,
+  which becomes the intersection over kinds. A profile's mask is then
+  checked against the kinds of the objects that reference it, still
+  ERROR 11 for the whole request. The Astrolog maintainer approved it,
+  and this project's maintainer approved it on 2026-09-18, at revision 3
+  of the drop text. This engine honours the same masks for every kind, so
+  `prometheiad` sends no 0x0014 and its WELCOME does not change. The work
+  here is vendoring the drop's bytes, verdicting its fixtures from the
+  text, and teaching the wire client, `wirelib.py` and `crosstest.py` to
+  read the tag.
 - **corrApplied** reports structural availability per object, never the
   request's mask (below). Our table: bodies and orbit points carry light
   time and aberration always; deflection everywhere except an observer at
