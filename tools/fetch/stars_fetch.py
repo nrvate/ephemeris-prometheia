@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetchlog  # noqa: E402  (one timestamped line per GET)
 
 USER_AGENT = ("prometheia-fetch/0.1.0 "
-              "(Ephemeris Prometheia fixed-star catalog; sequential, 13 requests)")
+              "(Ephemeris Prometheia fixed-star catalog; sequential, 15 requests)")
 PAUSE_S = 5.0
 
 CDS = "https://cdsarc.cds.unistra.fr/ftp/"
@@ -85,6 +85,11 @@ SOURCES = [
      "Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42; "
      "CDS: free use with acknowledgement"),
     ("roman-1987", "VI_42_data.dat", CDS + "VI/42/data.dat", "daf9e2b39ec57446d862a445276ae2ea50490ee455540972906098f5f9187957", "as roman-1987-readme"),
+    ("fk5-readme", "I_149A_ReadMe", CDS + "I/149A/ReadMe", "9b35679eb2bc623538baecbb1a4f94d1e7522c58928feaf8509a34b6ce59f7d8",
+     "Fifth Fundamental Catalogue, part I (Fricke et al. 1988), CDS I/149A; "
+     "CDS: free use with acknowledgement. Ground-based and pre-Hipparcos: the "
+     "outside check on the Hipparcos-derived positions (docs/STARS.md)"),
+    ("fk5", "I_149A_catalog.gz", CDS + "I/149A/catalog.gz", "67a228e2adacdb559ea5ec8305ca84d1d81f278af70483aac46beacd8e308a13", "as fk5-readme"),
     ("simbad-rv", "simbad-rv.csv",
      tap("SELECT i.id AS hip, b.rvz_radvel, b.rvz_err, b.rvz_qual FROM ident AS i "
          "JOIN basic AS b ON i.oidref = b.oid WHERE i.id LIKE 'HIP %' "

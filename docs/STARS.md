@@ -34,6 +34,7 @@ non-commercial terms.
 | SIMBAD, one query | traditional "NAME" identifiers of HR stars: the cross-check of which star each curated name belongs to | CDS: free use, acknowledge |
 | NASA HEASARC Messier Nebulae table (from *Sky Catalogue 2000.0* vol. 2) | the Messier objects' constellations; a second set of positions to cross-check SIMBAD | US Government service |
 | Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42 | the constellation boundaries (Delporte 1930), equinox B1875.0 | CDS: free use, acknowledge |
+| Basic Fifth Fundamental Catalogue, FK5 Part I (Fricke et al. 1988), CDS I/149A | not used by the catalog: the outside check on its positions ("Checked against FK5") | CDS: free use, acknowledge |
 
 Acknowledgements the terms ask for:
 - This research has made use of the SIMBAD database and the VizieR catalogue
@@ -46,8 +47,8 @@ Acknowledgements the terms ask for:
 The fetched files are not committed. `stars-raw/` is gitignored.
 
 ```sh
-tools/fetch/stars_fetch.py --list                       # the 13 sources
-tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~13 MB, 13 requests, 5 s apart
+tools/fetch/stars_fetch.py --list                       # the 15 sources
+tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~13 MB, 15 requests, 5 s apart
 tools/fetch/stars_fetch.py --raw-dir stars-raw --verify # against the pinned checksums
 ```
 
@@ -237,10 +238,49 @@ star, with a radial velocity of −110 km/s, and ERFA's space motion includes
 the light-time term that the straight-line model leaves out. Every other
 object agrees to about 0.15 mas.
 
+### Checked against FK5
+
+The cross-test's `stars` leg shows `prometheiad` and `astrolog-ephd` agree to
+milliarcseconds, but both take their stars from Hipparcos-derived catalogues,
+so an error they share would pass. `tools/check/stars_fk5.py` compares a
+server with the **FK5** (Fricke et al. 1988), which is ground-based and
+predates Hipparcos:
+- **Stars:** the stars leg's 29, matched by the Bright Star Catalogue's FK5
+  number. Castor is not compared: FK5 287 is HR 2890, Castor's fainter
+  component, and the catalog's Castor is HR 2891.
+- **Question:** each star as a barycentric direction, ICRS equatorial, no
+  corrections, at 1900, 2000 and 2100.
+- **Reference:** the FK5 entry carried into the Hipparcos frame and to the
+  epoch by ERFA's `fk52h` and `pmsafe` (pyerfa).
+  - Where the FK5 gives no parallax (Rigel, Deneb, Zubeneschamali, Acrux),
+    the reference uses a nominal 1 mas and no radial velocity.
+  - At zero parallax ERFA caps the space motion, which would erase the
+    proper motion and put Zubeneschamali 10″ off.
+
+Measured 2026-09-18 on `prometheiad`:
+- **The ordinary stars:** 24 of them, all within 0.56″ over the two
+  centuries. The worst is Antares in 1900. At 2000 all are within 0.31″.
+- **The astrometric binaries:** Sirius 2.33″, Procyon 1.55″, Achernar
+  1.01″ and Polaris 0.78″, each largest at 1900 or 2100.
+  - The Hipparcos proper motion is a few years' motion. It carries the
+    companion's orbit, which a century multiplies.
+  - The FK5's motion is a long-run mean. So the difference is the model
+    (straight-line motion from Hipparcos), not the catalog.
+- **Size of the differences:** several times the FK5's stated mean errors.
+  Those errors leave out the FK5's system errors, per its ReadMe.
+
+The band is 1″, and 3″ for the four binaries. **Both are estimates, not
+measurements.** The check is there to catch a wrong star, a wrong proper
+motion or a wrong epoch, which are arcseconds or more. A proper motion off by
+10 mas/yr, injected into Vega, shows as 1.1″ and fails.
+
 ## Known limits
 
 - Stars without a radial velocity in either source move in proper motion
   only. This matters only for fast, near stars over centuries.
+- Motion is a straight line from the Hipparcos epoch. A star with an unseen
+  companion wobbles about that line. Sirius is 2.3″ from the FK5 at 1900
+  and 2100 ("Checked against FK5").
 - Deep-sky positions are their SIMBAD centres. Extended objects have no
   single position; M 40 and M 73 are loose groups.
 
