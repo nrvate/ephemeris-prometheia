@@ -1,6 +1,7 @@
 build/
 build-*/
 *.epm
+*.epm.sha256
 !tests/data/*.epm
 sbdb-raw*/
 *.o
