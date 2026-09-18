@@ -136,12 +136,24 @@ def sep_arcsec(a, b):
 class Table:
     COLUMNS = ["leg", "epoch_tt", "object", "observer", "frame", "plane", "mask", "deltat",
                "ours", "theirs", "anchor", "anchor_source", "sep_servers", "sep_ours_anchor",
-               "sep_theirs_anchor", "band", "tier", "verdict", "note"]
+               "sep_theirs_anchor", "band", "tier", "verdict", "note", "req_ours",
+               "req_theirs"]
 
     def __init__(self):
         self.rows = []
+        # The two replies the next rows come from: each row records their
+        # request ids, which prometheiad logs as req=<id>, so a finding can
+        # be matched to the server lines behind it. Set by each leg.
+        self.pair = (None, None)
+
+    def asked(self, ra, rb):
+        """Name the replies the rows that follow were computed from."""
+        self.pair = (ra, rb)
 
     def add(self, **kw):
+        ra, rb = self.pair
+        kw.setdefault("req_ours", ra.request_id if ra is not None and ra.request_id else "")
+        kw.setdefault("req_theirs", rb.request_id if rb is not None and rb.request_id else "")
         self.rows.append({c: kw.get(c, "") for c in self.COLUMNS})
 
     def write(self, path, header):
@@ -168,6 +180,7 @@ def ask(client, srv, args, verbose):
 def leg_surfaces(client, ours, theirs, table, verbose):
     a = ask(client, ours, ["--obj", "10", "--corrections", "0"], verbose)
     b = ask(client, theirs, ["--obj", "10", "--corrections", "0"], verbose)
+    table.asked(a, b)
     print("\n== surfaces (a record, not a verdict)")
     keys = sorted(set(a.caps) | set(b.caps))
     for k in keys:
@@ -226,6 +239,7 @@ def leg_refusals(client, ours, theirs, a, b, table, verbose):
                     r = ask(client, srv, obj_args + ["--jd", "2451545.0", "--corrections",
                                                      str(mask), "--deltat", str(DELTA_T)]
                             + obs_args, verbose)
+                    table.asked(r if who == "ours" else None, r if who == "theirs" else None)
                     refused = "ERROR 11" in r.stderr
                     what = "ERROR 11" if refused else (
                         f"answered, errCode {r.objects[0].err}" if r.objects else r.stderr[:60])
@@ -285,6 +299,7 @@ def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observe
                 args += ["--obj", str(body)]
             ra = ask(client, ours, args, verbose)
             rb = ask(client, theirs, args, verbose)
+            table.asked(ra, rb)
             for k, (name, body) in enumerate(bodies):
                 va, vb = ra.row(k), rb.row(k)
                 ea = ra.objects[k].err if k < len(ra.objects) else -1
@@ -343,6 +358,7 @@ def leg_hamburg(client, ours, theirs, table, verbose):
             args += ["--hyp", t]
         ra = ask(client, ours, args, verbose)
         rb = ask(client, theirs, args, verbose)
+        table.asked(ra, rb)
         for k, t in enumerate(HAMBURG):
             va, vb = ra.row(k), rb.row(k)
             if va is None or vb is None or any(math.isnan(x) for x in va[:2] + vb[:2]):
@@ -390,6 +406,7 @@ def leg_apparent(client, ours, theirs, wel_a, wel_b, table, verbose):
                 args += ["--obj", str(b)]
             ra = ask(client, ours, args, verbose)
             rb = ask(client, theirs, args, verbose)
+            table.asked(ra, rb)
             for k, b in enumerate(bodies):
                 va, vb = ra.row(k), rb.row(k)
                 if va is None or vb is None or any(math.isnan(x) for x in va[:2] + vb[:2]):
@@ -448,6 +465,7 @@ def leg_bary(client, ours, theirs, table, verbose):
         args = ["--jd", repr(jd), "--icrs", "--eq", "--corrections", "0", "--bary", "--obj", "10",
                 "--deltat", str(DELTA_T)]
         ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+        table.asked(ra, rb)
         va, vb = ra.row(0), rb.row(0)
         base = dict(leg="horizons-bary", epoch_tt=jd, object=10, observer="bary", frame="ICRF",
                     plane="equator", mask=0, deltat=DELTA_T)
@@ -519,6 +537,7 @@ def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
     judged = {who: {1, 3} <= advertised(wel, 4)
               for who, wel in (("ours", wel_a), ("theirs", wel_b))}
     if not any(judged.values()):
+        table.asked(None, None)
         print("\n== deflection: FAIL, neither server lists masks 1 and 3 from a body centre")
         table.add(leg="deflection", observer="jupiter", verdict="unanswered",
                   note="no server lists masks 1 and 3 from a body centre")
@@ -542,6 +561,7 @@ def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
                         plane="equator", mask=3, deltat=DELTA_T, tier=3,
                         anchor_source="textbook deflection (USNO Circular 179) on each "
                                       "server's own mask-1 answer")
+            table.asked(got.get(("ours", 3)), got.get(("theirs", 3)))
             rows = {key: rep.row(k) for key, rep in got.items()}
             def err(who):
                 rep_ = got.get((who, 3))
@@ -635,6 +655,7 @@ def leg_topo(client, ut1_tool, ours, theirs, wel_a, wel_b, table, verbose):
                 args += ["--icrs", "--eq"]
             ra = ask(client, ours, args, verbose)
             rb = ask(client, theirs, args, verbose)
+            table.asked(ra, rb)
             va, vb = ra.row(0), rb.row(0)
             base = dict(leg=leg, epoch_tt=jd, object=body, observer=obs,
                         frame="ICRF" if mask == 1 else "true of date",
