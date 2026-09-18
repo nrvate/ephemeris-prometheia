@@ -621,7 +621,7 @@ body centre, and records a server that does not as not advertising the
 term. Our deflection is still refereed on every run, and a run in which
 neither server lists the masks fails rather than skipping.
 
-Verdicts (807 rows): 603 agree, 203 expected-difference (each row gives
+Verdicts (901 rows): 675 agree, 203 expected-difference (each row gives
 its reason), no findings, 1 unadjudicated (the 1800 Moon, whose anchor is
 outside `astrolog-ephd`'s coverage).
 

@@ -20,7 +20,7 @@ reader of the client's output. The first full run is
   `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`, and
   stop both with `pkill -x`.
 - **Latest record:** `docs/crosstest/2026-09-18d.tsv` (CROSS-TEST.md,
-  "Fourth record"). 807 rows: 603 agree, 203 expected-difference (each row
+  "Fourth record"). 901 rows: 675 agree, 203 expected-difference (each row
   gives its reason), no findings, and 1 unadjudicated (the 1800 Moon).
   Anchors: geocentric, heliocentric, topocentric (ΔT solved from Horizons'
   sidereal time by `build/prometheia-ut1`), barycentric (`bary-sun`), and
