@@ -44,7 +44,7 @@
 
 namespace prometheia::server {
 
-inline constexpr const char* kServerVersion = "prometheiad/0.2.0";
+inline constexpr const char* kServerVersion = "prometheiad/0.3.0";
 // What the ΔT-model capability names; the engine's default model (USNO
 // observed table, refreshed at release) is what serves the canonical-NaN
 // deltaTSec.

@@ -16,6 +16,7 @@
 #include "dataset.hpp"
 #include "tls.hpp"
 #include "ws_server.hpp"
+#include "prometheia/prometheia.hpp"
 
 using namespace prometheia;
 using namespace prometheia::server;
@@ -226,7 +227,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         const Dataset dataset =
-            make_dataset("Prometheia 0.1.0, " + std::string(probe.value().source()), ephemeris,
+            make_dataset("Prometheia " PROMETHEIA_VERSION ", " + std::string(probe.value().source()), ephemeris,
                          catalogs, perturbers, hypothetical_files);
         // A.8's invariable plane names its orientation in the engine
         // description (3.5a); the dataset id keeps the bare engine string.

@@ -19,7 +19,7 @@ ephem --scale ut1 -t 1900-01-01T12:00 --delta-t -2.7 moon   # before 1972
 ```
 
 ```
-# JPL DE440 binary (linux_p1550p2650.440), ephem 0.1.0
+# JPL DE440 binary (linux_p1550p2650.440), ephem 0.2.0
 # geocentric, apparent, ecliptic and true equinox of date, tropical
 # 2026-09-16 12:00:00.000 UTC, JD 2461300.000801 TT, Delta T 69.117 s
 body              longitude      latitude     distance AU       lon/day       lat/day       dist/day  sigma

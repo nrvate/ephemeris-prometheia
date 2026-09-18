@@ -11,7 +11,25 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.2.0 — 2026-09-18
+
+The same day as 0.1.0, in 56 commits:
+- the Hamburg School's Uranian points and other hypothetical bodies;
+- a client-server cross-test against the Astrolog project's server,
+  refereed by JPL Horizons and by textbook formulas, down to an
+  application-level test that casts real Astrolog charts through
+  `prometheiad`;
+- the sidereal planes;
+- per-kind correction masks in protocol v4;
+- logging and traceability end to end.
+
+Versions:
+- the library and tools are 0.2.0, and the C ABI is still 5;
+- `prometheiad` is 0.3.0, speaking protocol v4 with the per-kind
+  correction mask drop (ephv4 `eed6429`).
+
+The cross-test's current record is
+`docs/crosstest/2026-09-18f.tsv` (docs/CROSS-TEST.md).
 
 ### Client-server cross-testing
 
