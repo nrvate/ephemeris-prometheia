@@ -51,12 +51,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fetchlog  # noqa: E402  (one timestamped line per GET)
 
 BASE_URL = "https://ssd-api.jpl.nasa.gov/sbdb_query.api"
 SINGLE_URL = "https://ssd-api.jpl.nasa.gov/sbdb.api"
@@ -95,13 +99,15 @@ def http_get_json(url: str, tries: int = 4) -> dict:
     for attempt in range(tries):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=180) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+            fetchlog.log(f"GET {url}")
+            with fetchlog.Timer() as t, urllib.request.urlopen(req, timeout=180) as resp:
+                body = resp.read()
+            fetchlog.log(f"  {resp.status} {len(body)} bytes {t.seconds:.1f} s")
+            return json.loads(body.decode("utf-8"))
         except Exception as exc:  # noqa: BLE001 - retry any transport error
             last_err = exc
             wait = 2 ** attempt * 5
-            print(f"  attempt {attempt + 1}/{tries} failed ({exc}); "
-                  f"retrying in {wait}s", file=sys.stderr)
+            fetchlog.log(f"  attempt {attempt + 1}/{tries} failed ({exc}); retrying in {wait}s")
             time.sleep(wait)
     raise RuntimeError(f"GET failed after {tries} tries: {last_err}")
 

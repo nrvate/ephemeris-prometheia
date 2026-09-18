@@ -754,11 +754,19 @@ typedef struct printer {
     int columns; /* table: time columns present */
 } printer;
 
+/* The file's last path component, for headers: which file answered. */
+static const char* base_name(const char* path) {
+    const char* slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
 static void table_header(printer* p, const char* source, double jd_tt, const time_model* dt) {
     const config* c = p->c;
     const int eq = c->opts.coords == PROMETHEIA_COORDS_EQUATORIAL;
     char utc[40];
-    printf("# %s\n", source);
+    /* What answered, to reproduce this output later: the ephemeris, the
+     * file it came from, and this program's version. */
+    printf("# %s (%s), ephem %s\n", source, base_name(c->ephemeris), prometheia_version());
     printf("# %s, %s, %s, %s", center_text(c->opts.center), corrections_text(&c->opts),
            frame_text(&c->opts), sidereal_text(c->opts.sidereal));
     if (c->opts.center == PROMETHEIA_CENTER_TOPOCENTRIC)
@@ -1097,6 +1105,10 @@ int main(int argc, char** argv) {
     else {
         printf("{\"ephemeris\": ");
         json_string(prometheia_engine_source(eng));
+        printf(", \"ephemeris_file\": ");
+        json_string(base_name(c.ephemeris));
+        printf(", \"ephem_version\": ");
+        json_string(prometheia_version());
         printf(", \"center\": \"%s\", \"frame\": ", center_text(c.opts.center));
         json_string(frame_text(&c.opts));
         printf(", \"corrections\": \"%s\", \"zodiac\": ", corrections_text(&c.opts));

@@ -19,7 +19,7 @@ ephem --scale ut1 -t 1900-01-01T12:00 --delta-t -2.7 moon   # before 1972
 ```
 
 ```
-# JPL DE440 binary
+# JPL DE440 binary (linux_p1550p2650.440), ephem 0.1.0
 # geocentric, apparent, ecliptic and true equinox of date, tropical
 # 2026-09-16 12:00:00.000 UTC, JD 2461300.000801 TT, Delta T 69.117 s
 body              longitude      latitude     distance AU       lon/day       lat/day       dist/day  sigma
@@ -68,7 +68,10 @@ The option meanings, models and accuracy are the engine's: see [ENGINE.md](ENGIN
 ## Output
 
 `-f table` (the default) is for reading:
-- The header carries the ephemeris, the options in words, and the instant with its ΔT.
+- The header carries the ephemeris, the file it was read from and this
+  program's version (what answered, to reproduce the output later), the
+  options in words, and the instant with its ΔT. JSON carries the same as
+  `ephemeris`, `ephemeris_file` and `ephem_version`.
 - A series adds UTC and JD (TT) columns to every row.
 - `--dms` prints angles as degrees, minutes and seconds, or hours, minutes and seconds for RA.
 - Catalog bodies whose record carries a full orbit covariance show their 1σ direction uncertainty.

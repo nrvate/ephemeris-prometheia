@@ -27,6 +27,9 @@ import time
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fetchlog  # noqa: E402  (one timestamped line per GET)
+
 API = "https://ssd.jpl.nasa.gov/api/horizons.api"
 USER_AGENT = ("prometheia-fetch/0.1.0 "
               "(Ephemeris Prometheia M5 verification corpus; sequential, ~40 requests)")
@@ -182,13 +185,17 @@ def fetch_one(url):
     for attempt in range(4):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                return resp.read()
+            fetchlog.log(f"GET {url}")
+            with fetchlog.Timer() as t, urllib.request.urlopen(req, timeout=120) as resp:
+                body = resp.read()
+            fetchlog.log(f"  {resp.status} {len(body)} bytes {t.seconds:.1f} s")
+            return body
         except Exception as exc:  # noqa: BLE001 - backoff on any transport error
             if attempt == 3:
+                fetchlog.log(f"  failed: {exc}")
                 raise
             wait = 10 * 2 ** attempt
-            print(f"    {exc}; retrying in {wait}s", file=sys.stderr)
+            fetchlog.log(f"  {exc}; retrying in {wait}s")
             time.sleep(wait)
     raise AssertionError("unreachable")
 

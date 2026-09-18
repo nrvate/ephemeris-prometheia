@@ -29,6 +29,11 @@ documented, not that it is frozen.
   close, each with a connection id and the request id, at `--log-level
   quiet|info|debug` (default `info`). It never logs instants, sites, names
   or tokens (SERVER.md, "Logging").
+- Traceability: `prometheia-wire-client` picks a fresh request id per run
+  (`# request N`, the daemon's `req=N`), and the cross-test TSV records the
+  ids behind every row. The fetch tools log each GET with a UTC timestamp,
+  URL and outcome. `ephem` names the ephemeris file and its version in its
+  header and JSON.
 - Protocol v4 per-kind correction masks (WELCOME tag 0x0014, ephv4
   `eed6429`, set `472b21a`): vendored and verdicted 99/99, with the
   handshake-dependent judgements 7/7. `prometheia-wire-client` prints

@@ -33,6 +33,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fetchlog  # noqa: E402  (one timestamped line per GET)
+
 USER_AGENT = ("prometheia-fetch/0.1.0 "
               "(Ephemeris Prometheia fixed-star catalog; sequential, 13 requests)")
 PAUSE_S = 5.0
@@ -108,19 +111,24 @@ def fetch(url):
     for attempt in range(4):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=300) as resp:
-                return resp.read()
+            fetchlog.log(f"GET {url}")
+            with fetchlog.Timer() as t, urllib.request.urlopen(req, timeout=300) as resp:
+                body = resp.read()
+            fetchlog.log(f"  {resp.status} {len(body)} bytes {t.seconds:.1f} s")
+            return body
         except urllib.error.HTTPError as exc:
             # A client error (a rejected query) will not succeed on retry.
             if exc.code < 500 or attempt == 3:
+                fetchlog.log(f"  failed: {exc}")
                 raise
-            print(f"  retry after {delay:.0f} s: {exc}", file=sys.stderr)
+            fetchlog.log(f"  retry after {delay:.0f} s: {exc}")
             time.sleep(delay)
             delay *= 2
         except Exception as exc:  # noqa: BLE001 - retry any transport error
             if attempt == 3:
+                fetchlog.log(f"  failed: {exc}")
                 raise
-            print(f"  retry after {delay:.0f} s: {exc}", file=sys.stderr)
+            fetchlog.log(f"  retry after {delay:.0f} s: {exc}")
             time.sleep(delay)
             delay *= 2
     raise AssertionError("unreachable")

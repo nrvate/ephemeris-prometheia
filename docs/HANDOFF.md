@@ -137,9 +137,16 @@ portable ones for planetary points).
     request id per run (or `--request-id N`) and prints `# request N`, the
     daemon logs it as `req=N`, and `wirelib.py` reads it. Verbose runs of
     `crosstest.py` and `corrapplied.py` print it on every call.
-  - Remaining: the cross-test TSV does not yet carry each row's request
-    ids. The fetch tools and `ephem` have not been reviewed, and neither has
-    `astrolog-ephd`'s side of the join, which is theirs.
+  - Done 2026-09-18, the rest of this side:
+    - the cross-test TSV's `req_ours`/`req_theirs` columns name the
+      requests behind every row;
+    - the fetch tools log one UTC-timestamped line per GET, with its URL,
+      then status, bytes and seconds, or the error and retry
+      (`tools/fetch/fetchlog.py`);
+    - `ephem`'s header and JSON name the ephemeris file and its own
+      version.
+  - Open, on the Astrolog side: `astrolog-ephd`'s log and the Astrolog
+    client's request ids, the other half of the join. Theirs to decide.
 
 ## Parked (maintainer go-ahead required before starting)
 
