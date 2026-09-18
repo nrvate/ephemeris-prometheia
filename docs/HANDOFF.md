@@ -123,6 +123,30 @@ went back through the maintainer-relayed mail channel, with the advice
 to re-pin those legs citing `cf889eb` (mask-0 comparisons are the
 portable ones for planetary points).
 
+## Application-level leg (2026-09-18)
+
+The Astrolog Qt test suite casts real charts through a server and through
+local Swiss files, and compares every object:
+
+```
+ASTROLOG_EPHSRV_URL=localhost:47190 ASTROLOG_QT_TESTS=ephem-server-live \
+  env -u DISPLAY QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= \
+  ./astrolog-qt-test -Yi1 ephem            # from /nvm/work/ephv4
+```
+
+It demands bit-identical results, so against `prometheiad` every
+scenario "fails". Read the sizes, not the verdicts. First run against
+astrolog d80a6b3:
+- Earth differs by 0.0004–0.0012″ in every scenario: DE440 against the
+  refit, as the wire legs measured.
+- The North Node seen from Mars differs by 4.18″. At wire level the two
+  servers disagree by ~31° on that orbit point, so the definition is open
+  with the Astrolog side.
+- Sidereal on the solar-system plane is refused here (ERROR 11): a
+  capability gap, not yet planned.
+- No scenario uses `-u`, so the Uranian points have not yet crossed the
+  wire from the app. A `-u` scenario is requested.
+
 ## Queued (maintainer request, 2026-09-18)
 
 - **Logging, everywhere, for traceability.** Review what each component
