@@ -33,8 +33,10 @@ running daemons:
 
 Differences the two projects have agreed are deliberate are marked
 expected-difference with the reason in the row's note: Swiss's heliocentric
-light time, astrolog-ephd accepting unlisted masks, and a row one server
-refuses as outside its coverage (errCode 3).
+light time, Swiss's topocentric site about the mean pole (only where the
+geocentric answers agree at that instant), astrolog-ephd accepting
+unlisted masks, and a row one server refuses as outside its coverage
+(errCode 3).
 
 Every comparison is an angular separation (atan2 of cross and dot), never a
 difference of longitudes.  A leg is green when the servers agree AND the
@@ -46,7 +48,7 @@ The leg table is written as TSV (--out), one row per comparison, with the
 two servers' identities and both repositories' commits in its header.
 
 Usage:
-  crosstest.py --ours 127.0.0.1:47190 --theirs 127.0.0.1:47291 \\
+  crosstest.py --ours 127.0.0.1:47190 --theirs 127.0.0.1:47391 \\
                [--legs surfaces,same,...] [--out table.tsv]
 """
 
@@ -446,6 +448,32 @@ def delta_t_from_sidereal_time(ut1_tool, lines):
     return out
 
 
+# Swiss builds a topocentric site about the MEAN pole and uses it against a
+# true-of-date geocentric vector (confirmed in its source by the Astrolog
+# side; measured here as the nutation pole offset to 1-3 m). The site moves
+# at most ~9.3" of arc on the Earth's surface, under 300 m, which is 0.2" on
+# the Moon at perigee and far less on anything else.
+MEAN_POLE_BAND = {"moon": 0.2, "planets": 0.001}
+MEAN_POLE_NOTE = ("Swiss's topocentric site about the mean pole (no nutation), kept upstream; "
+                  "geocentric agrees at this instant")
+
+
+def mean_pole_site(client, ours, theirs, jd, body, st, verbose):
+    """Whether a topocentric gap of astrolog-ephd's can be the mean-pole site
+    and nothing else: the two servers' GEOCENTRIC answers at the same instant
+    agree within the same-question band, and the gap is no larger than the
+    nutation offset can make it. Anything else stays a finding."""
+    cls = "moon" if body == 301 else "planets"
+    if st > MEAN_POLE_BAND[cls] + THEIRS_HORIZONS[cls]:
+        return False
+    args = ["--jd", repr(jd), "--corrections", "1", "--icrs", "--eq", "--obj", str(body),
+            "--deltat", str(DELTA_T)]
+    va, vb = ask(client, ours, args, verbose).row(0), ask(client, theirs, args, verbose).row(0)
+    if va is None or vb is None:
+        return False
+    return sep_arcsec((va[0], va[1]), (vb[0], vb[1])) <= SAME_BAND
+
+
 def leg_topo(client, ut1_tool, ours, theirs, wel_a, wel_b, table, verbose):
     """Each server against Horizons from a site on the Earth: mask 1, ICRF,
     equatorial, with the Delta T that reproduces Horizons' sidereal time.
@@ -481,23 +509,32 @@ def leg_topo(client, ut1_tool, ours, theirs, wel_a, wel_b, table, verbose):
             pa, pb = (va[0], va[1]), (vb[0], vb[1])
             s = sep_arcsec(pa, pb)
             if leg == "apparent-topo":
+                verdict = "agree" if s <= SAME_BAND else "finding"
+                note = "Earth rotation from Horizons' LAST; see this row's horizons-topo"
+                if verdict == "finding" and mean_pole_site(client, ours, theirs, jd, body, s,
+                                                           verbose):
+                    verdict, note = "expected-difference", note + "; " + MEAN_POLE_NOTE
                 table.add(**base, ours=pa, theirs=pb, sep_servers=s, band=SAME_BAND, tier=2,
-                          verdict="agree" if s <= SAME_BAND else "finding",
-                          note="Earth rotation from Horizons' LAST; see this row's horizons-topo")
+                          verdict=verdict, note=note)
                 worst[("apparent", body)] = max(worst.get(("apparent", body), 0.0), s)
                 continue
             so, st = sep_arcsec(pa, anc), sep_arcsec(pb, anc)
             ok_o, ok_t = so <= OURS_HORIZONS[cls], st <= THEIRS_HORIZONS[cls]
+            note = ""
             if ok_o and ok_t:
                 verdict = "agree"
             elif s <= SAME_BAND:
                 verdict = "finding"
             else:
                 verdict = "finding (ours)" if not ok_o else "finding (theirs)"
+            if verdict == "finding (theirs)" and mean_pole_site(client, ours, theirs, jd, body,
+                                                                 st, verbose):
+                verdict = "expected-difference"
+                note = MEAN_POLE_NOTE
             table.add(**base, ours=pa, theirs=pb, anchor=anc, anchor_source=f"Horizons {name} q1",
                       sep_servers=s, sep_ours_anchor=so, sep_theirs_anchor=st,
                       band=f"ours {OURS_HORIZONS[cls]} theirs {THEIRS_HORIZONS[cls]}", tier=2,
-                      verdict=verdict)
+                      verdict=verdict, note=note)
             worst[("ours", body)] = max(worst.get(("ours", body), 0.0), so)
             worst[("theirs", body)] = max(worst.get(("theirs", body), 0.0), st)
     for (who, body), w in sorted(worst.items()):
@@ -551,6 +588,8 @@ def adjudicate_same(table):
     the anchor could not be asked, the row is left unadjudicated.
     """
     anchored = {(r["epoch_tt"], r["object"]): r for r in table.rows if r["leg"] == "horizons"}
+    geo_apparent = {(r["epoch_tt"], r["object"]): r for r in table.rows
+                    if r["leg"] == "apparent" and r["observer"] == "geo"}
     anchored_bary = {r["epoch_tt"]: r for r in table.rows if r["leg"] == "horizons-bary"}
     anchored_helio = {(r["epoch_tt"], r["object"]): r for r in table.rows
                       if r["leg"] == "horizons-helio"}
@@ -571,6 +610,14 @@ def adjudicate_same(table):
                 r["verdict"] = "expected-difference"
                 r["note"] += ("; the Sun's barycentric position, each server inside its km "
                               "band at the anchor (horizons-bary): the .se1 refit, seen close up")
+                continue
+        if r["leg"] == "apparent" and r["observer"] == "topo":
+            g = geo_apparent.get((r["epoch_tt"], r["object"]))
+            cls = "moon" if r["object"] == 301 else "planets"
+            if (g is not None and g["verdict"] in ("agree", "expected-difference")
+                    and r["sep_servers"] <= MEAN_POLE_BAND[cls]):
+                r["verdict"] = "expected-difference"
+                r["note"] += "; " + MEAN_POLE_NOTE
                 continue
         if r["leg"] == "apparent" and r["observer"] != "geo":
             r["note"] += "; no anchor from this observer"
@@ -602,15 +649,25 @@ def git_head(path, ignore=None):
         return "?"
 
 
+def binary_time(path):
+    try:
+        t = os.path.getmtime(path)
+    except OSError:
+        return "unknown"
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ours", default="127.0.0.1:47190")
-    ap.add_argument("--theirs", default="127.0.0.1:47291")
+    ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
     ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvm/work/ephv4", help="the Astrolog tree, for its commit")
+    ap.add_argument("--astrolog-bin", default="/nvm/work/ephv4/astrolog-ephd",
+                    help="the daemon that ran, for its build time (a commit can postdate it)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -623,6 +680,12 @@ def main():
     b = ask(client, theirs, ["--obj", "10", "--corrections", "0"], args.verbose)
     if not a.server or not b.server:
         sys.exit("both servers must answer a WELCOME: " + (a.stderr or b.stderr))
+    if a.server == b.server and a.dataset == b.dataset:
+        # Two harnesses on one machine have met: a port taken by someone
+        # else's daemon compares a server with itself, and every verdict
+        # after that is meaningless.
+        sys.exit(f"both endpoints answered as {a.server} with the same dataset: "
+                 "one of them is not the server it should be")
     print(f"ours   {a.server}  {a.dataset}")
     print(f"theirs {b.server}  {b.dataset}")
 
@@ -657,7 +720,8 @@ def main():
         header = [
             f"crosstest {datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}",
             f"ours   {a.server} dataset {a.dataset} prometheia {git_head(REPO, args.out)}",
-            f"theirs {b.server} dataset {b.dataset} astrolog {git_head(args.astrolog)}",
+            f"theirs {b.server} dataset {b.dataset} astrolog {git_head(args.astrolog)}"
+            f" binary built {binary_time(args.astrolog_bin)}",
             "angles in arcsec; positions lon/lat or RA/Dec in degrees; docs/CROSS-TEST.md",
         ]
         table.write(args.out, header)

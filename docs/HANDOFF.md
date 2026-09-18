@@ -15,22 +15,22 @@ reader of the client's output. The first full run is
 
 - **Launching both daemons.** Ours: `build/prometheiad --ephemeris
   ephe/linux_p1550p2650.440 --port 47190 --threads 1`. Theirs, from
-  `/nvm/work/ephv4`: `./astrolog-ephd --bind 127.0.0.1 --port 47291
+  `/nvm/work/ephv4`: `./astrolog-ephd --bind 127.0.0.1 --port 47391
   --threads 1 --ephe "/nvm/work/ephv4/ephem;/nvm/work/ephv4"`. Then
   `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`, and
   stop both with `pkill -x`.
-- **Latest run** (CROSS-TEST.md, "Second rerun"): 540 agree, 173
-  expected-difference (each with its reason), 27 + 16 findings, 49
-  unadjudicated. New anchors: topocentric (ΔT solved from Horizons' sidereal
-  time by `build/prometheia-ut1`) and barycentric (`bary-sun`).
-- **Sent to / waiting on the Astrolog side:** their topocentric observer is
-  placed about the mean pole: the site vector misses nutation, which gives
-  0.165″ on the Moon, confirmed to 1–3 m. Then a rerun on their 4b1e375
-  build, committed as the dated record. Their decisions (Swiss heliocentric
-  light time, permissive masks) are recorded as expected-difference.
-- **Open:** Jupiter-centred deflection (their account: Swiss deflects as
-  seen from the Earth), unadjudicated; the §3.5a spec question on
-  per-kind masks; two rows just over the 2 mas band.
+- **Latest record:** `docs/crosstest/2026-09-18b.tsv` (CROSS-TEST.md, "The
+  record"). 540 agree, 209 expected-difference (each row gives its reason),
+  7 findings (the Venus and Mercury rows just over the 2 mas band), 49
+  unadjudicated (deflection seen from Jupiter). Anchors: geocentric,
+  heliocentric, topocentric (ΔT solved from Horizons' sidereal time by
+  `build/prometheia-ut1`) and barycentric (`bary-sun`).
+- **Upstream Swiss behaviours, recorded as expected:** heliocentric light
+  time, and the topocentric site about the mean pole (0.165″ on the Moon,
+  confirmed in source by the Astrolog side, reported upstream by them).
+- **Open:** the §3.5a question of per-kind correction masks, which the
+  Astrolog side will put to its maintainer for the next drop; the 2 mas
+  edge rows; Jupiter-centred deflection.
 - **Also done this stretch:**
   - the per-object error contract, written into SERVER.md;
   - correction masks advertised exactly, with ERROR 11 for the rest;

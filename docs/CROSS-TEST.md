@@ -538,6 +538,38 @@ Still open:
   Mercury from the barycentre in 2100, 2.01 mas from ours. Both are just
   over the 2 mas band, and plausibly the refit.
 
+### The record, 2026-09-18 (`docs/crosstest/2026-09-18b.tsv`)
+
+The Astrolog side confirmed the mean-pole site in the source. The site
+routine can nutate, but every internal call site asks it not to, so the
+site is built about the mean pole and used against a true-of-date
+geocentric vector. The cause is upstream Swiss, not `astrolog-ephd`'s
+wiring. They have reported it upstream, because it reaches every
+topocentric chart the desktop application draws. The harness records it
+as expected-difference only where the two servers' geocentric answers
+agree at the same instant and the gap is no larger than the nutation
+offset can make it: 0.2″ on the Moon, 1 mas elsewhere. Fault-injected:
+with that band cut to 0.01″, 42 rows go back to findings.
+
+Against the 10:16 build (its Jupiter coverage fix predates the 4b1e375
+commit), 827 rows: 540 agree, 209 expected-difference, 5 findings, 2
+findings attributed to the Astrolog server, 49 unadjudicated. What
+remains:
+
+- **Venus at its 2020 inferior conjunction** (six rows across legs,
+  2.03–2.31 mas) and **Mercury from the barycentre in 2100** (2.01 mas):
+  just over the 2 mas band, plausibly the refit, and a question for the
+  Astrolog side.
+- **Deflection seen from Jupiter** (48 rows) and the 1800 Moon, whose
+  anchor row is outside `astrolog-ephd`'s coverage: unadjudicated.
+
+The header now also records the daemon binary's build time, because a
+commit can postdate the build that ran. `astrolog-ephd` moved to port
+47391 for these runs: their harness binds 47291 itself, and on a shared
+machine one harness ended up testing the other's daemon. `crosstest.py`
+now refuses to run when both endpoints answer with the same server and
+dataset.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
