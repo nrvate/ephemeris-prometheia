@@ -24,13 +24,15 @@ namespace prometheia::server {
 // NAIF/SPK-IDs, so there is no map: the ephemeris and catalogs answer the
 // IDs directly.
 struct ResolvedObject {
-    enum class Kind { Body, Star, OrbitPoint };
+    enum class Kind { Body, Star, OrbitPoint, Hypothetical, Elements };
 
     Kind kind = Kind::Body;
     int naif_id = 0;                              // Body and OrbitPoint: the SPK-ID
     size_t star_index = 0;                        // Star: its place in the catalog
     OrbitPoint point = OrbitPoint::AscendingNode; // OrbitPoint only
     OrbitElements elements = OrbitElements::Osculating;
+    std::string token;        // Hypothetical: the token, lowercase
+    PolynomialElements poly;  // Elements: what the request sent
     std::string name;         // what the answer's metadata calls it
     bool is_sun = false;      // the object is the Sun itself (no deflection of its own light)
     bool no_parallax = false; // Star: no parallax in the catalog, so no distance

@@ -29,6 +29,11 @@ struct Body {
 // name would otherwise silently leave an element at zero.
 Result<std::vector<Body>> parse(std::string_view text, std::string_view origin);
 
+// The element set this build ships (data/hypotheticals.jsonl, compiled in).
+// Anything that must change when an answer could change -- a server's
+// dataset id -- digests this text along with any element files it loads.
+std::string_view shipped();
+
 } // namespace prometheia::hypotheticals
 
 #endif // PROMETHEIA_HYPOTHETICALS_HPP

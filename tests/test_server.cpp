@@ -5,9 +5,11 @@
 // committed sample catalog. The conformance fixtures pin the codec itself
 // (tests/test_ephproto4.cpp); this file pins the server: the handshake, the
 // profiles, the answers' metadata and values, and the limits.
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -90,11 +92,18 @@ struct Fixture {
     std::unique_ptr<LoopContext> ctx;
     std::unique_ptr<Session> session;
 
-    Fixture() {
+    // `element_file`: an optional element file of named hypothetical bodies,
+    // added before the config is taken, as prometheiad does.
+    explicit Fixture(const std::string& element_file = {}) {
         Engine engine = synth::open_synthetic(tf);
         auto catalog =
             engine.add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm");
         REQUIRE_MESSAGE(catalog.ok(), catalog.error().message);
+        if (!element_file.empty()) {
+            auto added = engine.add_hypotheticals(element_file);
+            REQUIRE_MESSAGE(added.ok(), added.error().message);
+        }
+        config.hypotheticals = engine.hypothetical_tokens();
         config.engine = "Prometheia 0.1.0, synthetic kernel";
         config.dataset_id = "synthetic/test#00000000";
         config.ephemeris_name = "synthetic.bsp";
@@ -235,7 +244,9 @@ TEST_CASE("server_handshake") {
         CHECK(c.Kind(eph::kObjBody));
         CHECK(c.Kind(eph::kObjOrbitPoint));
         CHECK(c.Kind(eph::kObjStar));
-        CHECK(!c.Kind(eph::kObjElements));
+        CHECK(c.Kind(eph::kObjElements));
+        // Kind 3 exactly when there are named bodies to serve.
+        CHECK(c.Kind(eph::kObjHypothetical) == !c.hypotheticals.empty());
         CHECK(c.Observer(eph::kObsGeo));
         CHECK(c.Observer(eph::kObsBary));
         CHECK(c.Zodiac("fagan-bradley"));
@@ -1426,5 +1437,146 @@ TEST_CASE("server_segments") {
         const Segments d = join_segs(drain(s));
         CHECK(d.meta[0].errCode == eph::kOErrNone);
         CHECK(d.segs[0].size() >= 1);
+    }
+}
+
+// ---- hypothetical bodies (kinds 3 and 4) ------------------------------------
+
+namespace {
+
+// An invented body; every number is made up for the test.
+constexpr const char* kInventedBody =
+    R"({"token":"testbody","name":"Test Body","set":"Invented for tests","citation":"tests/test_server.cpp","epoch":2451545.0,"equinox":"J2000","centre":"sun","M":[10.0],"a":[4.0],"e":[0.05],"w":[20.0],"node":[30.0],"i":[1.5]})";
+
+// The same body as kind-4 elements, as a client would send it.
+eph::Object invented_as_elements(double mean_anomaly_deg = 10.0) {
+    eph::Object o;
+    o.kind = eph::kObjElements;
+    o.epoch = eph::Time{2451545.0, 0.0};
+    o.equinox = eph::kEqJ2000;
+    o.centre = 0;
+    o.nTerms = 1;
+    o.coef = {mean_anomaly_deg, 4.0, 0.05, 20.0, 30.0, 1.5}; // M, a, e, w, node, i
+    o.name = "sent elements";
+    return o;
+}
+
+eph::Object named(const char* token) {
+    eph::Object o;
+    o.kind = eph::kObjHypothetical;
+    o.name = token;
+    return o;
+}
+
+struct ElementFile {
+    std::string path = (std::filesystem::temp_directory_path() /
+                        ("prometheia-server-hyp-" + std::to_string(::getpid()) + ".jsonl"))
+                           .string();
+    explicit ElementFile(const std::string& text) {
+        FILE* f = std::fopen(path.c_str(), "wb");
+        REQUIRE(f);
+        std::fputs(text.c_str(), f);
+        std::fclose(f);
+    }
+    ~ElementFile() { std::remove(path.c_str()); }
+};
+
+} // namespace
+
+TEST_CASE("server_hypotheticals") {
+    SUBCASE("without named bodies, kind 4 is served and kind 3 is not advertised") {
+        Fixture f;
+        eph::Welcome w = f.welcome();
+        eph::Capabilities c;
+        std::string why;
+        REQUIRE(eph::ParseCapabilities(w.caps_, &c, &why) == eph::kOk);
+        CHECK(c.Kind(eph::kObjElements));
+        CHECK(!c.Kind(eph::kObjHypothetical));
+        CHECK(c.hypotheticals.empty());
+        // A.3 0x0012: every A.16 equinox.
+        bool saw_equinoxes = false;
+        for (const eph::Tlv& t : w.caps_) {
+            if (t.tag == eph::kCapTagEquinoxes) {
+                REQUIRE(t.value.size() == 4);
+                const auto* b = reinterpret_cast<const uint8_t*>(t.value.data());
+                const uint32_t mask = uint32_t(b[0]) | uint32_t(b[1]) << 8 | uint32_t(b[2]) << 16 |
+                                      uint32_t(b[3]) << 24;
+                CHECK(mask == 0x1Fu);
+                saw_equinoxes = true;
+            }
+        }
+        CHECK(saw_equinoxes);
+    }
+
+    ElementFile file(std::string(kInventedBody) + "\n");
+    Fixture f(file.path);
+    Session& s = *f.session;
+    eph::Welcome w = f.welcome();
+    eph::Capabilities c;
+    std::string why;
+    REQUIRE(eph::ParseCapabilities(w.caps_, &c, &why) == eph::kOk);
+    CHECK(c.Kind(eph::kObjHypothetical));
+    CHECK(std::find(c.hypotheticals.begin(), c.hypotheticals.end(), "testbody") !=
+          c.hypotheticals.end());
+
+    SUBCASE("by name and by elements, the same body answers the same") {
+        eph::Request req = base_request(2451545.0 + 300.0, 3, 10.0);
+        req.objs = {named("testbody"), invented_as_elements(), named("nosuchbody")};
+        CHECK(s.on_message(request(req, 7), true));
+        const Data d = join(drain(s));
+        REQUIRE(d.meta.size() == 3);
+
+        const eph::Meta& by_name = d.meta[0];
+        CHECK(by_name.errCode == eph::kOErrNone);
+        CHECK(by_name.name == "Test Body");
+        CHECK(by_name.rowsOk == 3);
+        CHECK(by_name.resolvedNaif == eph::kNaifNone); // not a NAIF body
+        CHECK(by_name.corrApplied == eph::kCorrMask);  // geocentric: all three
+
+        const eph::Meta& by_elements = d.meta[1];
+        CHECK(by_elements.errCode == eph::kOErrNone);
+        CHECK(by_elements.name == "sent elements");
+        CHECK(by_elements.resolvedNaif == eph::kNaifNone);
+
+        // The same elements, however they arrive: bit for bit.
+        for (int k = 0; k < 3 * d.n_cols; ++k) {
+            CHECK(std::isfinite(d.cols[k]));
+            CHECK(d.cols[k] == d.cols[size_t(3) * d.n_cols + k]);
+        }
+
+        // A.17: a token this server does not define is an unknown body.
+        CHECK(d.meta[2].errCode == eph::kOErrUnknownBody);
+        CHECK(d.meta[2].rowsOk == 0);
+    }
+
+    SUBCASE("fitted cells are keyed by the elements, not only the kind") {
+        // Two requests for kind-4 bodies differing only in M. Were the cell
+        // key blind to the elements, the second would be served the first's
+        // cells from the cache.
+        const auto fit = [&](double m, uint32_t id) {
+            eph::Request req = base_request(2451545.5, 10, 4.0);
+            req.representation = 1;
+            req.segTargetErrArcsec = 0.1f;
+            req.profiles[0].observer = eph::kObsHelio;
+            req.profiles[0].form = eph::kFormRectangular;
+            req.objs = {invented_as_elements(m)};
+            CHECK(s.on_message(request(req, id), true));
+            return join_segs(drain(s));
+        };
+        const Segments a = fit(10.0, 11);
+        const Segments b = fit(100.0, 12);
+        REQUIRE(a.segs.size() == 1);
+        REQUIRE(b.segs.size() == 1);
+        REQUIRE(!a.segs[0].empty());
+        REQUIRE(!b.segs[0].empty());
+        CHECK(a.meta[0].errCode == eph::kOErrNone);
+        double pa[3], pb[3], va[3], vb[3];
+        a.segs[0][0].Eval(eph::Time{2451545.5, 0.0}, pa, va);
+        b.segs[0][0].Eval(eph::Time{2451545.5, 0.0}, pb, vb);
+        // 90 degrees of mean anomaly apart: nowhere near each other.
+        const double gap =
+            std::sqrt((pa[0] - pb[0]) * (pa[0] - pb[0]) + (pa[1] - pb[1]) * (pa[1] - pb[1]) +
+                      (pa[2] - pb[2]) * (pa[2] - pb[2]));
+        CHECK(gap > 1.0); // AU
     }
 }

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "prometheia/hypotheticals.hpp"
 #include "sha256.hpp"
 
 namespace prometheia::server {
@@ -40,7 +41,8 @@ void hash_file(Sha256& sha, const std::string& tag, const std::string& path) {
 
 Dataset make_dataset(std::string engine, const std::string& ephemeris_path,
                      const std::vector<std::string>& catalog_paths,
-                     const std::string& perturbers_path) {
+                     const std::string& perturbers_path,
+                     const std::vector<std::string>& hypothetical_paths) {
     Dataset d;
     d.engine = std::move(engine);
     d.ephemeris = base_name(ephemeris_path);
@@ -58,6 +60,18 @@ Dataset make_dataset(std::string engine, const std::string& ephemeris_path,
     }
     if (!perturbers_path.empty()) {
         hash_file(sha, "perturbers", perturbers_path);
+    }
+    // The shipped element set rides in the library, not a file, so its text
+    // is hashed directly; an element file after it, like a catalog.
+    const std::string_view shipped = hypotheticals::shipped();
+    const std::string tag = "shipped hypotheticals";
+    sha.update(reinterpret_cast<const uint8_t*>(tag.data()), tag.size());
+    sha.update(reinterpret_cast<const uint8_t*>("\0"), 1);
+    sha.update(reinterpret_cast<const uint8_t*>(shipped.data()), shipped.size());
+    sha.update(reinterpret_cast<const uint8_t*>("\n"), 1);
+    for (const std::string& h : hypothetical_paths) {
+        hash_file(sha, "hypotheticals", h);
+        d.hypotheticals.push_back(base_name(h));
     }
     const std::string hex = sha.hex();
     d.id = d.engine + "/" + d.ephemeris + "/" +

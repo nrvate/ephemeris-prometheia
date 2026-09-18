@@ -26,6 +26,8 @@ constexpr const char* kUsage =
     "  --ephemeris FILE      JPL DE binary or SPK kernel (required)\n"
     "  --catalog FILE        EPM1 small-body catalog (repeatable, newest wins)\n"
     "  --perturbers FILE     asteroid perturber SPK kernel (e.g. sb441-n16.bsp)\n"
+    "  --hypotheticals FILE  element file of named hypothetical bodies (JSON Lines;\n"
+    "                        repeatable, later definitions win)\n"
     "  --bind ADDR           listen address (default: every interface)\n"
     "  --port N              default 47190; 0 picks a free port\n"
     "  --threads N           event loops, one engine each (default: hardware threads)\n"
@@ -61,7 +63,7 @@ bool parse_uint(const char* s, unsigned long& out) {
 
 int main(int argc, char** argv) {
     std::string ephemeris, perturbers, tokens_path;
-    std::vector<std::string> catalogs;
+    std::vector<std::string> catalogs, hypothetical_files;
     WsOptions options;
     options.threads = std::max(1u, std::thread::hardware_concurrency());
     unsigned drain_seconds = 10;
@@ -86,6 +88,8 @@ int main(int argc, char** argv) {
             ephemeris = value();
         } else if (arg == "--catalog") {
             catalogs.emplace_back(value());
+        } else if (arg == "--hypotheticals") {
+            hypothetical_files.emplace_back(value());
         } else if (arg == "--perturbers") {
             perturbers = value();
         } else if (arg == "--bind") {
@@ -170,6 +174,11 @@ int main(int argc, char** argv) {
                 return make_error(r.error().code, perturbers + ": " + r.error().message);
             }
         }
+        for (const std::string& h : hypothetical_files) {
+            if (auto r = e.value().add_hypotheticals(h); !r) {
+                return r.error(); // the parser's message already names the file and line
+            }
+        }
         return e;
     };
 
@@ -196,12 +205,16 @@ int main(int argc, char** argv) {
         }
         const Dataset dataset =
             make_dataset("Prometheia 0.1.0, " + std::string(probe.value().source()), ephemeris,
-                         catalogs, perturbers);
+                         catalogs, perturbers, hypothetical_files);
         options.config.engine = dataset.engine;
+        options.config.hypotheticals = probe.value().hypothetical_tokens();
         options.config.dataset_id = dataset.id;
         options.config.ephemeris_name = dataset.ephemeris;
         options.config.catalog_names = dataset.catalogs;
         std::fprintf(stderr, "prometheiad: dataset %s\n", dataset.id.c_str());
+        std::fprintf(stderr, "prometheiad: %zu hypothetical bod%s\n",
+                     options.config.hypotheticals.size(),
+                     options.config.hypotheticals.size() == 1 ? "y" : "ies");
     }
 
     WsServer server(options, make_engine);

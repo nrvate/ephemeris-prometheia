@@ -29,8 +29,14 @@ documented, not that it is frozen.
   `add_hypotheticals()` adds an operator's file, whose definitions win.
 - Orbit points and bodies from elements share one correction path; the
   orbit-point results are unchanged.
-- Not yet: the C API, `ephem` and `prometheiad` surfaces; the shipped
-  element values.
+- **`prometheiad` serves both kinds**, as DATA and as fitted segments. The
+  new `--hypotheticals FILE` option adds element files. WELCOME advertises
+  kind 4 always, kind 3 with its tokens (A.3 0x0011) whenever any are
+  defined, and all five element equinoxes (0x0012). The dataset id digests
+  the shipped set and every element file. The fitted-cell key carries the
+  elements, so two element sets never share a cell; a test that removes
+  them from the key goes red.
+- Not yet: the C API and `ephem` surfaces; the shipped element values.
 - 0.1.0's notes called kinds 3 and 4 a settled end state. That reflected
   one client's needs and has been reversed; see
   [docs/SERVER.md](docs/SERVER.md).

@@ -77,6 +77,10 @@ struct ServerConfig {
     // from the named snapshot, or ERROR 5 (3.5).
     std::string ephemeris_name;
     std::vector<std::string> catalog_names;
+    // The named hypothetical bodies every loop's engine defines (A.15 tokens
+    // and any others its element files add), advertised in WELCOME (A.3
+    // 0x0011). Filled at startup from a probe engine, as the dataset is.
+    std::vector<std::string> hypotheticals;
 };
 
 // One computed answer, in the server's own units (f64 throughout; the f32

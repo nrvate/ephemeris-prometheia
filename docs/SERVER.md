@@ -34,12 +34,18 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
     (WELCOME's `segMaxSpanDays`; default 1024).
   - `--cache-mb N`: the result cache per loop.
   - `--seg-cache-mb N`: the fitted segment cells per loop (default 16).
+  - `--hypotheticals FILE`: an element file of named hypothetical bodies
+    (JSON Lines, [HYPOTHETICALS.md](HYPOTHETICALS.md)); repeatable, and a
+    later file's definition of a token wins. The tokens defined are
+    advertised in WELCOME.
   - `--verbose`: log each connection.
   - Limits, tokens, TLS and draining: see Operations below.
 - **Dataset identity.** At startup the daemon digests every data file's
   contents and prints the dataset id it will serve
   (`<engine>/<ephemeris>/<catalogs>#<8 hex>`). The id changes whenever any
-  answer could change; clients key their caches on it and may pin it.
+  answer could change; clients key their caches on it and may pin it. The
+  digest covers the element set this build ships and every
+  `--hypotheticals` file too, because a redefined token changes its answers.
 - **Reference client.** `prometheia-wire-client --port 47190 --obj 599 --jd
   2461300.5 --count 3` sends HELLO and one REQUEST, and prints each object's
   metadata and one line per row. `--obj` takes a NAIF/SPK-ID, `--name` a
@@ -180,7 +186,8 @@ does with them:
   the Sun (this engine cannot bend the Sun's own light, and a barycentric
   observer is 0.005 AU from the Sun, so it is deflected); stars carry
   deflection and aberration but no light time (catalog positions are
-  directions of arrival).
+  directions of arrival); hypothetical bodies and bodies from elements
+  carry what a body carries.
 - **Orbit points** (kind 1) answer by the engine's `calc_orbit_point`
   (docs/ENGINE.md), points 0-3 by methods mean and osculating. The Sun and
   the barycentre have no orbit (per-object error 2); an undefined point
@@ -190,15 +197,32 @@ does with them:
   choice. A star without a parallax answers distance 0 with the
   `noDistance` flag. Deep-sky designations resolve for the Messier
   catalogue, which the caps name.
+- **Named hypotheticals** (kind 3) resolve a token against the element set
+  this build ships and any `--hypotheticals` files, ASCII case-insensitively;
+  an undefined token is per-object error 1. The elements are server-defined
+  (A.15), so the answer's source string names the set they came from. Kind
+  3 is advertised only when at least one token is defined, with the tokens
+  in A.3 0x0011.
+- **Bodies from elements** (kind 4) are computed from exactly the elements
+  sent: two-body motion by the protocol's rule, in any A.16 equinox (all
+  five are advertised in A.3 0x0012), about the Sun or the Earth.
+  Conventions and the mean-anomaly rule are in
+  [HYPOTHETICALS.md](HYPOTHETICALS.md). Elements that are not a bound orbit
+  at an instant fail that row with error 2. A client that needs a body from
+  its own elements, identically on every server, sends it this way, not by
+  name. Neither kind has a NAIF id, so META's `resolvedNaif` is the "none"
+  value, and a body observer is never "the object".
 - **Designations** (kind 5) resolve exactly as a LOOKUP of quality 0 or 1
   through the catalogs' name index; no match is per-object error 1.
 - **Speeds** off (profile `speeds` 0): the three rate columns are zero and
   META carries `noSpeeds`.
 - **Pins.** REQUEST TLVs 0x8001-0x8003 name the ephemeris, catalog or
   dataset the answer must come from; anything else is ERROR 5.
-- **Segments** (representation 1), CANCEL and priority ordering are not
-  served yet and not advertised; a segments REQUEST gets ERROR 11 until
-  they land.
+- **Segments** (representation 1), CANCEL and priority ordering are
+  served; see "The segment lattice" below. Named hypotheticals and bodies
+  from elements are fitted like bodies. The fitted-cell key carries a named
+  body's token and every coefficient of a body from elements, so two
+  element sets never share a cell.
 
 ## Server internals
 
@@ -586,19 +610,5 @@ bisection ladder for when a number disagrees.
 - **`deadlineMs` as a strategy switch.** The field is parsed and advisory;
   this server does not yet choose a cheaper strategy (samples rather than a
   fit) to meet one.
-- **Hypothetical bodies and polynomial elements** (kinds 3 and 4): not
-  served *yet* (per-object error 2, not advertised). The engine computes both
-  as of 2026-09-18 — `Engine::calc_elements` and `Engine::calc_hypothetical`,
-  conventions in [HYPOTHETICALS.md](HYPOTHETICALS.md) — and serving them is
-  the next server increment.
-
-  An earlier version of this entry called their absence a settled end state,
-  on the Astrolog client's reasoning: its hypotheticals come from the user's
-  own element file, so a server substituting its own set would silently
-  discard the user's definition. That reasoning still holds for that client,
-  which should send kind 4 carrying the user's elements. It was never a
-  reason for this server not to have them. The maintainer needs them, and in
-  Astrolog the eight Hamburg points are first-class planets by default, so a
-  Prometheia-only source chain asks for them in the ordinary course of things.
 - **TDB's own timescale machinery**: TDB instants convert to TT through the
   Fairhead-Bretagnon series (a few ns against its own ~10 us; TIME.md).

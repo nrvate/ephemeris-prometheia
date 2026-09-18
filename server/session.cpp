@@ -205,6 +205,13 @@ uint8_t corr_applied(eph::ObjKind kind, const CalcOptions& o, bool object_is_sun
     return deflection | eph::kCorrAberration | eph::kCorrLightTime;
 }
 
+// Whether an object kind is named by a NAIF/SPK-ID, and so has one to report
+// in META's resolvedNaif and to compare with a body observer. Stars,
+// hypotheticals and bodies from elements have none (3.4: INT32_MIN).
+bool has_naif(eph::ObjKind kind) {
+    return kind == eph::kObjBody || kind == eph::kObjOrbitPoint || kind == eph::kObjDesignation;
+}
+
 // ---- engine failure -> A.17 -------------------------------------------------
 
 // 3.9a: errors by meaning, not convenience; 3.8: the text names no instant.
@@ -314,6 +321,24 @@ std::string seg_key_prefix(const ServerConfig& cfg, const eph::Request& q,
     raw(&obj.star_index, sizeof obj.star_index);
     u8(uint8_t(obj.point));
     u8(obj.elements == OrbitElements::Mean ? 0 : 1);
+    // A named body is its token (the dataset id covers every element file);
+    // a body from elements is its elements, all of them, or two requests
+    // with different elements would share cells.
+    if (obj.kind == ResolvedObject::Kind::Hypothetical) {
+        k.append(obj.token);
+        k.push_back('\0');
+    } else if (obj.kind == ResolvedObject::Kind::Elements) {
+        const PolynomialElements& el = obj.poly;
+        raw(&el.epoch_jd_tt, sizeof el.epoch_jd_tt);
+        u8(uint8_t(el.equinox));
+        raw(&el.equinox_jd_tt, sizeof el.equinox_jd_tt);
+        u8(uint8_t(el.centre));
+        u8(uint8_t(el.n_terms));
+        for (const double* c : {el.mean_anomaly, el.semi_major_axis, el.eccentricity,
+                                el.arg_perihelion, el.ascending_node, el.inclination}) {
+            raw(c, sizeof(double) * size_t(el.n_terms));
+        }
+    }
     u8(uint8_t(o.center));
     raw(&o.center_body, sizeof o.center_body);
     raw(&o.site.lon_rad, sizeof o.site.lon_rad);
@@ -406,7 +431,12 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
 
     eph::Capabilities c;
     c.kinds = (1u << eph::kObjBody) | (1u << eph::kObjOrbitPoint) | (1u << eph::kObjStar) |
-              (1u << eph::kObjDesignation);
+              (1u << eph::kObjElements) | (1u << eph::kObjDesignation);
+    // Kind 3 only with something to serve: the tokens are its whole meaning.
+    if (!cfg.hypotheticals.empty()) {
+        c.kinds |= 1u << eph::kObjHypothetical;
+        c.hypotheticals = cfg.hypotheticals;
+    }
     c.observers = (1u << eph::kObsGeo) | (1u << eph::kObsTopo) | (1u << eph::kObsHelio) |
                   (1u << eph::kObsBary) | (1u << eph::kObsBody);
     c.planes = (1u << eph::kPlaneEcliptic) | (1u << eph::kPlaneEquator);
@@ -429,18 +459,21 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
     c.deltaTModel = kDeltaTModelName;
     c.lookupMax = kLookupMax;
     // The kinds this server fits (3.4): bodies, orbit points of the mean and
-    // osculating elements except the Moon's osculating apsides, and the
-    // designations that resolve to bodies. Stars have no distance to fit;
-    // the hypotheticals and polynomial elements are not served at all.
+    // osculating elements except the Moon's osculating apsides, named
+    // hypotheticals, bodies from elements, and the designations that resolve
+    // to bodies. Stars have no distance to fit.
     c.fSegments = true;
     c.segMaxDegree = uint8_t(kSegMaxDegree);
     c.segMaxPerObject = uint32_t(kSegMaxPerObject);
     c.segMinErrArcsec = float(kFinestErrArcsec);
-    c.segKinds = (1u << eph::kObjBody) | (1u << eph::kObjOrbitPoint) | (1u << eph::kObjDesignation);
+    c.segKinds = (1u << eph::kObjBody) | (1u << eph::kObjOrbitPoint) |
+                 (1u << eph::kObjHypothetical) | (1u << eph::kObjElements) |
+                 (1u << eph::kObjDesignation);
     c.segMaxSpanDays = cfg.max_seg_span_days;
     eph::EncodeCapabilities(c, &w.caps_);
-    // The deep-sky catalogues kind 2 resolves (A.3 0x000B); EncodeCapabilities
-    // does not know this one, so it goes in beside the others, ascending.
+    // The deep-sky catalogues kind 2 resolves (A.3 0x000B) and the element
+    // equinoxes (0x0012); EncodeCapabilities knows neither, so they go in
+    // beside the others, ascending.
     {
         eph::Tlv cat;
         cat.tag = eph::kCapTagCatalogs;
@@ -451,6 +484,15 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
         cw.str8("BSC5 + Hipparcos (1991.25), compiled-in");
         cat.value.assign(reinterpret_cast<const char*>(cb.data()), cb.size());
         w.caps_.push_back(std::move(cat));
+        // The element equinoxes kind 4 may name (A.3 0x0012, a u32 mask of
+        // A.16): all five, the engine rotating each with its own precession.
+        eph::Tlv eq;
+        eq.tag = eph::kCapTagEquinoxes;
+        std::vector<uint8_t> eb;
+        eph::Writer ew(&eb);
+        ew.u32((1u << (eph::kEquinoxMax + 1)) - 1u);
+        eq.value.assign(reinterpret_cast<const char*>(eb.data()), eb.size());
+        w.caps_.push_back(std::move(eq));
         std::sort(w.caps_.begin(), w.caps_.end(),
                   [](const eph::Tlv& a, const eph::Tlv& b) { return a.tag < b.tag; });
     }
@@ -553,7 +595,7 @@ public:
             t.obj = std::move(resolved).value();
             t.resolved = true;
             // A body observer with observerBody equal to the object (3.5).
-            if (t.kind != eph::kObjStar && plan.opts.center == Center::Body &&
+            if (has_naif(t.kind) && plan.opts.center == Center::Body &&
                 plan.opts.center_body == t.obj.naif_id) {
                 t.why = "the observer is the object";
                 t.code = eph::kOErrUnsupported;
@@ -711,7 +753,7 @@ private:
             m.corrApplied =
                 s.resolved ? corr_applied(eph::ObjKind(req_.objs[o].kind), plan.opts, s.obj.is_sun)
                            : 0;
-            m.resolvedNaif = s.resolved && s.kind != eph::kObjStar ? s.obj.naif_id : eph::kNaifNone;
+            m.resolvedNaif = s.resolved && has_naif(s.kind) ? s.obj.naif_id : eph::kNaifNone;
             m.firstFailedRow = s.first_failed_row;
             m.name = s.resolved ? s.obj.name : "";
             m.errText = !s.why.empty() ? s.why : s.first_err;
@@ -919,8 +961,7 @@ private:
         // The capability names the kinds this server fits (3.4); anything
         // else is a per-object error, as is the Moon's osculating apsis,
         // which swings degrees a day on purpose.
-        const bool fitted_kind = spec.kind == eph::kObjBody || spec.kind == eph::kObjOrbitPoint ||
-                                 spec.kind == eph::kObjDesignation;
+        const bool fitted_kind = spec.kind != eph::kObjStar;
         const bool lunar_osculating = spec.kind == eph::kObjOrbitPoint &&
                                       spec.method == eph::kMethOsculating && spec.naif == 301;
         auto resolved = resolve_object(spec, ctx_->engine());
@@ -942,7 +983,7 @@ private:
         s.obj = std::move(resolved).value();
         const ProfilePlan& plan = plans_[spec.profile];
         if (plan.opts.center == Center::Body && plan.opts.center_body == s.obj.naif_id &&
-            s.kind != eph::kObjStar) {
+            has_naif(s.kind)) {
             s.why = "the observer is the object";
             s.code = eph::kOErrUnsupported;
             return;
@@ -971,7 +1012,7 @@ private:
         ans_->segs[obj_index_] = std::move(s.out);
         m.corrApplied =
             corr_applied(s.kind, plans_[req_.objs[obj_index_].profile].opts, s.obj.is_sun);
-        m.resolvedNaif = s.kind != eph::kObjStar ? s.obj.naif_id : eph::kNaifNone;
+        m.resolvedNaif = has_naif(s.kind) ? s.obj.naif_id : eph::kNaifNone;
         // One probe at the span's middle names the source the fits came from.
         const double mid = 0.5 * (params_.jd_from_tt + params_.jd_to_tt);
         if (auto probe = calc_at(ctx_->engine(), s.obj, mid, req_.timeScale,

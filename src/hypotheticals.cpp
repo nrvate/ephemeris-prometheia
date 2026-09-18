@@ -14,6 +14,8 @@ namespace prometheia::hypotheticals {
 
 namespace {
 
+#include "hypotheticals_shipped.inc"
+
 // Just enough JSON for one element line (RFC 8259 grammar, read strictly):
 // the schema needs objects, arrays, strings and numbers, and the rest of the
 // grammar is parsed only so that it can be refused with a clear message.
@@ -432,6 +434,10 @@ Result<std::vector<Body>> parse(std::string_view text, std::string_view origin) 
         out.push_back(std::move(b));
     }
     return out;
+}
+
+std::string_view shipped() {
+    return kShippedHypotheticals;
 }
 
 } // namespace prometheia::hypotheticals

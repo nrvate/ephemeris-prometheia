@@ -17,16 +17,22 @@ namespace prometheia::server {
 struct Dataset {
     std::string engine;    // WELCOME's engine string, e.g. "Prometheia 0.1.0, JPL DE440"
     std::string ephemeris; // the ephemeris file's display name
-    std::vector<std::string> catalogs; // display names, in the order they were added
-    std::string id;                    // "<engine>/<ephemeris>/<catalogs>#<8 hex>"
+    std::vector<std::string> catalogs;      // display names, in the order they were added
+    std::vector<std::string> hypotheticals; // element files' display names, in load order
+    std::string id;                         // "<engine>/<ephemeris>/<catalogs>#<8 hex>"
 };
 
 // `engine` names the engine and what it reads (Engine::source()); the digest
 // is over that plus every file's contents, name-tagged so that reordering or
 // replacing a file with another of the same size cannot collide.
+//
+// Hypothetical bodies count too: the element set this build ships
+// (hypotheticals::shipped()) and every element file loaded, in load order,
+// since a later file redefines a token and so changes its answers.
 Dataset make_dataset(std::string engine, const std::string& ephemeris_path,
                      const std::vector<std::string>& catalog_paths,
-                     const std::string& perturbers_path);
+                     const std::string& perturbers_path,
+                     const std::vector<std::string>& hypothetical_paths = {});
 
 } // namespace prometheia::server
 

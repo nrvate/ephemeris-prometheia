@@ -38,8 +38,6 @@ constexpr double kTwoPi = 6.283185307179586476925286766559;
 constexpr double kJ2000 = 2451545.0;
 constexpr double kB1950 = 2433282.42345905; // Besselian B1950.0, TT
 constexpr double kJ1900 = 2415020.0;
-
-#include "hypotheticals_shipped.inc"
 // Earth rotation rate in rad per UT1 day (the ERA rate, Circular 179).
 constexpr double kEarthRotationRadPerDay = kTwoPi * 1.00273781191135448;
 // SBDB SPK-IDs of numbered asteroids are 20000000 + number; older NAIF
@@ -2041,7 +2039,7 @@ Result<Engine> Engine::open(const std::string& path) {
     e.impl_->perturbers.attach(e.impl_->source.get());
     frames::frame_bias_matrix(e.impl_->bias);
     e.impl_->eps_j2000 = frames::mean_obliquity(kJ2000);
-    auto shipped = hypotheticals::parse(kShippedHypotheticals, "data/hypotheticals.jsonl");
+    auto shipped = hypotheticals::parse(hypotheticals::shipped(), "data/hypotheticals.jsonl");
     if (!shipped)
         return shipped.error(); // a build defect: the file is checked by the tests
     e.impl_->define_hypotheticals(std::move(shipped).value());

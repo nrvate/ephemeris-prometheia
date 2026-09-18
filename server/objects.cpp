@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "objects.hpp"
 
+#include "prometheia/hypotheticals.hpp"
 #include "prometheia/stars.hpp"
 
 namespace prometheia::server {
@@ -121,12 +122,43 @@ Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine) {
             body.value().name + (spec.method == 0 ? " mean " : " ") + kPointSuffix[spec.point];
         return out;
     }
-    case eph::kObjHypothetical:
-        return make_error(ErrorCode::ArgumentError,
-                          "hypothetical bodies are not served by this engine");
-    case eph::kObjElements:
-        return make_error(ErrorCode::ArgumentError,
-                          "objects from polynomial elements are not served by this engine");
+    case eph::kObjHypothetical: {
+        // The elements are server-defined (A.15); the answer's source string
+        // names the set, which the engine sets from the definition.
+        const hypotheticals::Body* b = engine.hypothetical(spec.name);
+        if (!b) {
+            return make_error(ErrorCode::NotFound,
+                              "hypothetical body \"" + spec.name + "\" is not served");
+        }
+        out.kind = ResolvedObject::Kind::Hypothetical;
+        out.token = b->token;
+        out.name = b->name.empty() ? b->token : b->name;
+        return out;
+    }
+    case eph::kObjElements: {
+        // 3.5a: the six elements' coefficients arrive element by element,
+        // M's first, each nTerms long; the epoch and an explicit equinox are
+        // TT (A.16). parseRequest has bounded nTerms, equinox and centre.
+        static constexpr ElementEquinox kEquinoxes[] = {
+            ElementEquinox::J2000, ElementEquinox::B1950, ElementEquinox::J1900,
+            ElementEquinox::OfDate, ElementEquinox::Explicit};
+        PolynomialElements& el = out.poly;
+        el.epoch_jd_tt = spec.epoch.jd1 + spec.epoch.jd2;
+        el.equinox = kEquinoxes[spec.equinox];
+        el.equinox_jd_tt = spec.equinoxJd;
+        el.centre = spec.centre == 1 ? ElementCentre::Earth : ElementCentre::Sun;
+        el.n_terms = spec.nTerms;
+        double* const rows[6] = {el.mean_anomaly,   el.semi_major_axis, el.eccentricity,
+                                 el.arg_perihelion, el.ascending_node,  el.inclination};
+        for (int k = 0; k < 6; ++k) {
+            for (int j = 0; j < spec.nTerms; ++j) {
+                rows[k][j] = spec.coef[size_t(k) * spec.nTerms + size_t(j)];
+            }
+        }
+        out.kind = ResolvedObject::Kind::Elements;
+        out.name = spec.name.empty() ? std::string("elements") : spec.name;
+        return out;
+    }
     default:
         return make_error(ErrorCode::ArgumentError,
                           "object kind " + std::to_string(spec.kind) + " is not served");
@@ -151,6 +183,12 @@ Result<CalcResult> calc_at(Engine& engine, const ResolvedObject& obj, double jd,
     case ResolvedObject::Kind::OrbitPoint:
         return ut1 ? engine.calc_orbit_point_ut(obj.naif_id, obj.point, obj.elements, jd, opts)
                    : engine.calc_orbit_point(obj.naif_id, obj.point, obj.elements, jd, opts);
+    case ResolvedObject::Kind::Hypothetical:
+        return ut1 ? engine.calc_hypothetical_ut(obj.token, jd, opts)
+                   : engine.calc_hypothetical(obj.token, jd, opts);
+    case ResolvedObject::Kind::Elements:
+        return ut1 ? engine.calc_elements_ut(obj.poly, jd, opts)
+                   : engine.calc_elements(obj.poly, jd, opts);
     case ResolvedObject::Kind::Body:
         break;
     }
