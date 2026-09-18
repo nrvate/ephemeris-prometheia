@@ -28,6 +28,10 @@ running daemons:
              geometric vectors, judged as a length (km)
   deflection from Jupiter's centre, each server's bending of the light
              (mask 3 against its own mask 1) against the textbook formula
+  points     orbit points (Moon and planets, mean and osculating) by
+             direction and distance, mask 0, and the node-on-its-frame's-
+             ecliptic rule checked where it is exact
+  sidereal   the three A.8 sidereal planes for two zodiacs
   topo       each server against Horizons from a site on the Earth: mask 1,
              ICRF, equatorial, with the Delta T that reproduces Horizons'
              local apparent sidereal time (build/prometheia-ut1), then
@@ -595,6 +599,183 @@ def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
         print(f"  worst {who} vs textbook: {w:.6f}\"")
 
 
+# Orbit points (kind 1), geometric (mask 0) in the frame of date: the portable
+# comparison, where light-time conventions for a point stay out. Bands from
+# the first measurement (2026-09-18, the corpus epochs), each with its reason.
+POINT_SPECS = ["301.a.m", "301.d.m", "301.p.m", "301.A.m", "301.a.o", "301.d.o", "301.p.o",
+               "301.A.o", "199.a.m", "199.p.m", "199.a.o", "199.p.o", "4.a.m", "4.p.m",
+               "4.a.o", "4.p.o", "5.a.m", "5.p.m", "5.a.o", "5.p.o", "6.a.m", "6.p.m", "6.a.o",
+               "6.p.o"]
+POINT_BANDS = {
+    # The Moon's mean points follow analytic mean elements on both sides,
+    # its osculating points the ephemeris: measured <= 0.49", 1 km.
+    "moon": (1.0, 5.0),
+    # A planet's osculating points come from its state vector, so the
+    # refit's km-level position and velocity errors reach the node and
+    # perihelion directions amplified: measured <= 1.8", 780 km.
+    "osculating": (3.0, 1500.0),
+    # Mean elements of the inner planets and Mars: measured <= 1.3", 405 km.
+    "mean": (2.0, 500.0),
+}
+
+
+def point_class(spec):
+    naif, _, method = spec.split(".")
+    if naif == "301":
+        return "moon"
+    if method == "o":
+        return "osculating"
+    # Mean elements are model-defined; the giant planets' are ours fitted to
+    # DE440 and differ from Swiss's by up to 3300" (Saturn's perihelion).
+    return "mean" if naif in ("199", "299", "4") else "model"
+
+
+def leg_points(client, ours, theirs, table, verbose):
+    """Orbit points by direction AND distance, mask 0, true ecliptic of date;
+    then the rule that a node lies on the ecliptic of the profile's frame
+    (3.5a), checked where it is exact: the Moon's geocentric node has zero
+    latitude on its ecliptic, which for frames 2 and 3 is the J2000 one."""
+    epochs = sorted({p[0] for _, _, pts in corpus() for p in pts})
+    print("\n== points: orbit points, mask 0, true ecliptic of date, direction and distance")
+    worst = {}
+    for spec in POINT_SPECS:
+        cls = point_class(spec)
+        for jd in epochs:
+            args = ["--jd", repr(jd), "--corrections", "0", "--deltat", str(DELTA_T), "--node", spec]
+            ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+            table.asked(ra, rb)
+            va, vb = ra.row(0), rb.row(0)
+            base = dict(leg="points", epoch_tt=jd, object=spec, observer="geo",
+                        frame="true of date", plane="ecliptic", mask=0, deltat=DELTA_T)
+            if va is None or vb is None or any(math.isnan(v) for v in va[:3] + vb[:3]):
+                ea = ra.objects[0].err if ra.objects else -1
+                eb = rb.objects[0].err if rb.objects else -1
+                table.add(**base, verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
+                continue
+            s = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+            dkm = abs(va[2] - vb[2]) * AU_KM
+            w = worst.setdefault(spec, [0.0, 0.0])
+            w[0], w[1] = max(w[0], s), max(w[1], dkm)
+            note = f"distance ours {va[2] * AU_KM:.1f} km theirs {vb[2] * AU_KM:.1f} km, diff {dkm:.1f} km"
+            if cls == "model":
+                table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
+                          tier=2, verdict="unadjudicated",
+                          note=note + "; mean elements are model-defined (ours fitted to DE440)")
+                continue
+            band_s, band_km = POINT_BANDS[cls]
+            verdict = "agree" if s <= band_s and dkm <= band_km else "finding"
+            table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
+                      band=f"{band_s}\" {band_km} km", tier=2, verdict=verdict, note=note)
+    for spec, (s, d) in worst.items():
+        print(f"  {spec:8s} worst {s:9.3f}\"  {d:11.1f} km  ({point_class(spec)})")
+
+    print("  node on the frame's ecliptic (Moon's mean node, J2000 frame: latitude must be 0)")
+    for jd in epochs:
+        args = ["--jd", repr(jd), "--corrections", "0", "--deltat", str(DELTA_T), "--j2000",
+                "--node", "301.a.m"]
+        ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+        table.asked(ra, rb)
+        va, vb = ra.row(0), rb.row(0)
+        base = dict(leg="points-frame", epoch_tt=jd, object="301.a.m", observer="geo",
+                    frame="J2000", plane="ecliptic", mask=0, deltat=DELTA_T, tier=1)
+        if va is None or vb is None:
+            table.add(**base, verdict="unanswered")
+            continue
+        lo, lt = abs(va[1]) * 3600.0, abs(vb[1]) * 3600.0
+        band = 0.001  # rounding: the node is on its plane by construction
+        verdict = ("agree" if lo <= band and lt <= band else
+                   "finding (ours)" if lo > band else "finding (theirs)")
+        table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), band=band,
+                  verdict=verdict,
+                  note=f"latitude on the J2000 ecliptic: ours {lo:.4f}\" theirs {lt:.4f}\"; "
+                       "3.5a puts a node on the frame's ecliptic, the J2000 one for frames 2-3")
+
+
+# Sidereal planes (A.8). Planes 0 and 1 are the same question on both sides
+# and are judged by the refit band. Plane 2's longitude origin is open (the
+# protocol's "carried onto"): a row there is unadjudicated when the planes
+# themselves agree (latitude) and the longitudes differ by one constant
+# across bodies, which is a difference of origin and nothing else.
+SIDEREAL_BODIES = [10, 301, 4, 5, 6]
+# What a sidereal rotation may add to the tropical gap: the two ayanamsa
+# series differ by their precession models, 0.0026" over 1800-2200
+# (docs/FRAMES.md, measured against swetest -ay).
+SIDEREAL_EXTRA = 0.003
+INVARIABLE_LAT_BAND = 0.05  # arcsec: the two sides' plane orientations
+INVARIABLE_SPREAD_BAND = 0.02  # arcsec: a constant origin offset, across bodies
+
+
+def leg_sidereal(client, ours, theirs, table, verbose):
+    """Planes 0 and 1 are judged by what the sidereal rotation adds: each row
+    against the same body's tropical gap at that instant (the ephemerides'
+    own difference, the Moon's ~5 mas included) plus SIDEREAL_EXTRA."""
+    epochs = sorted({p[0] for _, _, pts in corpus() for p in pts})
+    print("\n== sidereal: the three A.8 planes, Fagan-Bradley and Lahiri, apparent")
+    tropical = {}
+    for jd in epochs:
+        args = ["--jd", repr(jd), "--corrections", "7", "--deltat", str(DELTA_T)]
+        for b in SIDEREAL_BODIES:
+            args += ["--obj", str(b)]
+        ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+        for k, b in enumerate(SIDEREAL_BODIES):
+            va, vb = ra.row(k), rb.row(k)
+            if va is not None and vb is not None and not math.isnan(va[0] + vb[0]):
+                tropical[(jd, b)] = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+    for zodiac in ("fagan-bradley", "lahiri"):
+        for plane in ("date", "anchor", "invariable"):
+            worst = 0.0
+            offsets = []
+            for jd in epochs:
+                args = ["--jd", repr(jd), "--corrections", "7", "--deltat", str(DELTA_T),
+                        "--sid", zodiac, "--sid-plane", plane]
+                for b in SIDEREAL_BODIES:
+                    args += ["--obj", str(b)]
+                ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+                table.asked(ra, rb)
+                rows = []
+                for k, b in enumerate(SIDEREAL_BODIES):
+                    va, vb = ra.row(k), rb.row(k)
+                    base = dict(leg="sidereal", epoch_tt=jd, object=b, observer="geo",
+                                frame=f"{zodiac} {plane}", plane="ecliptic", mask=7,
+                                deltat=DELTA_T, tier=2)
+                    if va is None or vb is None or any(math.isnan(v) for v in va[:2] + vb[:2]):
+                        ea = ra.objects[k].err if k < len(ra.objects) else -1
+                        eb = rb.objects[k].err if k < len(rb.objects) else -1
+                        table.add(**base, verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
+                        continue
+                    rows.append((b, va, vb, base))
+                if plane != "invariable":
+                    for b, va, vb, base in rows:
+                        s = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+                        trop = tropical.get((jd, b))
+                        band = (trop if trop is not None else refit_band(b, va[2])) + SIDEREAL_EXTRA
+                        worst = max(worst, s - (trop or 0.0))
+                        table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
+                                  sep_servers=s, band=band,
+                                  verdict="agree" if s <= band else "finding",
+                                  note=f"tropical gap here {trop:.4f}\"" if trop is not None
+                                  else "no tropical answer here")
+                    continue
+                dlons = [((va[0] - vb[0] + 180.0) % 360.0 - 180.0) * 3600.0 for _, va, vb, _ in rows]
+                dlats = [abs(va[1] - vb[1]) * 3600.0 for _, va, vb, _ in rows]
+                spread = max(dlons) - min(dlons) if dlons else 0.0
+                offsets += dlons
+                for (b, va, vb, base), dl, dt in zip(rows, dlons, dlats):
+                    same_plane = dt <= INVARIABLE_LAT_BAND and spread <= INVARIABLE_SPREAD_BAND
+                    table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
+                              sep_servers=sep_arcsec((va[0], va[1]), (vb[0], vb[1])),
+                              band=f"lat {INVARIABLE_LAT_BAND} spread {INVARIABLE_SPREAD_BAND}",
+                              verdict="unadjudicated" if same_plane else "finding",
+                              note=f"longitude offset {dl:+.3f}\" (spread {spread:.3f}\" across "
+                                   f"bodies), latitude {dt:.3f}\"; the plane agrees and the "
+                                   "origin is open: the protocol's 'carried onto'")
+            if plane == "invariable":
+                print(f"  {zodiac:13s} {plane:10s} origin offset "
+                      f"{min(offsets):+.3f}..{max(offsets):+.3f}\"")
+            else:
+                print(f"  {zodiac:13s} {plane:10s} worst beyond the tropical gap {worst:+.4f}\"")
+
+
 def delta_t_from_sidereal_time(ut1_tool, lines):
     """TT - UT1 (s) per (jd_tt, tdb_minus_ut, last_hours, lon_deg), solved by
     prometheia-ut1 so Horizons' own Earth rotation is what both servers get."""
@@ -841,7 +1022,7 @@ def main():
     ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection")
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,sidereal")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvm/work/ephv4", help="the Astrolog tree, for its commit")
     ap.add_argument("--astrolog-bin", default="/nvm/work/ephv4/astrolog-ephd",
@@ -879,6 +1060,10 @@ def main():
                                corpus("helio-", "'500@10'"), ["--helio"], "helio", True, True)
     if "apparent" in legs:
         leg_apparent(client, ours, theirs, a, b, table, args.verbose)
+    if "points" in legs:
+        leg_points(client, ours, theirs, table, args.verbose)
+    if "sidereal" in legs:
+        leg_sidereal(client, ours, theirs, table, args.verbose)
     if "deflection" in legs:
         leg_deflection(client, ours, theirs, a, b, table, args.verbose)
     if "bary" in legs:

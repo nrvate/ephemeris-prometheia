@@ -639,6 +639,42 @@ divergence it recorded is retired. The whole record has 1034 rows: 831
 agree, 180 expected-difference, no findings, and 1 unadjudicated (the
 1800 Moon).
 
+### Orbit points and sidereal planes become standing legs, 2026-09-18
+
+Today's orbit-point and sidereal findings came from ad-hoc probes, so both
+checks are now legs of `crosstest.py`.
+
+- **`points`:** 24 orbit points (the Moon's mean and osculating nodes and
+  apsides, and those of Mercury, Mars, Jupiter and Saturn) at the corpus
+  epochs, by direction and by distance, mask 0, true ecliptic of date.
+  Bands per class, from the first measurement:
+  - the Moon 1″ / 5 km (measured ≤ 0.49″, 1 km);
+  - osculating planetary points 3″ / 1500 km (≤ 1.8″, 780 km; the refit's
+    state errors reach the elements amplified);
+  - the inner planets' and Mars's mean points 2″ / 500 km.
+  Jupiter's and Saturn's mean points differ by up to 3300″ because mean
+  elements are model-defined (ours are fitted to DE440). They are
+  unadjudicated until the Astrolog side names its source. A second check
+  holds the rule that a node lies on its frame's ecliptic: the Moon's mean
+  node in the J2000 frame must have zero J2000 latitude.
+- **`sidereal`:** the three A.8 planes for Fagan-Bradley and Lahiri, five
+  bodies. Planes 0 and 1 are judged by what the sidereal rotation adds to
+  the same body's tropical gap at that instant: 0.003″, the documented
+  ayanamsa agreement. Plane 2 is unadjudicated while its latitudes agree
+  (≤ 0.05″) and its longitude offset is one constant across bodies
+  (spread ≤ 0.02″). That is a difference of origin, open in the protocol.
+
+Fault-injected: tightening the Moon's point band, the plane-2 spread and
+the sidereal extra gives 211 findings.
+
+First results, all on the Astrolog side and sent:
+- Their Moon node in the J2000 frame sits 0.006–10″ off the J2000
+  ecliptic: they compute nodes on the ecliptic of date and convert.
+- At 1800-01-01, the first instant of their files, their osculating
+  points answer errCode 4, except the true descending node, which answers
+  with the ascending node's distance (Δ 49,839 km). It looks like a
+  fallback at the file edge.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

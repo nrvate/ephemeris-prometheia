@@ -29,6 +29,9 @@ documented, not that it is frozen.
   close, each with a connection id and the request id, at `--log-level
   quiet|info|debug` (default `info`). It never logs instants, sites, names
   or tokens (SERVER.md, "Logging").
+- Cross-test legs `points` (orbit points by direction and distance, and
+  the node-on-its-frame's-ecliptic rule) and `sidereal` (the three planes
+  for two zodiacs).
 - All three protocol v4 sidereal planes: the ecliptic of date, the
   ecliptic of the anchor epoch, and the solar system's invariable plane
   (derived from DE440's angular momentum). Available as
