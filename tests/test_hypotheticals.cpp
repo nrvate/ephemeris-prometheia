@@ -494,3 +494,52 @@ TEST_CASE("shipped_bodies_reproduce_their_sources_own_check_positions") {
     CHECK(std::fabs(lv.value().pos.dist_au - 33.06) < 0.03);
     CHECK(lv.value().provenance.source == "Le Verrier 1846");
 }
+
+TEST_CASE("the_shipped_hamburg_points_match_swetest") {
+    // The eight Hamburg School points ship with the elements Astrolog
+    // distributes (docs/DESIGN.md, "Exposures": a recorded exception, taken
+    // by a separate session). The oracle is swetest's OUTPUT on the same
+    // elements -- heliocentric, true positions, J2000 (-hel -true -j2000),
+    // TT JD 2451545.0, JPL DE440 -- as for the other swetest fixtures. It
+    // prints 1e-7 deg; the 24 positions checked at 1900, 2000 and 2100 agreed
+    // to 0.00076" and 5e-10 AU, so 0.002" and 2e-9 AU are the bounds.
+    const std::string de = de440_path();
+    if (access(de.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s not present\n", de.c_str());
+        return;
+    }
+    auto opened = Engine::open(de);
+    REQUIRE(opened.ok());
+    Engine& e = opened.value();
+    struct Want {
+        const char* token;
+        double lon, lat, dist;
+    };
+    const Want want[] = {
+        {"cupido", 243.0869163, 0.9933286, 40.902232863},
+        {"hades", 78.5992663, -1.0315179, 50.743141041},
+        {"zeus", 184.4449817, -0.0021180, 59.245435610},
+        {"kronos", 87.9863168, 0.0130480, 64.922077248},
+        {"apollon", 200.5252405, -0.0056058, 70.299490000},
+        {"admetos", 49.7129506, 0.0106488, 73.627650000},
+        {"vulcanus", 110.3098697, 0.0118215, 77.255680000},
+        {"poseidon", 213.9506677, -0.0081925, 83.669070000},
+    };
+    CalcOptions o = CalcOptions::geometric();
+    o.center = Center::Heliocentric;
+    o.frame = Frame::J2000;
+    for (const Want& w : want) {
+        auto r = e.calc_hypothetical(w.token, kJ2000, o);
+        REQUIRE_MESSAGE(r.ok(), w.token);
+        const Position& p = r.value().pos;
+        const double a[3] = {std::cos(w.lat / kRad2Deg) * std::cos(w.lon / kRad2Deg),
+                             std::cos(w.lat / kRad2Deg) * std::sin(w.lon / kRad2Deg),
+                             std::sin(w.lat / kRad2Deg)};
+        const double b[3] = {std::cos(p.lat_deg / kRad2Deg) * std::cos(p.lon_deg / kRad2Deg),
+                             std::cos(p.lat_deg / kRad2Deg) * std::sin(p.lon_deg / kRad2Deg),
+                             std::sin(p.lat_deg / kRad2Deg)};
+        CHECK_MESSAGE(sep_arcsec(a, b) < 0.002, w.token);
+        CHECK_MESSAGE(std::fabs(p.dist_au - w.dist) < 2e-9, w.token);
+        CHECK(r.value().provenance.source == "Hamburg School (Swiss Ephemeris seorbel.txt)");
+    }
+}

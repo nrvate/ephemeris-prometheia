@@ -407,3 +407,27 @@ cleanroom uses. The exposed session writes everything else. The Astrolog side
 has adopted, in its own words, the rule that only specification sentences,
 fixtures and numbers cross between the projects, and that anything else is
 asked about first.
+
+**2026-09-18: the Hamburg points' elements, a deliberate exception.** The
+maintainer, a Uranian astrologer, decided that the shipped elements for the
+eight Hamburg School points (Cupido through Poseidon) are the ones Astrolog
+distributes in its copy of Swiss's `seorbel.txt`. Uranian charts from
+Prometheia then match Astrolog and every other Swiss-based program. No clean
+source exists for the elements in current use: the originals of 1923–37
+are not scanned anywhere, and the Hamburg School's own publisher names
+Neely's later refinement as the standard.
+
+The reasoning: orbital elements are numerical facts, and these particular
+facts come from the Hamburg School (Witte and Sieggrün, refined by Neely),
+not from Astrodienst. Forty-eight numbers carry no meaningful compilation
+right. What Swiss licenses is its file (the text, comments and layout),
+and none of that was copied. The exception is bounded:
+- only those eight entries;
+- read by a separate session that wrote them into Prometheia's own JSON
+  format and reported the numbers alone, never the file's structure;
+- the implementing session never opened the file;
+- the entries name their origin in their `set` and `citation` fields;
+- verified against `swetest`'s output (24 positions at 1900, 2000 and 2100,
+  to 0.00076″), with the check pinned as a test.
+
+No code, format knowledge or other data came across.

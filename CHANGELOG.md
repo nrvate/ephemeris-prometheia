@@ -61,7 +61,11 @@ documented, not that it is frozen.
   object kind.
 - The kind-4 rule is released on the protocol side as "the kind-4 elements
   rule" (Astrolog `176e333`).
-- Not yet: the shipped element values.
+- **Shipped element set:** the eight Hamburg points, and Le Verrier's
+  predicted Neptune from his 1846 paper. The Hamburg elements are those
+  Astrolog distributes, a recorded exception ([docs/DESIGN.md](docs/DESIGN.md)),
+  and match `swetest` to 0.00076″. Le Verrier's are held to the position he
+  printed himself.
 - 0.1.0's notes called kinds 3 and 4 a settled end state. That reflected
   one client's needs and has been reversed; see
   [docs/SERVER.md](docs/SERVER.md).
