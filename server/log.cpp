@@ -21,10 +21,9 @@ std::optional<LogLevel> parse_log_level(std::string_view s) {
     return std::nullopt;
 }
 
-void Log::write(LogLevel l, const char* fmt, ...) const {
-    if (!enabled(l)) {
-        return;
-    }
+namespace {
+
+void emit(std::FILE* out, const char* fmt, va_list ap) {
     const auto now = std::chrono::system_clock::now();
     const std::time_t secs = std::chrono::system_clock::to_time_t(now);
     const long ms =
@@ -36,15 +35,34 @@ void Log::write(LogLevel l, const char* fmt, ...) const {
     int n = std::snprintf(line, sizeof(line), "prometheiad %04d-%02d-%02dT%02d:%02d:%02d.%03ldZ ",
                           tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min,
                           tm.tm_sec, ms);
-    va_list ap;
-    va_start(ap, fmt);
     const int m = std::vsnprintf(line + n, sizeof(line) - size_t(n) - 1, fmt, ap);
-    va_end(ap);
     n = (m < 0) ? n : std::min<int>(n + m, int(sizeof(line)) - 2);
     line[n] = '\n';
     line[n + 1] = '\0';
-    std::fputs(line, out_);
-    std::fflush(out_);
+    std::fputs(line, out);
+    std::fflush(out);
+}
+
+} // namespace
+
+void Log::write(LogLevel l, const char* fmt, ...) const {
+    if (!enabled(l)) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    emit(out_, fmt, ap);
+    va_end(ap);
+}
+
+void Log::always(const char* fmt, ...) const {
+    if (!out_) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    emit(out_, fmt, ap);
+    va_end(ap);
 }
 
 std::string log_addr(std::string_view addr) {

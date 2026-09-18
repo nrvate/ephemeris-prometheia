@@ -668,8 +668,8 @@ Result<void> WsServer::reload_tls() {
             }
             auto* app = static_cast<Impl::App<true>*>(p->app);
             if (auto r = tls::load_into(app->getNativeHandle(), cert, key); !r) {
-                std::fprintf(stderr, "prometheiad: loop %zu: TLS reload failed: %s\n", p->index,
-                             r.error().message.c_str());
+                p->impl->log.always("loop %zu: TLS reload failed: %s", p->index,
+                                    r.error().message.c_str());
             }
         });
     }

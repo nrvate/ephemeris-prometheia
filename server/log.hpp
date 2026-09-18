@@ -39,6 +39,9 @@ public:
     // One line: "prometheiad <UTC time> <message>". Formatted whole and
     // written with one call, so lines from different loops never interleave.
     void write(LogLevel l, const char* fmt, ...) const __attribute__((format(printf, 3, 4)));
+    // The same line whatever the level: startup, reload, drain, stop and
+    // fatal errors, which even --log-level quiet keeps.
+    void always(const char* fmt, ...) const __attribute__((format(printf, 2, 3)));
 
 private:
     LogLevel level_;

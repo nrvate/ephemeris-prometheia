@@ -145,6 +145,18 @@ the reference client does.)
   counts), a HELLO timeout, and close with the number of requests.
 - **At `debug`:** also PINGs and a CANCEL that arrives after its answer was
   sent.
+- **At every level, `quiet` included:** the operational lines, in the same
+  timestamped format: the tokens file loaded (counted, never printed), the
+  dataset, the Uranian and other named bodies, listening, SIGHUP's TLS reload
+  or why not, a failed reload per loop, the drain on a signal, a second
+  signal, `stopped after N s`, and fatal errors. Only a usage error on the
+  command line prints plainly, before the log exists.
+  ```
+  prometheiad 2026-09-18T18:25:37.728Z listening on port 47190 (ws://, every interface, 1 loop)
+  prometheiad 2026-09-18T18:25:37.743Z SIGHUP: no certificate to reload (plain ws://)
+  prometheiad 2026-09-18T18:25:38.244Z signal 15: draining for up to 10 s
+  prometheiad 2026-09-18T18:25:38.245Z stopped after 1 s
+  ```
 - **Never logged:** request instants, observer sites, element coefficients,
   object names or designations, LOOKUP query strings, tokens. A request is
   someone's birth data. The log says how many objects and rows, which codes

@@ -2,6 +2,7 @@
 //
 // prometheiad: the engine over Astrolog's ephemeris protocol (version 4) on
 // WebSocket. docs/SERVER.md.
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -162,16 +163,22 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // Timestamped from here on: usage errors above go out before there is a
+    // log, and everything operational below goes through it (SERVER.md,
+    // "Logging"). These lines print at every level, quiet included.
+    const Log log(options.log_level);
+    const auto started = std::chrono::steady_clock::now();
+
     if (!tokens_path.empty()) {
         auto t = Limits::load_tokens(tokens_path);
         if (!t) {
-            std::fprintf(stderr, "prometheiad: %s\n", t.error().message.c_str());
+            log.always("%s", t.error().message.c_str());
             return 1;
         }
         options.tokens = std::move(t).value();
         // Counted, never printed: the log is no place for credentials.
-        std::fprintf(stderr, "prometheiad: %zu token(s) from %s%s\n", options.tokens.size(),
-                     tokens_path.c_str(), options.limits.require_token ? ", required" : "");
+        log.always("%zu token(s) from %s%s", options.tokens.size(), tokens_path.c_str(),
+                   options.limits.require_token ? ", required" : "");
     }
 
     const auto make_engine = [&]() -> Result<Engine> {
@@ -215,7 +222,7 @@ int main(int argc, char** argv) {
     {
         auto probe = make_engine();
         if (!probe) {
-            std::fprintf(stderr, "prometheiad: %s\n", probe.error().message.c_str());
+            log.always("%s", probe.error().message.c_str());
             return 1;
         }
         const Dataset dataset =
@@ -228,21 +235,20 @@ int main(int argc, char** argv) {
         options.config.dataset_id = dataset.id;
         options.config.ephemeris_name = dataset.ephemeris;
         options.config.catalog_names = dataset.catalogs;
-        std::fprintf(stderr, "prometheiad: dataset %s\n", dataset.id.c_str());
-        std::fprintf(stderr, "prometheiad: %zu hypothetical bod%s\n",
-                     options.config.hypotheticals.size(),
-                     options.config.hypotheticals.size() == 1 ? "y" : "ies");
+        log.always("dataset %s", dataset.id.c_str());
+        log.always("%zu hypothetical bod%s", options.config.hypotheticals.size(),
+                   options.config.hypotheticals.size() == 1 ? "y" : "ies");
     }
 
     WsServer server(options, make_engine);
     if (auto r = server.start(); !r) {
-        std::fprintf(stderr, "prometheiad: %s\n", r.error().message.c_str());
+        log.always("%s", r.error().message.c_str());
         return 1;
     }
-    std::fprintf(stderr, "prometheiad: listening on port %d (%s, %s, %u loop%s)\n", server.port(),
-                 server.tls() ? "wss://" : "ws://",
-                 options.bind.empty() ? "every interface" : options.bind.c_str(), options.threads,
-                 options.threads == 1 ? "" : "s");
+    log.always("listening on port %d (%s, %s, %u loop%s)", server.port(),
+               server.tls() ? "wss://" : "ws://",
+               options.bind.empty() ? "every interface" : options.bind.c_str(), options.threads,
+               options.threads == 1 ? "" : "s");
 
     std::thread signal_thread([&] {
         for (;;) {
@@ -252,24 +258,23 @@ int main(int argc, char** argv) {
             }
             if (sig == SIGHUP) {
                 if (auto r = server.reload_tls(); !r) {
-                    std::fprintf(stderr, "prometheiad: SIGHUP: %s\n", r.error().message.c_str());
+                    log.always("SIGHUP: %s", r.error().message.c_str());
                 } else {
-                    std::fprintf(stderr, "prometheiad: SIGHUP: reloaded %s\n",
-                                 options.tls_cert.c_str());
+                    log.always("SIGHUP: reloaded %s", options.tls_cert.c_str());
                 }
                 continue;
             }
             if (server.draining()) {
-                std::fprintf(stderr, "prometheiad: second signal while draining; exiting now\n");
+                log.always("second signal while draining; exiting now");
                 std::_Exit(1);
             }
-            std::fprintf(stderr, "prometheiad: signal %d: draining for up to %u s\n", sig,
-                         drain_seconds);
+            log.always("signal %d: draining for up to %u s", sig, drain_seconds);
             server.drain(drain_seconds);
         }
     });
     signal_thread.detach();
     server.join();
-    std::fprintf(stderr, "prometheiad: stopped\n");
+    log.always("stopped after %.0f s",
+               std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
     return 0;
 }

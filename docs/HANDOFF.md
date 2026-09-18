@@ -188,7 +188,9 @@ astrolog d80a6b3:
       then status, bytes and seconds, or the error and retry
       (`tools/fetch/fetchlog.py`);
     - `ephem`'s header and JSON name the ephemeris file and its own
-      version.
+      version;
+    - `prometheiad`'s startup, SIGHUP, drain, stop and fatal lines are
+      timestamped too, and print at every level.
   - Open, on the Astrolog side: `astrolog-ephd`'s log and the Astrolog
     client's request ids, the other half of the join. Theirs to decide.
 
