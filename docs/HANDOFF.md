@@ -125,9 +125,9 @@ portable ones for planetary points).
 
 ## Parked (maintainer go-ahead required before starting)
 
-- Vondrák 2011 long-term precession (IAU 2006 degrades far from J2000;
-  matters for DE441's ±13k-year span).
-- zstd-compressed wire payloads.
+- zstd-compressed wire payloads. The envelope reserves the flag, but
+  neither side advertises it, so this needs a named protocol drop with the
+  Astrolog side first.
 - The `deadlineMs` strategy switch — parsed and advisory today, honestly
   documented as unimplemented in SERVER.md.
 - Nightly/automated release builds of catalogs (idea only).
