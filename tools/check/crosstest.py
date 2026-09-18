@@ -775,11 +775,23 @@ def git_head(path, ignore=None):
 
 
 def binary_time(path):
+    """The daemon file's build time, marked STALE when a running process of
+    that name still executes a file since replaced (a rebuild under a live
+    daemon), since then the time describes a binary that did not answer."""
     try:
         t = os.path.getmtime(path)
     except OSError:
         return "unknown"
-    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out = datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    name = os.path.basename(path)
+    for pid in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        try:
+            exe = os.readlink(f"/proc/{pid}/exe")
+        except OSError:
+            continue
+        if os.path.basename(exe).startswith(name) and exe.endswith(" (deleted)"):
+            return out + " STALE: a running daemon predates this file"
+    return out
 
 
 def main():
