@@ -77,6 +77,8 @@ def main():
 
     obs_rows, vec_rows, prov = [], [], []
     for name, purpose, params in hf.requests():
+        if name.startswith("bary-"):
+            continue  # a cross-test anchor (tools/check/crosstest.py), not an engine test
         path = os.path.join(args.raw_dir, name + ".json")
         if name not in manifest or not os.path.exists(path):
             sys.exit(f"{name}: not in the cache (run tools/fetch/horizons_fetch.py)")

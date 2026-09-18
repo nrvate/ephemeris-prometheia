@@ -6,7 +6,9 @@ docs/CROSS-TEST.md is the plan and says what counts as a pass; this runs the
 legs of its runbook that need nothing but the reference client and two
 running daemons:
 
-  surfaces   each server's WELCOME, side by side (a record, not a verdict)
+  surfaces   each server's WELCOME, side by side (a record, not a verdict),
+             then every (observer, mask) a server does NOT list, which
+             3.5a says must draw ERROR 11
   same       both servers, the same question: mask 0, ICRF, equatorial,
              geocentric, the Horizons corpus's bodies at its epochs
   horizons   each server against JPL Horizons at the corpus's own points:
@@ -18,13 +20,21 @@ running daemons:
              referred to the Sun's equator and is never used)
   apparent   both servers, apparent place of date, every observer kind
              (geocentric, topocentric, heliocentric, barycentric, from
-             Jupiter's system); no anchor -- Horizons' apparent place carries
-             published frame offsets -- so a Moon gap is judged against the
-             geocentric anchor, as for 'same'
+             Jupiter's system), at the fullest mask both WELCOMEs list for
+             that observer; no anchor of its own -- Horizons' apparent place
+             carries published frame offsets -- so a gap is judged by the
+             anchor leg from the same observer, where there is one
+  bary       the Sun from the barycentre, mask 0, against Horizons'
+             geometric vectors, judged as a length (km)
+  topo       each server against Horizons from a site on the Earth: mask 1,
+             ICRF, equatorial, with the Delta T that reproduces Horizons'
+             local apparent sidereal time (build/prometheia-ut1), then
+             apparent place at the same rows, server against server
 
-The topocentric anchor is not run: Horizons' UT1 has to be recovered from its
-sidereal time first (tests/test_horizons.cpp does), and until it is, a
-topocentric anchor would compare two different Earth rotations.
+Differences the two projects have agreed are deliberate are marked
+expected-difference with the reason in the row's note: Swiss's heliocentric
+light time, astrolog-ephd accepting unlisted masks, and a row one server
+refuses as outside its coverage (errCode 3).
 
 Every comparison is an angular separation (atan2 of cross and dot), never a
 difference of longitudes.  A leg is green when the servers agree AND the
@@ -37,7 +47,7 @@ two servers' identities and both repositories' commits in its header.
 
 Usage:
   crosstest.py --ours 127.0.0.1:47190 --theirs 127.0.0.1:47291 \\
-               [--legs surfaces,same,horizons,hamburg] [--out table.tsv]
+               [--legs surfaces,same,...] [--out table.tsv]
 """
 
 import argparse
@@ -65,6 +75,12 @@ SAME_BAND = 0.002  # Swiss .se1 files: a refit of DE441, ~0.001" stated for the 
 OURS_HORIZONS = {"planets": 1e-4, "moon": 0.03}  # docs/VALIDATION.md gates
 THEIRS_HORIZONS = {"planets": 0.002, "moon": 0.03}  # the refit's fidelity, and the Moon's gate
 HAMBURG_BAND = 0.002  # same elements; the J1900 precession models differ sub-mas
+# The Sun from the barycentre, as a length: ours is DE440, the same fit as
+# Horizons' DE441 over the corpus (measured 3e-7 km); theirs is the refit's
+# 2 mas planet band expressed at 1 AU, since a position error does not care
+# which observer it is seen from.
+BARY_SUN_KM = {"ours": 0.001, "theirs": 1.45}
+AU_KM = 149597870.7
 DELTA_T = 69.2  # sent explicitly; a TT request does not use it, a UT1 one would
 
 HAMBURG = ["cupido", "hades", "zeus", "kronos", "apollon", "admetos", "vulcanus", "poseidon"]
@@ -140,7 +156,55 @@ def leg_surfaces(client, ours, theirs, table, verbose):
         ob = sum(o for o, m in mb if m == mask)
         table.add(leg="surfaces", object=f"corrmask {mask} observers", ours=oa, theirs=ob,
                   verdict="same" if oa == ob else "differs")
+    leg_refusals(client, ours, theirs, a, b, table, verbose)
     return a, b
+
+
+OBSERVERS = [("geo", 0, []), ("topo", 1, ["--topo", "8.55,47.37,500.0"]), ("helio", 2, ["--helio"]),
+             ("bary", 3, ["--bary"]), ("jupiter", 4, ["--center", "5"])]
+
+
+def advertised(corrmasks, bit):
+    """The exact masks WELCOME lists for one observer (A.3 0x0004)."""
+    return {m for o, m in corrmasks if o & (1 << bit)}
+
+
+def common_mask(a, b, bit):
+    """The fullest mask both servers list for this observer: the apparent
+    leg sends only what both advertise, because 3.5a makes anything else
+    ERROR 11 and a lenient server's answer to it is not a comparison."""
+    both = advertised(a.corrmasks, bit) & advertised(b.corrmasks, bit)
+    return max(both, key=lambda m: (bin(m).count("1"), m)) if both else None
+
+
+def leg_refusals(client, ours, theirs, a, b, table, verbose):
+    """3.5a from the wire: every mask a server does NOT list for an observer
+    must draw ERROR 11. Accepting one is a finding even when the answer looks
+    right, because the other server refuses it and a client cannot know
+    which behaviour it will meet."""
+    print("\n== refusals: every unlisted (observer, mask) must draw ERROR 11")
+    for who, srv, rep in (("ours", ours, a), ("theirs", theirs, b)):
+        for obs, bit, obs_args in OBSERVERS:
+            listed = advertised(rep.corrmasks, bit)
+            for mask in range(8):
+                if mask in listed:
+                    continue
+                r = ask(client, srv, ["--obj", "4", "--jd", "2451545.0", "--corrections", str(mask),
+                                      "--deltat", str(DELTA_T)] + obs_args, verbose)
+                refused = "ERROR 11" in r.stderr
+                what = "ERROR 11" if refused else (
+                    f"answered, errCode {r.objects[0].err}" if r.objects else r.stderr[:60])
+                verdict, note = "agree", "unlisted in WELCOME; 3.5a requires ERROR 11"
+                if not refused and who == "theirs":
+                    verdict = "expected-difference"
+                    note += ("; astrolog-ephd accepts unlisted masks by decision (an orbit point "
+                             "from the Sun honours bits a body there cannot), a spec question")
+                elif not refused:
+                    verdict = "finding (ours)"
+                table.add(leg="refusals", object=4, observer=obs, mask=mask,
+                          **{who: what}, verdict=verdict, note=note)
+                if not refused:
+                    print(f"  {who:6s} {obs:8s} mask {mask}: {what}")
 
 
 def corpus(prefix="geo-", center="'500@399'"):
@@ -261,19 +325,26 @@ APPARENT_BODIES = [10, 301, 199, 299, 4, 5, 6, 7, 8, 9]
 ZURICH = hf.SITES["zurich"]  # lon deg E, lat deg, height km
 
 
-def leg_apparent(client, ours, theirs, table, verbose):
-    """Leg 8: apparent place of date, every observer kind, server against server."""
+def leg_apparent(client, ours, theirs, wel_a, wel_b, table, verbose):
+    """Leg 8: apparent place of date, every observer kind, server against
+    server, at the fullest correction mask both servers list for it."""
     epochs = sorted({p[0] for _, _, pts in corpus() for p in pts})
     site = f"{ZURICH[0]},{ZURICH[1]},{ZURICH[2] * 1000.0}"  # the client takes metres
     observers = [
-        ("geo", [], 7),
-        ("topo", ["--topo", site], 7),
-        ("helio", ["--helio"], 5),  # the Sun's centre honours no deflection
-        ("bary", ["--bary"], 7),
-        ("jupiter", ["--center", "5"], 7),
+        ("geo", [], 0),
+        ("topo", ["--topo", site], 1),
+        ("helio", ["--helio"], 2),
+        ("bary", ["--bary"], 3),
+        ("jupiter", ["--center", "5"], 4),
     ]
     print("\n== apparent: true ecliptic of date, every observer, server against server")
-    for obs, obs_args, mask in observers:
+    for obs, obs_args, bit in observers:
+        mask = common_mask(wel_a, wel_b, bit)
+        if mask is None:
+            print(f"  {obs:8s} no mask both servers list")
+            continue
+        print(f"  {obs:8s} mask {mask} (ours lists {sorted(advertised(wel_a.corrmasks, bit))}, "
+              f"theirs {sorted(advertised(wel_b.corrmasks, bit))})")
         bodies = [b for b in APPARENT_BODIES
                   if not (obs == "helio" and b == 10) and not (obs == "jupiter" and b == 5)]
         worst = {}
@@ -303,6 +374,172 @@ def leg_apparent(client, ours, theirs, table, verbose):
         print(f"  {obs:8s} " + "  ".join(f"{b}:{w:.4f}" for b, w in sorted(worst.items())))
 
 
+def topo_corpus():
+    """(name, body, site, [(jd_tt, ra, dec, tdb_minus_ut, last_hours)]) of every
+    topocentric corpus request: astrometric ICRF RA/Dec and the Horizons
+    columns that fix its Earth rotation."""
+    raw = os.path.join(REPO, "horizons-raw")
+    out = []
+    for name, _, params in hf.requests():
+        if not name.startswith("topo-"):
+            continue
+        site = tuple(float(x) for x in params["SITE_COORD"].strip("'").split(","))
+        with open(os.path.join(raw, name + ".json")) as f:
+            result = json.load(f)["result"]
+        cols, rows = gen.table(result)
+        idx = {c: i for i, c in enumerate(cols)}
+        pts = [tuple(gen.num(r[idx[c]]) for c in ("Date_________JDTT", "R.A.___(ICRF)",
+                                                  "DEC____(ICRF)", "TDB-UT", "L_Ap_Sid_Time"))
+               for r in rows]
+        out.append((name, int(params["COMMAND"].strip("'")), site, pts))
+    return out
+
+
+def leg_bary(client, ours, theirs, table, verbose):
+    """The Sun from the barycentre, geometric (mask 0), ICRF, equatorial,
+    against Horizons' vectors: the anchor for the barycentric observer,
+    where the Sun is close enough that its position error shows directly."""
+    with open(os.path.join(REPO, "horizons-raw", "bary-sun.json")) as f:
+        result = json.load(f)["result"]
+    cols, rows = gen.table(result)
+    idx = {c: i for i, c in enumerate(cols)}
+    print("\n== horizons-bary: the Sun from the barycentre, mask 0, ICRF, equatorial")
+    for r in rows:
+        jd = gen.num(r[idx["JDTDB"]])  # the corpus instant; TDB - TT moves the Sun < 1 cm
+        x, y, z = (gen.num(r[idx[c]]) for c in ("X", "Y", "Z"))
+        dist = math.sqrt(x * x + y * y + z * z)
+        anc = (math.degrees(math.atan2(y, x)) % 360.0, math.degrees(math.asin(z / dist)))
+        args = ["--jd", repr(jd), "--icrs", "--eq", "--corrections", "0", "--bary", "--obj", "10",
+                "--deltat", str(DELTA_T)]
+        ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+        va, vb = ra.row(0), rb.row(0)
+        base = dict(leg="horizons-bary", epoch_tt=jd, object=10, observer="bary", frame="ICRF",
+                    plane="equator", mask=0, deltat=DELTA_T)
+        if va is None or vb is None or any(math.isnan(v) for v in va[:2] + vb[:2]):
+            ea = ra.objects[0].err if ra.objects else -1
+            eb = rb.objects[0].err if rb.objects else -1
+            table.add(**base, verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
+            continue
+        pa, pb = (va[0], va[1]), (vb[0], vb[1])
+        so, st = sep_arcsec(pa, anc), sep_arcsec(pb, anc)
+        # Position error in km: the angle at this range plus the range itself.
+        eo = math.hypot(math.radians(so / 3600.0) * dist, va[2] - dist) * AU_KM
+        et = math.hypot(math.radians(st / 3600.0) * dist, vb[2] - dist) * AU_KM
+        ok_o, ok_t = eo <= BARY_SUN_KM["ours"], et <= BARY_SUN_KM["theirs"]
+        verdict = ("agree" if ok_o and ok_t else
+                   "finding (ours)" if not ok_o else "finding (theirs)")
+        table.add(**base, ours=pa, theirs=pb, anchor=anc, anchor_source="Horizons bary-sun vectors",
+                  sep_servers=sep_arcsec(pa, pb), sep_ours_anchor=so, sep_theirs_anchor=st,
+                  band=f"km ours {BARY_SUN_KM['ours']} theirs {BARY_SUN_KM['theirs']}", tier=2,
+                  verdict=verdict, note=f"position error km ours {eo:.3f} theirs {et:.3f}")
+        print(f"  {jd:.1f}  ours {so:.5f}\" {eo:8.3f} km   theirs {st:.5f}\" {et:8.3f} km")
+
+
+def delta_t_from_sidereal_time(ut1_tool, lines):
+    """TT - UT1 (s) per (jd_tt, tdb_minus_ut, last_hours, lon_deg), solved by
+    prometheia-ut1 so Horizons' own Earth rotation is what both servers get."""
+    text = "".join(f"{a!r} {b!r} {c!r} {d!r}\n" for a, b, c, d in lines)
+    done = subprocess.run([ut1_tool], input=text, capture_output=True, text=True, check=True)
+    out = [float(v) for v in done.stdout.split()]
+    if len(out) != len(lines):
+        sys.exit(f"prometheia-ut1 answered {len(out)} of {len(lines)} rows")
+    return out
+
+
+def leg_topo(client, ut1_tool, ours, theirs, wel_a, wel_b, table, verbose):
+    """Each server against Horizons from a site on the Earth: mask 1, ICRF,
+    equatorial, with the Delta T that reproduces Horizons' sidereal time.
+    Then apparent place of date at the same rows, server against server, so
+    a topocentric apparent gap can be read with the anchor's Earth rotation."""
+    corpus_ = topo_corpus()
+    rows = [(name, body, site, p) for name, body, site, pts in corpus_ for p in pts]
+    dts = delta_t_from_sidereal_time(ut1_tool, [(p[0], p[3], p[4], site[0])
+                                                for _, _, site, p in rows])
+    print(f"\n== horizons-topo: mask 1, ICRF, equatorial, {len(corpus_)} site/body series, "
+          f"{len(rows)} rows; Delta T from Horizons' LAST {min(dts):.3f}..{max(dts):.3f} s")
+    worst = {}
+    for (name, body, site, p), dt in zip(rows, dts):
+        jd, anc = p[0], (p[1], p[2])
+        where = ["--topo", f"{site[0]},{site[1]},{site[2] * 1000.0}", "--deltat", repr(dt)]
+        cls = "moon" if body == 301 else "planets"
+        obs = "topo " + name.split("-")[1]
+        for mask, leg in ((1, "horizons-topo"), (common_mask(wel_a, wel_b, 1), "apparent-topo")):
+            args = ["--jd", repr(jd), "--corrections", str(mask), "--obj", str(body)] + where
+            if mask == 1:
+                args += ["--icrs", "--eq"]
+            ra = ask(client, ours, args, verbose)
+            rb = ask(client, theirs, args, verbose)
+            va, vb = ra.row(0), rb.row(0)
+            base = dict(leg=leg, epoch_tt=jd, object=body, observer=obs,
+                        frame="ICRF" if mask == 1 else "true of date",
+                        plane="equator" if mask == 1 else "ecliptic", mask=mask, deltat=dt)
+            if va is None or vb is None or any(math.isnan(x) for x in va[:2] + vb[:2]):
+                ea = ra.objects[0].err if ra.objects else -1
+                eb = rb.objects[0].err if rb.objects else -1
+                table.add(**base, verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
+                continue
+            pa, pb = (va[0], va[1]), (vb[0], vb[1])
+            s = sep_arcsec(pa, pb)
+            if leg == "apparent-topo":
+                table.add(**base, ours=pa, theirs=pb, sep_servers=s, band=SAME_BAND, tier=2,
+                          verdict="agree" if s <= SAME_BAND else "finding",
+                          note="Earth rotation from Horizons' LAST; see this row's horizons-topo")
+                worst[("apparent", body)] = max(worst.get(("apparent", body), 0.0), s)
+                continue
+            so, st = sep_arcsec(pa, anc), sep_arcsec(pb, anc)
+            ok_o, ok_t = so <= OURS_HORIZONS[cls], st <= THEIRS_HORIZONS[cls]
+            if ok_o and ok_t:
+                verdict = "agree"
+            elif s <= SAME_BAND:
+                verdict = "finding"
+            else:
+                verdict = "finding (ours)" if not ok_o else "finding (theirs)"
+            table.add(**base, ours=pa, theirs=pb, anchor=anc, anchor_source=f"Horizons {name} q1",
+                      sep_servers=s, sep_ours_anchor=so, sep_theirs_anchor=st,
+                      band=f"ours {OURS_HORIZONS[cls]} theirs {THEIRS_HORIZONS[cls]}", tier=2,
+                      verdict=verdict)
+            worst[("ours", body)] = max(worst.get(("ours", body), 0.0), so)
+            worst[("theirs", body)] = max(worst.get(("theirs", body), 0.0), st)
+    for (who, body), w in sorted(worst.items()):
+        label = {"ours": "ours vs Horizons", "theirs": "theirs vs Horizons",
+                 "apparent": "apparent, ours vs theirs"}[who]
+        print(f"  body {body:4d}  worst {label}: {w:.6f}\"")
+
+
+def adjudicate_helio_light_time(table):
+    """A heliocentric astrometric row where only astrolog-ephd leaves the
+    Horizons band, while the geometric (mask 0) answers agree within the
+    same-question band, is Swiss's heliocentric light time: kept by the
+    Astrolog side on purpose, so the difference is expected, not a defect.
+    A geometric disagreement at that row keeps it a finding."""
+    geometric = {(r["epoch_tt"], r["object"]): r for r in table.rows if r["leg"] == "same-helio"}
+    for r in table.rows:
+        astrometric_apparent = (r["leg"] == "apparent" and r["observer"] == "helio"
+                                and r["mask"] == 1 and r["verdict"] == "finding")
+        if not astrometric_apparent and (r["leg"] != "horizons-helio"
+                                         or r["verdict"] != "finding (theirs)"):
+            continue
+        g = geometric.get((r["epoch_tt"], r["object"]))
+        if g is not None and g["verdict"] == "agree":
+            r["verdict"] = "expected-difference"
+            r["note"] = (r.get("note", "") + "; geometric agrees, light time differs: Swiss's "
+                         "heliocentric light time, kept by design (docs/CROSS-TEST.md)").lstrip("; ")
+
+
+def adjudicate_coverage(table):
+    """A row one server answers and the other refuses with errCode 3 is a
+    difference of coverage (A.17: outside the data's span), a legitimate
+    answer, not a missing one. Any other refusal stays unanswered."""
+    for r in table.rows:
+        if r["verdict"] != "unanswered" or not r["note"].startswith("errCode"):
+            continue
+        codes = r["note"].split()
+        ours, theirs = int(codes[2]), int(codes[4])
+        if sorted((ours, theirs)) == [0, 3]:
+            r["verdict"] = "expected-difference"
+            r["note"] += "; outside one server's coverage (errCode 3)"
+
+
 def adjudicate_same(table):
     """Two servers disagreeing is not yet a verdict; the anchor decides.
 
@@ -314,6 +551,7 @@ def adjudicate_same(table):
     the anchor could not be asked, the row is left unadjudicated.
     """
     anchored = {(r["epoch_tt"], r["object"]): r for r in table.rows if r["leg"] == "horizons"}
+    anchored_bary = {r["epoch_tt"]: r for r in table.rows if r["leg"] == "horizons-bary"}
     anchored_helio = {(r["epoch_tt"], r["object"]): r for r in table.rows
                       if r["leg"] == "horizons-helio"}
     for r in table.rows:
@@ -322,6 +560,18 @@ def adjudicate_same(table):
         # An anchor adjudicates only a row from the same observer: the
         # geocentric Moon agreeing says nothing about a topocentric or a
         # barycentric gap, and borrowing it would wave real findings through.
+        if r["leg"] == "apparent" and r["observer"] == "jupiter":
+            r["verdict"] = "unadjudicated"
+            r["note"] += ("; no anchor observes from Jupiter. astrolog-ephd reports Swiss "
+                          "deflects the target as seen from the Earth, then re-centres")
+            continue
+        if r["leg"] == "apparent" and r["observer"] == "bary" and r["object"] == 10:
+            h = anchored_bary.get(r["epoch_tt"])
+            if h is not None and h["verdict"] == "agree":
+                r["verdict"] = "expected-difference"
+                r["note"] += ("; the Sun's barycentric position, each server inside its km "
+                              "band at the anchor (horizons-bary): the .se1 refit, seen close up")
+                continue
         if r["leg"] == "apparent" and r["observer"] != "geo":
             r["note"] += "; no anchor from this observer"
             continue
@@ -357,7 +607,8 @@ def main():
     ap.add_argument("--ours", default="127.0.0.1:47190")
     ap.add_argument("--theirs", default="127.0.0.1:47291")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent")
+    ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvm/work/ephv4", help="the Astrolog tree, for its commit")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -386,9 +637,16 @@ def main():
         compare_against_anchor(client, ours, theirs, table, args.verbose,
                                corpus("helio-", "'500@10'"), ["--helio"], "helio", True, True)
     if "apparent" in legs:
-        leg_apparent(client, ours, theirs, table, args.verbose)
+        leg_apparent(client, ours, theirs, a, b, table, args.verbose)
+    if "bary" in legs:
+        leg_bary(client, ours, theirs, table, args.verbose)
+    if "topo" in legs:
+        leg_topo(client, args.ut1, ours, theirs, a, b, table, args.verbose)
+    if "helio" in legs:
+        adjudicate_helio_light_time(table)
     if "horizons" in legs or "helio" in legs:
         adjudicate_same(table)
+    adjudicate_coverage(table)  # last: an anchor refused for coverage still adjudicates nothing
 
     counts = {}
     for r in table.rows:

@@ -176,6 +176,10 @@ target_link_libraries(prometheia-info PRIVATE prometheia)
 add_executable(prometheia-gen-mean-elements tools/gen/gen_mean_elements.cpp)
 target_link_libraries(prometheia-gen-mean-elements PRIVATE prometheia)
 
+# Delta T from a published sidereal time, for tools/check/crosstest.py.
+add_executable(prometheia-ut1 tools/check/ut1_main.cpp)
+target_link_libraries(prometheia-ut1 PRIVATE prometheia)
+
 add_executable(prometheia-spk-trim tools/spktrim/spk_trim_main.cpp)
 target_link_libraries(prometheia-spk-trim PRIVATE prometheia)
 

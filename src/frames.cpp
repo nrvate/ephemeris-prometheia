@@ -717,6 +717,18 @@ double gast_rad(double jd_ut1, double jd_tt, double dpsi, double eps_mean) {
     return gmst_rad(jd_ut1, jd_tt) + equation_of_equinoxes_rad(jd_tt, dpsi, eps_mean);
 }
 
+double ut1_from_sidereal_time(double jd_ut1_guess, double jd_tt, double last_rad,
+                              double site_lon_rad) {
+    constexpr double kTwoPi = 6.283185307179586476925287;
+    constexpr double kSiderealPerSolar = 1.00273781191135448;
+    double jd_ut1 = jd_ut1_guess;
+    for (int k = 0; k < 4; ++k) {
+        const double here = gast_rad(jd_ut1, jd_tt) + site_lon_rad;
+        jd_ut1 += std::remainder(last_rad - here, kTwoPi) / (kTwoPi * kSiderealPerSolar);
+    }
+    return jd_ut1;
+}
+
 void observer_geocentric(const GeoSite& site, double gast, double out[3]) {
     // Geodetic -> geocentric on the WGS84 ellipsoid, then rotate the ECEF
     // vector into the true equator-and-equinox-of-date frame by the

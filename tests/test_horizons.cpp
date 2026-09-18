@@ -171,12 +171,9 @@ struct FixedDeltaT final : time::DeltaTModel {
 // after 1962, so UT1 is solved from its local apparent sidereal time with
 // our GAST (the equinox offset is worth 3.5 ms: 1.6 m of site rotation).
 double delta_t_from_sidereal_time(const HorizonsObs& h) {
-    double jd_ut1 = h.jd_tt - (h.tdb_minus_ut - time::tdb_minus_tt(h.jd_tt)) / 86400.0;
-    const double target = h.last_hours / 24.0 * 2.0 * kPi;
-    for (int k = 0; k < 4; ++k) {
-        const double ours = frames::gast_rad(jd_ut1, h.jd_tt) + h.site_lon_deg * kDeg;
-        jd_ut1 += std::remainder(target - ours, 2.0 * kPi) / (2.0 * kPi * 1.00273781191135448);
-    }
+    const double guess = h.jd_tt - (h.tdb_minus_ut - time::tdb_minus_tt(h.jd_tt)) / 86400.0;
+    const double jd_ut1 = frames::ut1_from_sidereal_time(
+        guess, h.jd_tt, h.last_hours / 24.0 * 2.0 * kPi, h.site_lon_deg * kDeg);
     return (h.jd_tt - jd_ut1) * 86400.0;
 }
 

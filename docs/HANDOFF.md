@@ -19,17 +19,18 @@ reader of the client's output. The first full run is
   --threads 1 --ephe "/nvm/work/ephv4/ephem;/nvm/work/ephv4"`. Then
   `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`, and
   stop both with `pkill -x`.
-- **Rerun after the Astrolog fixes** (CROSS-TEST.md, "Rerun"): topocentric
-  Earth rotation now honours the request's ΔT (Moon 12″ → 0.13″), and
-  error 3 replaces 4 except on the nine Jupiter-centred rows at 1800.
-- **Still open with the Astrolog side:** heliocentric light time (they say
-  it is Swiss's model; the anchor puts them 0.38″ from Horizons, us at µas);
-  their server accepts heliocentric mask 7, which it no longer advertises
-  and ours refuses with ERROR 11, an interop split; deflection from the
-  barycentre and Jupiter (7 mas on Mars, unadjudicated); Venus at 2 mas.
-  Rerun once e9d406e is built. Legs 3–5 are theirs to drive.
-- **Open on this side:** the topocentric anchor, which needs Horizons' UT1
-  recovered from its sidereal time (tests/test_horizons.cpp does this).
+- **Latest run** (CROSS-TEST.md, "Second rerun"): 540 agree, 173
+  expected-difference (each with its reason), 27 + 16 findings, 49
+  unadjudicated. New anchors: topocentric (ΔT solved from Horizons' sidereal
+  time by `build/prometheia-ut1`) and barycentric (`bary-sun`).
+- **Sent to / waiting on the Astrolog side:** their topocentric observer is
+  placed about the mean pole: the site vector misses nutation, which gives
+  0.165″ on the Moon, confirmed to 1–3 m. Then a rerun on their 4b1e375
+  build, committed as the dated record. Their decisions (Swiss heliocentric
+  light time, permissive masks) are recorded as expected-difference.
+- **Open:** Jupiter-centred deflection (their account: Swiss deflects as
+  seen from the Earth), unadjudicated; the §3.5a spec question on
+  per-kind masks; two rows just over the 2 mas band.
 - **Also done this stretch:**
   - the per-object error contract, written into SERVER.md;
   - correction masks advertised exactly, with ERROR 11 for the rest;

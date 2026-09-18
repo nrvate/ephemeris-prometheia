@@ -145,6 +145,11 @@ def requests():
     for name, cmd in FROM_SUN:
         out.append((f"helio-{name}", "heliocentric astrometric/apparent",
                     observer(cmd, "500@10", PLANET_EPOCHS_TT, "1,2,20,31")))
+    # The Sun from the solar-system barycentre, geometric: the cross-test's
+    # anchor for the barycentric observer (docs/CROSS-TEST.md), where two
+    # servers' Sun-barycentre vectors can differ by more than light time.
+    out.append(("bary-sun", "the Sun from the barycentre, geometric vectors (TDB)",
+                vectors("10", "500@0", PLANET_EPOCHS_TT)))
     for name, cmd in [("sun", "10"), ("moon", "301"), ("venus", "299"), ("mars", "4")]:
         lon, lat, h = SITES["zurich"]
         out.append((f"topo-zurich-{name}", "topocentric apparent",

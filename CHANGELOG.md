@@ -22,6 +22,12 @@ documented, not that it is frozen.
   (`docs/crosstest/2026-09-18.tsv`) found three defects in the Astrolog
   server, each bisected to one correction term. It also found one in its own
   adjudication, fixed before the table was written.
+- The cross-test gained a topocentric anchor, a barycentric anchor and
+  refusal checks, and sends only masks both servers list. Deliberate
+  differences are recorded as expected-difference with their reason.
+- `frames::ut1_from_sidereal_time` recovers UT1 from a published local
+  apparent sidereal time. `prometheia-ut1` exposes it on the command line
+  for the harness.
 - `prometheia-wire-client` gained `--deltat`, `--hyp`, `--elements`,
   `--center`, `--corrections` and a capabilities line. `tools/check/wirelib.py`
   is the one reader of its output.

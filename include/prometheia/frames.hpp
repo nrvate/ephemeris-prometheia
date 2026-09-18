@@ -197,6 +197,14 @@ double gast_rad(double jd_ut1, double jd_tt);
 double equation_of_equinoxes_rad(double jd_tt, double dpsi, double eps_mean);
 double gast_rad(double jd_ut1, double jd_tt, double dpsi, double eps_mean);
 
+// UT1 (JD) at which the local apparent sidereal time at east longitude
+// site_lon_rad is last_rad under this library's GAST, starting from a
+// guess within a few minutes (Newton on the sidereal rate). This recovers
+// an outside source's Earth rotation from its published sidereal time, so
+// a comparison uses one rotation rather than two Delta T models.
+double ut1_from_sidereal_time(double jd_ut1_guess, double jd_tt, double last_rad,
+                              double site_lon_rad);
+
 // --- Topocentric helper ---------------------------------------------
 
 struct GeoSite {

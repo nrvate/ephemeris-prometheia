@@ -441,8 +441,8 @@ expected-difference, 188 findings, 40 findings attributed to the Astrolog
 server, 1 unadjudicated, 66 unanswered.
 
 - **Topocentric Earth rotation: fixed.** Worst topocentric Moon gap 12″ →
-  0.129″, topocentric findings 25 → 8. The residue is plausibly the two
-  sidereal-time models and awaits the topocentric anchor.
+  0.129″, topocentric findings 25 → 8. The residue is not the sidereal
+  time: see the next section.
 - **Error codes: mostly fixed.** At 1800-01-01, outside `astrolog-ephd`'s
   coverage, 57 rows now answer 3. Nine still answer 4: every
   Jupiter-centred row at that instant, where the other observers answer 3.
@@ -459,6 +459,84 @@ server, 1 unadjudicated, 66 unanswered.
     mask 7 works against one server and fails against the other.
   - Jupiter-centred keeps its full advertisement. The 7 mas deflection gap
     on Mars remains unadjudicated: no anchor observes from Jupiter.
+
+### Second rerun, 2026-09-18: three new anchors, and what they settled
+
+Against the `astrolog-ephd` built at 10:16 (through e9d406e, the narrowed
+WELCOME). Output in `build/xtest/rerun2.tsv`, not committed; a dated
+record waits for a build of 4b1e375. Verdicts: 540 agree, 173
+expected-difference, 27 findings, 16 findings attributed to the Astrolog
+server, 49 unadjudicated. Nothing is left unanswered.
+
+The harness gained:
+
+- **The topocentric anchor** (`topo` leg). Horizons prints its local
+  apparent sidereal time at the site; `build/prometheia-ut1` solves the
+  ΔT that reproduces it under this library's GAST
+  (`frames::ut1_from_sidereal_time`, shared with `tests/test_horizons.cpp`),
+  and both servers are sent that ΔT. Fault-injected: a 1 s ΔT error turns
+  12 of our rows into `finding (ours)`.
+- **The barycentric anchor** (`bary` leg): the Sun from the barycentre,
+  geometric, against one Horizons vectors request (`bary-sun` in
+  `tools/fetch/horizons_fetch.py`), judged as a length.
+- **Refusals** (in `surfaces`): every (observer, mask) a server does not
+  list is sent, and anything but ERROR 11 is recorded.
+- **Masks from WELCOME.** The apparent leg now sends the fullest mask
+  both servers list for each observer, not a fixed one.
+
+What they found:
+
+- **`astrolog-ephd` places a topocentric observer about the mean pole.**
+  With Horizons' own Earth rotation sent to both servers, `prometheiad`'s
+  topocentric Moon is 8.3 mas from Horizons, and `astrolog-ephd`'s is
+  0.165″. The geocentric Moon agrees to 1.6 mas at the same instants.
+  Recovering the observer's offset from the two topocentric vectors gives
+  100–290 m, horizontal (vertical under 2 m), in a direction that turns
+  from epoch to epoch. Varying the ΔT sent does not remove it, so it is not
+  the rotation angle. It is the nutation pole offset: rotating our site
+  vector by (Δε, −Δψ sin ε) with a four-term nutation reproduces the
+  measured offset to 1–3 m at all 15 rows, and the opposite sign misses by
+  twice the offset. Their site vector is rotated by sidereal time but not
+  taken through nutation. This is the whole of the topocentric Moon
+  residue in the apparent leg too (0.02–0.13″).
+- **The barycentric gap is the Sun's position, not a correction.** Masks 0
+  and 1 give the same 0.23″ as mask 1 did. Against Horizons, ours is 3e-7
+  km (DE440 and DE441 are the same fit over these epochs), and theirs
+  0.04–1.05 km. That is inside the refit's fidelity (2 mas at 1 AU is 1.45
+  km); it looks large from the barycentre only because the Sun is 0.005 AU
+  away. Marked expected-difference by the anchor.
+- **Deflection from the barycentre is no longer compared.**
+  `astrolog-ephd` now lists only masks 0 and 1 there, and at the Sun's
+  centre, so the harness sends mask 1.
+
+Agreed with the Astrolog side, and recorded as expected-difference with
+the reason in each row:
+
+- **Heliocentric light time.** They keep Swiss's, because `astrolog-ephd`
+  must serve the numbers the desktop library computes, and have reported
+  it upstream with this side's definition. The harness marks a
+  heliocentric row expected only where the geometric (mask 0) answers
+  agree, so the difference is confined to light time.
+- **Accepting unlisted masks.** Their server answers masks it does not
+  list, on purpose: an orbit point from the Sun's centre honours bits that
+  a body there cannot, and WELCOME's per-observer list cannot say so.
+  Their client now narrows every request to a listed mask (fixed in their
+  4b1e375), so an Astrolog cast works against `prometheiad`. The spec
+  question stays open: §3.5a says ERROR 11, and a per-kind list would let
+  both servers keep it.
+- **Coverage.** A row one server refuses as outside its data's span
+  (errCode 3) is a legitimate answer. The nine Jupiter-centred rows at
+  1800 that answered 4 now answer 3.
+
+Still open:
+
+- **Deflection seen from Jupiter**, 7 mas on Mars, unadjudicated. Their
+  account: Swiss deflects the target as seen from the Earth and then
+  re-centres on Jupiter; ours deflects with the observer at Jupiter. No
+  anchor observes from Jupiter.
+- **Venus at its 2020 inferior conjunction**, 2.03 mas from Horizons, and
+  Mercury from the barycentre in 2100, 2.01 mas from ours. Both are just
+  over the 2 mas band, and plausibly the refit.
 
 ### What it leaves behind
 
