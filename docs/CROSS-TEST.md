@@ -653,8 +653,9 @@ checks are now legs of `crosstest.py`.
     state errors reach the elements amplified);
   - the inner planets' and Mars's mean points 2″ / 500 km.
   Jupiter's and Saturn's mean points differ by up to 3300″ because mean
-  elements are model-defined (ours are fitted to DE440). They are
-  unadjudicated until the Astrolog side names its source. A second check
+  elements are model-defined: ours are fitted to DE440, and Swiss's come
+  from VSOP87. Its published manual says so, and says the two "are
+  considerable" apart. Recorded as expected-difference with that citation. A second check
   holds the rule that a node lies on its frame's ecliptic: the Moon's mean
   node in the J2000 frame must have zero J2000 latitude.
 - **`sidereal`:** the three A.8 planes for Fagan-Bradley and Lahiri, five

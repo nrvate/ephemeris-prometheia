@@ -627,8 +627,9 @@ def point_class(spec):
         return "moon"
     if method == "o":
         return "osculating"
-    # Mean elements are model-defined; the giant planets' are ours fitted to
-    # DE440 and differ from Swiss's by up to 3300" (Saturn's perihelion).
+    # Mean elements are model-defined: ours are fitted to DE440, Swiss's are
+    # VSOP87's (its published manual, which says the two "are considerable"
+    # apart); the giant planets differ by up to 3300" (Saturn's perihelion).
     return "mean" if naif in ("199", "299", "4") else "model"
 
 
@@ -661,8 +662,9 @@ def leg_points(client, ours, theirs, table, verbose):
             note = f"distance ours {va[2] * AU_KM:.1f} km theirs {vb[2] * AU_KM:.1f} km, diff {dkm:.1f} km"
             if cls == "model":
                 table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
-                          tier=2, verdict="unadjudicated",
-                          note=note + "; mean elements are model-defined (ours fitted to DE440)")
+                          tier=2, verdict="expected-difference",
+                          note=note + "; mean elements from two published sources: ours "
+                                      "fitted to DE440, Swiss's from VSOP87 (Swiss manual)")
                 continue
             band_s, band_km = POINT_BANDS[cls]
             verdict = "agree" if s <= band_s and dkm <= band_km else "finding"
