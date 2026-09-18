@@ -332,7 +332,7 @@ Astrolog side owns everything that drives its client or its daemon.
 
 | cell | driver | status |
 |---|---|---|
-| our client → both daemons | `tools/check/crosstest.py`, to build: one request, sent to each daemon, diffed as angular separation, checked against the anchor where one exists, written to the leg table | this side, no dependency on the Astrolog side beyond a running daemon |
+| our client → both daemons | `tools/check/crosstest.py`: one request, sent to each daemon, diffed as angular separation, checked against the anchor where one exists, written to the leg table | **run**: legs 2, 6, 7, 9 (below) |
 | their client → `prometheiad` | their harness, the live parity group pointed at `prometheiad` | Astrolog side |
 | their client → their daemon | their gate | exists |
 | both daemons, self-consistency | `tools/check/corrapplied.py` | **done**: 27/29 each |
@@ -380,6 +380,42 @@ Astrolog side owns everything that drives its client or its daemon.
 10. **Segments.** The Astrolog client has no SEGDATA decoder yet, so this
     leg waits on one. Until then, `prometheia-wire-client --segments` covers
     `prometheiad`'s side.
+
+### First run, 2026-09-18
+
+`docs/crosstest/2026-09-18.tsv`: 206 rows. `prometheiad` on DE440 and
+`astrolog-ephd` on its Swiss files, both on loopback, driven by
+`prometheia-wire-client`.
+
+- **Each server against Horizons** (astrometric ICRF, geocentric, ten bodies
+  at the corpus's epochs). `prometheiad`: 2–4 µas for the Sun and planets,
+  5.8 mas for the Moon, reproducing VALIDATION.md through the wire.
+  `astrolog-ephd`: 0.3–0.8 mas for the planets and 1.2 mas for the Moon,
+  the refit's fidelity. So the gap between the two servers is almost
+  entirely the refit, and the anchor is what says so.
+- **Both servers, the same question** (mask 0). 144 of the numeric rows
+  agree within 2 mas. The Moon's gap grows away from the present, to 21 mas
+  at 1800: DE440 against DE441, which each server reproduces separately
+  (VALIDATION.md). Where the anchor could be asked, the harness records those
+  rows as *expected-difference*, because each server sits inside its own
+  Horizons band there.
+- **Hamburg points by name**: the eight bodies at 1900, 2000 and 2100 agree
+  within 0.62 mas, and their distances to 10⁻¹² AU. The same elements pass
+  through two engines, and they differ only by the precession models'
+  rotation of the J1900 equinox.
+- **Findings**, all on the Astrolog side, and sent there:
+  - At exactly 1800-01-01, where its `.se1` files begin, `astrolog-ephd`
+    refuses light time with error 4 (data unavailable) for every body, while
+    answering geometric positions at the same instant. The refusal is
+    honest, with no silent Moshier, but error 3 (outside the data's time
+    coverage) is the meaning.
+  - Venus at 2020-06-01, 0.29 AU away near inferior conjunction, is 2.03 mas
+    from Horizons against a 2-mas band. That is plausibly the refit's
+    kilometre-scale error seen from close, and only the Astrolog side knows
+    how that fidelity is defined.
+- **Not yet run:** legs 3–5 (the Astrolog client can drive them), leg 8
+  (apparent place, every observer), and the heliocentric and topocentric
+  anchors, which the corpus has.
 
 ### What it leaves behind
 

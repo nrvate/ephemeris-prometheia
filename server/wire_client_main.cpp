@@ -37,6 +37,8 @@ constexpr const char* kUsage =
     "  --node NAIF.M       an orbit point, M = a|d|p|A (asc, desc, peri, apo)\n"
     "  --jd JD             first row, TT (default 2451545.0)\n"
     "  --ut                rows are UT1 (server's delta T)\n"
+    "  --deltat SEC        send TT-UT1 explicitly (one value), so the server's own\n"
+    "                      delta T model enters nothing\n"
     "  --step SECONDS      between rows (default 86400)\n"
     "  --count N           rows (default 1)\n"
     "  --helio | --bary    the observer (default geocentric); --helio asks for light\n"
@@ -174,6 +176,8 @@ int main(int argc, char** argv) {
             req.objs.push_back(o);
         } else if (arg == "--jd") {
             req.start.jd1 = std::strtod(value(), nullptr);
+        } else if (arg == "--deltat") {
+            req.deltaTSec = std::strtod(value(), nullptr);
         } else if (arg == "--ut") {
             req.timeScale = eph::kTimeUT1;
         } else if (arg == "--step") {
@@ -343,6 +347,22 @@ int main(int argc, char** argv) {
                     for (const auto& e : caps.corrMasks) {
                         std::printf("# corrmask observers %u corrections %u\n", e.first, e.second);
                     }
+                    // One line of the rest, for tools comparing two servers'
+                    // surfaces side by side.
+                    const auto list = [](const std::vector<std::string>& v) {
+                        std::string out;
+                        for (const std::string& x : v) {
+                            out += (out.empty() ? "" : ",") + x;
+                        }
+                        return out.empty() ? std::string("-") : out;
+                    };
+                    std::printf("# caps kinds %u observers %u planes %u forms %u frames %u "
+                                "orbitpoints %u orbitmethods %u columns %u timescales %u "
+                                "segments %d segkinds %u lookup %u zodiacs %s hypotheticals %s\n",
+                                caps.kinds, caps.observers, caps.planes, caps.forms, caps.frames,
+                                caps.orbitPoints, caps.orbitMethods, caps.columns, caps.timeScales,
+                                caps.fSegments ? 1 : 0, caps.segKinds, unsigned(caps.lookupMax),
+                                list(caps.zodiacs).c_str(), list(caps.hypotheticals).c_str());
                 }
             }
             continue;

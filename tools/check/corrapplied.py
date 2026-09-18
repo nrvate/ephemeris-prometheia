@@ -42,10 +42,12 @@ Usage:
 
 import argparse
 import math
-import re
 import shutil
-import subprocess
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import wirelib  # noqa: E402  (the one reader of the client's output)
 
 LIGHT_TIME, DEFLECTION, ABERRATION = 1, 2, 4
 BIT_NAME = {LIGHT_TIME: "light time", DEFLECTION: "deflection", ABERRATION: "aberration"}
@@ -56,9 +58,6 @@ OBS_BIT = {"geo": 0, "topo": 1, "helio": 2, "bary": 3, "body": 4}
 MOVED_ARCSEC = 1e-3
 STILL_ARCSEC = 1e-5
 
-META_RE = re.compile(r'^# object (\d+) name "(.*)" rowsOk (-?\d+) corr (\d+) err (\d+) "(.*)"$')
-CORRMASK_RE = re.compile(r"^# corrmask observers (\d+) corrections (\d+)$")
-ROW_RE = re.compile(r"^(\d+) (\d+) (.+)$")
 
 
 class Answer:
@@ -100,42 +99,16 @@ def separation_arcsec(a, b):
 
 
 def ask(client, host, port, obj_args, observer_args, mask, jd, verbose):
-    """One request. Returns (answer, corrmasks) or (None, corrmasks) on error."""
-    cmd = [client, "--host", host, "--port", str(port), "--jd", str(jd), "--corrections", str(mask)]
-    cmd += obj_args + observer_args
-    if verbose:
-        print("    $ " + " ".join(cmd), file=sys.stderr)
-    run = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    corrmasks = []
-    meta = None
-    row = None
-    for line in run.stdout.splitlines():
-        m = CORRMASK_RE.match(line)
-        if m:
-            corrmasks.append((int(m.group(1)), int(m.group(2))))
-            continue
-        m = META_RE.match(line)
-        if m:
-            meta = m
-            continue
-        m = ROW_RE.match(line)
-        if m and row is None:
-            row = [float(v) for v in m.group(3).split()]
-    if run.returncode != 0 or meta is None:
-        why = run.stderr.strip() or f"exit {run.returncode}"
-        return None, corrmasks, why
-    err = int(meta.group(5))
-    if err != 0 or row is None:
-        return (
-            Answer(meta.group(2), int(meta.group(4)), err, meta.group(6), 0.0, 0.0),
-            corrmasks,
-            None,
-        )
-    return (
-        Answer(meta.group(2), int(meta.group(4)), 0, "", row[0], row[1]),
-        corrmasks,
-        None,
-    )
+    """One request: (answer, corrmasks, None), or (None, corrmasks, why) on error."""
+    rep = wirelib.run(client, host, port,
+                      ["--jd", str(jd), "--corrections", str(mask)] + obj_args + observer_args,
+                      verbose, timeout=60)
+    if rep.returncode != 0 or not rep.objects:
+        return None, rep.corrmasks, rep.stderr or f"exit {rep.returncode}"
+    meta, row = rep.objects[0], rep.row(0)
+    if meta.err != 0 or row is None:
+        return Answer(meta.name, meta.corr, meta.err, meta.err_text, 0.0, 0.0), rep.corrmasks, None
+    return Answer(meta.name, meta.corr, 0, "", row[0], row[1]), rep.corrmasks, None
 
 
 def honoured(corrmasks, observer_bit, mask):
