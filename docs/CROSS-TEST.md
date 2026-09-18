@@ -305,6 +305,76 @@ Every one of these has cost this project or the Astrolog project real time.
   trusting a green: `corrapplied.py` had two bugs that only a deliberately
   broken server revealed, one of which made a whole check vacuous.
 
+## Runbook (draft, 2026-09-18)
+
+The principles above say what counts as a pass. This says what is actually
+run, by whom, in what order. It is a draft for both sides to amend: the
+Astrolog side owns everything that drives its client or its daemon.
+
+### Setup, recorded in the leg table's header
+
+- **Versions.** Both servers' `datasetId`, the Prometheia commit and the
+  Astrolog `ephv4` commit.
+- **Files.** `prometheiad` reads `ephe/linux_p1550p2650.440` (DE440).
+  `astrolog-ephd` runs twice: in its default configuration (the `.se1`
+  refit of DE441) for tier 2, and in JPL mode on the *same* DE440 file for
+  tier 1. The leg row names which.
+- **Time.** Every numeric leg is a TT grid or instant list and sends its own
+  ΔT, so no ΔT model enters.
+- **Their client** runs a single-source chain, and every numeric leg asserts
+  that the fallback notice is absent.
+
+### Who drives which cell
+
+| cell | driver | status |
+|---|---|---|
+| our client → both daemons | `tools/check/crosstest.py`, to build: one request, sent to each daemon, diffed as angular separation, checked against the anchor where one exists, written to the leg table | this side, no dependency on the Astrolog side beyond a running daemon |
+| their client → `prometheiad` | their harness, the live parity group pointed at `prometheiad` | Astrolog side |
+| their client → their daemon | their gate | exists |
+| both daemons, self-consistency | `tools/check/corrapplied.py` | **done**: 27/29 each |
+
+### Legs, in order (each is cheap to stop at)
+
+1. **Surfaces.** Each side parses the other's WELCOME. The output is a table
+   of advertised capabilities side by side (kinds, masks per observer,
+   zodiacs, segments, limits). It is a record, not a verdict: it says which
+   of the legs below can run against which daemon.
+2. **Error contract.** Both directions, each daemon against its written
+   contract ([SERVER.md](SERVER.md), "Per-object errors"; the Astrolog
+   equivalent). Unknown star, designation and id; the barycentre; an
+   undefined orbit point; out of coverage; an ambiguous star; an unhonoured
+   mask. Also: no errText may echo the request (§3.8).
+3. **Silent fallback.** An out-of-coverage instant and an uncovered object
+   must come back as error 3 or 4, or with a truthful source string.
+4. **Delivery equivalence.** The same question as one grid, in chunks, and
+   as an instant list gives identical bytes. A 10,000-row grid is compared
+   on its implied times.
+5. **CANCEL and priority**, their client against `prometheiad`: ERROR 10
+   before the answer is whole, nothing cached, interactive before prefetch.
+6. **Tier 1: geometric, same file.** Mask 0, ICRF, geocentric, with the
+   ten Horizons corpus bodies at its eight epochs, against `astrolog-ephd` in
+   JPL mode. Roundoff expected; `testpo.440` adjudicates.
+7. **Anchor legs: astrometric ICRF at the corpus's own points.** Mask 1,
+   equatorial ICRF, at exactly the corpus's instants, bodies and observers
+   (geocentric, heliocentric, three topocentric sites). Each server is
+   compared with Horizons as well as with the other. This server's own
+   agreement with Horizons is 6 µas geocentric ([VALIDATION.md](VALIDATION.md)).
+8. **Tier 2: apparent of date** for every observer kind, with the
+   bisection ladder on any break.
+9. **Hamburg points by name** (kind 3), if `astrolog-ephd` serves kind 3.
+   Expect about 10⁻⁷″: the same elements, differing only by k. Kronos
+   carries the compiled-in-table trap (HYPOTHETICALS.md), so the
+   `astrolog-ephd` leg records which table it read.
+10. **Segments**, if their client consumes SEGDATA. `prometheiad`'s fitted
+    cells are evaluated against their own direct samples, within each cell's
+    declared error.
+
+### What it leaves behind
+
+The leg table, committed as a dated record under `docs/crosstest/`. Every
+`finding` row becomes a test in whichever repository was wrong, citing the
+row. Nothing here enters `tools/gate.sh`, because it needs two daemons.
+
 ## What each leg records
 
 One row per leg, machine-readable, so the session is reproducible afterwards
