@@ -289,6 +289,10 @@ motion or a wrong epoch, which are arcseconds or more. A proper motion off by
 - Motion is a straight line from the Hipparcos epoch. A star with an unseen
   companion wobbles about that line. Sirius is 2.3″ from the FK5 at 1900
   and 2100 ("Checked against FK5").
+  - α Cen A is the extreme case, with an 80-year orbit about B. FK5 538 is
+    28.6″ from ours at 1900 and 17.4″ at 2100.
+  - The FK5's single α Cen entry is itself not simply A: it is 6.8″ from
+    ours at 2000. So those numbers bound the effect rather than measure it.
 - Deep-sky positions are their SIMBAD centres. Extended objects have no
   single position; M 40 and M 73 are loose groups.
 

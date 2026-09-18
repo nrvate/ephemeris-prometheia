@@ -56,7 +56,7 @@ two servers' identities and both repositories' commits in its header.
 
 Usage:
   crosstest.py --ours 127.0.0.1:47190 --theirs 127.0.0.1:47391 \\
-               [--legs surfaces,same,...] [--out table.tsv]
+               [--legs surfaces,same,...,sidsweep,...] [--out table.tsv]
 """
 
 import argparse
@@ -834,18 +834,116 @@ def leg_sidereal(client, ours, theirs, table, verbose):
                 offsets += dlons
                 for (b, va, vb, base), dl, dt in zip(rows, dlons, dlats):
                     same_plane = dt <= INVARIABLE_LAT_BAND and spread <= INVARIABLE_SPREAD_BAND
+                    # 3.5a Part A, approved by both maintainers 2026-09-18: the
+                    # origin is the zodiac's zero point projected onto the plane.
+                    # astrolog-ephd's fix is decided and pending (their registry
+                    # 4.1); until it lands their constant offset is expected.
+                    if same_plane and abs(dl) <= INVARIABLE_LAT_BAND:
+                        verdict = "agree"
+                    elif same_plane:
+                        verdict = "expected-difference"
+                    else:
+                        verdict = "finding"
                     table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
                               sep_servers=sep_arcsec((va[0], va[1]), (vb[0], vb[1])),
                               band=f"lat {INVARIABLE_LAT_BAND} spread {INVARIABLE_SPREAD_BAND}",
-                              verdict="unadjudicated" if same_plane else "finding",
+                              verdict=verdict,
                               note=f"longitude offset {dl:+.3f}\" (spread {spread:.3f}\" across "
-                                   f"bodies), latitude {dt:.3f}\"; the plane agrees and the "
-                                   "origin is open: the protocol's 'carried onto'")
+                                   f"bodies), latitude {dt:.3f}\"; 3.5a Part A (2026-09-18): "
+                                   "the origin is the projected zero point; theirs pending")
             if plane == "invariable":
                 print(f"  {zodiac:13s} {plane:10s} origin offset "
                       f"{min(offsets):+.3f}..{max(offsets):+.3f}\"")
             else:
                 print(f"  {zodiac:13s} {plane:10s} worst beyond the tropical gap {worst:+.4f}\"")
+
+
+SWEEP_BODIES = [10, 301, 4, 5]
+SWEEP_EPOCHS = [2433463.5, 2478938.5]  # 1950-07-01, 2075-01-01: off every token's anchor
+SWEEP_USER_ANCHOR = "2415020.5,22.46"  # any anchor will do: the leg asks whether a plane moves
+SWEEP_PLANES = ("date", "anchor", "invariable")
+# astrolog-ephd's star- and frame-anchored tokens, which answer plane 0 for
+# planes 1 and 2: known, and their fix is decided and pending (their registry
+# 4.1, 2026-09-18). Still findings; the note says they are not news.
+SWEEP_KNOWN_IGNORED = {"b1950", "j1900", "j2000", "true-citra", "true-revati", "true-pushya",
+                       "true-mula", "true-sheoran", "galcent-0sag", "galcent-cochrane",
+                       "galcent-mula-wilhelm", "galcent-rgilbrand", "galequ-iau1958",
+                       "galequ-mula", "galequ-true", "galalign-mardyks"}
+
+
+def sweep_tokens():
+    with open(os.path.join(REPO, "third_party", "ephproto", "v4", "registries.json")) as f:
+        entries = json.load(f)["registries"]["zodiac_tokens"]["entries"]
+    return [e["token"] for e in entries]
+
+
+def leg_sidsweep(client, ours, theirs, table, verbose):
+    """Every A.11 zodiac token on every A.8 plane, graded per server, on what
+    a plane request does rather than on agreement:
+    - a token the server's WELCOME does not list must draw ERROR 11 (3.5a);
+    - a listed token's planes 1 and 2 must each MOVE the answer from plane 0.
+      A row bit-identical to plane 0 is a plane accepted and ignored, which no
+      comparison with another server can see when that server was never asked
+      (the Astrolog side's 16 star- and frame-anchored tokens, 2026-09-18).
+    The epochs sit off every anchor epoch, where plane 1 could legitimately
+    coincide with plane 0."""
+    print("\n== sidsweep: every zodiac token on every sidereal plane, per server")
+    tokens = sweep_tokens()
+    for who, srv in (("ours", ours), ("theirs", theirs)):
+        listed = set(ask(client, srv, ["--obj", "10", "--corrections", "0"], verbose).caps.get("zodiacs", []))
+        tally = {}
+        for token in tokens:
+            zod = ["--sid", token] + (["--sidu", SWEEP_USER_ANCHOR] if token == "user" else [])
+            for jd in SWEEP_EPOCHS:
+                replies = {}
+                for plane in SWEEP_PLANES:
+                    args = ["--jd", repr(jd), "--corrections", "7", "--deltat", str(DELTA_T),
+                            "--sid-plane", plane] + zod
+                    for b in SWEEP_BODIES:
+                        args += ["--obj", str(b)]
+                    r = ask(client, srv, args, verbose)
+                    table.asked(r if who == "ours" else None, r if who == "theirs" else None)
+                    replies[plane] = r
+                for plane, r in replies.items():
+                    base = dict(leg="sidsweep", epoch_tt=jd, object=token, observer="geo",
+                                frame=f"{token} {plane}", plane="ecliptic", mask=7,
+                                deltat=DELTA_T, tier=2)
+                    refused = "ERROR 11" in r.stderr
+                    if token not in listed:
+                        verdict = "agree" if refused else f"finding ({who})"
+                        note = "unlisted in WELCOME; 3.5a requires ERROR 11"
+                        what = "ERROR 11" if refused else "answered"
+                    elif refused:
+                        verdict, what = f"finding ({who})", "ERROR 11"
+                        note = "token listed in WELCOME, so every advertised plane must be served"
+                    elif plane == "date":
+                        verdict, what, note = "agree", "answered", "plane 0, the reference"
+                    else:
+                        p0 = replies["date"]
+                        moved, same = [], 0
+                        for k in range(len(SWEEP_BODIES)):
+                            v, v0 = r.row(k), p0.row(k)
+                            if v is None or v0 is None:
+                                continue
+                            if v[0] == v0[0] and v[1] == v0[1]:
+                                same += 1
+                            moved.append(sep_arcsec((v[0], v[1]), (v0[0], v0[1])))
+                        if not moved:
+                            verdict, what, note = f"finding ({who})", "no rows", "answered without rows"
+                        elif same == len(moved):
+                            verdict, what = f"finding ({who})", "identical to plane 0"
+                            note = "bit-identical to plane 0 for every body: the plane was accepted and ignored"
+                            if who == "theirs" and token in SWEEP_KNOWN_IGNORED:
+                                note += "; known, their registry 4.1, fix pending"
+                        else:
+                            verdict, what = "agree", f"moved {min(moved):.3f}..{max(moved):.3f}\""
+                            note = "moves from plane 0"
+                    tally[verdict] = tally.get(verdict, 0) + 1
+                    table.add(**base, **{who: what}, verdict=verdict, note=note)
+                    if verdict != "agree" and jd == SWEEP_EPOCHS[0]:
+                        print(f"  {who:6s} {token:22s} {plane:10s} {what}")
+        print(f"  {who}: {len(listed & set(tokens))} of {len(tokens)} tokens listed; "
+              + ", ".join(f"{k} {v}" for k, v in sorted(tally.items())))
 
 
 def delta_t_from_sidereal_time(ut1_tool, lines):
@@ -1094,10 +1192,10 @@ def main():
     ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,sidereal,stars")
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,sidereal,sidsweep,stars")
     ap.add_argument("--out", help="write the leg table (TSV) here")
-    ap.add_argument("--astrolog", default="/nvm/work/ephv4", help="the Astrolog tree, for its commit")
-    ap.add_argument("--astrolog-bin", default="/nvm/work/ephv4/astrolog-ephd",
+    ap.add_argument("--astrolog", default="/nvmraid/shares/Astrolog", help="the Astrolog tree, for its commit")
+    ap.add_argument("--astrolog-bin", default="/nvmraid/shares/Astrolog/astrolog-ephd",
                     help="the daemon that ran, for its build time (a commit can postdate it)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
@@ -1138,6 +1236,8 @@ def main():
         leg_stars(client, ours, theirs, table, args.verbose)
     if "sidereal" in legs:
         leg_sidereal(client, ours, theirs, table, args.verbose)
+    if "sidsweep" in legs:
+        leg_sidsweep(client, ours, theirs, table, args.verbose)
     if "deflection" in legs:
         leg_deflection(client, ours, theirs, a, b, table, args.verbose)
     if "bary" in legs:

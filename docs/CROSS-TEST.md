@@ -715,6 +715,49 @@ its names mean:
   deliberately no longer byte-identical to Swiss's. The `stars` leg's
   Toliman row should then agree; not yet re-run.
 
+### The sidereal sweep, and two re-verifications, 2026-09-18 (`docs/crosstest/2026-09-18g.tsv`)
+
+Against `astrolog-ephd` from Astrolog `qt` at `91e427e`: 2,226 rows, with
+agree 1,809, expected-difference 313, finding 7, finding (theirs) 64,
+unadjudicated 2 and unanswered 9.
+- **`sidsweep`, a new leg.** Every A.11 zodiac token is asked on every A.8
+  plane at 1950-07-01 and 2075-01-01, which are off every token's anchor
+  epoch. It is graded per server, on what a plane request does:
+  - a token WELCOME does not list must draw ERROR 11;
+  - a listed token's planes 1 and 2 must each move the answer from plane 0,
+    and a row bit-identical to plane 0 is a finding.
+
+  That grading was suggested by the Astrolog side: a plane accepted and
+  ignored is invisible to any comparison with a server that was never asked.
+  - **`prometheiad`:** lists 3 of the 48 tokens (Fagan/Bradley, Lahiri and
+    user). All three move on both planes, and the 45 unlisted tokens draw
+    ERROR 11. All 288 rows agree.
+  - **`astrolog-ephd`:** lists all 48. Sixteen star- and frame-anchored
+    tokens answer plane 0 for planes 1 and 2 at both epochs, which is 64
+    findings. They match the Astrolog side's own prediction and their
+    registry §4.1 (fix decided, pending). The rows say so; they stay
+    findings.
+  - A caution for a later widening: at a token's own anchor epoch, plane 1
+    *is* plane 0, and an identical row is then correct.
+- **Plane 2, graded under Part A.** Both maintainers approved the projected
+  zero point on 2026-09-18. `astrolog-ephd`'s constant offset (−31.51″
+  Fagan/Bradley, −30.42″ Lahiri) is now expected-difference, pending their
+  fix. It becomes `agree` when the offset closes.
+- **The 7 findings** are the J2000-frame Moon node (`points-frame`). The
+  Astrolog side confirmed it; their registry §4.2 records it with the fix
+  pending.
+- **Re-verified:**
+  - Their `9bb48a5`: the osculating descending node at 1800 now answers
+    errCode 3 (outside coverage) rather than a fallback.
+  - Their `9e9e5c4`: Toliman now agrees, 0.04″ apart.
+- **α Cen A (Rigil Kentaurus) still differs by 6.23″,** and it is a
+  definition rather than a finding.
+  - Ours is the Hipparcos α Cen A.
+  - Theirs sits about 6″ from A toward B, roughly the pair's centre of mass.
+  - FK5 538 cannot choose between them. At 2000 it is 6.8″ from ours and
+    2.5″ from theirs, and ours runs to 28.6″ by 1900: the 80-year AB orbit
+    against a straight line (STARS.md, "Known limits").
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

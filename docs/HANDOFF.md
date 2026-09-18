@@ -49,12 +49,13 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    - the four astrometric binaries up to 2.3″ (Sirius), a straight-line-motion
      limit the servers share;
    - the two servers within 0.007″ of each other against FK5.
-3. **Re-verify, when the Astrolog build carries them:**
-   - their `9bb48a5`: the true descending node at 1800-01-01 now errors
-     (coverage) instead of falling back to the ascending node's distance;
-   - their `9e9e5c4` `sefstars.txt`: Toliman is α Cen B, and Proxima
-     Centauri is α Cen C, not α Cen. Our `stars` leg's α Cen check should
-     then agree for Toliman.
+3. **Re-verified 2026-09-18 (record g):**
+   - their `9bb48a5`: the 1800 descending node answers errCode 3;
+   - their `9e9e5c4`: Toliman agrees (0.04″).
+
+   **Still to re-run, when they land:**
+   - their plane-2 zero point and the 16 ignored tokens (their registry §4.1);
+   - their J2000-frame node (§4.2).
 
 ## The cross-test
 
@@ -75,9 +76,13 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `same` / `horizons`, `helio`, `hamburg`, `apparent`;
   - `topo`: ΔT from Horizons' sidereal time, via `build/prometheia-ut1`;
   - `bary`, `deflection` (textbook formula);
-  - `points`, `sidereal`, `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18f.tsv`, 1474 rows. The
-  `stars` leg came after it (CROSS-TEST.md, "Fixed stars").
+  - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
+    graded on whether a plane moves the answer), `stars`.
+- **Latest record:** `docs/crosstest/2026-09-18g.tsv`, 2,226 rows, against
+  Astrolog `qt` `91e427e`. The only findings are ones they already know
+  about (CROSS-TEST.md, "The sidereal sweep"):
+  - the J2000-frame node (7 rows);
+  - the 16 tokens that ignore planes 1 and 2 (64 rows).
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;
