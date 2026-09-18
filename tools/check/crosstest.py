@@ -842,21 +842,16 @@ def leg_sidereal(client, ours, theirs, table, verbose):
                     same_plane = dt <= INVARIABLE_LAT_BAND and spread <= INVARIABLE_SPREAD_BAND
                     # 3.5a Part A, approved by both maintainers 2026-09-18: the
                     # origin is the zodiac's zero point projected onto the plane.
-                    # astrolog-ephd's fix is decided and pending (their registry
-                    # 4.1); until it lands their constant offset is expected.
-                    if same_plane and abs(dl) <= INVARIABLE_LAT_BAND:
-                        verdict = "agree"
-                    elif same_plane:
-                        verdict = "expected-difference"
-                    else:
-                        verdict = "finding"
+                    # astrolog-ephd implements it since their 4f9c2a1, so any
+                    # offset beyond the frames' own disagreement is a finding.
+                    verdict = "agree" if same_plane and abs(dl) <= INVARIABLE_LAT_BAND else "finding"
                     table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
                               sep_servers=sep_arcsec((va[0], va[1]), (vb[0], vb[1])),
                               band=f"lat {INVARIABLE_LAT_BAND} spread {INVARIABLE_SPREAD_BAND}",
                               verdict=verdict,
                               note=f"longitude offset {dl:+.3f}\" (spread {spread:.3f}\" across "
                                    f"bodies), latitude {dt:.3f}\"; 3.5a Part A (2026-09-18): "
-                                   "the origin is the projected zero point; theirs pending")
+                                   "the origin is the projected zero point (theirs since 4f9c2a1)")
             if plane == "invariable":
                 print(f"  {zodiac:13s} {plane:10s} origin offset "
                       f"{min(offsets):+.3f}..{max(offsets):+.3f}\"")

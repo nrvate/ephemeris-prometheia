@@ -55,8 +55,9 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    - their `b89f510`: the J2000-frame node agrees (record h);
    - their `554288b`: α Cen A agrees to 0.007″ (record h).
 
-   **Still to re-run, when it lands:** their plane-2 zero point and the 16
-   ignored tokens (their registry §4.1), in progress.
+   - their `4f9c2a1` (§4.1): the 16 tokens now move (sweep 288/288). Their
+     zero point carries the nutation of t0 (record i). Re-run when they fix
+     it.
 
 4. **Fuzzing (started 2026-09-18).** `tools/fuzz.sh [SECONDS]` (SERVER.md,
    "Fuzzing").
@@ -90,9 +91,10 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `bary`, `deflection` (textbook formula);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18h.tsv`, against Astrolog `qt`
-  `b89f510`. The only findings are the 64 `sidsweep` rows their registry
-  §4.1 fix will close (CROSS-TEST.md, "Two Astrolog fixes verified").
+- **Latest record:** `docs/crosstest/2026-09-18i.tsv`, against Astrolog `qt`
+  `4f9c2a1` (their §4.1). The sweep passes. The fixed planes differ by the
+  nutation at each zodiac's anchor epoch (140 findings, theirs, reported),
+  per CROSS-TEST.md, "Their §4.1, and the anchor's nutation".
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;

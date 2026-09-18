@@ -777,6 +777,25 @@ finding (theirs) 64, unadjudicated 1 (the 1800 Moon) and unanswered 9.
   point is defined at the instant (errCode 2) on planes 1 and 2, and the
   sweep grades such a refusal `refused`.
 
+### Their §4.1, and the anchor's nutation, 2026-09-18 (`docs/crosstest/2026-09-18i.tsv`)
+
+Against Astrolog `qt` at `4f9c2a1`, where planes 1 and 2 became their own
+arithmetic:
+- **`sidsweep`: all 288 of their rows agree.** Every listed token moves on
+  both fixed planes.
+- **The fixed planes now disagree by a zodiac-dependent constant, identical
+  on planes 1 and 2:** Fagan/Bradley 3.31″, Lahiri 16.78″. That is 140
+  findings. Plane 1 had agreed to 0.003″ while Swiss computed it.
+  - The constants are the nutation in longitude at each anchor epoch:
+    −3.303″ at 1950-01-01 and +16.778″ at 1956-03-21.
+  - Their zero point placed the true ayanamsa of t0 on the mean ecliptic of
+    t0. On a mean frame it is the mean value (true less Δψ(t0)), which is
+    how our anchors are held.
+  - About 0.015″ is left on plane 2. That is the ~20 mas between their
+    mean-J2000 construction and our ICRF one, which they predicted.
+- The plane-2 branch now grades any offset as a finding, since their
+  implementation has landed.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
