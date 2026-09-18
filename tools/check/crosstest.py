@@ -509,8 +509,14 @@ def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
     each server's mask-3 answer against the textbook deflection applied to its
     own mask-1 answer. Light time is in both, so what is compared is the
     bending alone; each server is judged against its own geometry."""
-    if not ({1, 3} <= advertised(wel_a.corrmasks, 4) & advertised(wel_b.corrmasks, 4)):
-        print("\n== deflection: skipped, masks 1 and 3 are not both listed from a body centre")
+    # Each server is judged only if it lists both masks from a body centre; one
+    # that does not is recorded as not advertising the term, not as passing.
+    judged = {who: {1, 3} <= advertised(wel.corrmasks, 4)
+              for who, wel in (("ours", wel_a), ("theirs", wel_b))}
+    if not any(judged.values()):
+        print("\n== deflection: FAIL, neither server lists masks 1 and 3 from a body centre")
+        table.add(leg="deflection", observer="jupiter", verdict="unanswered",
+                  note="no server lists masks 1 and 3 from a body centre")
         return
     epochs = sorted({p[0] for _, _, pts in corpus() for p in pts})
     bodies = [b for b in APPARENT_BODIES if b != 5]  # the Sun included: its bending is nil
@@ -525,32 +531,41 @@ def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
         sun_a = ask_all(ours, 0, ["--obj", "10"]).row(0)
         sun_b = ask_all(theirs, 0, ["--obj", "10"]).row(0)
         got = {(who, m): ask_all(srv, m, objs) for who, srv in (("ours", ours), ("theirs", theirs))
-               for m in (1, 3)}
+               if judged[who] for m in (1, 3)}
         for k, b in enumerate(bodies):
             base = dict(leg="deflection", epoch_tt=jd, object=b, observer="jupiter", frame="ICRF",
                         plane="equator", mask=3, deltat=DELTA_T, tier=3,
                         anchor_source="textbook deflection (USNO Circular 179) on each "
                                       "server's own mask-1 answer")
             rows = {key: rep.row(k) for key, rep in got.items()}
+            def err(who):
+                rep_ = got.get((who, 3))
+                return rep_.objects[k].err if rep_ and k < len(rep_.objects) else 0
             if (sun_a is None or sun_b is None or
                     any(v is None or math.isnan(v[0]) for v in rows.values())):
-                ea = got[("ours", 3)].objects[k].err if k < len(got[("ours", 3)].objects) else -1
-                eb = got[("theirs", 3)].objects[k].err if k < len(got[("theirs", 3)].objects) else -1
-                table.add(**base, verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
+                table.add(**base, verdict="unanswered",
+                          note=f"errCode ours {err('ours')} theirs {err('theirs')}")
                 continue
             res = {}
             for who, sun in (("ours", sun_a), ("theirs", sun_b)):
+                if not judged[who]:
+                    continue
                 bent = (vector(rows[(who, 1)]) if b == 10 else  # the Sun does not bend its own light
                         textbook_deflection(vector(rows[(who, 1)]), vector(sun)))
                 res[who] = angle(vector(rows[(who, 3)]), bent)
                 worst[who] = max(worst.get(who, 0.0), res[who])
-            ok_o, ok_t = res["ours"] <= DEFLECTION_BAND, res["theirs"] <= DEFLECTION_BAND
+            ok_o = res.get("ours", 0.0) <= DEFLECTION_BAND
+            ok_t = res.get("theirs", 0.0) <= DEFLECTION_BAND
             verdict = ("agree" if ok_o and ok_t else "finding" if not ok_o and not ok_t else
                        "finding (ours)" if not ok_o else "finding (theirs)")
-            table.add(**base, sep_servers=angle(vector(rows[("ours", 3)]),
-                                                vector(rows[("theirs", 3)])),
-                      sep_ours_anchor=res["ours"], sep_theirs_anchor=res["theirs"],
-                      band=DEFLECTION_BAND, verdict=verdict)
+            unlisted = [who for who, j in judged.items() if not j]
+            table.add(**base, sep_servers=(angle(vector(rows[("ours", 3)]),
+                                                 vector(rows[("theirs", 3)]))
+                                           if not unlisted else ""),
+                      sep_ours_anchor=res.get("ours", ""), sep_theirs_anchor=res.get("theirs", ""),
+                      band=DEFLECTION_BAND, verdict=verdict,
+                      note="; ".join(f"{w} does not list masks 1 and 3 from a body centre"
+                                     for w in unlisted))
     for who, w in sorted(worst.items()):
         print(f"  worst {who} vs textbook: {w:.6f}\"")
 

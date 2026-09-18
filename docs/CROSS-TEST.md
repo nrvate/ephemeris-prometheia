@@ -606,6 +606,25 @@ attributed to the Astrolog server (all deflection from a planet centre:
 63 in the deflection leg, 48 apparent-place rows it adjudicates), 1
 unadjudicated (the 1800 Moon, whose anchor is outside their coverage).
 
+### Fourth record, 2026-09-18 (`docs/crosstest/2026-09-18d.tsv`)
+
+The Astrolog side traced the planet-centred deflection in the source. Swiss
+re-bases aberration on the centring body, but its deflection routine takes
+no observer and uses the Earth's Sun geometry on a vector relative to
+Jupiter. The result corresponds to no observer anywhere, which is why the
+"seen from the Earth, re-centred" model could not reproduce it. It is
+upstream Swiss. `astrolog-ephd` (050a5a4) no longer claims the term:
+WELCOME lists 0/1/5 from a planet centre, and corrApplied says the same.
+
+The deflection leg now judges each server that lists masks 1 and 3 from a
+body centre, and records a server that does not as not advertising the
+term. Our deflection is still refereed on every run, and a run in which
+neither server lists the masks fails rather than skipping.
+
+Verdicts (807 rows): 603 agree, 203 expected-difference (each row gives
+its reason), no findings, 1 unadjudicated (the 1800 Moon, whose anchor is
+outside `astrolog-ephd`'s coverage).
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

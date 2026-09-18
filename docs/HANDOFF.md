@@ -19,20 +19,22 @@ reader of the client's output. The first full run is
   --threads 1 --ephe "/nvm/work/ephv4/ephem;/nvm/work/ephv4"`. Then
   `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`, and
   stop both with `pkill -x`.
-- **Latest record:** `docs/crosstest/2026-09-18c.tsv` (CROSS-TEST.md,
-  "Third record"). 899 rows: 555 agree, 210 expected-difference (each row
-  gives its reason), 111 findings, all of them `astrolog-ephd`'s deflection
-  from a planet centre, which a textbook referee now judges, and 1
-  unadjudicated. Anchors: geocentric, heliocentric, topocentric (ΔT
-  solved from Horizons' sidereal time by `build/prometheia-ut1`),
-  barycentric (`bary-sun`), and the textbook deflection. The Swiss refit's
+- **Latest record:** `docs/crosstest/2026-09-18d.tsv` (CROSS-TEST.md,
+  "Fourth record"). 807 rows: 603 agree, 203 expected-difference (each row
+  gives its reason), no findings, and 1 unadjudicated (the 1800 Moon).
+  Anchors: geocentric, heliocentric, topocentric (ΔT solved from Horizons'
+  sidereal time by `build/prometheia-ut1`), barycentric (`bary-sun`), and
+  a textbook deflection referee from a planet centre. The Swiss refit's
   bands are lengths (`REFIT_KM`), with the 2 mas angle as a floor.
 - **Upstream Swiss behaviours, recorded as expected:** heliocentric light
   time, and the topocentric site about the mean pole (0.165″ on the Moon,
   confirmed in source by the Astrolog side, reported upstream by them).
-- **Open:** the §3.5a question of per-kind correction masks, with the
-  Astrolog maintainer for the next drop; their deflection from a planet
-  centre (sent).
+  Swiss's planet-centred deflection (no coherent observer) is no longer
+  claimed by `astrolog-ephd`.
+- **Open:** the per-kind correction mask drop (WELCOME tag 0x0014), which
+  the Astrolog maintainer approved. It is written up in
+  `/nvm/work/ephv4-drop-corrkind/DROP.md` and sent here for review before
+  either side builds it.
 - **Also done this stretch:**
   - the per-object error contract, written into SERVER.md;
   - correction masks advertised exactly, with ERROR 11 for the rest;

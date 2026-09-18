@@ -97,8 +97,9 @@ method because the body moves fast enough to matter; a node's contracts by
 v/c per pass, so a fixed-point iteration reaches roundoff in about three
 passes and no derivative is needed. Deflection and aberration are then the
 same calls the body path makes, with the same guard: the deflection term is
-skipped for an observer at the Sun or the barycentre, where it is not
-defined.
+skipped for an observer at the Sun's centre, where it is not defined, and
+for the Sun itself as the point. It is applied at the barycentre, which
+sits about 0.005 AU from the Sun's centre, close enough to deflect.
 
 ## What this does not decide
 
