@@ -17,9 +17,13 @@ chain asks for them in the ordinary course of things. Conventions are in
   `prometheiad` serving both, C ABI version 5 (reviewed by the Astrolog side
   before landing), and `ephem` (`hyp:TOKEN`, `hyp:all`). Gate green, 23
   suites.
-- **Held, not pushed:** those commits wait for the Astrolog side to cut the
-  v4 spec drop that carries the corrected mean-anomaly rule and its fixture.
-  Once it is cut, run the fixture here and push.
+- **The spec is released:** "the kind-4 elements rule", Astrolog `ephv4`
+  at `176e333`. It moves no bytes (the fixture gate stands as it was) and
+  replaces §3.5a's kind-4 text with the four sentences
+  [HYPOTHETICALS.md](HYPOTHETICALS.md) implements. Its numeric fixture is
+  still to be generated on the Astrolog side; when it arrives in
+  `/nvm/work/ephv4-drop-elements/elements/`, check this implementation
+  against it (CROSS-TEST.md, "The elements tier").
 - **Waiting on the maintainer:** the Hamburg elements. The maintainer chose
   to ship the Hamburg standard. The numbers must come from their own
   non-Swiss source, because anything recalled from memory would trace back

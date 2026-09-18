@@ -9,11 +9,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "ephproto.h"
+#include "prometheia/hypotheticals.hpp"
 #include "ws_client.hpp"
 
 using namespace prometheia;
@@ -28,6 +31,9 @@ constexpr const char* kUsage =
     "  --obj NAIF          a body by NAIF/SPK-ID (repeatable)\n"
     "  --name NAME         a catalog body by designation or name (repeatable)\n"
     "  --star NAME         a fixed star by name (repeatable)\n"
+    "  --hyp TOKEN         a named hypothetical body, kind 3 (repeatable)\n"
+    "  --elements FILE     every body in a JSON Lines element file, sent as kind 4\n"
+    "                      with exactly its elements (docs/HYPOTHETICALS.md)\n"
     "  --node NAIF.M       an orbit point, M = a|d|p|A (asc, desc, peri, apo)\n"
     "  --jd JD             first row, TT (default 2451545.0)\n"
     "  --ut                rows are UT1 (server's delta T)\n"
@@ -112,6 +118,43 @@ int main(int argc, char** argv) {
             o.kind = eph::kObjStar;
             o.name = value();
             req.objs.push_back(o);
+        } else if (arg == "--hyp") {
+            eph::Object o;
+            o.kind = eph::kObjHypothetical;
+            o.name = value();
+            req.objs.push_back(o);
+        } else if (arg == "--elements") {
+            const std::string path = value();
+            std::ifstream f(path, std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(f)),
+                                   std::istreambuf_iterator<char>());
+            if (!f) {
+                std::fprintf(stderr, "cannot open %s\n", path.c_str());
+                return 2;
+            }
+            auto bodies = prometheia::hypotheticals::parse(text, path);
+            if (!bodies) {
+                std::fprintf(stderr, "%s\n", bodies.error().message.c_str());
+                return 2;
+            }
+            // Element-major coefficients, M's first (3.5a); the epoch and an
+            // explicit equinox are TT; the wire calls the origin "centre".
+            for (const prometheia::hypotheticals::Body& b : bodies.value()) {
+                const prometheia::PolynomialElements& el = b.elements;
+                eph::Object o;
+                o.kind = eph::kObjElements;
+                o.epoch = eph::Time{el.epoch_jd_tt, 0.0};
+                o.equinox = uint8_t(el.equinox);
+                o.equinoxJd = el.equinox_jd_tt;
+                o.centre = el.origin == prometheia::ElementOrigin::Earth ? 1 : 0;
+                o.nTerms = uint8_t(el.n_terms);
+                for (const double* c : {el.mean_anomaly, el.semi_major_axis, el.eccentricity,
+                                        el.arg_perihelion, el.ascending_node, el.inclination}) {
+                    o.coef.insert(o.coef.end(), c, c + el.n_terms);
+                }
+                o.name = b.name.empty() ? b.token : b.name;
+                req.objs.push_back(std::move(o));
+            }
         } else if (arg == "--node") {
             std::string spec = value();
             const size_t dot = spec.find('.');

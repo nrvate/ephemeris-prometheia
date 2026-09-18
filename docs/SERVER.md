@@ -397,8 +397,15 @@ two sides agreed these semantics:
 - **Frames** are pinned: the ecliptic of date takes longitudes from the true
   equinox on the mean ecliptic; J2000 includes frame bias; ICRF does not; both
   use the IAU 2006 J2000 mean obliquity. Sites are WGS84 geodetic.
-- **Privacy:** neither ERROR text nor per-object error text may name an
-  instant or a place.
+- **Privacy:** neither ERROR text nor per-object error text may carry any
+  request contents (§3.8): not an instant, a place, or the name, token or id
+  the client sent. This server met that only for instants until 2026-09-18,
+  when a hypothetical-body message was about to echo a token. That exposed
+  the whole class: unknown stars, designations, NAIF ids and zodiac tokens
+  all came back verbatim. Per-object text is now a fixed sentence per error
+  code. The code is still classified from the engine's full message, so
+  only the echo is lost. `server_error_text_never_quotes_the_request` pins it
+  for every object kind.
 
 Settled in the same exchange:
 

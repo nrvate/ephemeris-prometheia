@@ -1580,3 +1580,48 @@ TEST_CASE("server_hypotheticals") {
         CHECK(gap > 1.0); // AU
     }
 }
+
+TEST_CASE("server_error_text_never_quotes_the_request") {
+    // 3.8: META errText never contains request contents. Each object below
+    // fails, and each carries something recognisable the client sent; none
+    // of it may come back.
+    Fixture f;
+    Session& s = *f.session;
+    f.welcome();
+    eph::Request req = base_request(2451545.0, 1);
+    eph::Object star;
+    star.kind = eph::kObjStar;
+    star.name = "Zzstarzz";
+    eph::Object designation;
+    designation.kind = eph::kObjDesignation;
+    designation.name = "Zzdesignationzz";
+    eph::Object hyp;
+    hyp.kind = eph::kObjHypothetical;
+    hyp.name = "zztokenzz";
+    req.objs = {star, designation, body_obj(-5), body_obj(987654321), hyp};
+    CHECK(s.on_message(request(req, 3), true));
+    const Data d = join(drain(s));
+    REQUIRE(d.meta.size() == 5);
+    for (const eph::Meta& m : d.meta) {
+        CHECK(m.errCode != eph::kOErrNone);
+        CHECK(!m.errText.empty());
+        for (const char* sent : {"Zzstarzz", "zzstarzz", "Zzdesignationzz", "zzdesignationzz",
+                                 "zztokenzz", "-5", "987654321", "2451545"}) {
+            CHECK_MESSAGE(m.errText.find(sent) == std::string::npos, m.errText);
+        }
+    }
+    CHECK(d.meta[0].errCode == eph::kOErrUnknownBody);
+    CHECK(d.meta[4].errCode == eph::kOErrUnknownBody);
+
+    // And a whole-request refusal: an unserved zodiac is ERROR 11, and its
+    // text does not repeat the token either.
+    eph::Request zod = base_request(2451545.0, 1);
+    zod.profiles[0].zodiac = "zzzodiaczz";
+    zod.objs = {body_obj(10)};
+    CHECK(s.on_message(request(zod, 4), true));
+    const auto replies = drain(s);
+    REQUIRE(replies.size() == 1);
+    const eph::Error e = error_of(replies[0]);
+    CHECK(e.code == eph::kErrUnsupported);
+    CHECK(e.text.find("zzzodiaczz") == std::string::npos);
+}

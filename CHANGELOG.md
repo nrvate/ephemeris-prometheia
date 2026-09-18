@@ -53,6 +53,14 @@ documented, not that it is frozen.
   applying to them, turned up a fourth time (SERVER.md's list of v4
   semantics) and a fifth (prometheia.h). Both are corrected, found this time
   by searching for the phrase rather than by a reader.
+- **Error text never quotes the request** (protocol §3.8). Adding a message
+  that would have echoed an unknown token exposed a whole class: unknown star
+  names, designations, NAIF ids and zodiac tokens all came back verbatim in
+  per-object or ERROR text. Per-object text is now a fixed sentence per
+  error code, classified from the full message, and a test pins it for every
+  object kind.
+- The kind-4 rule is released on the protocol side as "the kind-4 elements
+  rule" (Astrolog `176e333`).
 - Not yet: the shipped element values.
 - 0.1.0's notes called kinds 3 and 4 a settled end state. That reflected
   one client's needs and has been reversed; see

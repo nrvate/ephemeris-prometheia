@@ -159,7 +159,9 @@ std::optional<std::string> plan_profiles(const eph::Request& q, std::vector<Prof
             p.opts.sidereal_epoch_jtdb = pf.anchorEpoch.Sum();
             p.opts.sidereal_ayanamsa_deg = pf.anchorAyanamsaDeg;
         } else {
-            return "the zodiac '" + pf.zodiac + "' is not served by this engine";
+            // 3.8: the token the client sent does not come back; WELCOME
+            // already lists the zodiacs this server serves.
+            return "a profile names a zodiac this server does not serve (WELCOME lists them)";
         }
         p.rectangular = pf.form == eph::kFormRectangular;
         p.columns = pf.columns;
@@ -245,12 +247,33 @@ eph::ObjErr obj_err_of(const Error& e) {
     }
 }
 
-std::string clean_err_text(std::string text) {
-    // The one engine message that carries the instant it failed at.
-    if (text.find("at JD ") != std::string::npos) {
+// 3.8: META errText never carries request contents -- not the instant, not
+// the site, and not the name, token or id the client sent. Engine and
+// resolution messages quote exactly those, usefully for a library caller,
+// so none of them reaches the wire. The text is the error's meaning, fixed
+// per code; the code is classified from the full message first
+// (obj_err_of), so nothing is lost but the echo. Reasons the server writes
+// itself ("the observer is the object") are content-free by construction
+// and do not come through here.
+std::string clean_err_text(const Error& e) {
+    switch (obj_err_of(e)) {
+    case eph::kOErrUnknownBody:
+        return "not a body, name or token this server knows";
+    case eph::kOErrUnsupported:
+        return "not supported by this server for this object";
+    case eph::kOErrCoverage:
         return "outside the ephemeris's time coverage";
+    case eph::kOErrDataMissing:
+        return "the data this object needs is not loaded";
+    case eph::kOErrUndefinedPoint:
+        return "the point is undefined for this orbit";
+    case eph::kOErrAmbiguous:
+        return "the name is ambiguous";
+    case eph::kOErrNumerical:
+        return "the computation failed numerically";
+    default:
+        return "internal error";
     }
-    return text;
 }
 
 // ---- the segments span and its refusals -------------------------------------
@@ -588,7 +611,7 @@ public:
             const ProfilePlan& plan = plans_[req_.objs[o].profile];
             auto resolved = resolve_object(req_.objs[o], ctx_->engine());
             if (!resolved) {
-                t.why = clean_err_text(resolved.error().message);
+                t.why = clean_err_text(resolved.error());
                 t.code = obj_err_of(resolved.error());
                 continue;
             }
@@ -643,7 +666,7 @@ public:
                 if (!res) {
                     if (s.first_failed_row == eph::kRowNone) {
                         s.first_failed_row = next_row_;
-                        s.first_err = clean_err_text(res.error().message);
+                        s.first_err = clean_err_text(res.error());
                         s.code = obj_err_of(res.error());
                     }
                     continue;
@@ -845,7 +868,7 @@ public:
                 if (!got) {
                     s.failed = true;
                     s.code = obj_err_of(got.error());
-                    s.why = clean_err_text(got.error().message);
+                    s.why = clean_err_text(got.error());
                     break;
                 }
                 append(s.out, got.value());
@@ -976,7 +999,7 @@ private:
             return;
         }
         if (!resolved) {
-            s.why = clean_err_text(resolved.error().message);
+            s.why = clean_err_text(resolved.error());
             s.code = obj_err_of(resolved.error());
             return;
         }
