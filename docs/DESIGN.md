@@ -355,6 +355,22 @@ tool and script in this repo, and for anyone running them:
     - The C interface, `ephem star:NAME`, and prometheiad object kind 1.
     - SIMBAD radial velocities, cross-checked against the Bright Star
       Catalogue.
+  - Increments 9–11 (done 2026-09-18): protocol version 4, whose §3 was
+    co-designed with the Astrolog session and locked from both sides
+    (91/91 conformance fixtures, digest-pinned, run in-tree through the
+    vendored codec).
+    - 9: the locked fixtures gate in C++ and the registries check, by
+      name, in the gate script.
+    - 10: the session rewrite — profiles, instant lists, the batched
+      LOOKUP, the ΔT table/value/model order, pins, datasetId over the
+      data files' contents, corrApplied as a structural table, and the
+      wire map + version 3 deleted.
+    - 11: SEGDATA on the 32-day lattice (tropical coefficients, the
+      ayanamsa of each sidereal profile as its own scalar series, measured
+      residuals), row-block compute through a deferred pump so CANCEL
+      stops the work and a cancelled request caches nothing, priority 0
+      before 1, and the segment caches on the loop. docs/SERVER.md,
+      docs/SEGMENTS.md.
 
 ## Cleanroom policy
 

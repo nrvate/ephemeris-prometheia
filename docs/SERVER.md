@@ -122,11 +122,13 @@ there is no wire map. The full spec is Astrolog's §3; the shape:
 - **HELLO / WELCOME.** The session version is `min(client.protoMax, 4)`,
   fixed by the first HELLO. WELCOME advertises the limits (64 objects,
   20,000 rows, 500 rows per chunk, 16 profiles, 4 MiB payloads, the cell
-  bound), the caps bits (f32, instant lists, lookup, deep sky), the
-  capability TLVs (kinds, observers, planes/forms/frames, per-observer
-  correction masks, orbit points and methods, extra columns, the zodiacs
-  this engine serves, sidereal planes, time scales, the delta T model, the
-  lookup budget, the deep-sky catalogues) and the dataset id.
+  bound), the caps bits (f32, instant lists, lookup, deep sky, cancel,
+  priority, segments), the capability TLVs (kinds, observers,
+  planes/forms/frames, per-observer correction masks, orbit points and
+  methods, extra columns, the zodiacs this engine serves, sidereal planes,
+  time scales, the delta T model, the lookup budget, the segments bounds —
+  degree, per-object cap, the 0.001″ floor, the kinds fitted, the span —
+  and the deep-sky catalogues) and the dataset id.
 - **REQUEST.** A 16-byte delivery block (precision, priority,
   representation, degree hint, chunk hint, segment target, deadline — all
   advisory, all outside the cache key) then the question block: time scale
