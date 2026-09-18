@@ -338,11 +338,14 @@ def adjudicate_same(table):
             r["note"] += f"; anchor verdict: {h['verdict']}"
 
 
-def git_head(path):
+def git_head(path, ignore=None):
     try:
         head = subprocess.run(["git", "-C", path, "rev-parse", "--short", "HEAD"],
                               capture_output=True, text=True, timeout=10).stdout.strip() or "?"
-        dirty = subprocess.run(["git", "-C", path, "status", "--porcelain", "--untracked-files=no"],
+        # The table being written does not make the tree dirty.
+        spec = ["--", ".", f":!{os.path.relpath(os.path.abspath(ignore), path)}"] if ignore else []
+        dirty = subprocess.run(["git", "-C", path, "status", "--porcelain",
+                                "--untracked-files=no"] + spec,
                                capture_output=True, text=True, timeout=10).stdout.strip()
         return head + ("+dirty" if dirty else "")
     except Exception:  # noqa: BLE001
@@ -395,7 +398,7 @@ def main():
     if args.out:
         header = [
             f"crosstest {datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}",
-            f"ours   {a.server} dataset {a.dataset} prometheia {git_head(REPO)}",
+            f"ours   {a.server} dataset {a.dataset} prometheia {git_head(REPO, args.out)}",
             f"theirs {b.server} dataset {b.dataset} astrolog {git_head(args.astrolog)}",
             "angles in arcsec; positions lon/lat or RA/Dec in degrees; docs/CROSS-TEST.md",
         ]
