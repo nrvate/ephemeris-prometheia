@@ -178,8 +178,7 @@ the transcription to it.
 | token | source | status |
 |---|---|---|
 | `neptune-leverrier` | Le Verrier, *Comptes rendus* 23 (1846), p. 432 | shipped |
-| `neptune-adams` | Adams, *An Explanation of the observed Irregularities in the Motion of Uranus* (1846), pp. 18, 25 | not yet: see below |
-| `pluto-lowell` | Lowell, *Memoir on a Trans-Neptunian Planet* (1915), pp. 104–105 | not yet: see below |
+| `neptune-adams`, `pluto-lowell`, `isis-transpluto` | — | not planned (maintainer, 2026-09-18) |
 | `cupido` … `poseidon` (the eight Hamburg points) | the Hamburg School's elements as distributed in Swiss's `seorbel.txt`, copy shipped with Astrolog (Witte and Sieggrün's planets, refined by Neely) | shipped; a recorded exception, [DESIGN.md](DESIGN.md) "Exposures" |
 | the others in A.15 | — | no clean source found; served only from an operator's element file |
 
@@ -209,16 +208,12 @@ way is 8″ of this body's motion. His own derived position at the epoch is
 residual is a little larger than the rounding of the printed elements
 explains. It is recorded, not tuned away: this is his orbit as printed.
 
-**Adams's Neptune and Lowell's Planet X** each need a choice the source
-does not make, so neither ships until that choice is made deliberately.
-- Adams gives two hypotheses, prefers the second without adopting it, and
-  states the distance only as a ratio to Uranus's. A distance in AU would
-  need a value for Uranus's that the paper does not print.
-- Lowell gives two solutions, one with the mean longitude near 0° and one
-  near 180°, and says the duality "would necessarily always be the case".
-  His epoch and equinox (1850.0, the mean equinox of 1850) are stated
-  elsewhere in the memoir, not beside the elements.
+**Not planned.** Adams's and Lowell's predicted planets and Transpluto
+will not ship. The maintainer judged them historical curiosities nobody
+needs (2026-09-18). Adams's and Lowell's papers are public domain and would
+also each have needed an editorial choice the source doesn't make. Anyone
+who wants them can define them in an element file.
 
-**The others** (Transpluto, Nibiru, Harrington, Pickering's planets, Vulcan,
+**The others** (Nibiru, Harrington, Pickering's planets, Vulcan,
 White Moon, Proserpina, Waldemath) have no clean numeric source found yet.
 An operator who uses them supplies them in an element file.
