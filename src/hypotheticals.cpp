@@ -19,13 +19,22 @@ namespace {
 // Just enough JSON for one element line (RFC 8259 grammar, read strictly):
 // the schema needs objects, arrays, strings and numbers, and the rest of the
 // grammar is parsed only so that it can be refused with a clear message.
+struct Member;
+
 struct Value {
     enum class Kind { Null, Bool, Number, String, Array, Object };
     Kind kind = Kind::Null;
     double number = 0.0;
     std::string str;
     std::vector<Value> items;
-    std::vector<std::pair<std::string, Value>> members;
+    // A named struct, not std::pair: a vector may hold an incomplete type,
+    // but a pair of one may not be instantiated (clang with libstdc++ refuses).
+    std::vector<Member> members;
+};
+
+struct Member {
+    std::string key;
+    Value value;
 };
 
 class Reader {
@@ -100,7 +109,7 @@ private:
             if (!string(key))
                 return false;
             for (const auto& m : out.members)
-                if (m.first == key)
+                if (m.key == key)
                     return fail("field \"" + key + "\" appears twice");
             ws();
             if (i_ >= s_.size() || s_[i_] != ':')
@@ -109,7 +118,7 @@ private:
             Value v;
             if (!value(v, depth + 1))
                 return false;
-            out.members.emplace_back(std::move(key), std::move(v));
+            out.members.push_back(Member{std::move(key), std::move(v)});
             ws();
             if (i_ < s_.size() && s_[i_] == ',') {
                 ++i_;

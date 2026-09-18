@@ -56,6 +56,14 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    - their plane-2 zero point and the 16 ignored tokens (their registry §4.1);
    - their J2000-frame node (§4.2).
 
+4. **Fuzzing (started 2026-09-18).** `tools/fuzz.sh [SECONDS]` (SERVER.md,
+   "Fuzzing").
+   - The session is clean over 2.36 million inputs.
+   - The codec finding (DATA accepts non-finite values, and there is no
+     canonical f32 NaN) is with the Astrolog side.
+   - Next, if wanted: longer runs, and a load/soak harness (CROSS-TEST.md,
+     "What this does not test").
+
 ## The cross-test
 
 The runbook is [CROSS-TEST.md](CROSS-TEST.md). The harness,

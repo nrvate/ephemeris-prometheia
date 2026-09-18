@@ -11,6 +11,20 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **Fuzzing** (docs/SERVER.md, "Fuzzing"): `tools/fuzz.sh` runs libFuzzer
+  targets over the protocol codec and over `prometheiad`'s session, under
+  ASan and UBSan. The check is the protocol's own: every reply must parse
+  and re-encode byte for byte.
+  - The first 10-minute runs gave 2.36 million session inputs with no
+    failure.
+  - One codec finding, reported upstream: DATA accepts non-finite values.
+  - The tree now also builds with clang: `src/hypotheticals.cpp`'s JSON
+    value, and an unused session field.
+- **The `sidsweep` leg** grades an explicit refusal of a zodiac on a fixed
+  plane as `refused`. Only a silent plane-0 answer is a finding.
+
 ## 0.3.0 — 2026-09-18
 
 The protocol's §3.5a amendment and C ABI 6, with two new outside checks.

@@ -282,7 +282,6 @@ private:
     std::string conn_;
     uint32_t requests_seen_ = 0;
     uint8_t version_ = 0;
-    bool ignored_ext_ = false; // a non-critical extension this server ignored
     std::deque<std::vector<uint8_t>> control_;
     std::deque<Stream> streams_;
 };

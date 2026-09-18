@@ -781,10 +781,11 @@ A verdict is `agree`, `expected-difference` (with the tier-3 reason), or
 Worth stating so nobody reads a green matrix as more than it is.
 
 - **Robustness.** Neither the numeric legs nor the protocol legs feed malformed
-  input. Astrolog runs a `ROBUST` gate; this repository has five hand-written
-  malformed frames in `tests/test_server.cpp` and no fuzz corpus, so our wire
-  parser has never seen a hostile byte. That gap is ours and predates this
-  plan.
+  input. Since 2026-09-18 that is `tools/fuzz.sh`'s job (SERVER.md,
+  "Fuzzing"): libFuzzer over the codec and over the session. Its first
+  10-minute runs gave 2.36 million session inputs with no failure, and one
+  codec finding: DATA's non-finite values. It runs by hand, not in the gate,
+  and it is single-connection, so it says nothing about the next item.
 - **Load and duration.** Single-client, short-session. No soak, no concurrent
   clients, no memory-growth measurement.
 - **Kinds 3 and 4 against the Astrolog client.** This server now serves

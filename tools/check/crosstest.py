@@ -881,7 +881,8 @@ def leg_sidsweep(client, ours, theirs, table, verbose):
     """Every A.11 zodiac token on every A.8 plane, graded per server, on what
     a plane request does rather than on agreement:
     - a token the server's WELCOME does not list must draw ERROR 11 (3.5a);
-    - a listed token's planes 1 and 2 must each MOVE the answer from plane 0.
+    - a listed token's planes 1 and 2 must each MOVE the answer from plane 0,
+      or be refused explicitly (ERROR 11, or errCode 2 on every object);
       A row bit-identical to plane 0 is a plane accepted and ignored, which no
       comparison with another server can see when that server was never asked
       (the Astrolog side's 16 star- and frame-anchored tokens, 2026-09-18).
@@ -913,9 +914,15 @@ def leg_sidsweep(client, ours, theirs, table, verbose):
                         verdict = "agree" if refused else f"finding ({who})"
                         note = "unlisted in WELCOME; 3.5a requires ERROR 11"
                         what = "ERROR 11" if refused else "answered"
-                    elif refused:
+                    elif refused and plane == "date":
                         verdict, what = f"finding ({who})", "ERROR 11"
-                        note = "token listed in WELCOME, so every advertised plane must be served"
+                        note = "token listed in WELCOME, so plane 0 must be served"
+                    elif refused:
+                        # An explicit refusal of one (token, fixed plane) pair is
+                        # the protocol's answer for a zero point the server cannot
+                        # construct; only a silent plane-0 answer is a finding.
+                        verdict, what = "refused", "ERROR 11"
+                        note = "this token on a fixed plane refused outright, not answered silently"
                     elif plane == "date":
                         verdict, what, note = "agree", "answered", "plane 0, the reference"
                     else:
@@ -928,7 +935,11 @@ def leg_sidsweep(client, ours, theirs, table, verbose):
                             if v[0] == v0[0] and v[1] == v0[1]:
                                 same += 1
                             moved.append(sep_arcsec((v[0], v[1]), (v0[0], v0[1])))
-                        if not moved:
+                        errs = {o.err for o in r.objects}
+                        if not moved and errs == {2}:
+                            verdict, what = "refused", "errCode 2"
+                            note = "every object unsupported on this plane: refused, not answered silently"
+                        elif not moved:
                             verdict, what, note = f"finding ({who})", "no rows", "answered without rows"
                         elif same == len(moved):
                             verdict, what = f"finding ({who})", "identical to plane 0"

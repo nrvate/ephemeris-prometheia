@@ -11,7 +11,7 @@ point at it the way it points at Astrolog's own server (`astrolog-ephd`).
   `third_party/ephproto/v4/`. When an Astrolog checkout is named by
   `$PROMETHEIA_ASTROLOG`, the test `server_ephproto_matches_astrolog` fails
   if the copy has drifted, `tests/test_ephproto4.cpp` runs the locked
-  conformance fixtures through the vendored codec (91/91, digest-pinned),
+  conformance fixtures through the vendored codec (99/99, digest-pinned),
   and `tools/check/ephproto4_registries.py` (in `tools/gate.sh`) checks the
   registries against the header by name.
 - **Transport.** Binary WebSocket frames, one protocol message per frame. The
@@ -762,6 +762,54 @@ first live session against the Astrolog project's daemon — the four pairings,
 which anchors adjudicate which disagreements, the tolerance tiers that say in
 advance which differences are defects and which are model choices, and the
 bisection ladder for when a number disagrees.
+
+## Fuzzing
+
+`tools/fuzz.sh [SECONDS]` runs two libFuzzer targets under ASan and UBSan.
+It builds them with clang in `build-fuzz/` and runs each for SECONDS
+(default 60). It is never part of the gate.
+- **`fuzz_frame`**: any bytes into the protocol codec's whole-message parser
+  (`eph::ParseFrame`, the vendored `ephproto.h`).
+  - Besides the sanitizers, the check is the protocol's own: a frame the
+    codec accepts must re-encode to exactly the input. §3.1 makes a
+    receiver reject non-canonical input rather than normalise it.
+- **`fuzz_session`**: a connection's messages into a fresh `Session`, on the
+  synthetic kernel the server tests use, with small limits.
+  - An optional valid HELLO comes first, so the fuzzer starts inside the
+    session.
+  - Every reply must parse as a v4 frame and re-encode to the same bytes,
+    whatever the server was sent.
+
+Corpora start from the protocol's conformance set, read from the Astrolog
+tree (`$PROMETHEIA_ASTROLOG`). They grow in `fuzz-corpus/`, and failures land
+in `fuzz-artifacts/`; both are gitignored. The fuzzers run with address-space
+randomisation off (`setarch -R`). Under this kernel's randomisation, clang
+14's sanitizer runtime spun forever at start-up in 5 of 12 starts.
+
+**What it catches, measured by planting faults and reverting them:**
+- An off-by-one read in the codec's string reader was found within seconds.
+- A two-byte magic value checked at the start of a REQUEST was not found in
+  1.2 million session inputs, with or without value profiling.
+
+Byte-exact magic deep inside a structured message is the known weak spot of
+blind fuzzing. The session target reaches REQUEST handling, and the seeds are
+valid requests, but it should not be read as having explored every value of
+every field.
+
+**First runs, 2026-09-18** (10 minutes per target, after 1-minute runs):
+- **`fuzz_session`:** 2.36 million inputs, 7,444 edges covered, no failure.
+  Our session never crashed, leaked, hung, or sent a frame that failed to
+  parse or re-encode.
+- **`fuzz_frame`:** one finding, in the vendored codec, after 589,000 inputs.
+  `ParseData` accepts any value in DATA: infinities, and NaNs with any bit
+  pattern. §3.1 allows only finite values, plus the canonical quiet NaN
+  where a field says so (a failed row). The fuzzer saw it as a round-trip
+  failure: an f32 signalling NaN `0xFFA00000` parses, and re-encodes quieted
+  as `0xFFE00000`. f64 NaNs survive a round trip bit for bit, so the same
+  missing check there is invisible to this oracle. The spec also names no
+  canonical NaN for f32 delivery; the codec's encoder writes `0x7FC00000`.
+  Reported to the Astrolog side, whose codec it is. This server only sends
+  through that encoder, so it sends nothing non-canonical.
 
 ## Not implemented
 
