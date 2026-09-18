@@ -796,6 +796,21 @@ arithmetic:
 - The plane-2 branch now grades any offset as a finding, since their
   implementation has landed.
 
+### No findings, 2026-09-18 (`docs/crosstest/2026-09-18j.tsv`)
+
+Against Astrolog `qt` at `284b321`, their one-flag fix for record i's
+anchor: agree 1,951, expected-difference 243, unadjudicated 1 (the 1800
+Moon), unanswered 9, **no findings.**
+- Plane 1 is back to ≤ 0.0013″.
+- Plane 2's origin offset closed to −0.005 … +0.003″ for both zodiacs, and
+  the sweep is 288/288 on both sides.
+- Their own gate now reproduces Swiss's anchor-ecliptic answer with their
+  in-house arithmetic (54 comparisons, 0.01″). Without the flag, all 54 fail
+  by Δψ(t0).
+- The record's header marks their binary STALE: it was rebuilt after the
+  daemon started, most likely by their `make check`. The numbers show the
+  fix in effect.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
