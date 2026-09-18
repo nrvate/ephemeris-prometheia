@@ -34,9 +34,12 @@ constexpr const char* kUsage =
     "  --step SECONDS      between rows (default 86400)\n"
     "  --count N           rows (default 1)\n"
     "  --helio | --bary    the observer (default geocentric)\n"
+    "  --center NAIF       observer at a body's centre\n"
     "  --eq                equatorial plane (default ecliptic)\n"
     "  --j2000 | --icrs    the frame (default true of date)\n"
-    "  --no-corrections    geometric positions\n"
+    "  --no-corrections    geometric positions (same as --corrections 0)\n"
+    "  --corrections MASK  the correction bits to ask for, 0..7:\n"
+    "                      1 light time, 2 deflection, 4 aberration\n"
     "  --sid TOKEN         a zodiac (fagan-bradley, lahiri, user)\n"
     "  --sidu T0,AYAN      a user zodiac's anchor (mean ayanamsa at TT epoch)\n"
     "  --topo LON,LAT,ELV  observer site (degrees east, degrees, metres)\n"
@@ -134,6 +137,9 @@ int main(int argc, char** argv) {
             pf.observer = eph::kObsHelio;
         } else if (arg == "--bary") {
             pf.observer = eph::kObsBary;
+        } else if (arg == "--center") {
+            pf.observer = eph::kObsBody;
+            pf.observerBody = std::atoi(value());
         } else if (arg == "--eq") {
             pf.plane = eph::kPlaneEquator;
         } else if (arg == "--j2000") {
@@ -142,6 +148,13 @@ int main(int argc, char** argv) {
             pf.frame = eph::kFrameIcrf;
         } else if (arg == "--no-corrections") {
             pf.corrections = 0;
+        } else if (arg == "--corrections") {
+            const long m = std::strtol(value(), nullptr, 0);
+            if (m < 0 || m > eph::kCorrMask) {
+                std::fprintf(stderr, "--corrections must be 0..%u\n%s", eph::kCorrMask, kUsage);
+                return 1;
+            }
+            pf.corrections = uint8_t(m);
         } else if (arg == "--sid") {
             pf.zodiac = value();
         } else if (arg == "--sidu") {
@@ -268,6 +281,15 @@ int main(int argc, char** argv) {
                 std::printf("# WELCOME %s protocol %u engine \"%s\" dataset %s maxCells %u\n",
                             w.serverName.c_str(), w.protoSession, w.engine.c_str(),
                             w.datasetId.c_str(), w.maxCells);
+                // A.3 0x0004, one line per entry: what the server says it can
+                // honour, for which observers. A checker compares the
+                // corrApplied it reports against this.
+                eph::Capabilities caps;
+                if (eph::ParseCapabilities(w.caps_, &caps, &why) == eph::kOk) {
+                    for (const auto& e : caps.corrMasks) {
+                        std::printf("# corrmask observers %u corrections %u\n", e.first, e.second);
+                    }
+                }
             }
             continue;
         }

@@ -39,7 +39,10 @@ from both sides; no protocol rounds are owed. On their side: phase 4
 **phase 6 remote adapter will be the first live consumer** of our
 DATA/META — the armed check is a truthful `corrApplied` against real
 traffic (their client and our `prometheia-wire-client` can point at
-either daemon); their **phase 7 plugin builds against
+either daemon), and it is now a tool rather than a plan:
+`tools/check/corrapplied.py --host H --port N` runs it against any v4
+server and is green on ours (SERVER.md, "Checking that it is true");
+their **phase 7 plugin builds against
 [C_API.md](C_API.md)**, a cross-repo contract.
 
 2026-09-17, night: their phase-7 review measured our engine moving

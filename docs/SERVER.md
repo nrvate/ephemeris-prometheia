@@ -44,7 +44,9 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
   2461300.5 --count 3` sends HELLO and one REQUEST, and prints each object's
   metadata and one line per row. `--obj` takes a NAIF/SPK-ID, `--name` a
   catalog designation, `--star` a star, `--node N.M` an orbit point;
-  `--helio/--bary/--eq/--j2000/--icrs/--sid/--topo` shape the profile.
+  `--helio/--bary/--center NAIF/--eq/--j2000/--icrs/--sid/--topo` shape the
+  profile, and `--corrections MASK` asks for a chosen subset of the three
+  correction terms (`--no-corrections` is `--corrections 0`).
   `--token`, `--tls`, `--ca`, `--sni` and `--insecure` cover the options
   below; `--segments --target ARCSEC` asks for SEGDATA instead of samples
   (rectangular form; the ayanamsa series rides a `--sid` profile),
@@ -540,6 +542,37 @@ measurements. The short version: corrections on an orbit point are
 interoperable applied in full or not at all. A proper subset is well defined
 only within one implementation, and a client must not compare such an answer
 across servers.
+
+### Checking that it is true
+
+`tools/check/corrapplied.py` points at a running v4 server and asks whether
+its `corrApplied` matches its own behaviour. Being a diagnostic, the field has
+nothing to compare against but the server that sent it, so all three checks
+are internal:
+
+- **independence** — the byte is the same whatever the request's mask asked
+  for. A server that echoes the request into the slot fails here and nowhere
+  else, and echoing is the easy bug: this server did it until the v4 rewrite.
+- **declared** — the byte is a subset of the mask WELCOME advertised for that
+  observer (A.3 0x0004). Two things one server said, disagreeing.
+- **truthful** — asking for one correction alone either moves the position or
+  does not. A clear bit that moves the sky is a false denial. A set bit that
+  moves nothing is correct and reported as a note, because that is what a term
+  contributing nothing looks like: aberration at the barycentre measures
+  ~1e-11″ here, and the model did run.
+
+Only a clear movement (>1e-3″) accuses; anything smaller is a note. It is not
+in the gate — it needs a live daemon, and the gate stays hermetic and fast —
+so it is run against a server on purpose:
+
+    ./build/prometheiad --ephemeris ephe/linux_p1550p2650.440 &
+    python3 tools/check/corrapplied.py            # -v to show the notes
+
+It is written to run against any v4 server, not only this one, and it never
+compares two servers against each other — §3.5a forbids gating on this field,
+and the interesting failures are self-inconsistencies anyway. The wire client
+grew `--corrections MASK` and `--center NAIF` for it, which are also the two
+flags you want when probing a correction question by hand.
 
 ## Not implemented
 
