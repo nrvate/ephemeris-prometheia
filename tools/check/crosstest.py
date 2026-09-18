@@ -319,6 +319,12 @@ def adjudicate_same(table):
     for r in table.rows:
         if r["leg"] not in ("same", "same-helio", "apparent") or r["verdict"] != "finding":
             continue
+        # An anchor adjudicates only a row from the same observer: the
+        # geocentric Moon agreeing says nothing about a topocentric or a
+        # barycentric gap, and borrowing it would wave real findings through.
+        if r["leg"] == "apparent" and r["observer"] != "geo":
+            r["note"] += "; no anchor from this observer"
+            continue
         pool = anchored_helio if r["leg"] == "same-helio" else anchored
         h = pool.get((r["epoch_tt"], r["object"]))
         if h is None or h["verdict"] == "unanswered":
