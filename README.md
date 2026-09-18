@@ -15,6 +15,10 @@ a ~40 MB file with no time axis at all.
 application). The ephemeris *data* it ingests is US-government public domain
 (JPL SBDB / Horizons / DE files).
 
+Release history, with the measured accuracy and performance figures for each
+version and a plain statement of what is *not* in it:
+[CHANGELOG.md](CHANGELOG.md).
+
 ## Status
 
 All six milestones complete, plus protocol version 4 (2026-09-17):

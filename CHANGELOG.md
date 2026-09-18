@@ -1,0 +1,149 @@
+# Changelog
+
+Notable changes to Ephemeris Prometheia. Accuracy and performance figures in
+this file are measured, not estimated; where a number is an estimate it says
+so. Each entry points at the document carrying the method.
+
+**Versioning.** `0.x` releases may change the C ABI. The C interface described
+in [docs/C_API.md](docs/C_API.md) is a cross-repo contract — the Astrolog
+project's ephemeris plugin builds against it — so any ABI change is
+communicated to known consumers *before* it lands, never shipped unannounced.
+That policy is what `0.x` means here: the interface is deliberate and
+documented, not that it is frozen.
+
+## 0.1.0 — 2026-09-18
+
+First release. A cleanroom successor to the Swiss Ephemeris, written without
+reference to its source, under GPL-2.0-or-later. The work it covers landed
+over 2026-09-16 and 2026-09-17, in 97 commits.
+
+### Ephemeris and mechanics
+
+- **JPL DE readers** for the binary format, self-describing across DE200
+  through DE440+, either byte order, including the nutation, libration and
+  TT−TDB columns. **NAIF SPK readers** (`.bsp`, type 2 and 3 segments, with
+  segment chaining). [docs/DE.md](docs/DE.md), [docs/SPK.md](docs/SPK.md).
+- **Mechanics core**: a Kepler engine (elliptic and hyperbolic, closed-form
+  propagation used as the test oracle), adaptive DP5(4), and an IAS15-class
+  Radau-15 collocation integrator whose constants are derived from the Jacobi
+  recurrence rather than transcribed. Cubic-Hermite perturber trajectory
+  tables, heliocentric N-body forces, a windowed memo cache.
+- **EPM1 catalog container**: indexed, zstd-chunked, CRC-checked, no time axis.
+  87 bytes per body for the real 1.57M-body catalog — 136.7 MB against the
+  48 GB the equivalent `.se1` files occupy. [docs/FORMAT.md](docs/FORMAT.md).
+- **Ingest pipeline** for the JPL SBDB Query API: resumable, strictly
+  sequential, rate-limited, with freshness machinery (identity sweeps,
+  `orbit_id` delta overlays, hot-subset sweeps).
+  [docs/INGESTION.md](docs/INGESTION.md).
+
+### Time and frames
+
+- Exact proleptic-Gregorian calendar ↔ JD. UTC ↔ TAI ↔ TT with the USNO
+  leap-second table, including correct `23:59:60` labelling in both
+  directions. TT ↔ TDB via the published truncated series (~10 µs class).
+- ΔT (TT − UT1) is pluggable and defaults to observed USNO values (1657 to
+  the latest published month), with the Stephenson–Morrison–Hohenkerk eclipse
+  reconstruction before 1657 and a tidal trend after. Continuous everywhere.
+  **A ΔT model takes no state from the ephemeris** and is a pure function of
+  the instant — deliberately, and [docs/TIME.md](docs/TIME.md) records why.
+- IAU 2006 precession with the complete IAU 2000A nutation series (1365 terms,
+  parsed from the public-domain USNO Circular 179), ICRF → equatorial and
+  ecliptic of date, ERA/GMST/GAST, a WGS84 topocentric helper.
+  [docs/FRAMES.md](docs/FRAMES.md).
+
+### Engine, stars, orbit points
+
+- `prometheia::Engine::calc(body, time, options)` over DE, SPK and catalog
+  bodies, with apparent-place corrections (light time, gravitational
+  deflection, annual aberration) applied as the caller asks, for geocentric,
+  topocentric, heliocentric, barycentric and planet-centred observers.
+- Fixed stars from a naked-eye BSC + Hipparcos set with an alias table, SIMBAD
+  radial velocities cross-checked against the BSC.
+  [docs/STARS.md](docs/STARS.md).
+- **Nodes and apsides**, mean and osculating, as first-class computed points.
+  Corrections apply to an orbit point exactly as to a body. The conventions
+  and the measured magnitudes — including why a distant orbit's node moves
+  21″ from the observer's velocity and ~0″ from light time — are in
+  [docs/ORBIT-POINTS.md](docs/ORBIT-POINTS.md).
+- Sidereal zodiacs (ayanamshas), on-demand covariances and position
+  uncertainties.
+
+### Server
+
+- `prometheiad`, a WebSocket daemon speaking **ephemeris protocol version 4**,
+  co-designed with the Astrolog project and locked from both sides: NAIF body
+  IDs, profiles, instant lists, batched LOOKUP, per-object metadata with a
+  truthful `corrApplied`, and SEGDATA — Chebyshev segments fitted on a
+  server-owned 32-day lattice, with the ayanamsa carried as its own scalar
+  series. Block-wise compute (~2 ms slices) with CANCEL and priority, cell
+  caches shared across requests, TLS, token budgets, rate limits, and
+  `/healthz`, `/readyz`, `/metrics` on the same port.
+  [docs/SERVER.md](docs/SERVER.md), [docs/SEGMENTS.md](docs/SEGMENTS.md).
+- The protocol's conformance fixtures are vendored with checksums and gated
+  in-tree: 91/91, set digest pinned.
+
+### Interfaces
+
+- A C ABI (29 entry points, opaque handles) and `ephem`, a C99 CLI over it.
+  [docs/C_API.md](docs/C_API.md), [docs/EPHEM.md](docs/EPHEM.md).
+- Tools: `prometheia-fetch` (Python), `prometheia-convert`,
+  `prometheia-spk-trim`, `prometheia-info`, `prometheia-bench`,
+  `prometheia-wire-client`.
+- `pkg-config --cflags --libs prometheia` links both a C and a C++ consumer,
+  from an install prefix or from the build tree; both are verified.
+- Build requirements are C++20, CMake, zstd and a threads implementation.
+  OpenSSL is optional and enables TLS in the daemon. `doctest`, `uWebSockets`
+  and `uSockets` are vendored.
+
+### Accuracy, measured
+
+Method and full tables in [docs/VALIDATION.md](docs/VALIDATION.md) and
+[docs/ENGINE.md](docs/ENGINE.md).
+
+| quantity | measured |
+|---|---|
+| DE440 against JPL's `testpo.440` (13,201 points) | 1.4e-14 AU |
+| `de440s.bsp` against the DE440 binary | 4 cm |
+| Sun and planets, astrometric, vs JPL Horizons (geo / topo) | 6 µas / 11 µas |
+| Moon, astrometric, geocentric (1900–2100) | ≤ 0.006″ |
+| Apparent place of date, published frame offsets removed | ~1 mas |
+| Precession/nutation, differential vs `swetest` | 0.0005″ |
+| Small bodies, ±10 yr from element epoch, with SB441-N16 | 0.0053″ |
+| Light-time range, Sun and planets | 1.1 m |
+
+### Performance, measured
+
+- **1.9 µs** per position without rates, **4.0 µs** with rates, and **2.95 µs**
+  for the server's access pattern (every body at one instant before the next).
+  These were 53 and 55 µs before the optimisation work in this release.
+- A 90-day segment request for heliocentric Jupiter at a 0.1″ target fits in
+  4 segments with a worst residual of 0.031″; a repeat is served wholly from
+  the cell cache.
+
+### Not included
+
+- **Hypothetical bodies and polynomial elements** (protocol kinds 3 and 4):
+  not served, not advertised. This is a settled end state with reasoning
+  recorded in [docs/SERVER.md](docs/SERVER.md), not a gap awaiting work.
+- **zstd wire payloads** and **`deadlineMs` as a strategy switch**: the field
+  is parsed and advisory; no strategy switch is implemented, and the document
+  says so.
+- **Vondrák 2011 long-term precession**: unstarted by choice. IAU 2006
+  degrades far from J2000, which matters only for DE441's ±13k-year span.
+- **Fuzzing of the wire parser.** The protocol reader is exercised by valid
+  fixtures and five hand-written malformed frames; it has never been fed
+  systematically hostile input. Stated here because a network server's parser
+  is the part a reader should be told about.
+- **Soak, load and concurrency testing.** Single-client, short-session only.
+
+### Data and licensing
+
+GPL-2.0-or-later. Sources are open with no strings attached; attribution-only
+is acceptable and no CC BY-SA material is used anywhere. Data that is not
+committed is reproducible from a committed `tools/` script with checksums.
+Catalogs are published as tagged release assets rather than repo-tree files,
+so a downstream can pin a tag and reproduce any historical answer.
+
+Vendored third-party code: `doctest`, `uWebSockets`/`uSockets`, and the
+Astrolog project's `ephproto.h` protocol header with its registries, each with
+checksums recorded in `third_party/README.md`.
