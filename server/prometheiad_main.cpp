@@ -50,7 +50,10 @@ constexpr const char* kUsage =
     "  --tls-key FILE        ... and key; SIGHUP reloads both\n"
     "  --drain-seconds N     on SIGTERM/SIGINT stop accepting and give answers in\n"
     "                        flight N s (default 10); a second signal exits at once\n"
-    "  --verbose             log connections\n"
+    "  --log-level L         quiet, info (default) or debug: one line per\n"
+    "                        connection, HELLO, request, error and close,\n"
+    "                        never request instants, sites or tokens\n"
+    "  --verbose             the same as --log-level debug\n"
     "GET /healthz, /readyz and /metrics are served on the same port.\n";
 
 bool parse_uint(const char* s, unsigned long& out) {
@@ -65,6 +68,7 @@ int main(int argc, char** argv) {
     std::string ephemeris, perturbers, tokens_path;
     std::vector<std::string> catalogs, hypothetical_files;
     WsOptions options;
+    options.log_level = LogLevel::Info;
     options.threads = std::max(1u, std::thread::hardware_concurrency());
     unsigned drain_seconds = 10;
     for (int i = 1; i < argc; ++i) {
@@ -125,7 +129,14 @@ int main(int argc, char** argv) {
         } else if (arg == "--drain-seconds") {
             drain_seconds = unsigned(number(0, 3600));
         } else if (arg == "--verbose") {
-            options.verbose = true;
+            options.log_level = LogLevel::Debug;
+        } else if (arg == "--log-level") {
+            const auto level = parse_log_level(value());
+            if (!level) {
+                std::fprintf(stderr, "prometheiad: bad value for --log-level\n%s", kUsage);
+                return 2;
+            }
+            options.log_level = *level;
         } else if (arg == "--help" || arg == "-h") {
             std::fputs(kUsage, stdout);
             return 0;

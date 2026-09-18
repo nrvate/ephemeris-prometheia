@@ -106,6 +106,7 @@ struct WsServer::Impl {
     EngineFactory make_engine;
     std::unique_ptr<Limits> limits;
     bool tls = false;
+    Log log{LogLevel::Quiet}; // set from options in the constructor
 
     // One event loop. The uWS objects are touched only on the loop's thread
     // (through Loop::defer from elsewhere); `loop` is non-null, under `mu`,
@@ -125,6 +126,7 @@ struct WsServer::Impl {
         // any work remains, so an incoming CANCEL is read between slices
         // (3.4) instead of after a whole-request callback.
         bool pump_scheduled = false;
+        uint64_t next_conn = 0; // connection ids in log lines: "<loop>.<n>"
     };
     std::vector<std::unique_ptr<LoopState>> loops;
     std::vector<std::thread> threads;
@@ -244,6 +246,7 @@ struct WsServer::Impl {
             std::string addr(res->getRemoteAddressAsText());
             if (const char* why = limits->admit(addr)) {
                 ++ls.metrics.refused_connections;
+                log.write(LogLevel::Info, "refused addr=%s \"%s\"", log_addr(addr).c_str(), why);
                 res->writeStatus("503 Service Unavailable")
                     ->writeHeader("Content-Type", "text/plain")
                     ->end(std::string(why) + "\n");
@@ -258,14 +261,14 @@ struct WsServer::Impl {
         };
         behavior.open = [this, &ls, &ctx](Ws<SSL>* ws) {
             Conn* c = ws->getUserData();
-            c->session = std::make_unique<Session>(ctx, c->addr);
+            const std::string id = std::to_string(ls.index) + "." + std::to_string(ls.next_conn++);
+            c->session = std::make_unique<Session>(ctx, c->addr, id);
             c->opened = Clock::now();
             ls.sockets.insert(ws);
             ++ls.metrics.connections_open;
             ++ls.metrics.connections_total;
-            if (options.verbose) {
-                std::fprintf(stderr, "prometheiad: loop %zu open %s\n", ls.index, c->addr.c_str());
-            }
+            log.write(LogLevel::Info, "c=%s open addr=%s%s", id.c_str(), log_addr(c->addr).c_str(),
+                      SSL ? " tls" : "");
         };
         behavior.message = [&ls](Ws<SSL>* ws, std::string_view message, uWS::OpCode op) {
             Conn* c = ws->getUserData();
@@ -294,7 +297,14 @@ struct WsServer::Impl {
                 schedule_pump<SSL>(ls);
             }
         };
-        behavior.close = [&ls](Ws<SSL>* ws, int, std::string_view) {
+        behavior.close = [this, &ls](Ws<SSL>* ws, int code, std::string_view) {
+            const Conn* c = ws->getUserData();
+            if (c->session) {
+                const double ms =
+                    std::chrono::duration<double, std::milli>(Clock::now() - c->opened).count();
+                log.write(LogLevel::Info, "c=%s close code=%d requests=%u ms=%.0f",
+                          c->session->conn().c_str(), code, c->session->requests_seen(), ms);
+            }
             ls.sockets.erase(ws);
             --ls.metrics.connections_open;
         };
@@ -320,6 +330,9 @@ struct WsServer::Impl {
         }
         for (Ws<SSL>* ws : late) {
             ++ls.metrics.hello_timeouts;
+            ls.impl->log.write(LogLevel::Info, "c=%s no HELLO in %u ms, closing",
+                               ws->getUserData()->session->conn().c_str(),
+                               ls.impl->options.hello_timeout_ms);
             ws->end(1008, "no HELLO");
         }
     }
@@ -389,7 +402,7 @@ struct WsServer::Impl {
             report(ls, nullptr, -1, "engine: " + engine.error().message);
             return;
         }
-        LoopContext ctx(std::move(engine).value(), options.config, limits.get(), &ls.metrics);
+        LoopContext ctx(std::move(engine).value(), options.config, limits.get(), &ls.metrics, &log);
         std::unique_ptr<App<SSL>> app;
         if (SSL) {
             uWS::SocketContextOptions o;
@@ -523,6 +536,7 @@ struct WsServer::Impl {
 
 WsServer::WsServer(WsOptions options, EngineFactory make_engine) : impl_(std::make_unique<Impl>()) {
     impl_->options = std::move(options);
+    impl_->log = Log(impl_->options.log_level);
     impl_->make_engine = std::move(make_engine);
     LimitsConfig lc = impl_->options.limits;
     lc.burst_cells = impl_->options.config.max_cells;

@@ -126,23 +126,17 @@ portable ones for planetary points).
 ## Queued (maintainer request, 2026-09-18)
 
 - **Logging, everywhere, for traceability.** Review what each component
-  logs and make a request traceable end to end. Known gap: `prometheiad`
-  logs nothing per connection or request. On 2026-09-18 whether Astrolog
-  had connected at all could only be answered with `ss`, not from the
-  daemon. Scope to cover:
-  - `prometheiad`: connection open and close (peer address, TLS or not,
-    token id, never the token), each request (id, message type, profile
-    and object counts, representation, outcome or ERROR code, per-object
-    error codes, rows, duration, cache hit), CANCEL, and shutdown. Levels,
-    and a flag or environment variable to raise them.
-  - The wire client, `crosstest.py`, `corrapplied.py`, the fetch tools and
-    `ephem`: which server and dataset answered, and what was asked, so a
-    run can be matched to daemon log lines. A shared request or trace id
-    would join the two ends.
-  - Privacy: requests carry birth dates, times and places. By default log
-    counts, codes and timings, not instants or sites. The same rule as
-    §3.8's "errText never carries request contents", written down for
-    logs too.
+  logs and make a request traceable end to end.
+  - Done 2026-09-18, `prometheiad`: SERVER.md "Logging". A `c=<loop>.<n>`
+    connection id and `req=<id>` on every line; open, HELLO, accepted with
+    objects by kind, done with per-object codes and timing, ERRORs,
+    LOOKUPs and close. Levels via `--log-level`. Instants, sites, names
+    and tokens are never logged, and a test holds that. Before this,
+    `--verbose` logged connection opens and nothing else.
+  - Remaining: the wire client, `crosstest.py`, `corrapplied.py`, the fetch
+    tools and `ephem` should say which server and dataset answered and what
+    was asked, so a run can be matched to daemon lines. A client-side
+    request id that the daemon's `req=` matches would join the two ends.
 
 ## Parked (maintainer go-ahead required before starting)
 

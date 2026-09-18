@@ -5,6 +5,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -584,10 +585,10 @@ void ResultCache::put(const std::string& key, std::shared_ptr<const Answer> answ
 // ---- LoopContext -----------------------------------------------------------
 
 LoopContext::LoopContext(Engine engine, const ServerConfig& config, Limits* limits,
-                         Metrics* metrics)
+                         Metrics* metrics, const Log* log)
     : engine_(std::move(engine)), config_(config), cache_(config.cache_bytes),
       seg_cache_(config.seg_cache_bytes), ayan_cache_(config.seg_cache_bytes), limits_(limits),
-      metrics_(metrics ? metrics : &own_metrics_) {}
+      metrics_(metrics ? metrics : &own_metrics_), log_(log) {}
 
 std::shared_ptr<const Answer> LoopContext::answer(const eph::Request& req,
                                                   std::string_view question) {
@@ -1129,8 +1130,56 @@ void Session::send(uint16_t type, uint32_t request_id, const std::vector<uint8_t
     control_.back().insert(control_.back().end(), payload.begin(), payload.end());
 }
 
+void Session::note(LogLevel level, const char* fmt, ...) const {
+    const Log* log = ctx_.log();
+    if (!log || !log->enabled(level)) {
+        return;
+    }
+    char msg[768];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    log->write(level, "c=%s %s", conn_.c_str(), msg);
+}
+
+// Counts and codes only: what was asked stays out of the log (log.hpp).
+void Session::note_done(const Stream& s) const {
+    const Log* log = ctx_.log();
+    if (!log || !log->enabled(LogLevel::Info)) {
+        return;
+    }
+    const std::vector<eph::Meta>& meta = s.segments ? s.seg_answer->meta : s.answer->meta;
+    // Per-object error codes, as code:count, in code order.
+    uint32_t by_code[16] = {};
+    for (const eph::Meta& m : meta) {
+        ++by_code[std::min<uint32_t>(m.errCode, 15)];
+    }
+    std::string errs;
+    for (uint32_t c = 1; c < 16; ++c) {
+        if (by_code[c]) {
+            errs +=
+                (errs.empty() ? "" : ",") + std::to_string(c) + ":" + std::to_string(by_code[c]);
+        }
+    }
+    const double ms = std::chrono::duration<double, std::milli>(Clock::now() - s.accepted).count();
+    if (s.segments) {
+        note(LogLevel::Info, "req=%u done segments objs=%u chunks=%u objerr=%s ms=%.1f",
+             s.request_id, s.seg_answer->n_obj, s.chunk_index, errs.empty() ? "-" : errs.c_str(),
+             ms);
+    } else {
+        note(LogLevel::Info,
+             "req=%u done rows objs=%u rows=%u chunks=%u objerr=%s cache=%s ms=%.1f", s.request_id,
+             s.answer->n_obj, s.answer->n_time, s.chunk_index, errs.empty() ? "-" : errs.c_str(),
+             s.cache_hit ? "hit" : "miss", ms);
+    }
+}
+
 void Session::send_error(uint32_t request_id, eph::ErrCode code, uint16_t flags, uint32_t retry_ms,
                          const std::string& text) {
+    // The text is this server's own and carries no request contents (3.8).
+    note(LogLevel::Info, "req=%u error=%u%s \"%s\"", request_id, unsigned(code),
+         (flags & eph::kErrFlagClosing) ? " closing" : "", log_safe(text, 240).c_str());
     eph::Error e;
     e.code = code;
     e.flags = flags;
@@ -1221,12 +1270,19 @@ bool Session::on_message(std::string_view message, bool binary) {
             }
         }
         ++ctx_.metrics().hellos;
+        note(LogLevel::Info, "hello v=%u client=\"%s\" token=%s", unsigned(version_),
+             log_safe(h.clientName).c_str(),
+             h.token.empty()                                  ? "none"
+             : !ctx_.limits() || !ctx_.limits()->has_tokens() ? "ignored"
+             : budget_key_.rfind("t:", 0) == 0                ? "known"
+                                                              : "unknown");
         std::vector<uint8_t> welcome;
         build_welcome(welcome, ctx_.config(), version_);
         send(eph::kMsgWelcome, 0, welcome);
         return true;
     }
     case eph::kMsgPing:
+        note(LogLevel::Debug, "ping");
         send(eph::kMsgPong, env.requestId, {});
         return true;
     case eph::kMsgPong:
@@ -1266,6 +1322,7 @@ bool Session::on_message(std::string_view message, bool binary) {
 }
 
 bool Session::on_request(const eph::Envelope& env, const uint8_t* payload, size_t len) {
+    ++requests_seen_;
     eph::Request q;
     std::string why;
     bool ignored_ext = false;
@@ -1350,6 +1407,25 @@ bool Session::on_request(const eph::Envelope& env, const uint8_t* payload, size_
         }
     }
 
+    const size_t q_objs = q.objs.size(), q_profiles = q.profiles.size();
+    const uint32_t q_rows = q.nTime;
+    // Objects by A.12 kind: which kinds a client asks the server for, and so
+    // which it computes itself, is the question a log is read for.
+    std::string q_kinds;
+    {
+        static constexpr const char* kKindName[] = {"body", "point",    "star",
+                                                    "hyp",  "elements", "desig"};
+        size_t by_kind[6] = {};
+        for (const eph::Object& o : q.objs) {
+            ++by_kind[std::min<size_t>(o.kind, 5)];
+        }
+        for (size_t k = 0; k < 6; ++k) {
+            if (by_kind[k]) {
+                q_kinds += (q_kinds.empty() ? "" : ",") + std::string(kKindName[k]) + ":" +
+                           std::to_string(by_kind[k]);
+            }
+        }
+    }
     Stream s;
     s.request_id = env.requestId;
     s.priority = q.priority;
@@ -1379,11 +1455,17 @@ bool Session::on_request(const eph::Envelope& env, const uint8_t* payload, size_
         s.fitting = std::make_unique<SegmentsComputer>(ctx_, std::move(q), params);
     }
     ++ctx_.metrics().requests;
+    s.cache_hit = s.answer != nullptr;
+    // Counts only: never the instants, the profiles' sites or the objects.
+    note(LogLevel::Info, "req=%u accepted %s objs=%zu (%s) rows=%u profiles=%zu prio=%u%s",
+         s.request_id, s.segments ? "segments" : "rows", q_objs, q_kinds.c_str(), q_rows,
+         q_profiles, unsigned(s.priority), s.cache_hit ? " cache=hit" : "");
     streams_.push_back(std::move(s));
     return true;
 }
 
 bool Session::on_lookup(const eph::Envelope& env, const uint8_t* payload, size_t len) {
+    ++requests_seen_;
     eph::Lookup l;
     std::string why;
     if (eph::ParseLookup(payload, len, &l, &why) != eph::kOk) {
@@ -1452,6 +1534,13 @@ bool Session::on_lookup(const eph::Envelope& env, const uint8_t* payload, size_t
         lr.queries.push_back(std::move(ms));
     }
     lr.flags = truncated ? 1 : 0;
+    // Counts only: a query can be a person's name for a body (log.hpp).
+    size_t matches = 0;
+    for (const auto& q : lr.queries) {
+        matches += q.size();
+    }
+    note(LogLevel::Info, "lookup=%u queries=%zu matches=%zu%s", env.requestId, l.queries.size(),
+         matches, truncated ? " truncated" : "");
     std::vector<uint8_t> out;
     eph::EncodeLookupResult(&out, lr);
     send(eph::kMsgLookupResult, env.requestId, out);
@@ -1470,6 +1559,9 @@ void Session::on_cancel(uint32_t request_id) {
         // cache is only written by a compute that ran to its last row.
         const bool fully_sent = it->sent_all();
         streams_.erase(it);
+        if (fully_sent) {
+            note(LogLevel::Debug, "req=%u cancel after the answer was sent", request_id);
+        }
         if (!fully_sent) {
             ++ctx_.metrics().cancels;
             send_error(request_id, eph::kErrCancelled, 0, 0, "cancelled");
@@ -1588,6 +1680,7 @@ bool Session::next(std::vector<uint8_t>& out) {
         s.next_row += rows;
         ++s.chunk_index;
         if (s.next_row >= a.n_time) {
+            note_done(s);
             streams_.erase(std::find_if(streams_.begin(), streams_.end(),
                                         [&](const Stream& x) { return &x == &s; }));
         }
@@ -1646,6 +1739,7 @@ bool Session::next(std::vector<uint8_t>& out) {
     s.next_obj += count;
     ++s.chunk_index;
     if (s.next_obj >= a.n_obj) {
+        note_done(s);
         streams_.erase(std::find_if(streams_.begin(), streams_.end(),
                                     [&](const Stream& x) { return &x == &s; }));
     }

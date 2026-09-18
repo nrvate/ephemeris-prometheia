@@ -100,7 +100,7 @@ prometheia_test(horizons tests/test_horizons.cpp)
 # prometheiad's protocol core (docs/SERVER.md): Astrolog's ephemeris protocol
 # (third_party/ephproto, pinned) over the engine, with no sockets in it.
 add_library(prometheia_server STATIC server/session.cpp server/dataset.cpp server/limits.cpp
-  server/metrics.cpp server/objects.cpp server/segcache.cpp)
+  server/log.cpp server/metrics.cpp server/objects.cpp server/segcache.cpp)
 target_include_directories(prometheia_server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/server)
 target_include_directories(prometheia_server SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ephproto/v4)
 target_link_libraries(prometheia_server PUBLIC prometheia)

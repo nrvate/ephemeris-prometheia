@@ -37,6 +37,7 @@
 
 #include "ephproto.h"
 #include "limits.hpp"
+#include "log.hpp"
 #include "metrics.hpp"
 #include "prometheia/engine.hpp"
 #include "segcache.hpp"
@@ -143,8 +144,9 @@ public:
     // `limits` is shared by every loop and may be null (no tokens, no budget).
     // `metrics` may live outside the context so other threads can read it
     // for its whole life; null keeps the context's own.
+    // `log` may be null: nothing is logged.
     LoopContext(Engine engine, const ServerConfig& config, Limits* limits = nullptr,
-                Metrics* metrics = nullptr);
+                Metrics* metrics = nullptr, const Log* log = nullptr);
 
     // A request's answer from the cache, or computed and cached, in one call.
     // The session uses this only on its synchronous paths; a REQUEST it will
@@ -164,6 +166,7 @@ public:
     ScalarSegmentCache& ayan_cache() { return ayan_cache_; }
     Limits* limits() const { return limits_; }
     Metrics& metrics() { return *metrics_; }
+    const Log* log() const { return log_; }
 
 private:
     Engine engine_;
@@ -174,13 +177,15 @@ private:
     Limits* limits_;
     Metrics own_metrics_;
     Metrics* metrics_;
+    const Log* log_;
 };
 
 class Session {
 public:
-    // `addr` is the peer's address, the default compute-budget key.
-    explicit Session(LoopContext& ctx, std::string addr = {})
-        : ctx_(ctx), budget_key_("a:" + addr) {}
+    // `addr` is the peer's address, the default compute-budget key; `conn`
+    // the connection's id in log lines ("<loop>.<n>").
+    explicit Session(LoopContext& ctx, std::string addr = {}, std::string conn = {})
+        : ctx_(ctx), budget_key_("a:" + addr), conn_(conn.empty() ? "-" : std::move(conn)) {}
     // Out of line: a Stream holds unique_ptr to computers that are only
     // defined in session.cpp.
     ~Session();
@@ -210,6 +215,9 @@ public:
     // The session's protocol version: fixed by the first HELLO, 0 before.
     uint8_t version() const { return version_; }
     size_t queued_answers() const { return streams_.size(); }
+    // REQUESTs and LOOKUPs this connection sent, for its close line.
+    uint32_t requests_seen() const { return requests_seen_; }
+    const std::string& conn() const { return conn_; }
 
 private:
     struct Stream {
@@ -231,6 +239,9 @@ private:
         std::unique_ptr<SamplesComputer> computing;
         std::unique_ptr<SegmentsComputer> fitting;
         std::string cache_key; // the samples answer is cached under this whole
+        // For the log's "done" line.
+        std::chrono::steady_clock::time_point accepted = std::chrono::steady_clock::now();
+        bool cache_hit = false;
 
         // Out of line, like ~Session: the computers are only defined in
         // session.cpp.
@@ -252,6 +263,10 @@ private:
     };
 
     void send(uint16_t type, uint32_t request_id, const std::vector<uint8_t>& payload);
+    // One log line prefixed with this connection's id, when the level allows.
+    void note(LogLevel level, const char* fmt, ...) const __attribute__((format(printf, 3, 4)));
+    // The "done" line for a stream whose last chunk just went out.
+    void note_done(const Stream& s) const;
     void send_error(uint32_t request_id, eph::ErrCode code, uint16_t flags, uint32_t retry_ms,
                     const std::string& text);
     bool on_request(const eph::Envelope& env, const uint8_t* payload, size_t len);
@@ -264,6 +279,8 @@ private:
 
     LoopContext& ctx_;
     std::string budget_key_; // "a:" address, or "t:" token once HELLO gave a known one
+    std::string conn_;
+    uint32_t requests_seen_ = 0;
     uint8_t version_ = 0;
     bool ignored_ext_ = false; // a non-critical extension this server ignored
     std::deque<std::vector<uint8_t>> control_;

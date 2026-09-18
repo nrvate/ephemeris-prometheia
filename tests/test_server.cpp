@@ -95,7 +95,7 @@ struct Fixture {
 
     // `element_file`: an optional element file of named hypothetical bodies,
     // added before the config is taken, as prometheiad does.
-    explicit Fixture(const std::string& element_file = {}) {
+    explicit Fixture(const std::string& element_file = {}, const Log* log = nullptr) {
         Engine engine = synth::open_synthetic(tf);
         auto catalog =
             engine.add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm");
@@ -109,8 +109,8 @@ struct Fixture {
         config.dataset_id = "synthetic/test#00000000";
         config.ephemeris_name = "synthetic.bsp";
         config.catalog_names = {"sample-100.epm"};
-        ctx = std::make_unique<LoopContext>(std::move(engine), config);
-        session = std::make_unique<Session>(*ctx);
+        ctx = std::make_unique<LoopContext>(std::move(engine), config, nullptr, nullptr, log);
+        session = std::make_unique<Session>(*ctx, "10.0.0.9", "0.7");
     }
     eph::Welcome welcome() {
         CHECK(session->on_message(hello(), true));
@@ -1694,4 +1694,70 @@ TEST_CASE("server_refuses_a_correction_mask_it_does_not_advertise") {
         REQUIRE(d.meta.size() == 1);
         CHECK(d.meta[0].errCode == eph::kOErrNone);
     }
+}
+
+// The log traces a request from HELLO to its last chunk, and never carries
+// what was asked: no instant, no site (server/log.hpp).
+TEST_CASE("server_log_traces_a_request_without_its_contents") {
+    const auto read_all = [](std::FILE* f) {
+        std::fflush(f);
+        std::rewind(f);
+        std::string text;
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+            text.append(buf, n);
+        }
+        return text;
+    };
+    std::FILE* f = std::tmpfile();
+    REQUIRE(f);
+    const Log log(LogLevel::Info, f);
+    Fixture fx({}, &log);
+    fx.welcome();
+
+    eph::Request req = base_request(2451545.123456, 3);
+    req.profiles[0].observer = eph::kObsTopo;
+    req.profiles[0].siteLonEastDeg = 8.5501;
+    req.profiles[0].siteLatDeg = 47.3701;
+    req.profiles[0].siteHeightM = 432.1;
+    req.objs = {body_obj(10), body_obj(301)};
+    CHECK(fx.session->on_message(request(req, 5), true));
+    drain(*fx.session);
+
+    eph::Request helio = base_request(2451545.0, 1);
+    helio.profiles[0].observer = eph::kObsHelio;
+    helio.profiles[0].corrections = eph::kCorrMask; // deflection at the Sun: ERROR 11
+    helio.objs = {body_obj(4)};
+    CHECK(fx.session->on_message(request(helio, 6), true));
+    drain(*fx.session);
+
+    const std::string text = read_all(f);
+    INFO(text);
+    CHECK(text.find("c=0.7 hello v=4") != std::string::npos);
+    CHECK(text.find("c=0.7 req=5 accepted rows objs=2 (body:2) rows=3 profiles=1") !=
+          std::string::npos);
+    CHECK(text.find("c=0.7 req=5 done rows objs=2 rows=3 chunks=1") != std::string::npos);
+    CHECK(text.find("c=0.7 req=6 error=11") != std::string::npos);
+    for (const char* secret : {"2451545", "8.55", "47.37", "432"}) {
+        CHECK_MESSAGE(text.find(secret) == std::string::npos, secret);
+    }
+    std::fclose(f);
+
+    std::FILE* q = std::tmpfile();
+    REQUIRE(q);
+    const Log quiet(LogLevel::Quiet, q);
+    Fixture fq({}, &quiet);
+    fq.welcome();
+    CHECK(fq.session->on_message(request(req, 5), true));
+    drain(*fq.session);
+    CHECK(read_all(q).empty());
+    std::fclose(q);
+
+    CHECK(log_addr("0000:0000:0000:0000:0000:ffff:7f00:0001") == "127.0.0.1");
+    CHECK(log_addr("2001:0db8:0000:0000:0000:0000:0000:0001") ==
+          "2001:0db8:0000:0000:0000:0000:0000:0001");
+    CHECK(log_safe("a\"b\\c\n") == "a?b?c?");
+    CHECK(parse_log_level("debug") == LogLevel::Debug);
+    CHECK_FALSE(parse_log_level("loud"));
 }

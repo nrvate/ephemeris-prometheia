@@ -25,6 +25,10 @@ documented, not that it is frozen.
 - The cross-test gained a topocentric anchor, a barycentric anchor and
   refusal checks, and sends only masks both servers list. Deliberate
   differences are recorded as expected-difference with their reason.
+- `prometheiad` logs one line per connection, HELLO, request, ERROR and
+  close, each with a connection id and the request id, at `--log-level
+  quiet|info|debug` (default `info`). It never logs instants, sites, names
+  or tokens (SERVER.md, "Logging").
 - Protocol v4 per-kind correction masks (WELCOME tag 0x0014, ephv4
   `eed6429`, set `472b21a`): vendored and verdicted 99/99, with the
   handshake-dependent judgements 7/7. `prometheia-wire-client` prints

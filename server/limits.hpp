@@ -47,6 +47,8 @@ public:
 
     bool token_known(const std::string& token) const;
     bool require_token() const { return config_.require_token; }
+    // Whether any token is configured at all (a HELLO's token then means something).
+    bool has_tokens() const { return !tokens_.empty(); }
     const LimitsConfig& config() const { return config_; }
 
     // Charges `cells` to the budget `key`. Returns 0 when charged, else the

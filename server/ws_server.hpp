@@ -31,7 +31,9 @@ struct WsOptions {
     std::string bind; // empty: every interface
     int port = 47190; // 0: a free port, see WsServer::port()
     unsigned threads = 1;
-    bool verbose = false; // one line per connection on stderr
+    // Connections, HELLOs, requests and errors on stderr, one line each
+    // (log.hpp). Quiet by default for embedders; prometheiad asks for info.
+    LogLevel log_level = LogLevel::Quiet;
     ServerConfig config;
     // Caps, budget and token requirement; burst_cells is taken from
     // config.max_cells.

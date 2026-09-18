@@ -38,7 +38,9 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
     (JSON Lines, [HYPOTHETICALS.md](HYPOTHETICALS.md)); repeatable, and a
     later file's definition of a token wins. The tokens defined are
     advertised in WELCOME.
-  - `--verbose`: log each connection.
+  - `--log-level quiet|info|debug` (default `info`; `--verbose` is
+    `debug`): one line per connection, HELLO, request and ERROR on stderr.
+    See "Logging" below.
   - Limits, tokens, TLS and draining: see Operations below.
 - **Dataset identity.** At startup the daemon digests every data file's
   contents and prints the dataset id it will serve
@@ -108,6 +110,46 @@ behaves the same with either.
 - **Port sharing.** Every loop listens on the port with `SO_REUSEPORT`, so a
   second server would bind the same port silently and share its traffic.
   Startup therefore refuses a port something already accepts connections on.
+
+## Logging
+
+`prometheiad` writes one line per event on stderr, timestamped in UTC:
+
+```
+prometheiad 2026-09-18T17:04:49.307Z c=0.0 open addr=127.0.0.1
+prometheiad 2026-09-18T17:04:49.308Z c=0.0 hello v=4 client="prometheia-wire-client/0.2.0" token=none
+prometheiad 2026-09-18T17:04:49.308Z c=0.0 req=2 accepted rows objs=4 (body:2,point:1,hyp:1) rows=2 profiles=1 prio=0
+prometheiad 2026-09-18T17:04:49.308Z c=0.0 req=2 done rows objs=4 rows=2 chunks=1 objerr=- cache=miss ms=0.4
+prometheiad 2026-09-18T17:04:49.308Z c=0.0 close code=1006 requests=1 ms=1
+prometheiad 2026-09-18T17:04:49.310Z c=0.1 open addr=127.0.0.1
+prometheiad 2026-09-18T17:04:49.311Z c=0.1 hello v=4 client="prometheia-wire-client/0.2.0" token=none
+prometheiad 2026-09-18T17:04:49.311Z c=0.1 req=2 error=11 "a correction mask this server does not honour for that observer (WELCOME lists the pairs)"
+prometheiad 2026-09-18T17:04:49.311Z c=0.1 close code=1006 requests=1 ms=0
+```
+
+(Two runs of `prometheia-wire-client`, captured 2026-09-18. Close code 1006
+means the client dropped the socket without a close frame, which is what
+the reference client does.)
+
+- **`c=<loop>.<n>`** names the connection on every line. **`req=<id>`** is
+  the client's request id, so `grep 'c=0.1 '` is one connection's whole
+  story and `grep 'c=0.1 req=1 '` one request's.
+- **Events at `info`:** a refused connection (the cap's reason), open,
+  HELLO (client name, token `none`/`known`/`unknown`/`ignored`, never the
+  token), each REQUEST accepted with objects by kind, rows, profiles and
+  priority, its `done` line with per-object error codes (`code:count`),
+  cache hit or miss and time from acceptance to the last chunk, every
+  ERROR sent with its code and this server's text, LOOKUPs (query and match
+  counts), a HELLO timeout, and close with the number of requests.
+- **At `debug`:** also PINGs and a CANCEL that arrives after its answer was
+  sent.
+- **Never logged:** request instants, observer sites, element coefficients,
+  object names or designations, LOOKUP query strings, tokens. A request is
+  someone's birth data. The log says how many objects and rows, which codes
+  and how long, not when or where. It is the rule §3.8 sets for ERROR text,
+  applied to the log, and a test holds it
+  (`server_log_traces_a_request_without_its_contents`).
+- Embedders of `WsServer` get `LogLevel::Quiet` unless they ask.
 
 ## Licence of the binary
 
