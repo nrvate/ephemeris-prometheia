@@ -4,8 +4,9 @@
 One reader for the tools that drive a live v4 server through the reference
 client (corrapplied.py, crosstest.py), so the client's output format is
 parsed in exactly one place.  The client prints '#' lines for WELCOME, its
-capabilities and each object's metadata, and one line of six values per
-object per row.
+capabilities, the request id it chose (what prometheiad's log calls
+req=<id>, so a verbose run can be matched to the server's lines) and each
+object's metadata, and one line of six values per object per row.
 """
 
 import re
@@ -16,6 +17,7 @@ WELCOME_RE = re.compile(r'^# WELCOME (\S+) protocol (\d+) engine "(.*)" dataset 
 CORRMASK_RE = re.compile(r"^# corrmask observers (\d+) corrections (\d+)$")
 CORRKIND_RE = re.compile(r"^# corrkind observers (\d+) kinds (\d+) corrections (\d+)$")
 CAPS_RE = re.compile(r"^# caps (.*)$")
+REQUEST_RE = re.compile(r"^# request (\d+)$")
 META_RE = re.compile(r'^# object (\d+) name "(.*)" rowsOk (-?\d+) corr (\d+) err (\d+) "(.*)"$')
 ROW_RE = re.compile(r"^(\d+) (\d+) (.+)$")
 
@@ -43,6 +45,7 @@ class Reply:
         self.dataset = None
         self.caps = {}
         self.corrmasks = []  # (observer bitmask, exact mask), A.3 0x0004
+        self.request_id = None  # what prometheiad's log calls req=<id>
         self.corrkinds = []  # (observer bitmask, kind bitmask, exact mask), A.3 0x0014
         self.objects = []  # Meta, in request order
         self.rows = {}  # (object, row) -> [six floats]
@@ -94,6 +97,10 @@ def run(client, host, port, args, verbose=False, timeout=120):
         if m:
             rep.corrmasks.append((int(m.group(1)), int(m.group(2))))
             continue
+        m = REQUEST_RE.match(line)
+        if m:
+            rep.request_id = int(m.group(1))
+            continue
         m = CORRKIND_RE.match(line)
         if m:
             rep.corrkinds.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
@@ -110,4 +117,7 @@ def run(client, host, port, args, verbose=False, timeout=120):
         m = ROW_RE.match(line)
         if m:
             rep.rows[(int(m.group(1)), int(m.group(2)))] = [float(v) for v in m.group(3).split()]
+    if verbose:
+        # The join to the server's log: prometheiad logs this as req=<id>.
+        print(f"      -> {rep.server} req={rep.request_id} exit {rep.returncode}", file=sys.stderr)
     return rep

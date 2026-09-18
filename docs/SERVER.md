@@ -133,7 +133,9 @@ the reference client does.)
 
 - **`c=<loop>.<n>`** names the connection on every line. **`req=<id>`** is
   the client's request id, so `grep 'c=0.1 '` is one connection's whole
-  story and `grep 'c=0.1 req=1 '` one request's.
+  story and `grep 'c=0.1 req=1 '` one request's. `prometheia-wire-client`
+  picks a fresh id per run and prints it (`# request N`), so the client's
+  output and the server's lines join on it.
 - **Events at `info`:** a refused connection (the cap's reason), open,
   HELLO (client name, token `none`/`known`/`unknown`/`ignored`, never the
   token), each REQUEST accepted with objects by kind, rows, profiles and

@@ -15,6 +15,8 @@
 #include <thread>
 #include <vector>
 
+#include <unistd.h>
+
 #include "ephproto.h"
 #include "prometheia/hypotheticals.hpp"
 #include "ws_client.hpp"
@@ -60,6 +62,8 @@ constexpr const char* kUsage =
     "  --target ARCSEC     the segments' target error (with --segments)\n"
     "  --max-degree N      largest Chebyshev degree to buffer (with --segments)\n"
     "  --priority 0|1      0 interactive (default), 1 prefetch\n"
+    "  --request-id N      the REQUEST's id (default: a fresh one per run, printed\n"
+    "                      as '# request N', which prometheiad logs as req=N)\n"
     "  --cancel-after-ms N send CANCEL after N ms (shows ERROR 10 unless the\n"
     "                      answer already went out)\n"
     "  --token T           HELLO's access token\n"
@@ -95,6 +99,12 @@ int main(int argc, char** argv) {
     double step_seconds = 86400.0;
     double target_arcsec = 0.1;
     int cancel_after_ms = -1;
+    // A fresh id per run, so the server's log line for this request
+    // (prometheiad: "req=<id>") finds this run and no other. Nonzero, 31 bits.
+    uint32_t request_id =
+        uint32_t((std::chrono::system_clock::now().time_since_epoch().count() ^ getpid()) &
+                 0x7fffffff) |
+        1u;
     bool corrections_given = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -236,6 +246,12 @@ int main(int argc, char** argv) {
             req.maxDegreeHint = uint8_t(std::strtoul(value(), nullptr, 10));
         } else if (arg == "--priority") {
             req.priority = uint8_t(std::strtoul(value(), nullptr, 10));
+        } else if (arg == "--request-id") {
+            request_id = uint32_t(std::strtoul(value(), nullptr, 10));
+            if (request_id == 0) {
+                std::fprintf(stderr, "--request-id must be nonzero (3.3)\n");
+                return 2;
+            }
         } else if (arg == "--cancel-after-ms") {
             cancel_after_ms = std::atoi(value());
         } else if (arg == "--token") {
@@ -300,7 +316,7 @@ int main(int argc, char** argv) {
     }
     std::vector<uint8_t> payload;
     eph::EncodeRequest(&payload, req);
-    const uint32_t request_id = 2;
+    std::printf("# request %u\n", request_id);
     if (auto r = ws.send(message(eph::kMsgRequest, request_id, payload.data(), payload.size()));
         !r) {
         return fail(r.error());
