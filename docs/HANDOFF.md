@@ -4,6 +4,37 @@ A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 [DESIGN.md](DESIGN.md); the protocol state in [SERVER.md](SERVER.md).
 
+## Now: client-server cross-testing (2026-09-18)
+
+The maintainer's direction: "a client server testing paradigm is
+important". The runbook is [CROSS-TEST.md](CROSS-TEST.md); the harness is
+`tools/check/crosstest.py`, which runs the reference client against both v4
+daemons with JPL Horizons as referee. `tools/check/wirelib.py` is the one
+reader of the client's output. The first full run is
+`docs/crosstest/2026-09-18.tsv` (734 rows).
+
+- **Launching both daemons.** Ours: `build/prometheiad --ephemeris
+  ephe/linux_p1550p2650.440 --port 47190 --threads 1`. Theirs, from
+  `/nvm/work/ephv4`: `./astrolog-ephd --bind 127.0.0.1 --port 47291
+  --threads 1 --ephe "/nvm/work/ephv4/ephem;/nvm/work/ephv4"`. Then
+  `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`, and
+  stop both with `pkill -x`.
+- **Waiting on the Astrolog side:** fixes for the three defects the run
+  found in `astrolog-ephd`: heliocentric light time about 1% off; the
+  request's ΔT ignored; deflection advertised but not applied for
+  barycentric and planet-centred observers. Also: error 4 where 3 is meant,
+  and a question about Venus at 2 mas. A rerun after their fixes takes
+  about a minute. Legs 3–5 are theirs to drive.
+- **Open on this side:** the topocentric anchor, which needs Horizons' UT1
+  recovered from its sidereal time (tests/test_horizons.cpp does this).
+- **Also done this stretch:**
+  - the per-object error contract, written into SERVER.md;
+  - correction masks advertised exactly, with ERROR 11 for the rest;
+  - `corrapplied.py` can no longer pass on zero cases;
+  - a review of this session's own code, with all five fixes landed;
+  - a review of the Astrolog plugin, whose seven real findings they fixed
+    (the eighth, sidereal stars, was a false alarm on this side).
+
 ## Done: hypothetical bodies (2026-09-18)
 
 The maintainer, a Uranian astrologer, needed the Hamburg School's
@@ -29,10 +60,7 @@ Conventions are in [HYPOTHETICALS.md](HYPOTHETICALS.md).
 - **Cleanroom:** a Swiss-source exposure and its remedy are recorded in
   DESIGN.md. `src/elements.cpp` and its tests are written only by a session
   that never saw the exposure.
-- **With the Astrolog side:** phase 6's daemon is up and `corrapplied.py`
-  passes against it, 27 of 29 cases (CROSS-TEST.md). The rest of the
-  cross-test matrix is open, when both sides want a live session. They are on
-  phase 8, the branch review before the squash decision.
+- **With the Astrolog side:** see "Now", above.
 
 ## State at the previous snapshot (2026-09-17, night)
 

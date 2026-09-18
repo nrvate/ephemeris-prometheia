@@ -13,7 +13,21 @@ documented, not that it is frozen.
 
 ## Unreleased
 
-### Hypothetical bodies (in progress)
+### Client-server cross-testing
+
+- **`tools/check/crosstest.py`** runs the reference client against two v4
+  servers, compares their answers as angular separations, and uses JPL
+  Horizons as referee wherever the corpus has the point. It writes a dated
+  leg table ([docs/CROSS-TEST.md](docs/CROSS-TEST.md)). The first run
+  (`docs/crosstest/2026-09-18.tsv`) found three defects in the Astrolog
+  server, each bisected to one correction term. It also found one in its own
+  adjudication, fixed before the table was written.
+- `prometheia-wire-client` gained `--deltat`, `--hyp`, `--elements`,
+  `--center`, `--corrections` and a capabilities line. `tools/check/wirelib.py`
+  is the one reader of its output.
+- SERVER.md writes down the per-object error contract.
+
+### Hypothetical bodies
 
 - **Bodies from polynomial orbital elements**, `Engine::calc_elements`, the
   protocol's kind 4: pure two-body motion about the Sun or the Earth, with
