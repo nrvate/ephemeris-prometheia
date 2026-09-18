@@ -150,8 +150,8 @@ terms.
 
 ## Parked (maintainer go-ahead required before starting)
 
-- zstd-compressed wire payloads: the envelope reserves the flag, but it
-  needs a named protocol drop first.
+Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
+
 - The `deadlineMs` strategy switch: parsed and advisory today, and
   documented as unimplemented in SERVER.md.
 - Nightly or automated catalogue release builds: an idea only.

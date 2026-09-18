@@ -765,7 +765,11 @@ bisection ladder for when a number disagrees.
 
 ## Not implemented
 
-- **zstd payloads.** Reserved in the envelope, advertised by no one.
+- **zstd payloads.** Reserved in the envelope, advertised by no one, and
+  declined by the maintainer (2026-09-18) on measurement: a 288,357-byte f64
+  DATA chunk (12 bodies × 1000 days, all answering) came to 96.8% at zstd
+  levels 1–10 and 95.5% at 19, and the fast levels stored it uncompressed.
+  Packed ephemeris values do not compress; f32 halves them.
 - **`deadlineMs` as a strategy switch.** The field is parsed and advisory;
   this server does not yet choose a cheaper strategy (samples rather than a
   fit) to meet one.
