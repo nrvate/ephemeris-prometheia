@@ -13,6 +13,18 @@ running daemons:
              mask 1 (astrometric), ICRF, equatorial, geocentric
   hamburg    the eight Hamburg points by name (kind 3) from both servers:
              heliocentric, mask 0, mean ecliptic of J2000
+  helio      each server against Horizons from the Sun's centre: mask 1,
+             ICRF, equatorial (Horizons' Sun-centred APPARENT place is
+             referred to the Sun's equator and is never used)
+  apparent   both servers, apparent place of date, every observer kind
+             (geocentric, topocentric, heliocentric, barycentric, from
+             Jupiter's system); no anchor -- Horizons' apparent place carries
+             published frame offsets -- so a Moon gap is judged against the
+             geocentric anchor, as for 'same'
+
+The topocentric anchor is not run: Horizons' UT1 has to be recovered from its
+sidereal time first (tests/test_horizons.cpp does), and until it is, a
+topocentric anchor would compare two different Earth rotations.
 
 Every comparison is an angular separation (atan2 of cross and dot), never a
 difference of longitudes.  A leg is green when the servers agree AND the
@@ -131,12 +143,13 @@ def leg_surfaces(client, ours, theirs, table, verbose):
     return a, b
 
 
-def corpus_geo():
-    """(name, body, [(jd_tt, ra, dec)]) of every geocentric corpus request."""
+def corpus(prefix="geo-", center="'500@399'"):
+    """(name, body, [(jd_tt, ra, dec)]) of every corpus request from one centre:
+    the astrometric ICRF RA/Dec (Horizons quantity 1) at each of its instants."""
     raw = os.path.join(REPO, "horizons-raw")
     out = []
     for name, _, params in hf.requests():
-        if not name.startswith("geo-") or params["CENTER"] != "'500@399'":
+        if not name.startswith(prefix) or params["CENTER"] != center:
             continue
         with open(os.path.join(raw, name + ".json")) as f:
             result = json.load(f)["result"]
@@ -149,19 +162,27 @@ def corpus_geo():
 
 
 def leg_same_and_horizons(client, ours, theirs, table, verbose, do_same, do_horizons):
-    corpus = corpus_geo()
+    corpus_ = corpus()
+    return compare_against_anchor(client, ours, theirs, table, verbose, corpus_, [],
+                                  "geo", do_same, do_horizons)
+
+
+def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observer_args,
+                           observer, do_same, do_horizons):
     epochs = sorted({p[0] for _, _, pts in corpus for p in pts})
     bodies = [(name, body) for name, body, _ in corpus]
+    suffix = "" if observer == "geo" else "-" + observer
     anchors = {(body, p[0]): (p[1], p[2]) for _, body, pts in corpus for p in pts}
     worst = {}
-    for mask, leg, wanted in ((0, "same", do_same), (1, "horizons", do_horizons)):
+    for mask, leg0, wanted in ((0, "same", do_same), (1, "horizons", do_horizons)):
+        leg = leg0 + suffix
         if not wanted:
             continue
-        print(f"\n== {leg}: mask {mask}, ICRF, equatorial, geocentric, "
+        print(f"\n== {leg}: mask {mask}, ICRF, equatorial, {observer}, "
               f"{len(bodies)} bodies x {len(epochs)} epochs")
         for jd in epochs:
             args = ["--jd", repr(jd), "--icrs", "--eq", "--corrections", str(mask),
-                    "--deltat", str(DELTA_T)]
+                    "--deltat", str(DELTA_T)] + observer_args
             for _, body in bodies:
                 args += ["--obj", str(body)]
             ra = ask(client, ours, args, verbose)
@@ -171,16 +192,16 @@ def leg_same_and_horizons(client, ours, theirs, table, verbose, do_same, do_hori
                 ea = ra.objects[k].err if k < len(ra.objects) else -1
                 eb = rb.objects[k].err if k < len(rb.objects) else -1
                 if va is None or vb is None or any(math.isnan(x) for x in va[:2] + vb[:2]):
-                    table.add(leg=leg, epoch_tt=jd, object=body, observer="geo", frame="ICRF",
+                    table.add(leg=leg, epoch_tt=jd, object=body, observer=observer, frame="ICRF",
                               plane="equator", mask=mask, deltat=DELTA_T, verdict="unanswered",
                               note=f"errCode ours {ea} theirs {eb}")
                     continue
                 pa, pb = (va[0], va[1]), (vb[0], vb[1])
                 s = sep_arcsec(pa, pb)
-                row = dict(leg=leg, epoch_tt=jd, object=body, observer="geo", frame="ICRF",
+                row = dict(leg=leg, epoch_tt=jd, object=body, observer=observer, frame="ICRF",
                            plane="equator", mask=mask, deltat=DELTA_T, ours=pa, theirs=pb,
                            sep_servers=s)
-                if leg == "same":
+                if leg0 == "same":
                     row.update(band=SAME_BAND, tier=2,
                                verdict="agree" if s <= SAME_BAND else "finding",
                                note="DE440 against Swiss .se1 (DE441 refit)")
@@ -207,7 +228,7 @@ def leg_same_and_horizons(client, ours, theirs, table, verbose, do_same, do_hori
                     worst[("theirs", body)] = max(worst.get(("theirs", body), 0.0), st)
                 table.add(**row)
         for (who, body), w in sorted(worst.items()):
-            if (leg == "same") == (who == "same"):
+            if (leg0 == "same") == (who == "same"):
                 label = {"same": "ours vs theirs", "ours": "ours vs Horizons",
                          "theirs": "theirs vs Horizons"}[who]
                 print(f"  body {body:4d}  worst {label}: {w:.6f}\"")
@@ -236,6 +257,52 @@ def leg_hamburg(client, ours, theirs, table, verbose):
             print(f"  {jd:.1f} {t:9s} {s:.6f}\"  dDist {va[2] - vb[2]:+.2e} AU")
 
 
+APPARENT_BODIES = [10, 301, 199, 299, 4, 5, 6, 7, 8, 9]
+ZURICH = hf.SITES["zurich"]  # lon deg E, lat deg, height km
+
+
+def leg_apparent(client, ours, theirs, table, verbose):
+    """Leg 8: apparent place of date, every observer kind, server against server."""
+    epochs = sorted({p[0] for _, _, pts in corpus() for p in pts})
+    site = f"{ZURICH[0]},{ZURICH[1]},{ZURICH[2] * 1000.0}"  # the client takes metres
+    observers = [
+        ("geo", [], 7),
+        ("topo", ["--topo", site], 7),
+        ("helio", ["--helio"], 5),  # the Sun's centre honours no deflection
+        ("bary", ["--bary"], 7),
+        ("jupiter", ["--center", "5"], 7),
+    ]
+    print("\n== apparent: true ecliptic of date, every observer, server against server")
+    for obs, obs_args, mask in observers:
+        bodies = [b for b in APPARENT_BODIES
+                  if not (obs == "helio" and b == 10) and not (obs == "jupiter" and b == 5)]
+        worst = {}
+        for jd in epochs:
+            args = ["--jd", repr(jd), "--corrections", str(mask), "--deltat", str(DELTA_T)] + obs_args
+            for b in bodies:
+                args += ["--obj", str(b)]
+            ra = ask(client, ours, args, verbose)
+            rb = ask(client, theirs, args, verbose)
+            for k, b in enumerate(bodies):
+                va, vb = ra.row(k), rb.row(k)
+                if va is None or vb is None or any(math.isnan(x) for x in va[:2] + vb[:2]):
+                    ea = ra.objects[k].err if k < len(ra.objects) else -1
+                    eb = rb.objects[k].err if k < len(rb.objects) else -1
+                    table.add(leg="apparent", epoch_tt=jd, object=b, observer=obs,
+                              frame="true of date", plane="ecliptic", mask=mask, deltat=DELTA_T,
+                              verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
+                    continue
+                sep = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+                worst[b] = max(worst.get(b, 0.0), sep)
+                table.add(leg="apparent", epoch_tt=jd, object=b, observer=obs,
+                          frame="true of date", plane="ecliptic", mask=mask, deltat=DELTA_T,
+                          ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=sep,
+                          band=SAME_BAND, tier=2,
+                          verdict="agree" if sep <= SAME_BAND else "finding",
+                          note="no anchor: Horizons' apparent place carries frame offsets")
+        print(f"  {obs:8s} " + "  ".join(f"{b}:{w:.4f}" for b, w in sorted(worst.items())))
+
+
 def adjudicate_same(table):
     """Two servers disagreeing is not yet a verdict; the anchor decides.
 
@@ -247,10 +314,13 @@ def adjudicate_same(table):
     the anchor could not be asked, the row is left unadjudicated.
     """
     anchored = {(r["epoch_tt"], r["object"]): r for r in table.rows if r["leg"] == "horizons"}
+    anchored_helio = {(r["epoch_tt"], r["object"]): r for r in table.rows
+                      if r["leg"] == "horizons-helio"}
     for r in table.rows:
-        if r["leg"] != "same" or r["verdict"] != "finding":
+        if r["leg"] not in ("same", "same-helio", "apparent") or r["verdict"] != "finding":
             continue
-        h = anchored.get((r["epoch_tt"], r["object"]))
+        pool = anchored_helio if r["leg"] == "same-helio" else anchored
+        h = pool.get((r["epoch_tt"], r["object"]))
         if h is None or h["verdict"] == "unanswered":
             r["verdict"] = "unadjudicated"
             r["note"] += "; the anchor leg was not answered here"
@@ -278,7 +348,7 @@ def main():
     ap.add_argument("--ours", default="127.0.0.1:47190")
     ap.add_argument("--theirs", default="127.0.0.1:47291")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg")
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvm/work/ephv4", help="the Astrolog tree, for its commit")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -303,7 +373,12 @@ def main():
                               "same" in legs, "horizons" in legs)
     if "hamburg" in legs:
         leg_hamburg(client, ours, theirs, table, args.verbose)
-    if {"same", "horizons"} <= legs:
+    if "helio" in legs:
+        compare_against_anchor(client, ours, theirs, table, args.verbose,
+                               corpus("helio-", "'500@10'"), ["--helio"], "helio", True, True)
+    if "apparent" in legs:
+        leg_apparent(client, ours, theirs, table, args.verbose)
+    if "horizons" in legs or "helio" in legs:
         adjudicate_same(table)
 
     counts = {}
