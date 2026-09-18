@@ -119,7 +119,12 @@ It matters for determinism, not accuracy.
 
 The two constants live in one place, `include/prometheia/elements.hpp`, and
 must match the protocol text exactly, since a server that uses its own best
-value would disagree with one that uses the protocol's.
+value would disagree with one that uses the protocol's. The protocol's fifth sentence adds the other half: an implementation that
+works in degrees per day derives k from the radian value at full double
+precision, and never carries a rounded decimal. Prometheia holds k in radians
+per day, as the protocol states it, and converts only at the point of use.
+Swiss holds a ten-figure decimal in degrees per day, 1.446 × 10⁻¹² off. That
+is the one difference the conformance fixture shows, and the test bounds it.
 
 ## Corrections
 

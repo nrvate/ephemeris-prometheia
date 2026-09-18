@@ -4,37 +4,33 @@ A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 [DESIGN.md](DESIGN.md); the protocol state in [SERVER.md](SERVER.md).
 
-## In flight: hypothetical bodies (2026-09-18)
+## Done: hypothetical bodies (2026-09-18)
 
-The maintainer, a Uranian astrologer, needs the Hamburg School's
-transneptunian points and the rest of the protocol's hypothetical bodies. In
-Astrolog they are first-class planets by default, so a Prometheia-only source
-chain asks for them in the ordinary course of things. Conventions are in
-[HYPOTHETICALS.md](HYPOTHETICALS.md).
+The maintainer, a Uranian astrologer, needed the Hamburg School's
+transneptunian points; in Astrolog they are first-class planets by default.
+Conventions are in [HYPOTHETICALS.md](HYPOTHETICALS.md).
 
-- **Done:** the engine (`calc_elements` for the protocol's kind 4,
+- **Shipped:** the engine (`calc_elements` for the protocol's kind 4,
   `calc_hypothetical` for kind 3, from JSON Lines element files),
-  `prometheiad` serving both, C ABI version 5 (reviewed by the Astrolog side
-  before landing), and `ephem` (`hyp:TOKEN`, `hyp:all`). Gate green, 23
-  suites.
-- **The spec is released:** "the kind-4 elements rule", Astrolog `ephv4`
-  at `176e333`. It moves no bytes (the fixture gate stands as it was) and
-  replaces §3.5a's kind-4 text with the four sentences
-  [HYPOTHETICALS.md](HYPOTHETICALS.md) implements. Its numeric fixture is
-  still to be generated on the Astrolog side; when it arrives in
-  `/nvm/work/ephv4-drop-elements/elements/`, check this implementation
-  against it (CROSS-TEST.md, "The elements tier").
-- **Waiting on the maintainer:** the Hamburg elements. The maintainer chose
-  to ship the Hamburg standard. The numbers must come from their own
-  non-Swiss source, because anything recalled from memory would trace back
-  to Swiss's distributed element file. `data/hypotheticals.jsonl` ships empty
-  until then.
-- **Next:** default elements for the historical predicted planets (Le
-  Verrier's and Adams's Neptunes, Lowell's Pluto), transcribed from their
-  public-domain original publications, with citations.
-- **Cleanroom:** a Swiss-source exposure occurred and is recorded, with its
-  remedy, in [DESIGN.md](DESIGN.md), "Exposures". `src/elements.cpp` and its
-  tests are written only by a session that never saw the exposure.
+  `prometheiad` serving both, C ABI version 5 (reviewed by the Astrolog
+  side before it landed), `ephem` (`hyp:TOKEN`, `hyp:all`) and the wire
+  client (`--hyp`, `--elements`).
+- **Spec:** "the kind-4 elements rule", released by the Astrolog side as
+  five sentences (four at `176e333` plus a fifth, an amendment the
+  maintainer approved). Its numeric fixture is vendored and gated
+  (`ephproto4_kind4_elements_fixture`). The one known difference is Swiss's
+  truncated k, 1.4 × 10⁻¹² relative, and it is bounded in the test.
+- **Shipped elements:** the eight Hamburg points, taken from the Swiss
+  distribution's `seorbel.txt` as a recorded exception
+  ([DESIGN.md](DESIGN.md), "Exposures"). They match `swetest` to 0.00076″,
+  and match what every supported Astrolog install reads. Also shipped: Le
+  Verrier's Neptune. Adams's and Lowell's planets and Transpluto are not
+  planned. The rest of the A.15 list works only from an operator's file.
+- **Cleanroom:** a Swiss-source exposure and its remedy are recorded in
+  DESIGN.md. `src/elements.cpp` and its tests are written only by a session
+  that never saw the exposure.
+- **Next with the Astrolog side:** their phase 6 daemon, for
+  `corrapplied.py` and the rest of CROSS-TEST.md.
 
 ## State at the previous snapshot (2026-09-17, night)
 
