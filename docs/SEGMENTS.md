@@ -21,6 +21,18 @@ which is what an astrology client wants and what makes the segment worth
 sending. The fitter never re-interprets the vectors it is handed: it fits
 three scalar functions of time and measures how well they came back.
 
+There is also a **scalar** fit (`fit_scalar`), for a one-dimensional series
+of time — the ayanamsa, in version 4's SEGDATA. It exists because the vector
+fit's direction residual is an angle between directions and cannot see an
+error in a scalar: the same machinery (node interpolation, the coefficient
+tail as a degree estimate, a measured check set with both endpoints in it,
+raising the degree, then splitting) is applied to the value itself, in the
+value's own units. prometheiad fits an ayanamsa over the same lattice cells
+and at the same rung as the body segments it rides with, converting the rung
+with 3600; the sampler asks the engine for the Sun's own sidereal calc and
+reads the ayanamsa out of the result (it is a frame quantity — the observer
+does not matter, so the sampler observes from the geocentre).
+
 ## How the degree and the span are chosen
 
 Each interval is interpolated at the Chebyshev nodes of the first kind, which

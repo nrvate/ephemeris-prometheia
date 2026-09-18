@@ -13,11 +13,19 @@
 // the server answers from; the result cache keys on it plus the question
 // block's bytes (3.7).
 //
+// Requests are computed in blocks of rows across the owner's turns
+// (Session::work), not in one callback, so a CANCEL that arrives is read
+// before the rest of the work is done, and one large request does not block
+// its loop for everyone. A request works priority 0 before priority 1;
+// within one request the chunks stay in order.
+//
 // Threading: one LoopContext per event-loop thread (it owns that thread's
-// Engine and result cache); every Session of the loop borrows it.
+// Engine, result cache and segment caches); every Session of the loop borrows
+// it, and work() is only ever called on that thread.
 #ifndef PROMETHEIA_SERVER_SESSION_HPP
 #define PROMETHEIA_SERVER_SESSION_HPP
 
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <list>
@@ -31,6 +39,7 @@
 #include "limits.hpp"
 #include "metrics.hpp"
 #include "prometheia/engine.hpp"
+#include "segcache.hpp"
 
 namespace prometheia::server {
 
@@ -39,6 +48,12 @@ inline constexpr const char* kServerVersion = "prometheiad/0.2.0";
 // observed table, refreshed at release) is what serves the canonical-NaN
 // deltaTSec.
 inline constexpr const char* kDeltaTModelName = "usno-observed";
+
+// The largest Chebyshev degree a segments answer carries, and the most
+// segments one object may take (WELCOME's A.3 0x000F): the cap keeps one
+// object's chunks inside WELCOME's payload bound at the largest degree.
+inline constexpr int kSegMaxDegree = 16;
+inline constexpr size_t kSegMaxPerObject = 8192;
 
 struct ServerConfig {
     // The WELCOME bounds. max_cells bounds objects x rows per REQUEST; the
@@ -49,8 +64,12 @@ struct ServerConfig {
     uint32_t max_cells = 100000;
     uint8_t max_profiles = 16;
     uint32_t max_payload = 4u * 1024u * 1024u;
-    size_t cache_bytes = 64u << 20; // per loop
-    size_t max_queued_answers = 4;  // computed, not yet sent, per connection
+    // The widest span one segments REQUEST may ask (WELCOME's segMaxSpanDays);
+    // the honest unit for a segments bound is the time window (3.9).
+    uint32_t max_seg_span_days = 1024;
+    size_t cache_bytes = 64u << 20;     // per loop, samples answers
+    size_t seg_cache_bytes = 16u << 20; // per loop, fitted lattice cells
+    size_t max_queued_answers = 4;      // computed, not yet sent, per connection
     std::string server_name = kServerVersion;
     std::string engine;     // WELCOME's engine string, from Engine::source()
     std::string dataset_id; // from make_dataset(); the cache key's prefix
@@ -73,10 +92,24 @@ struct Answer {
     size_t bytes() const { return cols.size() * sizeof(double) + meta.size() * 64; }
 };
 
+// One segments answer (a representation = 1 REQUEST): the wire's own shapes.
+// Coefficients are tropical in each object's profile frame; the ayanamsa of
+// every sidereal profile rides as its own series, which the client subtracts
+// (3.4). rowsOk counts the segments served, and firstFailedRow is unused.
+struct SegAnswer {
+    uint32_t n_obj = 0;
+    std::vector<std::string> sources;
+    std::vector<eph::Meta> meta;
+    std::vector<eph::AyanSeries> ayan;
+    std::vector<std::vector<eph::Segment>> segs;
+};
+
 // Least-recently-used answers under a byte budget, keyed by datasetId plus
 // the question block's bytes, exactly as received (3.7): the delivery block
 // is outside the key, so the same question in any precision or chunking is
-// computed once.
+// computed once. Segments answers do not live here: their sharing unit is the
+// lattice cell, whose key carries the rung (a delivery-block field), so they
+// have their own cache in LoopContext.
 class ResultCache {
 public:
     explicit ResultCache(size_t budget_bytes) : budget_(budget_bytes) {}
@@ -96,6 +129,11 @@ private:
     std::unordered_map<std::string, Lru::iterator> map_;
 };
 
+// A compute that yields between blocks of rows, so a CANCEL that arrives is
+// read before the rest of the work is done (3.4). Defined in session.cpp.
+class SamplesComputer;
+class SegmentsComputer;
+
 class LoopContext {
 public:
     // `limits` is shared by every loop and may be null (no tokens, no budget).
@@ -104,15 +142,22 @@ public:
     LoopContext(Engine engine, const ServerConfig& config, Limits* limits = nullptr,
                 Metrics* metrics = nullptr);
 
-    // A request's answer from the cache, or computed and cached. The cache
-    // key is the dataset id plus the question block's bytes.
+    // A request's answer from the cache, or computed and cached, in one call.
+    // The session uses this only on its synchronous paths; a REQUEST it will
+    // stream goes through SamplesComputer and finish() below.
     std::shared_ptr<const Answer> answer(const eph::Request& req, std::string_view question);
     // Computed, never cached.
     std::shared_ptr<const Answer> compute(const eph::Request& req);
+    // A blockwise compute that finished: cached whole — a cancelled or
+    // unfinished answer never reaches here — and measured.
+    void finish(const std::string& key, const std::shared_ptr<const Answer>& answer, uint64_t cells,
+                double ms);
 
     const ServerConfig& config() const { return config_; }
     Engine& engine() { return engine_; }
     ResultCache& cache() { return cache_; }
+    SegmentCache& seg_cache() { return seg_cache_; }
+    ScalarSegmentCache& ayan_cache() { return ayan_cache_; }
     Limits* limits() const { return limits_; }
     Metrics& metrics() { return *metrics_; }
 
@@ -120,6 +165,8 @@ private:
     Engine engine_;
     ServerConfig config_;
     ResultCache cache_;
+    SegmentCache seg_cache_;
+    ScalarSegmentCache ayan_cache_;
     Limits* limits_;
     Metrics own_metrics_;
     Metrics* metrics_;
@@ -130,17 +177,31 @@ public:
     // `addr` is the peer's address, the default compute-budget key.
     explicit Session(LoopContext& ctx, std::string addr = {})
         : ctx_(ctx), budget_key_("a:" + addr) {}
+    // Out of line: a Stream holds unique_ptr to computers that are only
+    // defined in session.cpp.
+    ~Session();
+    Session(const Session&) = delete;
+    Session& operator=(const Session&) = delete;
 
     // Handles one WebSocket message. Returns false when the connection is to
     // be closed once the replies queued so far have been sent.
     bool on_message(std::string_view message, bool binary);
 
     // The next whole message to send, if any: control replies first, then
-    // the DATA chunks of computed answers in request order.
+    // the chunks of answers ready to stream, lower priority number first and
+    // in request order within one priority.
     bool next(std::vector<uint8_t>& out);
 
-    // Whether next() has anything to hand out.
-    bool pending() const { return !control_.empty() || !streams_.empty(); }
+    // Whether next() has anything to hand out right now. A request still
+    // computing has nothing to send yet; it says so through has_work().
+    bool pending() const;
+
+    // Whether an accepted request still needs computing. The owner works the
+    // session between its own turns.
+    bool has_work() const;
+    // One bounded slice of the most urgent compute (a few milliseconds): the
+    // span between slices is where a CANCEL is read.
+    void work();
 
     // The session's protocol version: fixed by the first HELLO, 0 before.
     uint8_t version() const { return version_; }
@@ -149,12 +210,41 @@ public:
 private:
     struct Stream {
         uint32_t request_id = 0;
+        uint8_t priority = 0; // 0 interactive, 1 prefetch (3.4)
         uint8_t precision = eph::kPrecF64;
-        uint32_t chunk_rows = 0;
-        uint32_t next_row = 0;
+        uint32_t chunk_rows = 0; // samples chunks
         uint32_t chunk_index = 0;
         bool ignored_ext = false;
+        bool segments = false;
+        // Samples: the answer and the rows already sent.
         std::shared_ptr<const Answer> answer;
+        uint32_t next_row = 0;
+        // Segments: the answer and the objects already sent.
+        std::shared_ptr<const SegAnswer> seg_answer;
+        uint32_t next_obj = 0;
+        // While the compute runs. Dropping the stream drops these, which is
+        // what stops the work when a CANCEL arrives.
+        std::unique_ptr<SamplesComputer> computing;
+        std::unique_ptr<SegmentsComputer> fitting;
+        std::string cache_key; // the samples answer is cached under this whole
+
+        // Out of line, like ~Session: the computers are only defined in
+        // session.cpp.
+        ~Stream();
+        Stream() = default;
+        Stream(Stream&&) = default;
+        Stream& operator=(Stream&&) = default;
+
+        bool sendable() const {
+            if (segments) {
+                return seg_answer && next_obj < seg_answer->n_obj;
+            }
+            return answer && next_row < answer->n_time;
+        }
+        bool sent_all() const {
+            return segments ? (seg_answer && next_obj >= seg_answer->n_obj)
+                            : (answer && next_row >= answer->n_time);
+        }
     };
 
     void send(uint16_t type, uint32_t request_id, const std::vector<uint8_t>& payload);
@@ -162,6 +252,11 @@ private:
                     const std::string& text);
     bool on_request(const eph::Envelope& env, const uint8_t* payload, size_t len);
     bool on_lookup(const eph::Envelope& env, const uint8_t* payload, size_t len);
+    void on_cancel(uint32_t request_id);
+    // The stream to work on (computing) or send from (sendable): the lowest
+    // priority number, and the earliest arrival among equals — the deque
+    // holds arrival order.
+    Stream* pick(bool computing);
 
     LoopContext& ctx_;
     std::string budget_key_; // "a:" address, or "t:" token once HELLO gave a known one

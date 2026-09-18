@@ -30,7 +30,10 @@ constexpr const char* kUsage =
     "  --port N              default 47190; 0 picks a free port\n"
     "  --threads N           event loops, one engine each (default: hardware threads)\n"
     "  --max-cells N         objects x rows per REQUEST (default 100000)\n"
+    "  --max-seg-span-days N widest span one segments REQUEST may ask (WELCOME's\n"
+    "                        segMaxSpanDays; default 1024)\n"
     "  --cache-mb N          result cache per loop (default 64)\n"
+    "  --seg-cache-mb N      fitted segment cells per loop (default 16)\n"
     "  --max-conns N         WebSockets open in total (default 10000; 0 = no cap)\n"
     "  --max-conns-per-ip N  from one address (default 64; 0 = no cap)\n"
     "  --cells-per-sec N     compute budget per address, or per token, refilling\n"
@@ -93,8 +96,12 @@ int main(int argc, char** argv) {
             options.threads = unsigned(number(1, 1024));
         } else if (arg == "--max-cells") {
             options.config.max_cells = uint32_t(number(1, 0xFFFFFFFFul));
+        } else if (arg == "--max-seg-span-days") {
+            options.config.max_seg_span_days = uint32_t(number(1, 2000000ul));
         } else if (arg == "--cache-mb") {
             options.config.cache_bytes = size_t(number(0, 65536)) << 20;
+        } else if (arg == "--seg-cache-mb") {
+            options.config.seg_cache_bytes = size_t(number(0, 65536)) << 20;
         } else if (arg == "--max-conns") {
             options.limits.max_conns = uint32_t(number(0, 0xFFFFFFFFul));
         } else if (arg == "--max-conns-per-ip") {

@@ -73,6 +73,45 @@ struct FitReport {
 Result<FitReport> fit(const Sampler& sampler, double jd_from, double jd_to,
                       const FitOptions& options = {});
 
+// ---- scalar series ------------------------------------------------------------
+//
+// The same fit for a one-dimensional function of time -- an ayanamsa, not a
+// position. The vector fitter's residual is an angle between directions,
+// which cannot see an error in a scalar, so the scalar series gets its own
+// fit with the same contract: interpolate at the Chebyshev nodes, choose the
+// degree from the coefficients, MEASURE the residual on a check set that
+// includes both endpoints, raise the degree and then split where the
+// measurement says the target was missed.
+
+struct ScalarSegment {
+    double mid_jd_tt = 0.0;
+    double half_span_days = 0.0;
+    int degree = 0;
+    std::vector<double> c;  // degree + 1 Chebyshev coefficients
+    double err_value = 0.0; // largest measured |fit - sampler|, value units
+
+    double value(double jd_tt) const;
+};
+
+using ScalarSampler = std::function<Result<void>(double jd_tt, double& value)>;
+
+struct ScalarFitOptions {
+    double target = 1e-5; // in the value's own units
+    int min_degree = 3;
+    int max_degree = 16;
+    double min_half_span_days = 0.05;
+    size_t max_segments = 4096;
+    int check_multiple = 4;
+};
+
+struct ScalarFitReport {
+    std::vector<ScalarSegment> segments;
+    size_t sampler_calls = 0;
+};
+
+Result<ScalarFitReport> fit_scalar(const ScalarSampler& sampler, double jd_from, double jd_to,
+                                   const ScalarFitOptions& options = {});
+
 } // namespace prometheia::segments
 
 #endif // PROMETHEIA_SEGMENTS_HPP

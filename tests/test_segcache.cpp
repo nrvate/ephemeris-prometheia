@@ -230,3 +230,61 @@ TEST_CASE("segcache_segments_are_worth_evaluating") {
     }
     CHECK(worst <= got.value().err_arcsec_served);
 }
+
+TEST_CASE("segcache_scalar_series_walks_the_same_lattice") {
+    // An ayanamsa-like series: slow drift, no drama. The scalar service
+    // covers whole cells, measures honestly and shares them by key.
+    ScalarSegmentCache cache(1u << 20);
+    size_t calls = 0;
+    segments::ScalarSampler sampler = [&calls](double jd, double& v) -> Result<void> {
+        ++calls;
+        v = 23.85 + 0.0139688 * (jd - 2451545.0) + 0.02 * std::sin(0.0172 * (jd - 2451545.0));
+        return {};
+    };
+    SegmentRequest r;
+    r.jd_from_tt = 2461300.5;
+    r.jd_to_tt = r.jd_from_tt + 40.0; // three cells from a mid-cell start
+    r.target_err_arcsec = 0.01;
+    auto a = scalar_series_for(cache, "d#1|lahiri|true", r, 0.01 / 3600.0, sampler);
+    REQUIRE_MESSAGE(a.ok(), a.error().message);
+    CHECK(a.value().cells == 3);
+    CHECK(a.value().cells_fitted == 3);
+    CHECK(a.value().jd_from_tt ==
+          doctest::Approx(Lattice::cell_start(Lattice::cell_of(r.jd_from_tt))));
+    REQUIRE(!a.value().segments.empty());
+    for (size_t i = 1; i < a.value().segments.size(); ++i) {
+        const auto& p = a.value().segments[i - 1];
+        const auto& q = a.value().segments[i];
+        CHECK(std::fabs((p.mid_jd_tt + p.half_span_days) - (q.mid_jd_tt - q.half_span_days)) <
+              1e-9);
+    }
+
+    // The measured residual bounds the truth between the check points too.
+    double worst = 0.0;
+    for (int i = 0; i <= 4000; ++i) {
+        const double jd = a.value().jd_from_tt + i * 0.02;
+        double want = 0.0;
+        REQUIRE(sampler(jd, want).ok());
+        for (const segments::ScalarSegment& s : a.value().segments) {
+            if (jd >= s.mid_jd_tt - s.half_span_days && jd <= s.mid_jd_tt + s.half_span_days) {
+                worst = std::max(worst, std::fabs(s.value(jd) - want));
+                break;
+            }
+        }
+    }
+    CHECK(worst <= 0.01 / 3600.0);
+
+    // A second series over the same cells, a different zodiac: nothing shared.
+    const size_t calls_first = calls;
+    auto b = scalar_series_for(cache, "d#1|fagan-bradley|true", r, 0.01 / 3600.0, sampler);
+    REQUIRE(b.ok());
+    CHECK(b.value().cells_fitted == 3);
+    CHECK(calls > calls_first);
+    // The same zodiac again: every cell is served.
+    const size_t calls_second = calls;
+    auto c = scalar_series_for(cache, "d#1|lahiri|true", r, 0.01 / 3600.0, sampler);
+    REQUIRE(c.ok());
+    CHECK(c.value().cells_fitted == 0);
+    CHECK(calls == calls_second);
+    CHECK(cache.hits() >= 3);
+}

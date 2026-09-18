@@ -330,4 +330,169 @@ Result<FitReport> fit(const Sampler& sampler, double jd_from, double jd_to,
     return report;
 }
 
+// ---- scalar series -----------------------------------------------------------
+
+namespace {
+
+// The degree the coefficient tail says suffices for `target`, by the same
+// contract as needed_degree: never trusted, only spent on choosing where the
+// check set goes. A 1-D series' tail is the suffix sum of |c_k|, continued
+// geometrically past the last coefficient in hand.
+int needed_degree_1d(const std::vector<double>& c, double target, int lo, int hi) {
+    const int last = int(c.size()) - 1;
+    if (last < 2) {
+        return hi;
+    }
+    std::vector<double> tail(size_t(last) + 2, 0.0); // tail[k] = sum_{j>=k} |c_j|
+    for (int k = last; k >= 0; --k) {
+        tail[size_t(k)] = tail[size_t(k) + 1] + std::fabs(c[size_t(k)]);
+    }
+    const double a_last = tail[size_t(last)];
+    if (!(a_last > 0.0)) {
+        return lo; // exact at this degree
+    }
+    const int back = std::min(4, last);
+    const double a_back = tail[size_t(last - back)];
+    if (!(a_back > 0.0)) {
+        return lo;
+    }
+    const double r = std::pow(a_last / a_back, 1.0 / double(back));
+    if (!(r < 0.98)) {
+        return hi + 8; // not decaying: no degree within reach
+    }
+    for (int d = lo; d <= hi; ++d) {
+        double sum = d + 1 <= last ? tail[size_t(d + 1)] : 0.0;
+        if (d >= last) {
+            sum += a_last * std::pow(r, double(d - last) + 1.0) / (1.0 - r);
+        }
+        if (sum <= 0.5 * target) {
+            return d;
+        }
+    }
+    return hi + 1;
+}
+
+Result<ScalarSegment> fit_scalar_coeffs(const ScalarSampler& sampler, double mid, double half,
+                                        int degree, size_t& calls) {
+    const size_t n = size_t(degree) + 1;
+    std::vector<double> v(n);
+    for (size_t k = 0; k < n; ++k) {
+        const double t = std::cos(kPi * (double(k) + 0.5) / double(n));
+        double x = 0.0;
+        auto r = sampler(mid + t * half, x);
+        ++calls;
+        if (!r) {
+            return r.error();
+        }
+        v[k] = x;
+    }
+    ScalarSegment s;
+    s.mid_jd_tt = mid;
+    s.half_span_days = half;
+    s.degree = degree;
+    interpolate(v, s.c);
+    return s;
+}
+
+// Measured on interior points offset from the nodes and both endpoints: the
+// same rule as the vector fit's measure(), for a series whose error is not an
+// angle but a difference of values.
+Result<void> measure_scalar(ScalarSegment& s, const ScalarSampler& sampler, int check_multiple,
+                            size_t& calls) {
+    const size_t n = s.c.size();
+    const double mid = s.mid_jd_tt, half = s.half_span_days;
+    s.err_value = 0.0;
+    const int interior = std::max(4, check_multiple) * int(n) + 1;
+    for (int i = 0; i < interior + 2; ++i) {
+        const double t = i == interior       ? -1.0
+                         : i == interior + 1 ? 1.0
+                                             : -1.0 + 2.0 * (double(i) + 0.5) / double(interior);
+        double x = 0.0;
+        auto r = sampler(mid + t * half, x);
+        ++calls;
+        if (!r) {
+            return r.error();
+        }
+        s.err_value = std::max(s.err_value, std::fabs(clenshaw(s.c, t) - x));
+    }
+    return {};
+}
+
+} // namespace
+
+double ScalarSegment::value(double jd_tt) const {
+    return clenshaw(c, (jd_tt - mid_jd_tt) / half_span_days);
+}
+
+Result<ScalarFitReport> fit_scalar(const ScalarSampler& sampler, double jd_from, double jd_to,
+                                   const ScalarFitOptions& options) {
+    if (!(jd_to > jd_from)) {
+        return make_error(ErrorCode::ArgumentError, "scalar fit: the span is empty");
+    }
+    if (!(options.target > 0.0) || options.min_degree < 1 ||
+        options.max_degree < options.min_degree || options.max_degree > 31 ||
+        !(options.min_half_span_days > 0.0) || options.max_segments == 0) {
+        return make_error(ErrorCode::ArgumentError, "scalar fit: unusable options");
+    }
+    ScalarFitReport report;
+    struct Interval {
+        double from, to;
+    };
+    std::vector<Interval> stack{{jd_from, jd_to}};
+    int hint = options.min_degree;
+    while (!stack.empty()) {
+        const Interval in = stack.back();
+        stack.pop_back();
+        const double half = 0.5 * (in.to - in.from);
+        const double mid = 0.5 * (in.to + in.from);
+        const bool can_split = half > options.min_half_span_days;
+        const int probe = std::clamp(hint, options.min_degree, options.max_degree);
+        auto probed = fit_scalar_coeffs(sampler, mid, half, probe, report.sampler_calls);
+        if (!probed) {
+            return probed.error();
+        }
+        ScalarSegment best = std::move(probed).value();
+        const int want =
+            needed_degree_1d(best.c, options.target, options.min_degree, options.max_degree);
+        int use = std::clamp(want, options.min_degree, options.max_degree);
+        if (use != best.degree) {
+            auto refit = fit_scalar_coeffs(sampler, mid, half, use, report.sampler_calls);
+            if (!refit) {
+                return refit.error();
+            }
+            best = std::move(refit).value();
+        }
+        if (auto m = measure_scalar(best, sampler, options.check_multiple, report.sampler_calls);
+            !m) {
+            return m.error();
+        }
+        while (best.err_value > options.target && best.degree + 2 <= options.max_degree) {
+            auto more =
+                fit_scalar_coeffs(sampler, mid, half, best.degree + 2, report.sampler_calls);
+            if (!more) {
+                return more.error();
+            }
+            best = std::move(more).value();
+            if (auto m =
+                    measure_scalar(best, sampler, options.check_multiple, report.sampler_calls);
+                !m) {
+                return m.error();
+            }
+        }
+        if (best.err_value > options.target && can_split) {
+            stack.push_back({mid, in.to});
+            stack.push_back({in.from, mid});
+            continue;
+        }
+        if (report.segments.size() >= options.max_segments) {
+            return make_error(ErrorCode::ArgumentError, "scalar fit: the span needs more than " +
+                                                            std::to_string(options.max_segments) +
+                                                            " segments");
+        }
+        hint = best.degree;
+        report.segments.push_back(std::move(best));
+    }
+    return report;
+}
+
 } // namespace prometheia::segments

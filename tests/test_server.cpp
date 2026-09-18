@@ -32,23 +32,30 @@ struct Reply {
     std::vector<uint8_t> payload;
 };
 
+// Drives the session the way the WebSocket head does: send what is ready,
+// then work the computes a slice at a time until nothing is left.
 std::vector<Reply> drain(Session& s) {
     std::vector<Reply> out;
     std::vector<uint8_t> msg;
-    while (s.next(msg)) {
-        Reply r;
-        REQUIRE(msg.size() >= eph::kEnvelopeSize);
-        r.env.version = msg[2];
-        r.env.type = uint16_t(msg[4] | (uint16_t(msg[5]) << 8));
-        r.env.requestId = uint32_t(msg[8]) | (uint32_t(msg[9]) << 8) | (uint32_t(msg[10]) << 16) |
-                          (uint32_t(msg[11]) << 24);
-        r.env.payloadLen = uint32_t(msg[12]) | (uint32_t(msg[13]) << 8) |
-                           (uint32_t(msg[14]) << 16) | (uint32_t(msg[15]) << 24);
-        r.payload.assign(msg.begin() + eph::kEnvelopeSize, msg.end());
-        CHECK(r.payload.size() == r.env.payloadLen);
-        out.push_back(std::move(r));
+    for (;;) {
+        while (s.next(msg)) {
+            Reply r;
+            REQUIRE(msg.size() >= eph::kEnvelopeSize);
+            r.env.version = msg[2];
+            r.env.type = uint16_t(msg[4] | (uint16_t(msg[5]) << 8));
+            r.env.requestId = uint32_t(msg[8]) | (uint32_t(msg[9]) << 8) |
+                              (uint32_t(msg[10]) << 16) | (uint32_t(msg[11]) << 24);
+            r.env.payloadLen = uint32_t(msg[12]) | (uint32_t(msg[13]) << 8) |
+                               (uint32_t(msg[14]) << 16) | (uint32_t(msg[15]) << 24);
+            r.payload.assign(msg.begin() + eph::kEnvelopeSize, msg.end());
+            CHECK(r.payload.size() == r.env.payloadLen);
+            out.push_back(std::move(r));
+        }
+        if (!s.has_work()) {
+            return out;
+        }
+        s.work();
     }
-    return out;
 }
 
 std::string as_view(const std::vector<uint8_t>& v) {
@@ -214,8 +221,8 @@ TEST_CASE("server_handshake") {
     SUBCASE("WELCOME carries the session, the bounds and the capabilities") {
         const eph::Welcome w = f.welcome();
         CHECK(w.protoSession == 4);
-        CHECK(w.caps ==
-              (eph::kCapF32 | eph::kCapInstantLists | eph::kCapLookup | eph::kCapDeepSky));
+        CHECK(w.caps == (eph::kCapF32 | eph::kCapInstantLists | eph::kCapLookup | eph::kCapDeepSky |
+                         eph::kCapCancel | eph::kCapPriority | eph::kCapSegments));
         CHECK(w.serverName == kServerVersion);
         CHECK(w.engine == f.config.engine);
         CHECK(w.datasetId == f.config.dataset_id);
@@ -1041,4 +1048,383 @@ TEST_CASE("server_metrics_text") {
     CHECK(text.find(
               "prometheiad_build_info{server=\"prometheiad/0.2.0\",protocol=\"4\",tls=\"0\"} 1") !=
           std::string::npos);
+}
+
+// ---- CANCEL, priority, segments (3.4) ----------------------------------------
+
+// A decoded SEGDATA answer: every object's segment list and the metadata.
+struct Segments {
+    std::vector<eph::Meta> meta;
+    std::vector<std::vector<eph::Segment>> segs;
+    std::vector<eph::AyanSeries> ayan;
+    uint32_t chunks = 0, n_obj = 0;
+};
+
+Segments join_segs(const std::vector<Reply>& replies) {
+    Segments d;
+    for (const Reply& r : replies) {
+        REQUIRE(r.env.type == eph::kMsgSegData);
+        eph::SegDataChunk c;
+        std::string why;
+        REQUIRE_MESSAGE(eph::ParseSegData(r.payload.data(), r.payload.size(), &c, &why) == eph::kOk,
+                        why);
+        REQUIRE(c.chunkIndex == d.chunks);
+        if (c.flags & eph::kChunkMeta) {
+            REQUIRE(d.meta.empty());
+            d.meta = c.meta;
+            d.ayan = c.ayan;
+            d.n_obj = c.nObj;
+            REQUIRE(c.nObj == c.meta.size());
+            d.segs.assign(c.nObj, {});
+        }
+        REQUIRE(c.nObj == d.n_obj);
+        REQUIRE(c.iObj + c.nObjChunk <= c.nObj);
+        for (uint32_t i = 0; i < c.nObjChunk; ++i) {
+            REQUIRE(c.segs[i].size() == size_t(uint32_t(c.meta[c.iObj + i].rowsOk)));
+            d.segs[c.iObj + i] = c.segs[i];
+        }
+        ++d.chunks;
+        if (d.chunks > 1) {
+            // nothing
+        }
+    }
+    return d;
+}
+
+// The largest angle between a fit and the engine, in arcsec, over a span.
+double worst_angle(const eph::Segment* seg, double jd, const double want[3]) {
+    double pos[3], vel[3];
+    seg->Eval(eph::Time{jd, 0.0}, pos, vel);
+    const double cross[3] = {pos[1] * want[2] - pos[2] * want[1],
+                             pos[2] * want[0] - pos[0] * want[2],
+                             pos[0] * want[1] - pos[1] * want[0]};
+    const double n = std::sqrt(cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]);
+    const double dot = pos[0] * want[0] + pos[1] * want[1] + pos[2] * want[2];
+    return std::atan2(n, dot) * (180.0 / 3.14159265358979323846) * 3600.0;
+}
+
+const eph::Segment* covering(const std::vector<eph::Segment>& segs, double jd) {
+    for (const eph::Segment& g : segs) {
+        if (jd >= g.mid.jd1 - g.halfSpanDays - 1e-9 && jd <= g.mid.jd1 + g.halfSpanDays + 1e-9) {
+            return &g;
+        }
+    }
+    return nullptr;
+}
+
+TEST_CASE("server_cancel") {
+    Fixture f;
+    Session& s = *f.session;
+    f.welcome();
+
+    SUBCASE("an unknown id gets nothing; others keep working") {
+        eph::Request req = base_request(2451545.0, 2);
+        req.objs = {body_obj(10)};
+        CHECK(s.on_message(request(req, 1), true));
+        CHECK(s.on_message(as_view(message(eph::kMsgCancel, 42, nullptr, 0)), true));
+        const auto replies = drain(s);
+        REQUIRE(replies.size() == 1);
+        CHECK(replies[0].env.type == eph::kMsgData);
+        CHECK(replies[0].env.requestId == 1);
+        CHECK(f.ctx->metrics().cancels == 0);
+    }
+
+    SUBCASE("a cancelled request stops work and caches nothing") {
+        eph::Request req = base_request(2451545.0, 20000, 1.0 / 24.0); // 20000 hourly rows
+        req.objs = {body_obj(10), body_obj(399), body_obj(5)};
+        CHECK(s.on_message(request(req, 7), true));
+        CHECK(s.has_work());
+        s.work(); // one slice: a fraction of the rows, never the whole answer
+        CHECK(s.has_work());
+        CHECK(f.ctx->cache().entries() == 0); // partial answers are never cached
+        CHECK(s.on_message(as_view(message(eph::kMsgCancel, 7, nullptr, 0)), true));
+        CHECK(!s.has_work());
+        CHECK(s.queued_answers() == 0);
+        const auto replies = drain(s);
+        REQUIRE(replies.size() == 1);
+        REQUIRE(replies[0].env.type == eph::kMsgError);
+        const eph::Error e = error_of(replies[0]);
+        CHECK(e.code == eph::kErrCancelled);
+        CHECK(e.flags == 0); // not closing, not retryable
+        CHECK(e.retryAfterMs == 0);
+        CHECK(f.ctx->cache().entries() == 0);
+        CHECK(f.ctx->metrics().cancels == 1);
+        CHECK(f.ctx->metrics().cache_misses == 0); // the compute never finished
+
+        // The same question asked again is answered whole: the cancellation
+        // left no half answer behind.
+        CHECK(s.on_message(request(req, 8), true));
+        const Data d = join(drain(s));
+        REQUIRE(d.meta.size() == 3);
+        CHECK(d.meta[0].rowsOk == 20000);
+        CHECK(f.ctx->cache().entries() == 1);
+        CHECK(f.ctx->metrics().cancels == 1);
+    }
+
+    SUBCASE("a request answered completely gets nothing") {
+        eph::Request req = base_request(2451545.0, 3);
+        req.objs = {body_obj(10)};
+        CHECK(s.on_message(request(req, 3), true));
+        CHECK(drain(s).size() == 1); // one chunk, the last
+        CHECK(s.on_message(as_view(message(eph::kMsgCancel, 3, nullptr, 0)), true));
+        CHECK(drain(s).empty());
+        CHECK(f.ctx->metrics().cancels == 0);
+    }
+}
+
+TEST_CASE("server_priority_interactive_before_prefetch") {
+    Fixture f;
+    Session& s = *f.session;
+    f.welcome();
+
+    eph::Request prefetch = base_request(2451545.0, 3000, 1.0 / 24.0);
+    prefetch.objs = {body_obj(10), body_obj(399), body_obj(5)};
+    prefetch.priority = 1;
+    CHECK(s.on_message(request(prefetch, 21), true));
+    eph::Request interactive = base_request(2451550.0, 4);
+    interactive.objs = {body_obj(10)};
+    interactive.priority = 0;
+    CHECK(s.on_message(request(interactive, 22), true));
+
+    const auto replies = drain(s);
+    // The interactive answer is worked and sent before the prefetch (3.5),
+    // even though the prefetch arrived first.
+    size_t first_data = replies.size();
+    for (size_t i = 0; i < replies.size(); ++i) {
+        if (replies[i].env.type == eph::kMsgData) {
+            first_data = i;
+            break;
+        }
+    }
+    REQUIRE(first_data < replies.size());
+    CHECK(replies[first_data].env.requestId == 22);
+    // Both answers arrive complete, each in order.
+    uint32_t rows21 = 0, rows22 = 0;
+    for (const Reply& r : replies) {
+        if (r.env.type != eph::kMsgData) {
+            continue;
+        }
+        eph::DataChunk c;
+        std::string why;
+        REQUIRE(eph::ParseData(r.payload.data(), r.payload.size(), &c, &why) == eph::kOk);
+        if (r.env.requestId == 21) {
+            CHECK(c.iTime == rows21);
+            rows21 += c.nRows;
+        } else {
+            CHECK(r.env.requestId == 22);
+            CHECK(c.iTime == rows22);
+            rows22 += c.nRows;
+        }
+    }
+    CHECK(rows21 == 3000);
+    CHECK(rows22 == 4);
+}
+
+TEST_CASE("server_segments") {
+    Fixture f;
+    Session& s = *f.session;
+    Engine check = synth::open_synthetic(f.tf);
+    REQUIRE(
+        check.add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm").ok());
+    f.welcome();
+
+    const auto seg_request = [&](double jd, uint32_t n_time, double step_days) {
+        eph::Request req = base_request(jd, n_time, step_days);
+        req.representation = 1;
+        req.segTargetErrArcsec = 0.1f;
+        req.profiles[0].observer = eph::kObsHelio;
+        req.profiles[0].form = eph::kFormRectangular;
+        return req;
+    };
+
+    SUBCASE("segments answer, evaluate against the engine, and share cells") {
+        eph::Request req = seg_request(2451545.5, 10, 4.0); // 36 days: 3 cells
+        req.objs = {body_obj(5), body_obj(399)};
+        CHECK(s.on_message(request(req, 5), true));
+        const Segments d = join_segs(drain(s));
+        CHECK(d.n_obj == 2);
+        REQUIRE(d.segs[0].size() > 0);
+        REQUIRE(d.segs[1].size() > 0);
+
+        CHECK(d.meta[0].name == "Jupiter");
+        CHECK(d.meta[0].rowsOk == int32_t(d.segs[0].size()));
+        CHECK(d.meta[0].errCode == eph::kOErrNone);
+        CHECK(d.meta[0].errText.empty());
+        CHECK(d.meta[0].resolvedNaif == 5);
+        CHECK(d.meta[0].firstFailedRow == eph::kRowNone);
+        // A heliocentric observer cannot be deflected; light time and
+        // aberration are live (the same table DATA answers use).
+        CHECK(d.meta[0].corrApplied == (eph::kCorrLightTime | eph::kCorrAberration));
+        CHECK(d.meta[0].sourceIdx != eph::kSourceNone);
+        CHECK(d.ayan.empty()); // tropical profiles carry no series
+
+        // Whole cells, contiguous, within the degree cap.
+        const double from = Lattice::cell_start(Lattice::cell_of(2451545.5));
+        const double to = Lattice::cell_end(Lattice::cell_of(2451545.5 + 36.0));
+        double prev_end = from;
+        float worst_declared = 0.0f;
+        for (const eph::Segment& g : d.segs[0]) {
+            CHECK(std::fabs((g.mid.jd1 - g.halfSpanDays) - prev_end) < 1e-9);
+            prev_end = g.mid.jd1 + g.halfSpanDays;
+            CHECK(g.degree <= uint8_t(kSegMaxDegree));
+            worst_declared = std::max(worst_declared, g.errArcsec);
+        }
+        CHECK(prev_end == doctest::Approx(to));
+        CHECK(worst_declared <= 0.1f); // the target, met and measured
+
+        // The fit is tropical and answers the engine within what it declares.
+        CalcOptions o;
+        o.center = Center::Heliocentric;
+        o.sigma = false;
+        double worst = 0.0, worst_rate = 0.0;
+        for (int i = 0; i <= 400; ++i) {
+            const double jd = from + i * (to - from) / 400.0;
+            const eph::Segment* seg = covering(d.segs[0], jd);
+            REQUIRE(seg != nullptr);
+            const Position p = check.calc(5, jd, o).value().pos;
+            worst = std::max(worst, worst_angle(seg, jd, p.xyz_au));
+            double pos[3], vel[3];
+            seg->Eval(eph::Time{jd, 0.0}, pos, vel);
+            const double dv[3] = {vel[0] - p.vel_au_day[0], vel[1] - p.vel_au_day[1],
+                                  vel[2] - p.vel_au_day[2]};
+            const double dist = std::sqrt(p.xyz_au[0] * p.xyz_au[0] + p.xyz_au[1] * p.xyz_au[1] +
+                                          p.xyz_au[2] * p.xyz_au[2]);
+            worst_rate =
+                std::max(worst_rate, std::sqrt(dv[0] * dv[0] + dv[1] * dv[1] + dv[2] * dv[2]) /
+                                         dist * (180.0 / 3.14159265358979323846) * 3600.0);
+        }
+        CHECK(worst <= 0.1);
+        CHECK(worst_rate <= 0.5); // the rate residual is declared, not gated
+
+        // A second identical request serves the same cells: the lattice, not
+        // the ask, is what was fitted.
+        const uint64_t hits = f.ctx->seg_cache().hits();
+        CHECK(s.on_message(request(req, 6), true));
+        const Segments again = join_segs(drain(s));
+        CHECK(again.segs[0].size() == d.segs[0].size());
+        CHECK(f.ctx->seg_cache().hits() > hits);
+        CHECK(f.ctx->seg_cache().entries() >= 3);
+    }
+
+    SUBCASE("a sidereal profile carries its ayanamsa series") {
+        eph::Request req = seg_request(2451545.5, 10, 4.0);
+        req.profiles[0].zodiac = "lahiri";
+        req.objs = {body_obj(5)};
+        CHECK(s.on_message(request(req, 5), true));
+        const Segments d = join_segs(drain(s));
+        CHECK(d.meta[0].errCode == eph::kOErrNone);
+        REQUIRE(d.ayan.size() == 1);
+        CHECK(d.ayan[0].profile == 0);
+        REQUIRE(!d.ayan[0].segs.empty());
+
+        // The ayanamsa series answers the engine's own ayanamsa within its
+        // declared error.
+        CalcOptions sid; // the ayanamsa is observer-independent; the Sun is
+        // asked geocentrically so the engine always has it.
+        sid.center = Center::Geocentric;
+        sid.sidereal = SiderealMode::Lahiri;
+        sid.sigma = false;
+        double worst = 0.0, worst_declared = 0.0;
+        for (const eph::AyanSeg& g : d.ayan[0].segs) {
+            worst_declared = std::max(worst_declared, double(g.errArcsec));
+        }
+        const double ayan_from = Lattice::cell_start(Lattice::cell_of(2451545.5));
+        const double ayan_to = Lattice::cell_end(Lattice::cell_of(2451545.5 + 36.0));
+        for (int i = 0; i <= 400; ++i) {
+            const double jd = ayan_from + i * (ayan_to - ayan_from) / 400.0;
+            const eph::AyanSeg* seg = nullptr;
+            for (const eph::AyanSeg& g : d.ayan[0].segs) {
+                if (jd >= g.mid.jd1 - g.halfSpanDays - 1e-9 &&
+                    jd <= g.mid.jd1 + g.halfSpanDays + 1e-9) {
+                    seg = &g;
+                    break;
+                }
+            }
+            REQUIRE(seg != nullptr);
+            const auto r = check.calc(10, jd, sid);
+            REQUIRE(r.ok());
+            REQUIRE(r.value().ayanamsa_deg.has_value());
+            worst = std::max(
+                worst,
+                std::fabs(seg->Eval(eph::Time{jd, 0.0}) - r.value().ayanamsa_deg.value()) * 3600.0);
+        }
+        CHECK(worst_declared <= 0.1f);
+        CHECK(worst <= 0.1);
+    }
+
+    SUBCASE("objects this server does not fit are per-object errors") {
+        eph::Request req = seg_request(2451545.5, 5, 4.0);
+        eph::Object star;
+        star.kind = eph::kObjStar;
+        star.name = "Sirius";
+        eph::Object luno;
+        luno.kind = eph::kObjOrbitPoint;
+        luno.naif = 301;
+        luno.method = eph::kMethOsculating;
+        req.objs = {star, body_obj(5), luno};
+        CHECK(s.on_message(request(req, 5), true));
+        const Segments d = join_segs(drain(s));
+        CHECK(d.n_obj == 3);
+        CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
+        CHECK(d.meta[0].rowsOk == 0);
+        CHECK(d.segs[0].empty());
+        CHECK(d.meta[1].errCode == eph::kOErrNone);
+        CHECK(!d.segs[1].empty());
+        CHECK(d.meta[2].errCode == eph::kOErrUnsupported);
+        CHECK(d.meta[2].rowsOk == 0);
+        CHECK(d.segs[2].empty());
+    }
+
+    SUBCASE("refusals that cost no work") {
+        // Over the advertised span bound.
+        eph::Request too_long = seg_request(2451545.0, 60, 40.0); // 2360 days
+        too_long.objs = {body_obj(5)};
+        CHECK(s.on_message(request(too_long, 30), true));
+        auto r = drain(s);
+        REQUIRE(r.size() == 1);
+        const eph::Error e1 = error_of(r[0]);
+        CHECK(e1.code == eph::kErrLimits);
+        CHECK(e1.text.find("segMaxSpanDays") != std::string::npos);
+        CHECK(f.ctx->seg_cache().misses() == 0);
+
+        // Finer than the advertised floor: refused, not served coarser.
+        eph::Request too_fine = seg_request(2451545.0, 5, 1.0);
+        too_fine.segTargetErrArcsec = 0.0005f;
+        too_fine.objs = {body_obj(5)};
+        CHECK(s.on_message(request(too_fine, 31), true));
+        r = drain(s);
+        REQUIRE(r.size() == 1);
+        CHECK(error_of(r[0]).code == eph::kErrLimits);
+
+        // The codec's own refusals: a spherical profile, and a list.
+        eph::Request spherical = base_request(2451545.0, 5, 1.0);
+        spherical.representation = 1;
+        spherical.segTargetErrArcsec = 0.1f;
+        spherical.objs = {body_obj(5)};
+        CHECK(s.on_message(request(spherical, 32), true));
+        r = drain(s);
+        REQUIRE(r.size() == 1);
+        CHECK(error_of(r[0]).code == eph::kErrUnsupported);
+
+        eph::Request listreq = seg_request(2451545.0, 3, 1.0);
+        listreq.timeMode = eph::kTimeList;
+        for (int i = 0; i < 3; ++i) {
+            eph::Time t;
+            t.jd1 = 2451545.0 + i;
+            listreq.instants.push_back(t);
+        }
+        listreq.objs = {body_obj(5)};
+        CHECK(s.on_message(request(listreq, 33), true));
+        r = drain(s);
+        REQUIRE(r.size() == 1);
+        CHECK(error_of(r[0]).code == eph::kErrUnsupported);
+
+        // One instant still serves the cell covering it.
+        eph::Request one = seg_request(2451545.0, 1, 1.0);
+        one.objs = {body_obj(5)};
+        CHECK(s.on_message(request(one, 34), true));
+        const Segments d = join_segs(drain(s));
+        CHECK(d.meta[0].errCode == eph::kOErrNone);
+        CHECK(d.segs[0].size() >= 1);
+    }
 }

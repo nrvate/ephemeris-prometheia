@@ -4,11 +4,13 @@
 // server speaking Astrolog's ephemeris protocol, version 4). Sends HELLO and
 // one REQUEST, collects the DATA chunks and prints one line per object per
 // row. docs/SERVER.md.
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "ephproto.h"
@@ -40,6 +42,13 @@ constexpr const char* kUsage =
     "  --topo LON,LAT,ELV  observer site (degrees east, degrees, metres)\n"
     "  --f32               ask for float32 values\n"
     "  --chunk N           chunk-size hint (default: the server's maximum)\n"
+    "  --segments          representation 1: ask for SEGDATA (rectangular form,\n"
+    "                      answered with Chebyshev segments over the span)\n"
+    "  --target ARCSEC     the segments' target error (with --segments)\n"
+    "  --max-degree N      largest Chebyshev degree to buffer (with --segments)\n"
+    "  --priority 0|1      0 interactive (default), 1 prefetch\n"
+    "  --cancel-after-ms N send CANCEL after N ms (shows ERROR 10 unless the\n"
+    "                      answer already went out)\n"
     "  --token T           HELLO's access token\n"
     "  --tls               wss:// (verifies the certificate and name)\n"
     "  --ca FILE           trust anchors for --tls (default: the system store)\n"
@@ -70,6 +79,8 @@ int main(int argc, char** argv) {
     eph::Request req; // defaults: TT grid, one profile, f64
     eph::Profile& pf = req.profiles.emplace_back();
     double step_seconds = 86400.0;
+    double target_arcsec = 0.1;
+    int cancel_after_ms = -1;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const auto value = [&]() -> const char* {
@@ -149,6 +160,18 @@ int main(int argc, char** argv) {
             req.precision = eph::kPrecF32;
         } else if (arg == "--chunk") {
             req.chunkRows = uint32_t(std::strtoul(value(), nullptr, 10));
+        } else if (arg == "--segments") {
+            req.representation = 1;
+            pf.form = eph::kFormRectangular; // segments are rectangular (3.4)
+            pf.columns = 0;
+        } else if (arg == "--target") {
+            target_arcsec = std::strtod(value(), nullptr);
+        } else if (arg == "--max-degree") {
+            req.maxDegreeHint = uint8_t(std::strtoul(value(), nullptr, 10));
+        } else if (arg == "--priority") {
+            req.priority = uint8_t(std::strtoul(value(), nullptr, 10));
+        } else if (arg == "--cancel-after-ms") {
+            cancel_after_ms = std::atoi(value());
         } else if (arg == "--token") {
             token = value();
         } else if (arg == "--tls") {
@@ -175,6 +198,13 @@ int main(int argc, char** argv) {
     }
     // 3.5: stepNs is 0 with one row, nonzero otherwise.
     req.stepNs = req.nTime > 1 ? int64_t(step_seconds * 1e9) : 0;
+    if (req.representation == 1) {
+        if (!(target_arcsec > 0.0)) {
+            std::fprintf(stderr, "--segments needs --target ARCSEC > 0\n%s", kUsage);
+            return 2;
+        }
+        req.segTargetErrArcsec = float(target_arcsec);
+    }
 
     WsClient ws;
     if (auto r = ws.connect(host, port, "/", tls); !r) {
@@ -203,6 +233,14 @@ int main(int argc, char** argv) {
     if (auto r = ws.send(message(eph::kMsgRequest, request_id, payload.data(), payload.size()));
         !r) {
         return fail(r.error());
+    }
+    if (cancel_after_ms >= 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(cancel_after_ms));
+        // A request already answered completely earns silence (3.4); one
+        // still computing earns ERROR 10.
+        if (auto r = ws.send(message(eph::kMsgCancel, request_id, nullptr, 0)); !r) {
+            return fail(r.error());
+        }
     }
 
     const auto n_obj = uint32_t(req.objs.size());
@@ -236,11 +274,66 @@ int main(int argc, char** argv) {
         if (env.type == eph::kMsgError) {
             eph::Error e;
             if (eph::ParseError(p, env.payloadLen, &e, &why) == eph::kOk) {
+                if (e.code == eph::kErrCancelled && cancel_after_ms >= 0) {
+                    std::printf("# cancelled before the answer was whole\n");
+                    return 0;
+                }
                 std::fprintf(stderr, "ERROR %u: %s\n", e.code, e.text.c_str());
             }
             return 2;
         }
-        if (env.type != eph::kMsgData || env.requestId != request_id) {
+        if (env.requestId != request_id) {
+            continue;
+        }
+        if (req.representation == 1) {
+            if (env.type != eph::kMsgSegData) {
+                continue;
+            }
+            eph::SegDataChunk s;
+            if (eph::ParseSegData(p, env.payloadLen, &s, &why) != eph::kOk) {
+                std::fprintf(stderr, "bad SEGDATA chunk: %s\n", why.c_str());
+                return 1;
+            }
+            for (const eph::Meta& mm : s.meta) {
+                std::printf("# object %ld name \"%s\" segments %d corr %u err %u \"%s\"\n",
+                            long(&mm - s.meta.data()), mm.name.c_str(), mm.rowsOk, mm.corrApplied,
+                            mm.errCode, mm.errText.c_str());
+            }
+            for (const eph::AyanSeries& series : s.ayan) {
+                float worst = 0.0f;
+                double from = 0.0, to = 0.0;
+                for (const eph::AyanSeg& g : series.segs) {
+                    worst = std::max(worst, g.errArcsec);
+                    from = std::min(from == 0.0 ? g.mid.jd1 - g.halfSpanDays : from,
+                                    g.mid.jd1 - g.halfSpanDays);
+                    to = std::max(to, g.mid.jd1 + g.halfSpanDays);
+                }
+                std::printf("# ayanamsa profile %u: %zu segments, JD %.1f..%.1f, worst %.4g\"\n",
+                            series.profile, series.segs.size(), from, to, worst);
+            }
+            for (uint32_t i = 0; i < s.nObjChunk; ++i) {
+                const std::vector<eph::Segment>& segs = s.segs[i];
+                float worst = 0.0f, worst_rate = 0.0f;
+                double from = 0.0, to = 0.0;
+                int max_deg = 0;
+                for (const eph::Segment& g : segs) {
+                    worst = std::max(worst, g.errArcsec);
+                    worst_rate = std::max(worst_rate, g.errRateArcsecPerDay);
+                    max_deg = std::max(max_deg, int(g.degree));
+                    from = std::min(from == 0.0 ? g.mid.jd1 - g.halfSpanDays : from,
+                                    g.mid.jd1 - g.halfSpanDays);
+                    to = std::max(to, g.mid.jd1 + g.halfSpanDays);
+                }
+                std::printf("seg %u %zu segments JD %.1f..%.1f degree<=%d err<=%.4g\" "
+                            "rate<=%.4g\"/day\n",
+                            s.iObj + i, segs.size(), from, to, max_deg, worst, worst_rate);
+            }
+            if (s.flags & eph::kChunkLast) {
+                return 0;
+            }
+            continue;
+        }
+        if (env.type != eph::kMsgData) {
             continue;
         }
         eph::DataChunk d;

@@ -120,6 +120,11 @@ struct WsServer::Impl {
         std::unordered_set<void*> sockets;
         Impl* impl = nullptr;
         Clock::time_point drain_deadline{};
+        // One deferred pump per loop at a time: it works each session's
+        // computes a bounded slice at a time and reschedules itself while
+        // any work remains, so an incoming CANCEL is read between slices
+        // (3.4) instead of after a whole-request callback.
+        bool pump_scheduled = false;
     };
     std::vector<std::unique_ptr<LoopState>> loops;
     std::vector<std::thread> threads;
@@ -136,6 +141,45 @@ struct WsServer::Impl {
     using Ws = uWS::WebSocket<SSL, true, Conn>;
     template <bool SSL>
     using App = uWS::TemplatedApp<SSL>;
+
+    // A request still computing is worked a bounded slice at a time between
+    // loop turns: the deferred callback runs after whatever messages are
+    // already waiting have been read, which is the window a CANCEL needs.
+    // Schedules at most one pass at a time; the pass reschedules itself
+    // while any session still has work.
+    template <bool SSL>
+    static void schedule_pump(LoopState& ls) {
+        if (ls.pump_scheduled || !ls.loop) {
+            return;
+        }
+        ls.pump_scheduled = true;
+        LoopState* p = &ls;
+        ls.loop->defer([p] {
+            p->pump_scheduled = false;
+            if (!p->app || p->sockets.empty()) {
+                return;
+            }
+            // Copied at run time: anything that closed before this callback
+            // ran was erased from the set first (all on this thread).
+            std::vector<void*> sockets(p->sockets.begin(), p->sockets.end());
+            bool more = false;
+            for (void* q : sockets) {
+                auto* ws = static_cast<Ws<SSL>*>(q);
+                Conn* c = ws->getUserData();
+                if (!c->session) {
+                    continue;
+                }
+                if (c->session->has_work()) {
+                    c->session->work(); // one bounded slice
+                    more = true;
+                }
+                flush<SSL>(ws, *p); // send what the slice finished
+            }
+            if (more) {
+                schedule_pump<SSL>(*p);
+            }
+        });
+    }
 
     template <bool SSL>
     static void flush(Ws<SSL>* ws, LoopState& ls) {
@@ -228,12 +272,28 @@ struct WsServer::Impl {
             if (c->close_when_sent) {
                 return;
             }
-            if (!c->session->on_message(message, op == uWS::OpCode::BINARY)) {
+            const bool keep = c->session->on_message(message, op == uWS::OpCode::BINARY);
+            // Read before the flush: flush may end() the connection for a
+            // closing error, and the socket's memory does not survive that.
+            const bool has_work = c->session->has_work();
+            if (!keep) {
                 c->close_when_sent = true;
             }
             flush<SSL>(ws, ls);
+            // A REQUEST this message accepted is worked by the pump, not in
+            // this callback (3.4): a CANCEL that follows is read first.
+            if (has_work) {
+                schedule_pump<SSL>(ls);
+            }
         };
-        behavior.drain = [&ls](Ws<SSL>* ws) { flush<SSL>(ws, ls); };
+        behavior.drain = [&ls](Ws<SSL>* ws) {
+            Conn* c = ws->getUserData();
+            const bool has_work = c->session->has_work();
+            flush<SSL>(ws, ls);
+            if (has_work) {
+                schedule_pump<SSL>(ls);
+            }
+        };
         behavior.close = [&ls](Ws<SSL>* ws, int, std::string_view) {
             ls.sockets.erase(ws);
             --ls.metrics.connections_open;
@@ -276,7 +336,11 @@ struct WsServer::Impl {
     static bool idle(LoopState& ls) {
         for (void* p : ls.sockets) {
             auto* ws = static_cast<Ws<SSL>*>(p);
-            if (ws->getUserData()->session->pending() || ws->getBufferedAmount() > 0) {
+            const Conn* c = ws->getUserData();
+            // In-flight computes too: letting them finish caches the answer
+            // for whoever asks the same question after the restart.
+            if (ws->getBufferedAmount() > 0 || (c->session && c->session->pending()) ||
+                (c->session && c->session->has_work())) {
                 return false;
             }
         }

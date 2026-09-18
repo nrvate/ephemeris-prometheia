@@ -51,6 +51,8 @@ std::string metrics_text(const std::vector<const Metrics*>& loops, const ServerI
     metric("prometheiad_hellos_total", "counter", "HELLOs answered.", sum(&Metrics::hellos));
     metric("prometheiad_requests_total", "counter", "REQUESTs answered with data.",
            sum(&Metrics::requests));
+    metric("prometheiad_cancels_total", "counter",
+           "REQUESTs stopped by a CANCEL before they were fully answered.", sum(&Metrics::cancels));
     metric("prometheiad_cells_computed_total", "counter",
            "Cells (objects x rows) computed, cache misses only.", sum(&Metrics::cells_computed));
     metric("prometheiad_cache_hits_total", "counter", "REQUESTs answered from the result cache.",

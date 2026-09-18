@@ -276,3 +276,91 @@ TEST_CASE("segments_de440_roots_land_where_the_engine_puts_them") {
     // be worse than the fit that produced them.
     CHECK(worst_seconds < 3.0);
 }
+
+// ---- scalar series -----------------------------------------------------------
+
+TEST_CASE("segments_scalar_fits_a_known_function_within_its_target") {
+    // An ayanamsa-like function: a large linear drift plus a slow periodic
+    // term. The fit must meet the target where it says it does, on the check
+    // set (interior and both endpoints), and evaluate back exactly.
+    const auto sampler = [](double jd, double& v) -> Result<void> {
+        const double t = jd - 2451545.0;
+        v = 23.85 + 13.97e-3 * t + 0.02 * std::sin(2.0 * 3.14159265358979323846 * t / 365.25);
+        return {};
+    };
+    segments::ScalarFitOptions o;
+    o.target = 1e-9; // degrees: ~3.6e-6 arcsec, met easily by degree 4-5
+    auto fit = segments::fit_scalar(sampler, 2451545.0, 2451545.0 + 320.0, o);
+    REQUIRE_MESSAGE(fit.ok(), fit.error().message);
+    const std::vector<segments::ScalarSegment>& segs = fit.value().segments;
+    REQUIRE(!segs.empty());
+    double worst = 0.0;
+    for (int i = 0; i <= 3200; ++i) {
+        const double jd = 2451545.0 + i * 0.1;
+        double want = 0.0;
+        REQUIRE(sampler(jd, want).ok());
+        for (const segments::ScalarSegment& s : segs) {
+            if (jd >= s.mid_jd_tt - s.half_span_days && jd <= s.mid_jd_tt + s.half_span_days) {
+                worst = std::max(worst, std::fabs(s.value(jd) - want));
+                break;
+            }
+        }
+    }
+    CHECK(worst <= o.target);
+    // Every segment's declared residual is a measured bound on itself.
+    for (const segments::ScalarSegment& s : segs) {
+        CHECK(s.err_value <= o.target);
+        CHECK(s.err_value > 0.0);
+    }
+    // The residuals are measured on both endpoints: the declared error of the
+    // segment holding the span's start must be at least the error AT the
+    // start.
+    double at_start = 0.0;
+    REQUIRE(sampler(2451545.0, at_start).ok());
+    CHECK(segs.front().err_value >= std::fabs(segs.front().value(2451545.0) - at_start));
+}
+
+TEST_CASE("segments_scalar_splits_when_the_target_demands_it") {
+    // A function with a sharp kink needs real work: high-frequency ripple
+    // over a long span forces splits.
+    const auto sampler = [](double jd, double& v) -> Result<void> {
+        const double t = jd - 2451545.0;
+        v = 24.0 + 0.5 * std::sin(40.0 * t);
+        return {};
+    };
+    segments::ScalarFitOptions o;
+    o.target = 1e-7;
+    auto fit = segments::fit_scalar(sampler, 2451545.0, 2451545.0 + 64.0, o);
+    REQUIRE_MESSAGE(fit.ok(), fit.error().message);
+    CHECK(fit.value().segments.size() >= 4); // 64 days at this frequency splits
+    double worst = 0.0;
+    for (int i = 0; i <= 6400; ++i) {
+        const double jd = 2451545.0 + i * 0.01;
+        double want = 0.0;
+        REQUIRE(sampler(jd, want).ok());
+        for (const segments::ScalarSegment& s : fit.value().segments) {
+            if (jd >= s.mid_jd_tt - s.half_span_days && jd <= s.mid_jd_tt + s.half_span_days) {
+                worst = std::max(worst, std::fabs(s.value(jd) - want));
+                break;
+            }
+        }
+    }
+    CHECK(worst <= o.target);
+}
+
+TEST_CASE("segments_scalar_refuses_bad_spans_and_reports_sampler_errors") {
+    const auto sampler = [](double, double&) -> Result<void> { return {}; };
+    segments::ScalarFitOptions o;
+    CHECK(!segments::fit_scalar(sampler, 2451545.0, 2451545.0, o).ok());
+    CHECK(!segments::fit_scalar(sampler, 2451546.0, 2451545.0, o).ok());
+    o.target = 0.0;
+    CHECK(!segments::fit_scalar(sampler, 2451545.0, 2451545.5, o).ok());
+
+    const auto broken = [](double, double&) -> Result<void> {
+        return make_error(ErrorCode::NotFound, "no such body");
+    };
+    segments::ScalarFitOptions ok_options;
+    auto failed = segments::fit_scalar(broken, 2451545.0, 2451545.5, ok_options);
+    REQUIRE(!failed.ok());
+    CHECK(failed.error().code == ErrorCode::NotFound);
+}

@@ -444,3 +444,99 @@ TEST_CASE("prometheiad_tls") {
     CHECK(e.error().message.find("does not match certificate") != std::string::npos);
 }
 #endif
+
+TEST_CASE("prometheiad_segments_and_cancel") {
+    Running run;
+    WsClient c;
+    connect_and_hello(c, run.server->port());
+
+    SUBCASE("a segments request answers SEGDATA over the wire") {
+        eph::Request req; // heliocentric rectangular, tropical
+        req.profiles.emplace_back();
+        req.profiles[0].observer = eph::kObsHelio;
+        req.profiles[0].form = eph::kFormRectangular;
+        req.representation = 1;
+        req.segTargetErrArcsec = 0.1f;
+        req.start.jd1 = 2451545.5;
+        req.stepNs = int64_t(4.0 * 86400.0 * 1e9);
+        req.nTime = 10;
+        eph::Object jup;
+        jup.naif = 5;
+        req.objs = {jup};
+        std::vector<uint8_t> payload;
+        eph::EncodeRequest(&payload, req);
+        REQUIRE(c.send(message(eph::kMsgRequest, 5, payload.data(), payload.size())).ok());
+
+        eph::SegDataChunk first;
+        bool got_last = false;
+        for (;;) {
+            const auto m = c.receive();
+            REQUIRE_MESSAGE(m.ok(), m.error().message);
+            REQUIRE(m.value().size() >= eph::kEnvelopeSize);
+            const uint8_t* p = m.value().data() + eph::kEnvelopeSize;
+            std::string why;
+            eph::SegDataChunk d;
+            REQUIRE_MESSAGE(eph::ParseSegData(p, m.value().size() - eph::kEnvelopeSize, &d, &why) ==
+                                eph::kOk,
+                            why);
+            REQUIRE(id_of(m.value()) == 5);
+            if (d.chunkIndex == 0) {
+                first = d;
+            }
+            if (d.flags & eph::kChunkLast) {
+                got_last = true;
+                break;
+            }
+        }
+        CHECK(got_last);
+        REQUIRE(first.nObj == 1);
+        REQUIRE(first.meta.size() == 1);
+        CHECK(first.meta[0].name == "Jupiter");
+        CHECK(first.meta[0].errCode == eph::kOErrNone);
+        CHECK(first.meta[0].rowsOk > 0);
+        CHECK(!first.segs[0].empty());
+        CHECK(first.ayan.empty());
+        // Contiguous coverage, the degree inside the cap.
+        for (size_t i = 1; i < first.segs[0].size(); ++i) {
+            const eph::Segment& a = first.segs[0][i - 1];
+            const eph::Segment& b = first.segs[0][i];
+            CHECK(std::fabs((a.mid.jd1 + a.halfSpanDays) - (b.mid.jd1 - b.halfSpanDays)) < 1e-9);
+        }
+        for (const eph::Segment& g : first.segs[0]) {
+            CHECK(g.degree <= uint8_t(kSegMaxDegree));
+            CHECK(g.errArcsec <= 0.1f);
+        }
+    }
+
+    SUBCASE("CANCEL stops a request that is still computing") {
+        eph::Request big; // long enough that 20 ms is safely inside the work
+        big.profiles.emplace_back();
+        big.start.jd1 = 2451545.0;
+        big.stepNs = 3600LL * 1000000000LL;
+        big.nTime = 20000; // 20000 hourly rows, inside the kernel's 120 years
+        eph::Object sun, earth, jup;
+        sun.naif = 10;
+        earth.naif = 399;
+        jup.naif = 5;
+        big.objs = {sun, earth, jup};
+        std::vector<uint8_t> payload;
+        eph::EncodeRequest(&payload, big);
+        REQUIRE(c.send(message(eph::kMsgRequest, 11, payload.data(), payload.size())).ok());
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        REQUIRE(c.send(message(eph::kMsgCancel, 11, nullptr, 0)).ok());
+
+        // No DATA ever: chunks only follow a whole answer, so the first
+        // reply owed to this id is the ERROR itself.
+        const auto m = c.receive();
+        REQUIRE_MESSAGE(m.ok(), m.error().message);
+        REQUIRE(type_of(m.value()) == eph::kMsgError);
+        REQUIRE(id_of(m.value()) == 11);
+        eph::Error e;
+        std::string why;
+        REQUIRE(eph::ParseError(m.value().data() + eph::kEnvelopeSize,
+                                m.value().size() - eph::kEnvelopeSize, &e, &why) == eph::kOk);
+        CHECK(e.code == eph::kErrCancelled);
+        CHECK(e.flags == 0);
+        CHECK(e.retryAfterMs == 0);
+    }
+}

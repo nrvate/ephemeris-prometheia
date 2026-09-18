@@ -28,6 +28,7 @@ struct Metrics {
     Counter hello_timeouts{0};
     Counter hellos{0};
     Counter requests{0};
+    Counter cancels{0};
     Counter cells_computed{0};
     Counter cache_hits{0};
     Counter cache_misses{0};

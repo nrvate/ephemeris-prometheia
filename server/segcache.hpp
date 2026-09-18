@@ -5,7 +5,7 @@
 // A client asks for segments over the span it cares about. The server does
 // not fit that span: it fits the fixed lattice cells that cover it, so two
 // clients asking overlapping spans share the work rather than each paying
-// for a fit keyed to their own start instant. The client is given contiguous
+// for a fit keyed to its own start instant. The client is given contiguous
 // coverage of what it asked for, plus a little either side, which is what it
 // wanted anyway.
 //
@@ -14,6 +14,10 @@
 // could defeat the sharing without meaning to. Quantisation therefore only
 // ever moves toward a FINER fit: the client gets at least the accuracy it
 // asked for, and the segment still publishes the residual that was measured.
+//
+// Two kinds of cell live here: a body's rectangular position (three Chebyshev
+// axes) and a scalar series such as an ayanamsa. Both walk the same lattice
+// under the same ladder; the caches are separate because the values are.
 //
 // Nothing here knows about any wire format. The caller supplies a key that
 // identifies everything but the span — dataset, object, profile — and a
@@ -58,35 +62,44 @@ double quantise_target(double asked_err_arcsec);
 
 // One cell's fit.
 using CellSegments = std::vector<segments::Segment>;
+using ScalarCell = std::vector<segments::ScalarSegment>;
+
+size_t cell_bytes(const CellSegments& cell);
+size_t cell_bytes(const ScalarCell& cell);
 
 // Least-recently-used cells under a byte budget. One per event loop, like
 // the engine and the result cache.
-class SegmentCache {
+template <typename Cell>
+class CellCache {
 public:
-    explicit SegmentCache(size_t budget_bytes) : budget_(budget_bytes) {}
+    explicit CellCache(size_t budget_bytes) : budget_(budget_bytes) {}
 
-    std::shared_ptr<const CellSegments> get(const std::string& key);
-    void put(const std::string& key, std::shared_ptr<const CellSegments> cell);
+    std::shared_ptr<const Cell> get(const std::string& key);
+    void put(const std::string& key, std::shared_ptr<const Cell> cell);
 
     size_t entries() const { return map_.size(); }
     size_t used_bytes() const { return used_; }
     uint64_t hits() const { return hits_; }
     uint64_t misses() const { return misses_; }
-    static size_t bytes_of(const CellSegments& cell);
 
 private:
-    using Lru = std::list<std::pair<std::string, std::shared_ptr<const CellSegments>>>;
+    using Lru = std::list<std::pair<std::string, std::shared_ptr<const Cell>>>;
+    using LruIter = typename Lru::iterator;
     size_t budget_;
     size_t used_ = 0;
     uint64_t hits_ = 0, misses_ = 0;
     Lru lru_;
-    std::unordered_map<std::string, Lru::iterator> map_;
+    std::unordered_map<std::string, LruIter> map_;
 };
+
+using SegmentCache = CellCache<CellSegments>;
+using ScalarSegmentCache = CellCache<ScalarCell>;
 
 struct SegmentRequest {
     double jd_from_tt = 0.0;
     double jd_to_tt = 0.0;
     double target_err_arcsec = 0.1; // as asked; quantised downward by the service
+    int min_degree = 6;             // the fitter raises from here
     int max_degree = 16;            // as asked; clamped to what the fitter allows
     size_t max_cells = 16;          // the span bound, in cells
 };
@@ -101,6 +114,18 @@ struct SegmentAnswer {
     size_t sampler_calls = 0;
 };
 
+// The same answer for a scalar series, the residual in the value's own units
+// (an ayanamsa is fitted in degrees and its rung converted with 3600).
+struct ScalarAnswer {
+    std::vector<segments::ScalarSegment> segments;
+    double err_served = 0.0;
+    double jd_from_tt = 0.0;
+    double jd_to_tt = 0.0;
+    size_t cells = 0;
+    size_t cells_fitted = 0;
+    size_t sampler_calls = 0;
+};
+
 // Serves a span from the lattice, fitting only the cells not already cached.
 // `key_prefix` identifies everything except the span and the rung: dataset,
 // object and profile. ArgumentError where the span is empty, inverted, or
@@ -108,6 +133,12 @@ struct SegmentAnswer {
 // unchanged and nothing is cached for the cell that failed.
 Result<SegmentAnswer> segments_for(SegmentCache& cache, std::string_view key_prefix,
                                    const SegmentRequest& request, const segments::Sampler& sampler);
+
+// The scalar twin, for a series the wire carries per sidereal profile.
+// `target_value` is the rung in the value's own units.
+Result<ScalarAnswer> scalar_series_for(ScalarSegmentCache& cache, std::string_view key_prefix,
+                                       const SegmentRequest& request, double target_value,
+                                       const segments::ScalarSampler& sampler);
 
 } // namespace prometheia::server
 
