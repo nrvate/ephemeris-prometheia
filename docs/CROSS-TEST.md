@@ -184,6 +184,22 @@ The first cases are the ones that are degrees apart under a wrong rule:
 Compare at TT (the `_ut` forms bring in each engine's Delta T and belong to a
 different tier), geometric first, then with each correction.
 
+**First run, 2026-09-18.** The four cases above were run once by hand, with
+inputs from this side and answers from both. All four match. The worst
+disagreement is 0.3 mas, on an Earth orbit of a = 0.01 AU after 173
+revolutions. The case that separates the corrected rule from the frozen
+one lands on the corrected rule on both sides. Every row that disagrees at
+all is one where the mean motion enters, and each disagreement grows with
+the mean anomaly accumulated. That traces to a single cause: Swiss
+implementations carry k as a truncated decimal in degrees per day,
+1.4 × 10⁻¹² relative off the protocol's value. This is a **known, quantified,
+one-cause difference**, worth about 2 × 10⁻⁷″ on the Hamburg points (under
+half an orbit a century). It is recorded rather than "fixed", because fixing
+it on the Astrolog side would put that one Swiss consumer out of step with
+every other. A cross-test that sees it should stop, not chase it. The
+committed fixture, with a generator and a digest, is still to come from the
+Astrolog side.
+
 ## The bisection ladder
 
 When a number disagrees, add one thing at a time. Each rung isolates exactly

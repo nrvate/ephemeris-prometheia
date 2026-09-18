@@ -167,8 +167,48 @@ therefore override any shipped default without editing it.
 
 ## Named bodies
 
-*Defaults and their provenance are being assembled from clean, citable
-sources; see the data policy in [DESIGN.md](DESIGN.md). This section records,
-per token, the published source of its default elements, or states that the
-token has no default and is served only from an operator-supplied element
-file.*
+The element set this library ships is `data/hypotheticals.jsonl`, compiled
+in. Every entry comes from a source clean under the data policy in
+[DESIGN.md](DESIGN.md), which for these bodies means the original
+publication. Each entry is transcribed from a page image, not from OCR, and
+wherever the source prints a position it derived from its own elements, a
+test (`shipped_bodies_reproduce_their_sources_own_check_positions`) holds
+the transcription to it.
+
+| token | source | status |
+|---|---|---|
+| `neptune-leverrier` | Le Verrier, *Comptes rendus* 23 (1846), p. 432 | shipped |
+| `neptune-adams` | Adams, *An Explanation of the observed Irregularities in the Motion of Uranus* (1846), pp. 18, 25 | not yet: see below |
+| `pluto-lowell` | Lowell, *Memoir on a Trans-Neptunian Planet* (1915), pp. 104–105 | not yet: see below |
+| the eight Hamburg points | the maintainer's element set | awaiting the maintainer |
+| the others in A.15 | — | no clean source found; served only from an operator's element file |
+
+**Le Verrier's Neptune.** He prints a = 36.154, e = 0.10761, longitude of
+perihelion 284°45′ and mean longitude 318°47′ at 1847 January 1, "from the
+equinox of 1 January 1847", with no inclination. Transcribed as follows:
+- the orbit in the ecliptic (i = 0, Ω = 0), so ω is the longitude of
+  perihelion and M = L − ϖ = 34°02′;
+- the equinox as an explicit mean equinox at the epoch (the protocol's
+  elements carry no true equinox);
+- one term, so the body moves at the Gaussian mean motion. That gives a
+  period of 217.392 years against his printed 217.387.
+
+The source gives no hour for the epoch. 0h is taken, and half a day either
+way is 8″ of this body's motion. His own derived position at the epoch is
+326°32′ and 33.06; the transcription gives 326°31.3′ and 33.080. That
+residual is a little larger than the rounding of the printed elements
+explains. It is recorded, not tuned away: this is his orbit as printed.
+
+**Adams's Neptune and Lowell's Planet X** each need a choice the source
+does not make, so neither ships until that choice is made deliberately.
+- Adams gives two hypotheses, prefers the second without adopting it, and
+  states the distance only as a ratio to Uranus's. A distance in AU would
+  need a value for Uranus's that the paper does not print.
+- Lowell gives two solutions, one with the mean longitude near 0° and one
+  near 180°, and says the duality "would necessarily always be the case".
+  His epoch and equinox (1850.0, the mean equinox of 1850) are stated
+  elsewhere in the memoir, not beside the elements.
+
+**The others** (Transpluto, Nibiru, Harrington, Pickering's planets, Vulcan,
+White Moon, Proserpina, Waldemath) have no clean numeric source found yet.
+An operator who uses them supplies them in an element file.

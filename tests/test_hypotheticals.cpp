@@ -466,3 +466,31 @@ TEST_CASE("an_equinox_date_only_with_an_explicit_equinox") {
     el.equinox_jd_tt = 0.0; // explicit, but no date
     CHECK(!e.calc_elements(el, kJ2000).ok());
 }
+
+TEST_CASE("shipped_bodies_reproduce_their_sources_own_check_positions") {
+    // Where a source prints a position it derived from its own elements, the
+    // shipped transcription has to give it back: a misread digit would miss
+    // by degrees. Heliocentric, geometric, the mean ecliptic of the epoch.
+    const std::string de = de440_path();
+    if (access(de.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s not present\n", de.c_str());
+        return;
+    }
+    auto opened = Engine::open(de);
+    REQUIRE(opened.ok());
+    Engine& e = opened.value();
+    CalcOptions o = CalcOptions::geometric();
+    o.center = Center::Heliocentric;
+    o.frame = Frame::MeanOfDate;
+
+    // Le Verrier, Comptes rendus 23 (1846) p. 432: at 1er janvier 1847, true
+    // heliocentric longitude 326 deg 32', distance 33,06. The transcription
+    // gives 326 deg 31.3' and 33.080: agreement within 0.7' and 0.02 AU, a
+    // residual a little larger than the printed elements' rounding explains,
+    // recorded here rather than tuned away (docs/HYPOTHETICALS.md).
+    auto lv = e.calc_hypothetical("neptune-leverrier", 2395662.5, o);
+    REQUIRE_MESSAGE(lv.ok(), lv.error().message);
+    CHECK(std::fabs(lv.value().pos.lon_deg - (326.0 + 32.0 / 60.0)) < 1.0 / 60.0);
+    CHECK(std::fabs(lv.value().pos.dist_au - 33.06) < 0.03);
+    CHECK(lv.value().provenance.source == "Le Verrier 1846");
+}

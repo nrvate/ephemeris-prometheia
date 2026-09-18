@@ -18,6 +18,7 @@
 
 #include "dataset.hpp"
 #include "objects.hpp"
+#include "prometheia/hypotheticals.hpp"
 #include "prometheia/stars.hpp"
 #include "session.hpp"
 #include "synthetic_spk.hpp"
@@ -1484,15 +1485,25 @@ struct ElementFile {
 } // namespace
 
 TEST_CASE("server_hypotheticals") {
-    SUBCASE("without named bodies, kind 4 is served and kind 3 is not advertised") {
+    SUBCASE("with only the shipped set, WELCOME advertises exactly its tokens") {
         Fixture f;
         eph::Welcome w = f.welcome();
         eph::Capabilities c;
         std::string why;
         REQUIRE(eph::ParseCapabilities(w.caps_, &c, &why) == eph::kOk);
         CHECK(c.Kind(eph::kObjElements));
-        CHECK(!c.Kind(eph::kObjHypothetical));
-        CHECK(c.hypotheticals.empty());
+        // Whatever data/hypotheticals.jsonl holds, in its order; kind 3 is
+        // advertised exactly when that is not empty.
+        auto shipped = hypotheticals::parse(hypotheticals::shipped(), "shipped");
+        REQUIRE(shipped.ok());
+        std::vector<std::string> want;
+        for (const hypotheticals::Body& b : shipped.value()) {
+            if (std::find(want.begin(), want.end(), b.token) == want.end()) {
+                want.push_back(b.token);
+            }
+        }
+        CHECK(c.hypotheticals == want);
+        CHECK(c.Kind(eph::kObjHypothetical) == !want.empty());
         // A.3 0x0012: every A.16 equinox.
         bool saw_equinoxes = false;
         for (const eph::Tlv& t : w.caps_) {
