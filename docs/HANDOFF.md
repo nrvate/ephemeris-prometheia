@@ -1,10 +1,38 @@
-# Handoff — where the work stands (2026-09-17, night)
+# Handoff — where the work stands (2026-09-18)
 
 A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 [DESIGN.md](DESIGN.md); the protocol state in [SERVER.md](SERVER.md).
 
-## State
+## In flight: hypothetical bodies (2026-09-18)
+
+The maintainer, a Uranian astrologer, needs the Hamburg School's
+transneptunian points and the rest of the protocol's hypothetical bodies. In
+Astrolog they are first-class planets by default, so a Prometheia-only source
+chain asks for them in the ordinary course of things. Conventions are in
+[HYPOTHETICALS.md](HYPOTHETICALS.md).
+
+- **Done:** the engine (`calc_elements` for the protocol's kind 4,
+  `calc_hypothetical` for kind 3, from JSON Lines element files),
+  `prometheiad` serving both, C ABI version 5 (reviewed by the Astrolog side
+  before landing), and `ephem` (`hyp:TOKEN`, `hyp:all`). Gate green, 23
+  suites.
+- **Held, not pushed:** those commits wait for the Astrolog side to cut the
+  v4 spec drop that carries the corrected mean-anomaly rule and its fixture.
+  Once it is cut, run the fixture here and push.
+- **Waiting on the maintainer:** the Hamburg elements. The maintainer chose
+  to ship the Hamburg standard. The numbers must come from their own
+  non-Swiss source, because anything recalled from memory would trace back
+  to Swiss's distributed element file. `data/hypotheticals.jsonl` ships empty
+  until then.
+- **Next:** default elements for the historical predicted planets (Le
+  Verrier's and Adams's Neptunes, Lowell's Pluto), transcribed from their
+  public-domain original publications, with citations.
+- **Cleanroom:** a Swiss-source exposure occurred and is recorded, with its
+  remedy, in [DESIGN.md](DESIGN.md), "Exposures". `src/elements.cpp` and its
+  tests are written only by a session that never saw the exposure.
+
+## State at the previous snapshot (2026-09-17, night)
 
 - HEAD = `origin/initial` = `fa4e0b3`, tree clean, gate green (21 suites
   in Release and ASan+UBSan).
