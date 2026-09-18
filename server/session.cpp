@@ -95,6 +95,20 @@ struct ProfilePlan {
     uint32_t columns = 0;
 };
 
+// Which correction masks this server honours for an observer (A.3 0x0004,
+// 3.5a): a list of exact masks, and "any other combination is ERROR 11".
+// Every combination for every observer, except that the Sun's centre cannot
+// be deflected, so there only the masks without deflection. A body observer
+// that happens to be the Sun cannot be told apart in the capability, which
+// names observer kinds; there the answer's corrApplied says deflection did
+// not apply. WELCOME and the refusal both read this, so they cannot differ.
+bool honoured(uint8_t observer, uint8_t mask) {
+    if (mask > eph::kCorrMask) {
+        return false;
+    }
+    return observer != eph::kObsHelio || (mask & eph::kCorrDeflection) == 0;
+}
+
 // Resolves every profile of a request, or says why one cannot be served.
 // The header's parser has already refused what the registry does not know;
 // what is left to refuse is a value this engine does not serve (3.4: ERROR
@@ -139,6 +153,10 @@ std::optional<std::string> plan_profiles(const eph::Request& q, std::vector<Prof
         default:
             p.opts.frame = Frame::ICRF;
             break;
+        }
+        if (!honoured(pf.observer, pf.corrections)) {
+            return "a correction mask this server does not honour for that observer "
+                   "(WELCOME lists the pairs)";
         }
         p.opts.light_time = (pf.corrections & eph::kCorrLightTime) != 0;
         p.opts.deflection = (pf.corrections & eph::kCorrDeflection) != 0;
@@ -466,12 +484,16 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
     c.forms = (1u << eph::kFormSpherical) | (1u << eph::kFormRectangular);
     c.frames = (1u << eph::kFrameTrueOfDate) | (1u << eph::kFrameMeanOfDate) |
                (1u << eph::kFrameJ2000) | (1u << eph::kFrameIcrf);
-    // What the engine can honour, per observer (3.5a): the Sun's centre
-    // cannot be deflected; everything else can.
-    c.corrMasks = {
-        {(1u << eph::kObsGeo) | (1u << eph::kObsTopo) | (1u << eph::kObsBody), eph::kCorrMask},
-        {(1u << eph::kObsHelio), eph::kCorrLightTime | eph::kCorrAberration},
-        {(1u << eph::kObsBary), eph::kCorrMask}};
+    // Every exact mask honoured, with the observers it is honoured for.
+    for (uint8_t m = 0; m <= eph::kCorrMask; ++m) {
+        uint32_t observers = 0;
+        for (uint8_t obs = 0; obs <= eph::kObserverMax; ++obs) {
+            if (honoured(obs, m)) {
+                observers |= 1u << obs;
+            }
+        }
+        c.corrMasks.push_back({observers, m});
+    }
     c.orbitPoints = (1u << eph::kPtAscNode) | (1u << eph::kPtDescNode) | (1u << eph::kPtPeri) |
                     (1u << eph::kPtApo);
     c.orbitMethods = (1u << eph::kMethMean) | (1u << eph::kMethOsculating);

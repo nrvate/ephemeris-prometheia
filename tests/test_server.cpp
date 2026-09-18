@@ -263,6 +263,14 @@ TEST_CASE("server_handshake") {
         CHECK(c.CorrectionMask(eph::kObsBary, eph::kCorrMask));
         CHECK(!c.CorrectionMask(eph::kObsHelio, eph::kCorrDeflection));
         CHECK(c.CorrectionMask(eph::kObsHelio, eph::kCorrLightTime | eph::kCorrAberration));
+        // A.3 0x0004 lists EXACT masks, and every one honoured must be listed:
+        // a client never sends an unlisted pair, so an unlisted mask 0 would
+        // mean no geometric answers from this server at all.
+        for (uint8_t m = 0; m <= eph::kCorrMask; ++m) {
+            CHECK(c.CorrectionMask(eph::kObsGeo, m));
+            CHECK(c.CorrectionMask(eph::kObsBary, m));
+            CHECK(c.CorrectionMask(eph::kObsHelio, m) == ((m & eph::kCorrDeflection) == 0));
+        }
         CHECK(c.lookupMax > 0);
     }
     SUBCASE("a newer client meets the server at 4") {
@@ -511,6 +519,7 @@ TEST_CASE("server_profiles") {
         const CalcResult want = engine(o);
         eph::Profile pf;
         pf.observer = eph::kObsHelio;
+        pf.corrections = eph::kCorrLightTime | eph::kCorrAberration; // all the Sun's centre honours
         pf.form = eph::kFormRectangular;
         const Data d = one(pf);
         for (int i = 0; i < 3; ++i) {
@@ -1245,6 +1254,7 @@ TEST_CASE("server_segments") {
         req.representation = 1;
         req.segTargetErrArcsec = 0.1f;
         req.profiles[0].observer = eph::kObsHelio;
+        req.profiles[0].corrections = eph::kCorrLightTime | eph::kCorrAberration;
         req.profiles[0].form = eph::kFormRectangular;
         return req;
     };
@@ -1569,6 +1579,7 @@ TEST_CASE("server_hypotheticals") {
             req.representation = 1;
             req.segTargetErrArcsec = 0.1f;
             req.profiles[0].observer = eph::kObsHelio;
+            req.profiles[0].corrections = eph::kCorrLightTime | eph::kCorrAberration;
             req.profiles[0].form = eph::kFormRectangular;
             req.objs = {invented_as_elements(m)};
             CHECK(s.on_message(request(req, id), true));
@@ -1635,4 +1646,32 @@ TEST_CASE("server_error_text_never_quotes_the_request") {
     const eph::Error e = error_of(replies[0]);
     CHECK(e.code == eph::kErrUnsupported);
     CHECK(e.text.find("zzzodiaczz") == std::string::npos);
+}
+
+TEST_CASE("server_refuses_a_correction_mask_it_does_not_advertise") {
+    // 3.5a: "A server advertises, per observer, the masks it can honour (A.3
+    // 0x0004); any other combination is ERROR 11." The Sun's centre cannot be
+    // deflected, so a heliocentric profile asking for deflection is refused
+    // whole -- not answered quietly without it.
+    Fixture f;
+    Session& s = *f.session;
+    f.welcome();
+    eph::Request req = base_request(2451545.0, 1);
+    req.profiles[0].observer = eph::kObsHelio;
+    req.profiles[0].corrections = eph::kCorrMask; // includes deflection
+    req.objs = {body_obj(5)};
+    CHECK(s.on_message(request(req, 9), true));
+    const auto replies = drain(s);
+    REQUIRE(replies.size() == 1);
+    CHECK(error_of(replies[0]).code == eph::kErrUnsupported);
+
+    // The same observer with a mask it does advertise is answered, and so is
+    // mask 0 anywhere: the geometric position, the portable comparison.
+    for (uint8_t mask : {uint8_t(eph::kCorrLightTime | eph::kCorrAberration), uint8_t(0)}) {
+        req.profiles[0].corrections = mask;
+        CHECK(s.on_message(request(req, 10 + mask), true));
+        const Data d = join(drain(s));
+        REQUIRE(d.meta.size() == 1);
+        CHECK(d.meta[0].errCode == eph::kOErrNone);
+    }
 }

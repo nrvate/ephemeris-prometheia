@@ -180,6 +180,17 @@ does with them:
   instants), its one value, or — the canonical NaN — the engine's observed
   USNO model, which WELCOME names. The delta T column reports the value
   used.
+- **Correction masks** are advertised as the protocol defines them (A.3
+  0x0004): a list of the EXACT masks honoured, with the observers each is
+  honoured for. Here that is every mask for every observer, except that the
+  Sun's centre cannot be deflected, so a heliocentric profile has only masks
+  0, 1, 4 and 5. Any other combination is ERROR 11 (§3.5a). Until 2026-09-18
+  this server listed one mask per observer (7, and 5 at the Sun) while
+  answering every combination. A client following the rules would then never
+  have sent it mask 0, the geometric position CROSS-TEST.md calls the
+  portable comparison. A body observer that is the Sun cannot be told apart
+  in a capability that names observer kinds; there the answer's
+  `corrApplied` shows that deflection did not apply.
 - **corrApplied** reports structural availability per object, never the
   request's mask (below). Our table: bodies and orbit points carry light
   time and aberration always; deflection everywhere except an observer at
@@ -586,8 +597,9 @@ are internal:
 - **independence** — the byte is the same whatever the request's mask asked
   for. A server that echoes the request into the slot fails here and nowhere
   else, and echoing is the easy bug: this server did it until the v4 rewrite.
-- **declared** — the byte is a subset of the mask WELCOME advertised for that
-  observer (A.3 0x0004). Two things one server said, disagreeing.
+- **declared** — the byte is a subset of the correction bits WELCOME says can
+  be honoured for that observer (A.3 0x0004). Two things one server said,
+  disagreeing.
 - **truthful** — asking for one correction alone either moves the position or
   does not. A clear bit that moves the sky is a false denial. A set bit that
   moves nothing is correct and reported as a note, because that is what a term
@@ -600,6 +612,16 @@ so it is run against a server on purpose:
 
     ./build/prometheiad --ephemeris ephe/linux_p1550p2650.440 &
     python3 tools/check/corrapplied.py            # -v to show the notes
+
+It asks only the masks the server's own WELCOME honours. A check a server
+cannot be asked (a lone deflection at the Sun's centre, or anything without
+light time on an engine that cannot switch light time off) is reported as
+inapplicable, never as passed. **Checking nothing fails.** The run exits
+non-zero if no case was checked, if fewer than half were (`--min-fraction`),
+or if any of the three checks never ran. The first version printed OK after
+checking zero cases against the Astrolog server: a green that could not have
+been red, in the tool built to catch exactly that. Against this server it
+checks 27 of 29 cases.
 
 It is written to run against any v4 server, not only this one, and it never
 compares two servers against each other — §3.5a forbids gating on this field,

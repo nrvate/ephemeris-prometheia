@@ -454,6 +454,7 @@ TEST_CASE("prometheiad_segments_and_cancel") {
         eph::Request req; // heliocentric rectangular, tropical
         req.profiles.emplace_back();
         req.profiles[0].observer = eph::kObsHelio;
+        req.profiles[0].corrections = eph::kCorrLightTime | eph::kCorrAberration;
         req.profiles[0].form = eph::kFormRectangular;
         req.representation = 1;
         req.segTargetErrArcsec = 0.1f;

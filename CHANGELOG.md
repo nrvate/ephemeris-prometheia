@@ -59,6 +59,15 @@ documented, not that it is frozen.
   per-object or ERROR text. Per-object text is now a fixed sentence per
   error code, classified from the full message, and a test pins it for every
   object kind.
+- **Correction masks follow the protocol.** WELCOME now lists every exact
+  mask honoured per observer (all eight; at the Sun's centre only those
+  without deflection), and anything else is ERROR 11. Before, it listed one
+  mask per observer while answering every combination, so a conforming
+  client would never have asked for a geometric or astrometric position.
+- **`corrapplied.py` no longer passes vacuously.** It asks only the masks a
+  server's WELCOME honours, reports what it cannot ask as inapplicable, and
+  fails when nothing, or under half, was checked, or when a check never ran.
+  Against the Astrolog server it had printed OK after checking zero cases.
 - The kind-4 rule is released on the protocol side as "the kind-4 elements
   rule" (Astrolog `176e333`).
 - **Shipped element set:** the eight Hamburg points, and Le Verrier's
