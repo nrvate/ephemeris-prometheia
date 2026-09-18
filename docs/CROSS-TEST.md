@@ -99,11 +99,32 @@ of DE bodies, both servers reading the same DE440 file, in ICRF. Nothing
 model-dependent remains: this is the same Chebyshev data evaluated twice. A
 disagreement here is a defect in one of the two, and `testpo.440` says which.
 
+**That premise is false for `astrolog-ephd` in its default configuration,**
+and the first draft of this plan got it wrong. Per the Astrolog side: their
+daemon links the Swiss library, which by default reads Swiss's own `.se1`
+files — a compressed re-fit of the JPL integration with its own segmentation
+and a stated fidelity of about 0.001″ for the planets — and their bundled set
+is DE441, not DE440 (measured from the running binary, not read off a
+filename). A default-configuration mask-0 leg therefore has a floor set by
+that refit, not by roundoff, and `testpo.440` cannot adjudicate it: testpo
+validates JPL's interpolation, and the refit is a generation downstream.
+
+So a tier 1 leg **must put `astrolog-ephd` in its JPL mode, reading the same
+DE440 file this server reads**, and must say so in the leg row. It is not the
+default, and a leg that forgets it silently becomes a tier 2 leg wearing a
+tier 1 label.
+
 **Tier 2 — must agree to ~1 mas.** Astrometric and apparent places of bodies;
 osculating orbit points. Measured precedent between these two engines: Jupiter's
 osculating ascending node, ours 20.8367″ against theirs 20.837001″; lunar orbit
 points to 0.0002″; the Moon's own apparent place 11.4249″ against 11.424861″.
 A disagreement above a few mas here is worth chasing; Horizons adjudicates.
+
+**Default-configuration mask-0 legs belong here too**, recorded with the reason
+"Swiss `.se1` refit of DE441, not the DE itself" so nobody chases it twice. The
+band for those is set by the refit's documented fidelity, and should be written
+as that — our own measurement would only rediscover a number that already has
+a source.
 
 **Tier 3 — expected to differ; agreement is not the test.** These are model
 choices, not errors, and a gate on them would be wrong:
@@ -113,7 +134,12 @@ choices, not errors, and a gate on them would be wrong:
 - **ΔT.** Different models, legitimately. Pin the ΔT explicitly in the request
   (v4 §3.5 lets the client send a value or a table) so that a ΔT difference
   cannot masquerade as a position difference. **Every numeric leg should send
-  its own ΔT.**
+  its own ΔT.** On the Astrolog side this is more than hygiene: their library
+  derives ΔT from the DE number of the file currently loaded, so their ΔT
+  depends on which dataset is open and on *when* it is asked relative to the
+  first file open — the bug they fixed in phase 4c, worth 0.037 s at 1900.
+  Sending ΔT removes that whole axis. Ours takes no ephemeris state
+  ([TIME.md](TIME.md)).
 - **Ayanamsa variants**, where the definitions differ.
 - **Small-body solutions**, unless both sides are demonstrably on the same
   SBDB solution and the same perturber set.
@@ -141,7 +167,10 @@ When a number disagrees, add one thing at a time. Each rung isolates exactly
 one stage, and the rung where it breaks is the answer.
 
 1. **Mask 0, ICRF, J2000.** Raw ephemeris interpolation and nothing else.
-   Breaks here → the DE reader or the file. `testpo.440` settles it.
+   Breaks here → the DE reader or the file. `testpo.440` settles it — but only
+   if `astrolog-ephd` is in JPL mode on the same file. In its default
+   configuration, a break at this rung is first a question about the `.se1`
+   refit, not a defect.
 2. **Mask 1 (light time), ICRF.** Adds the light-time solution.
    Breaks here → the retardation loop, its convergence, or which body is
    retarded. For an orbit point, remember that retarding the *observer* is
@@ -159,7 +188,44 @@ one stage, and the rung where it breaks is the answer.
    barycentric, 0.0107″ at the Sun, 10.4372″ geocentric, 8.7706″ centred on
    Jupiter.
 
+## Legs the numeric matrix cannot see
+
+Two legs proposed by the Astrolog side. Both test something every other leg
+assumes rather than checks.
+
+**The silent-fallback leg.** Swiss does not fail when a file is missing or an
+instant is out of its coverage: for the main planets it silently answers from
+its analytic Moshier model instead. They measured it — with every ephemeris
+directory removed, the Sun still computes, 0.04″ off, with no error and no
+flag. That is a server answering from a different model than the one its
+`datasetId` names, which is the class `corrapplied.py` exists for, one level up.
+So: request an instant outside the pinned ephemeris's coverage, and an object
+the pinned set does not cover, and require **either** a per-object error (3,
+out of range; 4, data missing) **or** a truthful source string — never a
+silent substitution. Run it against both servers. It needs to be a named leg,
+because every other leg in the matrix would pass while being quietly answered
+by a different model.
+
+**Chunk, grid and list equivalence.** The same question asked as one grid, as
+several chunks and as an explicit instant list must give identical bytes. The
+v4 row formula is normative — row *r* is `(jd1+jd2) + (double)(r·stepNs)/86400e9`,
+computed from *r*, never accumulated — and a server that accumulates drifts at
+large *r*. That presents as a position disagreement that walks with row index,
+which is easy to misread as physics. A 10,000-row grid compared on the
+*implied times* isolates it in one leg.
+
 ## Measurement traps to encode in the harness
+
+- **Drive the client with a one-source chain.** Astrolog's client now has a
+  fallback chain: when the selected source cannot answer an object, the next
+  one does, and the chart still comes out with a notice. A leg pointing their
+  client at `prometheiad` with a chain of `prometheia,swiss` would, on any
+  failure, show our engine agreeing with Swiss to the bit — because it *is*
+  Swiss. That is the two-implementations-converging failure arriving through a
+  side door, and it is unrecoverable for the same reason. Pin the chain to the
+  single source under test and assert the fallback notice is absent on every
+  numeric leg. The Astrolog side is making this a named precondition of their
+  harness.
 
 Every one of these has cost this project or the Astrolog project real time.
 
