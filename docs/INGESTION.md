@@ -305,7 +305,9 @@ tagged GitHub release assets, not repo-tree files**:
 
 - One asset per catalog build: `sbdb-full-YYYYMMDD.epm` plus a `.sha256`
   sidecar (the swisseph-fork release pattern: SHA256SUMS, nothing binary in
-  the tree). Release assets allow 2 GB each; the full catalog is ~40 MB.
+  the tree). Release assets allow 2 GB each; the full catalog is 137 MB
+  (`sbdb-full-20260916.epm`: 136,692,088 bytes, 1,566,773 records, 87.2
+  bytes each including the index, metadata and string pool).
 - Each release is immutable and pinned — downstreams can reproduce any
   historical answer by pinning the tag. Provenance travels inside the
   container's CBOR metadata (source, pull window, SBDB count).
