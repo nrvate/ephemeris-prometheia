@@ -269,6 +269,14 @@ Measured 2026-09-18 on `prometheiad`:
 - **Size of the differences:** several times the FK5's stated mean errors.
   Those errors leave out the FK5's system errors, per its ReadMe.
 
+**`astrolog-ephd`** (Astrolog `qt` at `c04cdf6`), the same day: the same
+picture, within 0.007″ of `prometheiad` on every star and epoch. The binaries
+are therefore a limit both servers share: straight-line Hipparcos motion. They
+are not a defect in either, and not something to chase.
+
+The FK5 cannot check the α Centauri names. It lists α Cen A only (FK5 538),
+with no separate entry for B, and Proxima is far too faint for it.
+
 The band is 1″, and 3″ for the four binaries. **Both are estimates, not
 measurements.** The check is there to catch a wrong star, a wrong proper
 motion or a wrong epoch, which are arcseconds or more. A proper motion off by

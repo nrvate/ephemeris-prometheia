@@ -42,14 +42,13 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
      test that the ICRF node rotated by the public frame matrices is the
      date-frame node. The `points` leg's J2000 check now compares the two
      servers' node of date.
-2. **Star positions against an outside source: ours done, theirs to run.**
-   `tools/check/stars_fk5.py` compares a server with the FK5, which is
-   ground-based and pre-Hipparcos (STARS.md, "Checked against FK5").
-   - `prometheiad`: the 24 ordinary stars within 0.56″ over 1900–2100, and
-     the four astrometric binaries up to 2.3″ (Sirius).
-   - `astrolog-ephd`: not run yet. The only builds on this machine predate
-     v4, so a current one was asked for. Then run
-     `stars_fk5.py --server ours=47190 --server theirs=47391`.
+2. **Star positions against an outside source: done** (STARS.md, "Checked
+   against FK5"). `tools/check/stars_fk5.py` compares a server with the FK5,
+   which is ground-based and pre-Hipparcos. Both servers pass:
+   - the 24 ordinary stars within 0.56″ over 1900–2100;
+   - the four astrometric binaries up to 2.3″ (Sirius), a straight-line-motion
+     limit the servers share;
+   - the two servers within 0.007″ of each other against FK5.
 3. **Re-verify, when the Astrolog build carries them:**
    - their `9bb48a5`: the true descending node at 1800-01-01 now errors
      (coverage) instead of falling back to the ascending node's distance;
@@ -66,9 +65,9 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
 - **Launch:**
   - ours: `build/prometheiad --ephemeris ephe/linux_p1550p2650.440 --port
     47190 --threads 1`;
-  - theirs, from `/nvm/work/ephv4`: `./astrolog-ephd --bind 127.0.0.1
-    --port 47391 --threads 1 --ephe "/nvm/work/ephv4/ephem;/nvm/work/ephv4"`
-    (47391: their own harness binds 47291);
+  - theirs: `astrolog-ephd` on 127.0.0.1:47391 (their own harness binds
+    47291). The live tree is `/nvmraid/shares/Astrolog`, branch `qt`, since
+    ephv4 landed there; the Astrolog session builds and runs it;
   - then `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`,
     and stop both with `pkill -x` (never `pkill -f`).
 - **Legs:**
@@ -94,7 +93,7 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   ```
   ASTROLOG_EPHSRV_URL=localhost:47190 ASTROLOG_QT_TESTS=ephem-server-live \
     env -u DISPLAY QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= \
-    ./astrolog-qt-test -Yi1 ephem            # from /nvm/work/ephv4
+    ./astrolog-qt-test -Yi1 ephem            # from /nvmraid/shares/Astrolog
   ```
   It demands bit-identity, so read the sizes, not the verdicts:
   - Earth 0.0004–0.0012″;
