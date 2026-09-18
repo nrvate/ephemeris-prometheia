@@ -29,8 +29,10 @@ Conventions are in [HYPOTHETICALS.md](HYPOTHETICALS.md).
 - **Cleanroom:** a Swiss-source exposure and its remedy are recorded in
   DESIGN.md. `src/elements.cpp` and its tests are written only by a session
   that never saw the exposure.
-- **Next with the Astrolog side:** their phase 6 daemon, for
-  `corrapplied.py` and the rest of CROSS-TEST.md.
+- **With the Astrolog side:** phase 6's daemon is up and `corrapplied.py`
+  passes against it, 27 of 29 cases (CROSS-TEST.md). The rest of the
+  cross-test matrix is open, when both sides want a live session. They are on
+  phase 8, the branch review before the squash decision.
 
 ## State at the previous snapshot (2026-09-17, night)
 

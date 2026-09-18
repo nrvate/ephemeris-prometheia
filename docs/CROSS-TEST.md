@@ -57,6 +57,17 @@ Both servers should also be run through `tools/check/corrapplied.py`, which
 compares a server only with itself and therefore presumes nothing about either
 engine.
 
+**Done, 2026-09-18.** Against `astrolog-ephd`, 27 of 29 cases were checked,
+with all three checks running on all 27; against `prometheiad`, 27 of 29.
+Both pass. The skips are legitimate on both servers: the Sun seen from the
+Sun's centre, and a node seen from its own body. Against `astrolog-ephd`, the
+truthfulness of deflection or aberration asked for alone is *inapplicable*,
+because Swiss cannot drop light time on its own. That server honours exactly
+masks 7, 0, 3, 5 and 1, and the tool reports the gap rather than passing it.
+The first run had printed OK after checking zero cases. The tool now fails
+on that, and fixing it exposed that `prometheiad` was under-advertising its
+masks (SERVER.md, "Correction masks").
+
 ## The anchors, and which one adjudicates what
 
 Measured, and documented in [VALIDATION.md](VALIDATION.md) and
