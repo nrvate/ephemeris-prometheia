@@ -26,7 +26,8 @@ documented, not that it is frozen.
   refusal checks, and sends only masks both servers list. Deliberate
   differences are recorded as expected-difference with their reason.
 - Protocol v4 per-kind correction masks (WELCOME tag 0x0014, ephv4
-  `eed6429`): vendored and verdicted 98/98. `prometheia-wire-client` prints
+  `eed6429`, set `472b21a`): vendored and verdicted 99/99, with the
+  handshake-dependent judgements 7/7. `prometheia-wire-client` prints
   `# corrkind` lines, and the fixture reader gained `--judge` for request
   fixtures whose refusal depends on a WELCOME. `prometheiad`'s WELCOME
   does not change.

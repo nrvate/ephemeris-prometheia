@@ -744,6 +744,44 @@ def main():
                   + (f" — {why}" if why else ""))
             print(f"       note: {note}")
     print(f"\n{agree}/{len(rows)} agree; {len(disagreements)} disagreements")
+    # JUDGEMENTS.tsv (per-kind drop, section 2): request fixtures whose
+    # outcome depends on a server's WELCOME, each paired with one. Its
+    # set-sha256 is over the table's non-comment lines exactly as written.
+    judgements = os.path.join(args.dir, "JUDGEMENTS.tsv")
+    judged_bad = 0
+    if os.path.exists(judgements):
+        with open(judgements) as fh:
+            lines = fh.read().splitlines(keepends=True)
+        want = None
+        for line in lines:
+            m = re.match(r"#\s*set-sha256\s+([0-9a-fA-F]{64})\s*$", line)
+            if m:
+                want = m.group(1).lower()
+        body = [l for l in lines if l.strip() and not l.startswith("#")]
+        got_sha = hashlib.sha256("".join(body).encode()).hexdigest()
+        if want != got_sha:
+            print(f"JUDGEMENTS set-sha256 MISMATCH: table {want}, computed {got_sha}")
+            return 2
+        outcomes = {"served": 0, "error11": 0}
+        for line in body:
+            req, wel, expect = line.rstrip("\n").split("\t")[:3]
+            def load(name):
+                with open(os.path.join(args.dir, name + ".hex")) as fh:
+                    version, _f, t, rid, payload = parse_envelope(
+                        bytes.fromhex("".join(fh.read().split())))
+                return parse_payload(version, t, rid, payload)
+            got = judge(load(wel), load(req))
+            got = "served" if got == "served" else "error11"
+            outcomes[got] = outcomes.get(got, 0) + 1
+            if got != expect:
+                judged_bad += 1
+                print(f"  DIFF judgement {req} under {wel}: table says {expect}, we say {got}")
+        print(f"judgements: {len(body) - judged_bad}/{len(body)} agree "
+              f"({outcomes['served']} served, {outcomes['error11']} ERROR 11)")
+        if not outcomes["served"] or not outcomes["error11"]:
+            # A table of one outcome passes a reader that always gives it.
+            print("judgements: FAIL, the table does not exercise both outcomes")
+            judged_bad += 1
     for req, wel in args.judge:
         def load(name):
             with open(os.path.join(args.dir, name)) as fh:
@@ -751,7 +789,7 @@ def main():
                     bytes.fromhex("".join(fh.read().split())))
             return parse_payload(version, _t, rid, payload)
         print(f"  judge {req} under {wel}: {judge(load(wel), load(req))}")
-    return 1 if disagreements else 0
+    return 1 if disagreements or judged_bad else 0
 
 
 if __name__ == "__main__":

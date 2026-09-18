@@ -34,10 +34,10 @@
 
 namespace {
 
-// The set of the per-kind correction mask drop (ephv4 eed6429), recorded in
-// third_party/README.md at the 98/98 verdict.
+// The set of the per-kind correction mask drop (ephv4 472b21a), recorded in
+// third_party/README.md at the 99/99 verdict.
 constexpr const char* kPinnedSetSha256 =
-    "934d3a0d49d3439740c0e8d063addba662354946e9686c85111032ddbc858f43";
+    "d904e3586c25dc0eeedb0cebb316be92f04b086c2e4d96ae4d2e3bf92337c72d";
 
 // FIPS 180-4 SHA-256, only to check the fixture set's digest against the
 // manifest's and the pin. Public-domain algorithm, written from the standard.

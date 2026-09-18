@@ -504,21 +504,23 @@ capability set whole instead of intersecting it with the request's mask,
 and no further round is owed on §3 — the remaining work here is our
 migration, below.
 
-**The per-kind drop, 2026-09-18:** 98/98 at ephv4 `eed6429`
-(`set-sha256 934d3a0d…`, verified independently), with the reader taught
+**The per-kind drop, 2026-09-18:** 99/99 at ephv4 `472b21a`
+(`set-sha256 d904e358…`, verified independently), with the reader taught
 0x0014 from the drop text before the codec was read. The reader validates
 what is inside that capability entry: count, layout, and correction bits
-above 0x07 as malformed. A reader that stored capability payloads raw
-would have passed the reserved-bit fixture; removing the check makes
-exactly that fixture disagree. The set's three request fixtures are
-well-formed messages whose refusal depends on a server's WELCOME, which a
-standalone fixture does not carry. `--judge REQUEST WELCOME` renders the
-drop's section-2 verdict for such a pair: the shared profile is ERROR 11
-under `welcome_corrkind`, the split profiles are served, and the
-unreferenced heliocentric mask-7 profile is ERROR 11, checked against
-0x0004 alone. The vendored header also gained a check the drop text does
-not name: `ValidateWelcome` refuses `maxPayload = 0`, the reading rule
-this side recommended at the §3 lock.
+above 0x07 as malformed. Other capability entries are still read raw on
+this side. A reader that stored capability payloads raw would have passed
+the reserved-bit fixture; removing the check makes exactly that fixture
+disagree. Request fixtures whose refusal depends on a server's WELCOME
+are paired with one in `JUDGEMENTS.tsv`. The reader applies the drop's
+section 2 to every row: 7/7, including a positive control, and it fails a
+table that does not exercise both outcomes. A reader that refuses
+everything fails there twice (fault-injected). `--judge REQUEST WELCOME`
+judges any single pair. The previous pin (`0fbc863`) was one line older
+than the §3 lock commit `cf83dc9`: the lock added `ValidateWelcome`'s
+refusal of `maxPayload = 0`, the reading rule this side had recommended,
+and nothing else differed. Our WELCOME's `maxPayload` is nonzero, so the
+server was never out of step.
 
 **Our migration** — complete. Steps 1–5 landed with the codec and the
 session rewrite; steps 6–7 are SEGDATA, row-block compute, CANCEL and

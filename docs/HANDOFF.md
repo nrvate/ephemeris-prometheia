@@ -32,8 +32,8 @@ reader of the client's output. The first full run is
   Swiss's planet-centred deflection (no coherent observer) is no longer
   claimed by `astrolog-ephd`.
 - **Landed: the per-kind correction mask drop** (WELCOME tag 0x0014,
-  ephv4 `eed6429`, SERVER.md "Per-kind correction masks"). Fixtures 98/98
-  from the text first, the vendored pair re-pinned, and no server change.
+  ephv4 `eed6429`, SERVER.md "Per-kind correction masks"). Fixtures 99/99
+  and judgements 7/7 from the text first, the vendored pair re-pinned, and no server change.
   The client reads the tag, and the cross-test's refusal leg checks every
   (observer, kind, mask) on both servers, 160/160. Latest record:
   `docs/crosstest/2026-09-18e.tsv` (1034 rows, no findings).
