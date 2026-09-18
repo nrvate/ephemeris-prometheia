@@ -675,6 +675,23 @@ First results, all on the Astrolog side and sent:
   with the ascending node's distance (Δ 49,839 km). It looks like a
   fallback at the file edge.
 
+### Fixed stars, 2026-09-18
+
+The `stars` leg asks 29 named stars (the royal stars, the brightest
+navigational stars, Algol, Polaris and the Pleiades' Alcyone) at 1900, 2000
+and 2100, apparent, tropical and Lahiri. Both servers read
+Hipparcos-derived catalogues with proper motion, and they agree to
+0.008″. The band is 0.02″; a 0.0005″ band gives 134 findings.
+
+α Centauri is handled separately, because the catalogues differ in what
+its names mean:
+- Our Rigil Kentaurus is α Cen A and our Toliman is α Cen B, as the IAU
+  names them. They are 16.45″ apart at J2000.
+- `astrolog-ephd` answers both names with one α Cen entry, which lies
+  between A and B. Rigil Kentaurus is recorded as unadjudicated (a
+  catalogue convention: the system against component A). Toliman is a
+  finding on their side, since a client asking for B gets something else.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

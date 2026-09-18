@@ -32,6 +32,8 @@ running daemons:
              direction and distance, mask 0, and the node-on-its-frame's-
              ecliptic rule checked where it is exact
   sidereal   the three A.8 sidereal planes for two zodiacs
+  stars      29 fixed stars by name, tropical and sidereal, and the two
+             IAU names of alpha Centauri
   topo       each server against Horizons from a site on the Earth: mask 1,
              ICRF, equatorial, with the Delta T that reproduces Horizons'
              local apparent sidereal time (build/prometheia-ut1), then
@@ -691,6 +693,75 @@ def leg_points(client, ours, theirs, table, verbose):
                        "3.5a puts a node on the frame's ecliptic, the J2000 one for frames 2-3")
 
 
+# Fixed stars by name, apparent place. Both sides read Hipparcos-derived
+# catalogues with proper motion, so the band is small: measured <= 0.008"
+# over 1900-2100 (2026-09-18) for the 29 stars below.
+STARS = ["Aldebaran", "Regulus", "Spica", "Antares", "Fomalhaut", "Sirius", "Algol", "Vega",
+         "Polaris", "Betelgeuse", "Rigel", "Arcturus", "Canopus", "Achernar", "Deneb", "Altair",
+         "Pollux", "Castor", "Procyon", "Capella", "Alcyone", "Zubenelgenubi", "Zubeneschamali",
+         "Bellatrix", "Acrux", "Hadar", "Mirach", "Alphecca", "Scheat"]
+STAR_BAND = 0.02
+STAR_EPOCHS = [2415020.5, 2451545.0, 2488069.5]
+
+
+def leg_stars(client, ours, theirs, table, verbose):
+    """Fixed stars by name, apparent, tropical and Lahiri; then alpha Centauri,
+    where the catalogues differ in what a name means: the IAU's names are
+    Rigil Kentaurus for alpha Cen A and Toliman for alpha Cen B."""
+    print("\n== stars: fixed stars by name, apparent, true ecliptic of date")
+    for zodiac in ("", "lahiri"):
+        worst = 0.0
+        for jd in STAR_EPOCHS:
+            args = ["--jd", repr(jd), "--corrections", "7", "--deltat", str(DELTA_T)]
+            if zodiac:
+                args += ["--sid", zodiac]
+            for name in STARS:
+                args += ["--star", name]
+            ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+            table.asked(ra, rb)
+            for k, name in enumerate(STARS):
+                va, vb = ra.row(k), rb.row(k)
+                base = dict(leg="stars", epoch_tt=jd, object=name, observer="geo",
+                            frame=zodiac or "tropical", plane="ecliptic", mask=7,
+                            deltat=DELTA_T, tier=2)
+                if va is None or vb is None or any(math.isnan(v) for v in va[:2] + vb[:2]):
+                    ea = ra.objects[k].err if k < len(ra.objects) else -1
+                    eb = rb.objects[k].err if k < len(rb.objects) else -1
+                    table.add(**base, verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
+                    continue
+                sep = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+                worst = max(worst, sep)
+                table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=sep,
+                          band=STAR_BAND, verdict="agree" if sep <= STAR_BAND else "finding")
+        print(f"  {zodiac or 'tropical':9s} {len(STARS)} stars worst {worst:.4f}\"")
+
+    # alpha Centauri: the same two names on both servers, astrometric J2000.
+    args = ["--jd", "2451545.0", "--icrs", "--eq", "--corrections", "0", "--deltat",
+            str(DELTA_T), "--star", "Rigil Kentaurus", "--star", "Toliman"]
+    ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+    table.asked(ra, rb)
+    rows = [(ra.row(k), rb.row(k)) for k in range(2)]
+    if any(v is None for pair in rows for v in pair):
+        table.add(leg="stars-alcen", verdict="unanswered", note="alpha Centauri not answered")
+        return
+    (a_o, a_t), (b_o, b_t) = rows
+    ours_split = sep_arcsec((a_o[0], a_o[1]), (b_o[0], b_o[1]))
+    theirs_split = sep_arcsec((a_t[0], a_t[1]), (b_t[0], b_t[1]))
+    table.add(leg="stars-alcen", epoch_tt=2451545.0, object="Rigil Kentaurus", frame="ICRF",
+              plane="equator", mask=0, ours=(a_o[0], a_o[1]), theirs=(a_t[0], a_t[1]),
+              sep_servers=sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])), tier=3,
+              verdict="unadjudicated",
+              note="catalogue convention: ours is alpha Cen A (the IAU's Rigil Kentaurus); "
+                   "theirs one alpha Cen entry, between A and B")
+    table.add(leg="stars-alcen", epoch_tt=2451545.0, object="Toliman", frame="ICRF",
+              plane="equator", mask=0, ours=(b_o[0], b_o[1]), theirs=(b_t[0], b_t[1]),
+              sep_servers=sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1])), tier=3,
+              verdict="agree" if theirs_split > 1.0 else "finding (theirs)",
+              note=f"the IAU's Toliman is alpha Cen B; A to B is {ours_split:.2f}\" here "
+                   f"and {theirs_split:.2f}\" on theirs (0 = both names answer one star)")
+    print(f"  alpha Cen: A-B {ours_split:.2f}\" ours, {theirs_split:.2f}\" theirs")
+
+
 # Sidereal planes (A.8). Planes 0 and 1 are the same question on both sides
 # and are judged by the refit band. Plane 2's longitude origin is open (the
 # protocol's "carried onto"): a row there is unadjudicated when the planes
@@ -1022,7 +1093,7 @@ def main():
     ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,sidereal")
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,sidereal,stars")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvm/work/ephv4", help="the Astrolog tree, for its commit")
     ap.add_argument("--astrolog-bin", default="/nvm/work/ephv4/astrolog-ephd",
@@ -1062,6 +1133,8 @@ def main():
         leg_apparent(client, ours, theirs, a, b, table, args.verbose)
     if "points" in legs:
         leg_points(client, ours, theirs, table, args.verbose)
+    if "stars" in legs:
+        leg_stars(client, ours, theirs, table, args.verbose)
     if "sidereal" in legs:
         leg_sidereal(client, ours, theirs, table, args.verbose)
     if "deflection" in legs:

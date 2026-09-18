@@ -29,6 +29,8 @@ documented, not that it is frozen.
   close, each with a connection id and the request id, at `--log-level
   quiet|info|debug` (default `info`). It never logs instants, sites, names
   or tokens (SERVER.md, "Logging").
+- Cross-test leg `stars`: 29 named stars, tropical and sidereal, and the
+  two IAU names of α Centauri.
 - Cross-test legs `points` (orbit points by direction and distance, and
   the node-on-its-frame's-ecliptic rule) and `sidereal` (the three planes
   for two zodiacs).
