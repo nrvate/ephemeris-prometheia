@@ -17,7 +17,7 @@ application). The ephemeris *data* it ingests is US-government public domain
 
 ## Status
 
-Milestones 0–4 of 6 complete (2026-09-16):
+All six milestones complete, plus protocol version 4 (2026-09-17):
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
@@ -103,9 +103,17 @@ Milestones 0–4 of 6 complete (2026-09-16):
   perihelia and aphelia (perigee/apogee for the Moon) as points seen from any
   observer; mean planetary elements fitted to DE440 itself. Planet-centred
   observers. [docs/ENGINE.md](docs/ENGINE.md).
+- **`prometheiad` and protocol version 4** — the WebSocket daemon speaks
+  the ephemeris protocol co-designed (and locked from both sides) with the
+  Astrolog project: NAIF body IDs, profiles, instant lists, batched LOOKUP,
+  per-object META with a truthful `corrApplied`, and SEGDATA — Chebyshev
+  segments fitted on a server-owned 32-day lattice with the ayanamsa as its
+  own scalar series — plus block-wise compute with CANCEL and priority,
+  cell caches shared across requests, and a reference wire client.
+  [docs/SERVER.md](docs/SERVER.md), [docs/SEGMENTS.md](docs/SEGMENTS.md).
 - **Tools** — `ephem`, `prometheia-fetch` (Python), `prometheia-convert`, `prometheia-spk-trim`,
   `prometheia-info`, `prometheia-bench`; `prometheiad` and `prometheia-wire-client`
-  ([docs/SERVER.md](docs/SERVER.md)). Seventeen test suites (a ~20 s local gate, `tools/gate.sh`), clean under
+  ([docs/SERVER.md](docs/SERVER.md)). Twenty-one test suites (a ~20 s local gate, `tools/gate.sh`), clean under
   ASan/UBSan/LeakSan.
 
 Design rationale, evidence from the Swiss Ephemeris source, and the full
