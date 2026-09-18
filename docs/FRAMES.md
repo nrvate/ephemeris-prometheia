@@ -176,8 +176,8 @@ IAU 2006 remains the default.
 ## Sidereal planes (protocol v4 A.8)
 
 `CalcOptions::sidereal_plane` picks the plane a sidereal longitude is
-counted along. The engine and `prometheiad` expose it; the C ABI does not
-yet, because its structs are frozen per ABI version.
+counted along. The engine, `prometheiad` and the C ABI (version 6,
+`prometheia_options.sidereal_plane`; `ephem --sid-plane`) expose it.
 
 - **Ecliptic of date** (the default): the ayanamsha is subtracted as it
   moves, as above.

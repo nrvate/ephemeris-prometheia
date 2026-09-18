@@ -11,6 +11,14 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **C ABI version 6:** `prometheia_options.sidereal_plane` and the
+  `PROMETHEIA_SIDEREAL_PLANE_*` constants, which take the protocol's A.8
+  values. The field is appended, so bindings must rebuild: the ABI check is
+  equality. The Astrolog side reviewed it before it landed; it lets their
+  plugin serve Astrolog's solar-system-plane charts. `ephem --sid-plane`.
+
 ## 0.2.0 — 2026-09-18
 
 The same day as 0.1.0, in 56 commits:

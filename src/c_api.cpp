@@ -93,6 +93,10 @@ prometheia_status guarded(prometheia_error* err, F&& f) {
     }
 }
 
+static_assert(PROMETHEIA_SIDEREAL_PLANE_DATE == int(SiderealPlane::EclipticOfDate));
+static_assert(PROMETHEIA_SIDEREAL_PLANE_ANCHOR == int(SiderealPlane::EclipticOfAnchor));
+static_assert(PROMETHEIA_SIDEREAL_PLANE_INVARIABLE == int(SiderealPlane::Invariable));
+
 // C options -> CalcOptions, rejecting out-of-range selector fields.
 prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometheia_error* err) {
     if (c.center < PROMETHEIA_CENTER_GEOCENTRIC || c.center > PROMETHEIA_CENTER_BODY) {
@@ -116,10 +120,15 @@ prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometh
     default:
         return argument(err, "options: sidereal mode out of range");
     }
+    if (c.sidereal_plane < PROMETHEIA_SIDEREAL_PLANE_DATE ||
+        c.sidereal_plane > PROMETHEIA_SIDEREAL_PLANE_INVARIABLE) {
+        return argument(err, "options: sidereal plane out of range");
+    }
     o.center = static_cast<Center>(c.center);
     o.frame = static_cast<Frame>(c.frame);
     o.coords = static_cast<Coords>(c.coords);
     o.sidereal = static_cast<SiderealMode>(c.sidereal);
+    o.sidereal_plane = static_cast<SiderealPlane>(c.sidereal_plane);
     o.precession = static_cast<Precession>(c.precession);
     o.sidereal_epoch_jtdb = c.sidereal_epoch_jd;
     o.sidereal_ayanamsa_deg = c.sidereal_ayanamsa_deg;
@@ -245,6 +254,7 @@ void prometheia_options_init(prometheia_options* opts) {
     opts->site_lat_deg = d.site.lat_rad / kDegToRad;
     opts->site_height_m = d.site.height_m;
     opts->center_body = d.center_body;
+    opts->sidereal_plane = static_cast<int>(d.sidereal_plane);
 }
 
 prometheia_status prometheia_engine_open(const char* path, prometheia_engine** out,

@@ -40,7 +40,7 @@ extern "C" {
 #define PROMETHEIA_API
 #endif
 
-#define PROMETHEIA_ABI_VERSION 5
+#define PROMETHEIA_ABI_VERSION 6
 
 /* ---- Status and errors ------------------------------------------------ */
 
@@ -103,6 +103,14 @@ PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION *
 #define PROMETHEIA_SIDEREAL_LAHIRI 1
 #define PROMETHEIA_SIDEREAL_USER 255
 
+/* The plane a sidereal longitude is counted along (ABI version 6): the
+ * ephemeris protocol's A.8 values. The two fixed planes need ecliptic
+ * coordinates, ignore `frame`, and report the zodiac's anchor value A0 as
+ * ayanamsa_deg; a tropical request ignores the field. */
+#define PROMETHEIA_SIDEREAL_PLANE_DATE 0       /* ecliptic of date (default) */
+#define PROMETHEIA_SIDEREAL_PLANE_ANCHOR 1     /* mean ecliptic & equinox of the anchor epoch */
+#define PROMETHEIA_SIDEREAL_PLANE_INVARIABLE 2 /* invariable plane of the solar system */
+
 #define PROMETHEIA_PRECESSION_IAU2006 0
 #define PROMETHEIA_PRECESSION_VONDRAK2011 1
 
@@ -133,6 +141,8 @@ typedef struct prometheia_options {
     /* PROMETHEIA_CENTER_BODY: the observing body's NAIF ID / SPK-ID
      * (default the Sun). ABI version 4. */
     int center_body;
+    /* PROMETHEIA_SIDEREAL_PLANE_*, with a sidereal zodiac. ABI version 6. */
+    int sidereal_plane;
 } prometheia_options;
 
 /* Apparent place, geocentric, true ecliptic and equinox of date, rates on. */

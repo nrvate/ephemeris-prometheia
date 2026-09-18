@@ -236,6 +236,10 @@ TEST_CASE("ephem_options_map_to_engine") {
     partial.speed = false;
     CalcOptions bary;
     bary.center = Center::Barycentric;
+    CalcOptions lahiri_inv = lahiri;
+    lahiri_inv.sidereal_plane = SiderealPlane::Invariable;
+    CalcOptions user_anchor = user;
+    user_anchor.sidereal_plane = SiderealPlane::EclipticOfAnchor;
     const Case cases[] = {
         {"--geometric --frame j2000 --equatorial", geo_j2000_eq},
         {"--astrometric --frame=mean", astro_mean},
@@ -247,6 +251,8 @@ TEST_CASE("ephem_options_map_to_engine") {
         {"--sidereal user:2440000.5:22.25", user},
         {"--no-deflection --no-speed", partial},
         {"--center barycentric", bary},
+        {"--sidereal lahiri --sid-plane invariable", lahiri_inv},
+        {"--sidereal user:2440000.5:22.25 --sid-plane anchor", user_anchor},
     };
     for (const Case& c : cases) {
         const Run r = ephem(k.arg + " -j 2455000.5 -f csv jupiter " + c.args);
@@ -473,6 +479,12 @@ TEST_CASE("ephem_errors_and_status") {
     r = ephem(k.arg + " -c /nonexistent/cat.epm sun");
     CHECK(r.status == 2);
     CHECK(r.err.find("catalog") != std::string::npos);
+    // A fixed sidereal plane is an ecliptic; an unknown plane is refused.
+    r = ephem(k.arg + " --sidereal lahiri --sid-plane invariable --equatorial sun");
+    CHECK(r.status == 2);
+    CHECK(r.err.find("--equatorial") != std::string::npos);
+    r = ephem(k.arg + " --sidereal lahiri --sid-plane galactic sun");
+    CHECK(r.status == 2);
 
     // Per-body failures: status 1, the good rows still printed.
     r = ephem(k.arg + " -j 2451545 -f csv sun nosuchbody 499 earth jupiter");

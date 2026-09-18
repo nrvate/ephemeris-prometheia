@@ -118,7 +118,13 @@ printf("%s\n", r.source);    /* the element set's name */
   and `*out` from open is set to `NULL`.
 - **Options.** Start from `prometheia_options_init()`, not from a zeroed
   struct. Zero is not the default for every field: frame 0 is ICRF and
-  sidereal mode 0 is Fagan/Bradley. Selector fields are plain `int`s,
+  sidereal mode 0 is Fagan/Bradley. `sidereal_plane` (ABI version 6)
+  takes the protocol's A.8 values through `PROMETHEIA_SIDEREAL_PLANE_*`:
+  the ecliptic of date (default), the ecliptic of the zodiac's anchor
+  epoch, or the invariable plane. The two fixed planes apply only with a
+  sidereal zodiac, need ecliptic coordinates (`PROMETHEIA_ERROR_ARGUMENT`
+  otherwise), ignore `frame`, and report A0 as `ayanamsa_deg`
+  ([FRAMES.md](FRAMES.md), "Sidereal planes"). Selector fields are plain `int`s,
   range-checked on every call. Boolean switches treat any nonzero value as
   true. `NULL` options mean the defaults.
 - **Units.** The C struct takes the topocentric site in **degrees**
@@ -146,7 +152,7 @@ printf("%s\n", r.source);    /* the element set's name */
 
 ## ABI stability
 
-`PROMETHEIA_ABI_VERSION` (currently 5; version 2 added `prometheia_options.sigma`, version 3 `prometheia_options.precession`, version 4 `PROMETHEIA_CENTER_BODY` and `prometheia_options.center_body`, version 5 the hypothetical-body functions and the `prometheia_elements` and `prometheia_hypothetical` structs, purely additive) names the struct layouts and
+`PROMETHEIA_ABI_VERSION` (currently 6; version 6 appended `prometheia_options.sidereal_plane` and the `PROMETHEIA_SIDEREAL_PLANE_*` constants, reviewed by the Astrolog side before it landed; version 2 added `prometheia_options.sigma`, version 3 `prometheia_options.precession`, version 4 `PROMETHEIA_CENTER_BODY` and `prometheia_options.center_body`, version 5 the hypothetical-body functions and the `prometheia_elements` and `prometheia_hypothetical` structs, purely additive) names the struct layouts and
 function signatures. Any change to them bumps the version, and bindings
 compare against `prometheia_abi_version()` at load time. **The check is
 equality, not `>=`, while we are on 0.x.** Versions 2 to 4 each appended

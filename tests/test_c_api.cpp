@@ -88,6 +88,8 @@ TEST_CASE("c_api_library_and_defaults") {
     CHECK(c.site_lon_deg == 0.0);
     CHECK(c.site_lat_deg == 0.0);
     CHECK(c.site_height_m == 0.0);
+    CHECK(c.sidereal_plane == int(d.sidereal_plane));
+    CHECK(c.sidereal_plane == PROMETHEIA_SIDEREAL_PLANE_DATE);
     prometheia_options_init(nullptr); // no-op
 
     // The selector constants mirror the C++ enums.
@@ -101,6 +103,9 @@ TEST_CASE("c_api_library_and_defaults") {
     CHECK(PROMETHEIA_SIDEREAL_FAGAN_BRADLEY == int(SiderealMode::FaganBradley));
     CHECK(PROMETHEIA_SIDEREAL_LAHIRI == int(SiderealMode::Lahiri));
     CHECK(PROMETHEIA_SIDEREAL_USER == int(SiderealMode::User));
+    CHECK(PROMETHEIA_SIDEREAL_PLANE_ANCHOR == int(SiderealPlane::EclipticOfAnchor));
+    CHECK(PROMETHEIA_SIDEREAL_PLANE_INVARIABLE == int(SiderealPlane::Invariable));
+    CHECK(PROMETHEIA_ABI_VERSION == 6);
     CHECK(PROMETHEIA_MOON == body::kMoon);
     CHECK(PROMETHEIA_EARTH == body::kEarth);
     CHECK(PROMETHEIA_PLUTO == body::kPluto);
@@ -166,6 +171,7 @@ TEST_CASE("c_api_matches_engine_bit_for_bit") {
         int body;
         int center, frame, coords, sidereal;
         int lt, defl, aber, speed;
+        int plane = PROMETHEIA_SIDEREAL_PLANE_DATE; // ABI 6
     };
     const Case cases[] = {
         {10, 0, 3, 0, -1, 1, 1, 1, 1},    // apparent, true ecliptic of date
@@ -181,6 +187,8 @@ TEST_CASE("c_api_matches_engine_bit_for_bit") {
         {5, 0, 3, 0, 255, 1, 1, 1, 1},    // user-anchored
         {5, 0, 3, 0, -1, 1, 1, 1, 1 + 6}, // any nonzero int is true
         {399, 4, 1, 0, -1, 1, 1, 1, 1},   // centred on the Jupiter barycentre
+        {10, 0, 3, 0, 1, 1, 1, 1, 1, PROMETHEIA_SIDEREAL_PLANE_ANCHOR}, // Lahiri, anchor ecliptic
+        {5, 0, 3, 0, 255, 1, 1, 1, 1, PROMETHEIA_SIDEREAL_PLANE_INVARIABLE}, // user, invariable
     };
     for (const Case& k : cases) {
         prometheia_options co;
@@ -199,6 +207,7 @@ TEST_CASE("c_api_matches_engine_bit_for_bit") {
         co.site_lat_deg = 47.37;
         co.site_height_m = 500.0;
         co.center_body = 5;
+        co.sidereal_plane = k.plane;
 
         CalcOptions o;
         o.center = Center(k.center);
@@ -213,6 +222,7 @@ TEST_CASE("c_api_matches_engine_bit_for_bit") {
         o.speed = k.speed;
         o.site = {8.55 * kDegToRad, 47.37 * kDegToRad, 500.0};
         o.center_body = 5;
+        o.sidereal_plane = SiderealPlane(k.plane);
 
         for (double jd : {kJ2000, 2461300.25}) {
             prometheia_result cr;
@@ -307,6 +317,13 @@ TEST_CASE("c_api_calc_errors") {
     bad([](prometheia_options& x) { x.sidereal = 2; });
     bad([](prometheia_options& x) { x.sidereal = -2; });
     bad([](prometheia_options& x) { x.precession = 2; });
+    bad([](prometheia_options& x) { x.sidereal_plane = 3; });
+    bad([](prometheia_options& x) { x.sidereal_plane = -1; });
+    bad([](prometheia_options& x) { // a fixed plane is an ecliptic
+        x.sidereal = PROMETHEIA_SIDEREAL_LAHIRI;
+        x.sidereal_plane = PROMETHEIA_SIDEREAL_PLANE_INVARIABLE;
+        x.coords = PROMETHEIA_COORDS_EQUATORIAL;
+    });
     bad([](prometheia_options& x) {
         x.sidereal = PROMETHEIA_SIDEREAL_USER;
         x.sidereal_ayanamsa_deg = std::nan("");

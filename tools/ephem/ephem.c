@@ -324,6 +324,8 @@ static void print_help(void) {
            "      --frame true|mean|j2000|icrf   equinox of date (default true)\n"
            "      --equatorial       right ascension/declination instead of ecliptic\n"
            "      --sidereal MODE    fagan-bradley (fb), lahiri, user:JD:DEG, tropical\n"
+           "      --sid-plane P      the sidereal plane: date (default), anchor (the\n"
+           "                         ecliptic of the zodiac's anchor epoch) or invariable\n"
            "      --precession MODEL iau2006 (default) or vondrak2011 (long-term)\n"
            "      --orbit-point P[:mean|:osc]  asc, desc, peri or apo of each body's\n"
            "                         orbit instead of the body (osculating by default)\n"
@@ -531,6 +533,17 @@ static int parse_args(int argc, char** argv, config* c) {
                 return EXIT_USAGE;
             if (!parse_keyword(v, frame_names, frame_values, 4, &c->opts.frame))
                 return usage_error("unknown frame '%s' (true, mean, j2000, icrf)", v);
+        } else if (is_opt(&a, NULL, "--sid-plane")) {
+            if (!(v = value_of(&a)))
+                return EXIT_USAGE;
+            if (equals_nocase(v, "date"))
+                c->opts.sidereal_plane = PROMETHEIA_SIDEREAL_PLANE_DATE;
+            else if (equals_nocase(v, "anchor"))
+                c->opts.sidereal_plane = PROMETHEIA_SIDEREAL_PLANE_ANCHOR;
+            else if (equals_nocase(v, "invariable"))
+                c->opts.sidereal_plane = PROMETHEIA_SIDEREAL_PLANE_INVARIABLE;
+            else
+                return usage_error("unknown sidereal plane '%s' (date, anchor, invariable)", v);
         } else if (is_opt(&a, NULL, "--precession")) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;
@@ -709,6 +722,13 @@ static const char* center_text(int center) {
 
 static const char* frame_text(const prometheia_options* o) {
     const int eq = o->coords == PROMETHEIA_COORDS_EQUATORIAL;
+    /* A fixed sidereal plane is its own frame; --frame does not apply. */
+    if (o->sidereal != PROMETHEIA_SIDEREAL_TROPICAL && !eq) {
+        if (o->sidereal_plane == PROMETHEIA_SIDEREAL_PLANE_ANCHOR)
+            return "mean ecliptic and equinox of the zodiac's anchor epoch";
+        if (o->sidereal_plane == PROMETHEIA_SIDEREAL_PLANE_INVARIABLE)
+            return "invariable plane of the solar system";
+    }
     switch (o->frame) {
     case PROMETHEIA_FRAME_ICRF:
         return eq ? "ICRF equator" : "ICRF axes, J2000 mean ecliptic";
@@ -734,7 +754,7 @@ static const char* corrections_text(const prometheia_options* o) {
                          : "aberration only";
 }
 
-static const char* sidereal_text(int mode) {
+static const char* zodiac_text(int mode) {
     switch (mode) {
     case PROMETHEIA_SIDEREAL_FAGAN_BRADLEY:
         return "sidereal (Fagan/Bradley)";
@@ -745,6 +765,11 @@ static const char* sidereal_text(int mode) {
     default:
         return "tropical";
     }
+}
+
+/* The zodiac in words (a fixed plane is named as the frame, frame_text). */
+static const char* sidereal_text(const prometheia_options* o) {
+    return zodiac_text(o->sidereal);
 }
 
 typedef struct printer {
@@ -768,7 +793,7 @@ static void table_header(printer* p, const char* source, double jd_tt, const tim
      * file it came from, and this program's version. */
     printf("# %s (%s), ephem %s\n", source, base_name(c->ephemeris), prometheia_version());
     printf("# %s, %s, %s, %s", center_text(c->opts.center), corrections_text(&c->opts),
-           frame_text(&c->opts), sidereal_text(c->opts.sidereal));
+           frame_text(&c->opts), sidereal_text(&c->opts));
     if (c->opts.center == PROMETHEIA_CENTER_TOPOCENTRIC)
         printf(", site %.6f,%.6f,%gm", c->opts.site_lon_deg, c->opts.site_lat_deg,
                c->opts.site_height_m);
@@ -925,6 +950,12 @@ int main(int argc, char** argv) {
     status = parse_args(argc, argv, &c);
     if (status >= 0)
         return status;
+    if (c.opts.sidereal != PROMETHEIA_SIDEREAL_TROPICAL &&
+        c.opts.sidereal_plane != PROMETHEIA_SIDEREAL_PLANE_DATE &&
+        c.opts.coords == PROMETHEIA_COORDS_EQUATORIAL)
+        return usage_error(
+            "--sid-plane %s is a plane of its own: drop --equatorial",
+            c.opts.sidereal_plane == PROMETHEIA_SIDEREAL_PLANE_ANCHOR ? "anchor" : "invariable");
 
     if (!c.ephemeris)
         c.ephemeris = getenv("PROMETHEIA_EPHEMERIS");
@@ -1112,7 +1143,7 @@ int main(int argc, char** argv) {
         printf(", \"center\": \"%s\", \"frame\": ", center_text(c.opts.center));
         json_string(frame_text(&c.opts));
         printf(", \"corrections\": \"%s\", \"zodiac\": ", corrections_text(&c.opts));
-        json_string(sidereal_text(c.opts.sidereal));
+        json_string(sidereal_text(&c.opts));
         printf(", \"rows\": [");
     }
 
