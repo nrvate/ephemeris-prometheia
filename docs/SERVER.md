@@ -508,8 +508,12 @@ migration, below.
 (`set-sha256 d904e358…`, verified independently), with the reader taught
 0x0014 from the drop text before the codec was read. The reader validates
 what is inside that capability entry: count, layout, and correction bits
-above 0x07 as malformed. Other capability entries are still read raw on
-this side. A reader that stored capability payloads raw would have passed
+above 0x07 as malformed. Since 2026-09-18 it checks every capability
+entry against its A.3 layout, written from `registries.json`'s payload
+text. That covers all 20 tags across the set's 13 WELCOMEs. It is
+stricter than the codec in two places no fixture decides yet: the segments
+capability's three reserved bytes must be zero (§3.1), and the rates
+bound's floats must be finite. A reader that stored capability payloads raw would have passed
 the reserved-bit fixture; removing the check makes exactly that fixture
 disagree. Request fixtures whose refusal depends on a server's WELCOME
 are paired with one in `JUDGEMENTS.tsv`. The reader applies the drop's

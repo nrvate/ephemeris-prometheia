@@ -493,6 +493,82 @@ def parse_corrections_by_kind(value):
     return entries
 
 
+def _u32(r):
+    r.u32()
+
+
+def _tokens(r, what):
+    for _ in range(r.u16()):
+        r.str8(what)
+
+
+def _segments(r):
+    r.u8()                        # maxDegree
+    r.zero(3, "segments reserved")
+    r.u32()                       # maxSegmentsPerObject
+    r.f32("minErrArcsec")
+    r.u32()                       # kinds
+    r.u32()                       # maxSegSpanDays
+
+
+def _coverage(r):
+    for _ in range(r.u16()):
+        r.str8("coverage id")
+        r.time("coverage min")
+        r.time("coverage max")
+
+
+def _catalogs(r):
+    for _ in range(r.u16()):
+        r.str8("catalog id")
+        r.str8("catalog snapshot")
+
+
+def _corrections(r):
+    for _ in range(r.u8()):
+        r.u32()
+        r.u8()
+
+
+# A.3's capability layouts, written from registries.json's payload text (the
+# generated form of A.3), not from the codec: each reads exactly its bytes.
+CAPABILITY_LAYOUTS = {
+    0x0001: _u32, 0x0002: _u32,
+    0x0003: lambda r: (r.u32(), r.u32(), r.u32()),
+    0x0004: _corrections,
+    0x0005: lambda r: (r.u32(), r.u32()),
+    0x0006: _u32,
+    0x0007: lambda r: _tokens(r, "zodiac token"),
+    0x0008: _u32, 0x0009: _u32,
+    0x000A: _coverage,
+    0x000B: _catalogs,
+    0x000C: lambda r: r.str8("delta T model"),
+    0x000D: lambda r: _tokens(r, "precession model"),
+    0x000E: lambda r: (r.u32(), r.u32()),
+    0x000F: _segments,
+    0x0010: lambda r: r.u16(),
+    0x0011: lambda r: _tokens(r, "hypothetical token"),
+    0x0012: _u32,
+    0x0013: lambda r: (r.f32("rates degPerDay"), r.f32("rates auPerDay")),
+    0x0014: lambda r: None,       # parse_corrections_by_kind, which keeps its entries
+}
+
+
+def check_capabilities(tlvs):
+    """Every known capability TLV must be exactly its A.3 layout: a payload
+    stored raw would let any bytes through, and no fixture could say so."""
+    for tag, value in tlvs.items():
+        layout = CAPABILITY_LAYOUTS.get(tag)
+        if layout is None or tag == 0x0014:
+            continue
+        r = Reader(value)
+        try:
+            layout(r)
+            r.done(f"capability {tag:#06x}")
+        except (Malformed, struct.error) as e:
+            raise Malformed(f"capability TLV {tag:#06x} is not its layout: {e}")
+
+
 def welcome_corrections(tlvs):
     """(0x0004 entries, 0x0014 entries) of a WELCOME's TLVs."""
     t = Reader(tlvs[0x0004])
@@ -565,6 +641,7 @@ def parse_payload(version, mtype, request_id, payload):
         if missing:
             raise Malformed("WELCOME is missing required capability tags "
                             + ", ".join(f"{t:#06x}" for t in missing))
+        check_capabilities(tlvs)
         return welcome_corrections(tlvs)
     elif mtype == 3:
         return parse_request(r, request_id)
