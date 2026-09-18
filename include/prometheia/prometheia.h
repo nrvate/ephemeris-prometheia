@@ -40,7 +40,7 @@ extern "C" {
 #define PROMETHEIA_API
 #endif
 
-#define PROMETHEIA_ABI_VERSION 4
+#define PROMETHEIA_ABI_VERSION 5
 
 /* ---- Status and errors ------------------------------------------------ */
 
@@ -230,7 +230,9 @@ PROMETHEIA_API prometheia_status prometheia_calc_ut(prometheia_engine* engine, i
  * A node or apsis of a body's orbit as a point in space, seen with the
  * options' observer and frame (docs/ENGINE.md, "Nodes and apsides"): the
  * heliocentric orbit (geocentric for the Moon) on the output frame's
- * ecliptic; geometric, no light time or aberration; rates by central
+ * ecliptic. The options' corrections apply exactly as to a body -- a node
+ * exists to be compared with apparent positions (docs/ORBIT-POINTS.md) --
+ * and all three off give the geometric point. Rates by central
  * differences. PROMETHEIA_ERROR_ARGUMENT where the point is undefined.
  */
 #define PROMETHEIA_ORBIT_ASCENDING_NODE 0
@@ -249,6 +251,116 @@ PROMETHEIA_API prometheia_status prometheia_calc_orbit_point(prometheia_engine* 
 PROMETHEIA_API prometheia_status prometheia_calc_orbit_point_ut(
     prometheia_engine* engine, int body, int point, int elements, double jd_ut1,
     const prometheia_options* opts, prometheia_result* result, prometheia_error* err);
+
+/* ---- Bodies from orbital elements (ABI version 5) --------------------------
+ *
+ * A body defined by orbital elements rather than an ephemeris: a hypothetical
+ * planet, a predicted one, a fictitious moon (docs/HYPOTHETICALS.md). Each
+ * element is a polynomial in T = (t_TT - epoch) / 36525 Julian centuries;
+ * the motion is pure two-body Keplerian about its origin. This is ephemeris
+ * protocol v4's kind 4, and the selector values are its registries'.
+ *
+ * The structs below are frozen for the life of an ABI version: a layout
+ * change bumps PROMETHEIA_ABI_VERSION, which consumers compare against
+ * prometheia_abi_version() at load. Every element is its own polynomial, so
+ * a zero coefficient contributes nothing, and the mean-anomaly rule turns on
+ * whether M's coefficients beyond the constant are nonzero. Padding a
+ * shorter element with zeros to the shared n_terms therefore never changes
+ * the body.
+ */
+#define PROMETHEIA_EQUINOX_J2000 0    /* mean ecliptic and equinox of J2000.0 */
+#define PROMETHEIA_EQUINOX_B1950 1    /* ... of B1950.0, dynamically (not FK4) */
+#define PROMETHEIA_EQUINOX_J1900 2    /* ... of J1900.0 */
+#define PROMETHEIA_EQUINOX_OF_DATE 3  /* ... of the instant evaluated */
+#define PROMETHEIA_EQUINOX_EXPLICIT 4 /* ... of equinox_jd_tt */
+
+#define PROMETHEIA_ELEMENTS_ORIGIN_SUN 0
+#define PROMETHEIA_ELEMENTS_ORIGIN_EARTH 1
+
+typedef struct prometheia_elements {
+    double epoch_jd_tt;
+    int equinox;          /* PROMETHEIA_EQUINOX_* */
+    double equinox_jd_tt; /* PROMETHEIA_EQUINOX_EXPLICIT: that date; otherwise 0 */
+    int origin;           /* PROMETHEIA_ELEMENTS_ORIGIN_* */
+    int n_terms;          /* 1..5: the terms each polynomial uses */
+    /* Coefficients of T^0 .. T^(n_terms-1): mean anomaly (deg), semi-major
+     * axis (AU), eccentricity, argument of perihelion (deg), ascending node
+     * (deg), inclination (deg). Unused terms are ignored; zero-padding is
+     * meaningless (the mean-anomaly rule reads M's nonzero coefficients). */
+    double mean_anomaly[5];
+    double semi_major_axis[5];
+    double eccentricity[5];
+    double arg_perihelion[5];
+    double ascending_node[5];
+    double inclination[5];
+} prometheia_elements;
+
+/*
+ * Position of the body the elements define, at a TT (or, _ut, a UT1)
+ * Julian date. The options' corrections apply as to any body, light time
+ * solved through the same two-body motion. PROMETHEIA_ERROR_ARGUMENT for
+ * elements out of range or not a bound orbit at the instant. result->source
+ * is "two-body orbital elements".
+ *
+ * The TT form is a function of the elements alone: two implementations given
+ * the same elements must agree, and it is the form to compare across servers.
+ * The UT1 form also depends on the engine's Delta T (the observed model, or
+ * prometheia_engine_set_delta_t's), so it is not.
+ */
+PROMETHEIA_API prometheia_status prometheia_calc_elements(
+    prometheia_engine* engine, const prometheia_elements* elements, double jd_tt,
+    const prometheia_options* opts, prometheia_result* result, prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_calc_elements_ut(
+    prometheia_engine* engine, const prometheia_elements* elements, double jd_ut1,
+    const prometheia_options* opts, prometheia_result* result, prometheia_error* err);
+
+/* ---- Named hypothetical bodies (ABI version 5) ------------------------------
+ *
+ * Bodies named by a token (the protocol's A.15: "cupido", "hades", ...),
+ * defined by element files in JSON Lines (docs/HYPOTHETICALS.md, "Element
+ * files"). The engine opens with the set the library ships; each file added
+ * redefines the tokens it carries. Tokens match ASCII case-insensitively.
+ * Strings returned below, and the indexes prometheia_hypothetical_token
+ * takes, are valid until the engine is closed or another element file is
+ * added. Not thread-safe, like the rest of an engine.
+ */
+PROMETHEIA_API prometheia_status prometheia_engine_add_hypotheticals(prometheia_engine* engine,
+                                                                     const char* element_file_path,
+                                                                     prometheia_error* err);
+
+/* The number of tokens defined, and the index-th (in the order first
+ * defined; NULL out of range). */
+PROMETHEIA_API int prometheia_hypothetical_count(const prometheia_engine* engine);
+PROMETHEIA_API const char* prometheia_hypothetical_token(const prometheia_engine* engine,
+                                                         int index);
+
+typedef struct prometheia_hypothetical {
+    const char* token;    /* lowercase */
+    const char* name;     /* display name; "" when the file gives none */
+    const char* set;      /* the element set's name; results carry it as source */
+    const char* citation; /* where the numbers come from */
+    prometheia_elements elements;
+} prometheia_hypothetical;
+
+/* A token's current definition. PROMETHEIA_ERROR_NOT_FOUND when undefined. */
+PROMETHEIA_API prometheia_status prometheia_hypothetical_get(const prometheia_engine* engine,
+                                                             const char* token,
+                                                             prometheia_hypothetical* out,
+                                                             prometheia_error* err);
+
+/* Position of a named body, computed from its elements as
+ * prometheia_calc_elements does; result->source is its element set's name.
+ * PROMETHEIA_ERROR_NOT_FOUND for an undefined token. */
+PROMETHEIA_API prometheia_status prometheia_calc_hypothetical(prometheia_engine* engine,
+                                                              const char* token, double jd_tt,
+                                                              const prometheia_options* opts,
+                                                              prometheia_result* result,
+                                                              prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_calc_hypothetical_ut(prometheia_engine* engine,
+                                                                 const char* token, double jd_ut1,
+                                                                 const prometheia_options* opts,
+                                                                 prometheia_result* result,
+                                                                 prometheia_error* err);
 
 /* ---- Fixed stars ------------------------------------------------------------
  *

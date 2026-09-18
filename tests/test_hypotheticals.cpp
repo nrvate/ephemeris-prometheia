@@ -56,14 +56,14 @@ State state_of(Engine& e, int body, double jd, Frame frame, Center center) {
 
 // One-term elements from an osculating state.
 PolynomialElements elements_from(const State& s, double mu, double epoch, ElementEquinox eq,
-                                 ElementCentre centre) {
+                                 ElementOrigin origin) {
     auto k = state_to_elements(mu, s);
     REQUIRE(k.ok());
     const Elements& el = k.value();
     PolynomialElements p;
     p.epoch_jd_tt = epoch;
     p.equinox = eq;
-    p.centre = centre;
+    p.origin = origin;
     p.n_terms = 1;
     p.mean_anomaly[0] = el.mean_anom * kRad2Deg;
     p.semi_major_axis[0] = el.a;
@@ -112,7 +112,7 @@ TEST_CASE("elements_reproduce_a_planet_at_its_epoch_and_kepler_away_from_it") {
     const double epoch = kJ2000 + 123.4;
     const State s = state_of(e, 5, epoch, Frame::J2000, Center::Heliocentric);
     const PolynomialElements el =
-        elements_from(s, kMuSun, epoch, ElementEquinox::J2000, ElementCentre::Sun);
+        elements_from(s, kMuSun, epoch, ElementEquinox::J2000, ElementOrigin::Sun);
 
     CalcOptions o = CalcOptions::geometric();
     o.frame = Frame::J2000;
@@ -165,7 +165,7 @@ TEST_CASE("elements_refer_to_the_equinox_they_name") {
     icrf.coords = Coords::Equatorial;
     for (const Case& c : cases) {
         const State s = state_of(e, 6, c.epoch, Frame::MeanOfDate, Center::Heliocentric);
-        PolynomialElements el = elements_from(s, kMuSun, c.epoch, c.eq, ElementCentre::Sun);
+        PolynomialElements el = elements_from(s, kMuSun, c.epoch, c.eq, ElementOrigin::Sun);
         if (c.eq == ElementEquinox::Explicit)
             el.equinox_jd_tt = c.epoch;
         auto truth = e.calc(6, c.epoch, icrf);
@@ -191,7 +191,7 @@ TEST_CASE("earth_centred_elements_reproduce_the_moon_and_move_slower") {
     const double epoch = kJ2000 + 42.0;
     const State s = state_of(e, body::kMoon, epoch, Frame::J2000, Center::Geocentric);
     const PolynomialElements el =
-        elements_from(s, kMuEarth, epoch, ElementEquinox::J2000, ElementCentre::Earth);
+        elements_from(s, kMuEarth, epoch, ElementEquinox::J2000, ElementOrigin::Earth);
 
     CalcOptions o = CalcOptions::geometric();
     o.frame = Frame::J2000;
@@ -296,7 +296,7 @@ namespace {
 
 // An invented body: every number here is made up for the test.
 constexpr const char* kInvented =
-    R"({"token":"testbody","name":"Test Body","set":"Invented for tests","citation":"tests/test_hypotheticals.cpp","epoch":2415020.0,"equinox":"J1900","centre":"sun","M":[10.0],"a":[40.0],"e":[0.01],"w":[20.0],"node":[30.0],"i":[1.5]})";
+    R"({"token":"testbody","name":"Test Body","set":"Invented for tests","citation":"tests/test_hypotheticals.cpp","epoch":2415020.0,"equinox":"J1900","origin":"sun","M":[10.0],"a":[40.0],"e":[0.01],"w":[20.0],"node":[30.0],"i":[1.5]})";
 
 std::string why_rejected(const std::string& line) {
     auto r = hypotheticals::parse(line, "t.jsonl");
@@ -335,7 +335,7 @@ TEST_CASE("element_files_read_strictly") {
     REQUIRE(x.ok());
     CHECK(x.value()[0].elements.equinox == ElementEquinox::Explicit);
     CHECK(x.value()[0].elements.equinox_jd_tt == 2440000.5);
-    CHECK(x.value()[0].elements.centre == ElementCentre::Earth);
+    CHECK(x.value()[0].elements.origin == ElementOrigin::Earth);
 
     // Refusals name the line and the reason. A mistyped field is an error,
     // not a silently zero element.
@@ -445,4 +445,24 @@ TEST_CASE("named_hypotheticals_compute_as_their_elements_and_later_files_win") {
     CHECK(!e.add_hypotheticals(path).ok());
     CHECK(e.hypothetical("broken") == nullptr);
     CHECK(e.calc_hypothetical("testbody", kJ2000).ok());
+}
+
+TEST_CASE("an_equinox_date_only_with_an_explicit_equinox") {
+    const std::string de = de440_path();
+    if (access(de.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s not present\n", de.c_str());
+        return;
+    }
+    auto opened = Engine::open(de);
+    REQUIRE(opened.ok());
+    Engine& e = opened.value();
+    PolynomialElements el;
+    el.semi_major_axis[0] = 10.0;
+    REQUIRE(e.calc_elements(el, kJ2000).ok());
+    el.equinox_jd_tt = 2440000.5; // a date, but the equinox is J2000
+    CHECK(!e.calc_elements(el, kJ2000).ok());
+    el.equinox = ElementEquinox::Explicit;
+    CHECK(e.calc_elements(el, kJ2000).ok());
+    el.equinox_jd_tt = 0.0; // explicit, but no date
+    CHECK(!e.calc_elements(el, kJ2000).ok());
 }

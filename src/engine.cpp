@@ -1791,7 +1791,7 @@ struct Engine::Impl {
 
         const double jd_tdb = time::tdb_from_tt(jd_tt);
         double centre[6];
-        auto r = el.centre == ElementCentre::Earth
+        auto r = el.origin == ElementOrigin::Earth
                      ? source->barycentric(body::kEarth, jd_tdb, centre)
                      : sun_at(jd_tdb, centre);
         if (!r)
@@ -2248,11 +2248,19 @@ Result<CalcResult> Engine::calc_elements(const PolynomialElements& el, double jd
     if (el.n_terms < 1 || el.n_terms > 5)
         return make_error(ErrorCode::ArgumentError, "elements take 1 to 5 polynomial terms");
     if (int(el.equinox) < 0 || int(el.equinox) > int(ElementEquinox::Explicit) ||
-        int(el.centre) < 0 || int(el.centre) > int(ElementCentre::Earth))
+        int(el.origin) < 0 || int(el.origin) > int(ElementOrigin::Earth))
         return make_error(ErrorCode::ArgumentError, "unknown element equinox or centre");
-    if (!std::isfinite(el.epoch_jd_tt) ||
-        (el.equinox == ElementEquinox::Explicit && !std::isfinite(el.equinox_jd_tt)))
-        return make_error(ErrorCode::ArgumentError, "non-finite element epoch or equinox");
+    if (!std::isfinite(el.epoch_jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite element epoch");
+    // The protocol's canonical encoding (A.16): an explicit equinox names a
+    // date, and no other equinox carries one. Enforced here too, so that a
+    // caller who leaves the field uninitialised finds out from the engine and
+    // not from the wire.
+    if (el.equinox == ElementEquinox::Explicit
+            ? !(std::isfinite(el.equinox_jd_tt) && el.equinox_jd_tt != 0.0)
+            : el.equinox_jd_tt != 0.0)
+        return make_error(ErrorCode::ArgumentError,
+                          "equinox_jd_tt is a finite date for an explicit equinox, else zero");
     CalcResult res;
     double tau = 0.0;
     auto r = impl_->position(

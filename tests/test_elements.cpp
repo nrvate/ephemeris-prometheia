@@ -71,7 +71,7 @@ TEST_CASE("one_term_earth_centred_is_slower_by_sqrt_mass_ratio") {
     // 7.79861314599897 and M = 17.79861314599897.
     PolynomialElements sun = one_term(10.0, 4.0);
     PolynomialElements earth = sun;
-    earth.centre = ElementCentre::Earth;
+    earth.origin = ElementOrigin::Earth;
     const double m_sun = mean_anomaly_deg(sun, kJ2000 + kCentury);
     const double m_earth = mean_anomaly_deg(earth, kJ2000 + kCentury);
     CHECK(m_earth == doctest::Approx(17.79861314599897).epsilon(1e-14));
@@ -91,7 +91,7 @@ TEST_CASE("multi_term_mean_anomaly_is_the_bare_polynomial") {
     el.mean_anomaly[2] = 3.0;
     el.semi_major_axis[0] = 1.0;
     CHECK(mean_anomaly_deg(el, kJ2000 + 2.0 * kCentury) == doctest::Approx(62.0).epsilon(1e-15));
-    el.centre = ElementCentre::Earth;
+    el.origin = ElementOrigin::Earth;
     el.semi_major_axis[0] = 40.0;
     CHECK(mean_anomaly_deg(el, kJ2000 + 2.0 * kCentury) == doctest::Approx(62.0).epsilon(1e-15));
 }

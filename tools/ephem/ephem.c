@@ -54,6 +54,8 @@ typedef struct config {
     const char* catalogs[MAX_CATALOGS];
     int n_catalogs;
     const char* perturbers;
+    const char* hypothetical_files[MAX_CATALOGS];
+    int n_hypothetical_files;
     const char* bodies[MAX_BODIES];
     int n_bodies;
 
@@ -76,8 +78,9 @@ typedef struct config {
 } config;
 
 typedef struct body_ref {
-    int id;   /* NAIF ID / SPK-ID, or the catalog star index when star */
-    int star; /* nonzero: a fixed star or deep-sky object */
+    int id;         /* NAIF ID / SPK-ID, or the catalog star index when star */
+    int star;       /* nonzero: a fixed star or deep-sky object */
+    char token[64]; /* non-empty: a named hypothetical body, by its token */
     char label[64];
 } body_ref;
 
@@ -291,6 +294,9 @@ static void print_help(void) {
            "  @TEXT          force a catalog lookup (@1 is Ceres; plain 1 is NAIF 1)\n"
            "  star:NAME      a fixed star or Messier object by name or designation\n"
            "                 (star:Graffias, \"star:Beta Scorpii\", star:HR5984, star:M45)\n"
+           "  hyp:TOKEN      a hypothetical body by its token (hyp:cupido), from the\n"
+           "                 shipped element set or --hypotheticals; hyp:all is every\n"
+           "                 one defined (docs/HYPOTHETICALS.md)\n"
            "\n"
            "Data:\n"
            "  -e, --ephemeris FILE   planetary ephemeris (default: $PROMETHEIA_EPHEMERIS)\n"
@@ -298,6 +304,9 @@ static void print_help(void) {
            "                         ($PROMETHEIA_CATALOGS, ':'-separated, is added first)\n"
            "  -p, --perturbers FILE  asteroid perturber kernel, e.g. JPL sb441-n16.bsp\n"
            "                         (default: $PROMETHEIA_PERTURBERS)\n"
+           "      --hypotheticals FILE  add an element file (JSON Lines) of named\n"
+           "                         hypothetical bodies; repeatable, later ones win\n"
+           "                         ($PROMETHEIA_HYPOTHETICALS, ':'-separated, first)\n"
            "\n"
            "Time (default: now):\n"
            "  -t, --time WHEN        YYYY-MM-DD[THH:MM[:SS.s]] or 'now'; UTC unless --scale\n"
@@ -445,6 +454,12 @@ static int parse_args(int argc, char** argv, config* c) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;
             c->perturbers = v;
+        } else if (is_opt(&a, NULL, "--hypotheticals")) {
+            if (!(v = value_of(&a)))
+                return EXIT_USAGE;
+            if (c->n_hypothetical_files == MAX_CATALOGS)
+                return usage_error("too many element files (limit %s)", "32");
+            c->hypothetical_files[c->n_hypothetical_files++] = v;
         } else if (is_opt(&a, "-t", "--time")) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;
@@ -850,8 +865,12 @@ static void print_row(printer* p, double jd_tt, const body_ref* b, const prometh
 
 /* ---- Main --------------------------------------------------------------- */
 
-static int add_env_catalogs(prometheia_engine* eng, prometheia_error* err) {
-    const char* env = getenv("PROMETHEIA_CATALOGS");
+typedef prometheia_status (*add_file_fn)(prometheia_engine*, const char*, prometheia_error*);
+
+/* Adds each file a ':'-separated environment variable names, in order. */
+static int add_env_files(prometheia_engine* eng, const char* var, const char* what, add_file_fn add,
+                         prometheia_error* err) {
+    const char* env = getenv(var);
     char *copy, *tok, *save;
     size_t n;
     if (!env || !*env)
@@ -867,8 +886,8 @@ static int add_env_catalogs(prometheia_engine* eng, prometheia_error* err) {
             *save++ = '\0';
         if (!*tok)
             continue;
-        if (prometheia_engine_add_catalog(eng, tok, err) != PROMETHEIA_OK) {
-            fprintf(stderr, "%s: catalog %s: %s\n", g_program, tok, err->message);
+        if (add(eng, tok, err) != PROMETHEIA_OK) {
+            fprintf(stderr, "%s: %s %s: %s\n", g_program, what, tok, err->message);
             free(copy);
             return 0;
         }
@@ -909,13 +928,25 @@ int main(int argc, char** argv) {
         fprintf(stderr, "%s: %s\n", g_program, err.message);
         return EXIT_USAGE;
     }
-    if (!add_env_catalogs(eng, &err)) {
+    if (!add_env_files(eng, "PROMETHEIA_CATALOGS", "catalog", prometheia_engine_add_catalog,
+                       &err) ||
+        !add_env_files(eng, "PROMETHEIA_HYPOTHETICALS", "element file",
+                       prometheia_engine_add_hypotheticals, &err)) {
         prometheia_engine_close(eng);
         return EXIT_USAGE;
     }
     for (i = 0; i < c.n_catalogs; ++i) {
         if (prometheia_engine_add_catalog(eng, c.catalogs[i], &err) != PROMETHEIA_OK) {
             fprintf(stderr, "%s: catalog %s: %s\n", g_program, c.catalogs[i], err.message);
+            prometheia_engine_close(eng);
+            return EXIT_USAGE;
+        }
+    }
+    for (i = 0; i < c.n_hypothetical_files; ++i) {
+        if (prometheia_engine_add_hypotheticals(eng, c.hypothetical_files[i], &err) !=
+            PROMETHEIA_OK) {
+            /* The parser's message names the file and the line. */
+            fprintf(stderr, "%s: %s\n", g_program, err.message);
             prometheia_engine_close(eng);
             return EXIT_USAGE;
         }
@@ -945,7 +976,34 @@ int main(int argc, char** argv) {
         body_ref b;
         size_t k;
         b.star = 0;
+        b.token[0] = '\0';
         snprintf(b.label, sizeof b.label, "%s", s);
+        if (strncmp(s, "hyp:", 4) == 0) {
+            const int all = strcmp(s + 4, "all") == 0;
+            const int count = all ? prometheia_hypothetical_count(eng) : 1;
+            int h;
+            if (all && count == 0) {
+                fprintf(stderr, "%s: hyp:all: no hypothetical bodies are defined\n", g_program);
+                p.errors++;
+            }
+            for (h = 0; h < count; ++h) {
+                const char* token = all ? prometheia_hypothetical_token(eng, h) : s + 4;
+                prometheia_hypothetical info;
+                if (!token ||
+                    prometheia_hypothetical_get(eng, token, &info, &err) != PROMETHEIA_OK) {
+                    fprintf(stderr, "%s: unknown hypothetical body '%s'\n", g_program, s + 4);
+                    p.errors++;
+                    continue;
+                }
+                if (n_bodies == MAX_BODIES)
+                    break;
+                b.id = 0;
+                snprintf(b.token, sizeof b.token, "%s", info.token);
+                snprintf(b.label, sizeof b.label, "%s", *info.name ? info.name : info.token);
+                bodies[n_bodies++] = b;
+            }
+            continue;
+        }
         if (strncmp(s, "star:", 5) == 0) {
             prometheia_star info;
             if (prometheia_star_find(s + 5, &b.id, &err) != PROMETHEIA_OK ||
@@ -1056,7 +1114,12 @@ int main(int argc, char** argv) {
         for (i = 0; i < n_bodies; ++i) {
             prometheia_result r;
             const prometheia_status s =
-                bodies[i].star
+                bodies[i].token[0]
+                    ? (c.scale == SCALE_UT1 ? prometheia_calc_hypothetical_ut(eng, bodies[i].token,
+                                                                              t, &c.opts, &r, &err)
+                                            : prometheia_calc_hypothetical(eng, bodies[i].token, t,
+                                                                           &c.opts, &r, &err))
+                : bodies[i].star
                     ? (c.scale == SCALE_UT1
                            ? prometheia_calc_star_ut(eng, bodies[i].id, t, &c.opts, &r, &err)
                            : prometheia_calc_star(eng, bodies[i].id, t, &c.opts, &r, &err))

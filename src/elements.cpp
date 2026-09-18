@@ -34,7 +34,7 @@ double mean_anomaly_deg(const PolynomialElements& el, double jd_tt) {
     // taken at the instant, from its own polynomial.
     const double a = evaluate(el.semi_major_axis, el.n_terms, T);
     double n = kGaussK / (a * std::sqrt(a)); // rad/day
-    if (el.centre == ElementCentre::Earth)
+    if (el.origin == ElementOrigin::Earth)
         n /= std::sqrt(kSunEarthMassRatio); // the Earth alone, not Earth+Moon
     return el.mean_anomaly[0] + n * kDegPerRad * dt;
 }

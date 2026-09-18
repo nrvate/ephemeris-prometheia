@@ -41,6 +41,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 - `-e FILE` or `$PROMETHEIA_EPHEMERIS` names the planetary ephemeris: a DE binary or an SPK kernel, detected by content.
 - `-p FILE` or `$PROMETHEIA_PERTURBERS` adds an asteroid perturber kernel (JPL's `sb441-n16.bsp`) to the small-body force model; see [ENGINE.md](ENGINE.md).
 - `-c FILE` adds an EPM1 catalog and can be repeated. Catalogs in `$PROMETHEIA_CATALOGS` (colon-separated) load first, and later catalogs win.
+- `--hypotheticals FILE` adds an element file of named hypothetical bodies (JSON Lines; [HYPOTHETICALS.md](HYPOTHETICALS.md)) and can be repeated. Files in `$PROMETHEIA_HYPOTHETICALS` (colon-separated) load first, and a later file's definition of a token wins. A malformed file stops `ephem` before any output, naming the file and line.
 
 **Time** (default: now)
 - `-t YYYY-MM-DD[THH:MM[:SS.s]][Z]` is read as UTC by default. Negative years are allowed on the TT or UT1 scales.
@@ -53,6 +54,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 
 **Observer, frame, corrections**
 - `star:NAME` as a body: a fixed star or Messier object by any name or designation (docs/STARS.md).
+- `hyp:TOKEN` as a body: a named hypothetical body (`hyp:cupido`), from the element set the library ships or a `--hypotheticals` file, matched case-insensitively; `hyp:all` is every body defined, in definition order. Corrections, observers and frames apply as to any body ([HYPOTHETICALS.md](HYPOTHETICALS.md)).
 - `--orbit-point asc|desc|peri|apo[:mean|:osc]`: a node or apsis of each body's orbit instead of the body (osculating unless `:mean`; docs/ENGINE.md, "Nodes and apsides").
 - `--center geo|topo|helio|bary|BODY`: BODY is a built-in name (`mars`) or a NAIF ID, and positions are seen from that body's centre with light time, deflection and aberration for an observer moving with it.
 - `--site LON,LAT[,H]`: geodetic degrees east and north, metres above WGS84. It implies `topo`.

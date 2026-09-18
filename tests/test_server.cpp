@@ -1446,7 +1446,7 @@ namespace {
 
 // An invented body; every number is made up for the test.
 constexpr const char* kInventedBody =
-    R"({"token":"testbody","name":"Test Body","set":"Invented for tests","citation":"tests/test_server.cpp","epoch":2451545.0,"equinox":"J2000","centre":"sun","M":[10.0],"a":[4.0],"e":[0.05],"w":[20.0],"node":[30.0],"i":[1.5]})";
+    R"({"token":"testbody","name":"Test Body","set":"Invented for tests","citation":"tests/test_server.cpp","epoch":2451545.0,"equinox":"J2000","origin":"sun","M":[10.0],"a":[4.0],"e":[0.05],"w":[20.0],"node":[30.0],"i":[1.5]})";
 
 // The same body as kind-4 elements, as a client would send it.
 eph::Object invented_as_elements(double mean_anomaly_deg = 10.0) {

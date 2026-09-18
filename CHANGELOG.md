@@ -36,7 +36,24 @@ documented, not that it is frozen.
   the shipped set and every element file. The fitted-cell key carries the
   elements, so two element sets never share a cell; a test that removes
   them from the key goes red.
-- Not yet: the C API and `ephem` surfaces; the shipped element values.
+- **C ABI version 5**, purely additive: `prometheia_calc_elements` and
+  `prometheia_calc_hypothetical` (each with a `_ut` form),
+  `prometheia_engine_add_hypotheticals`, token enumeration and
+  `prometheia_hypothetical_get`. The signatures were reviewed by the Astrolog
+  side before landing, per the ABI policy above. The structs are frozen for
+  the life of an ABI version; only the TT forms are interoperable (the UT1
+  forms bring in the engine's Delta T).
+- The body an orbit is about is called its **origin** in Prometheia's own
+  names (C, C++ and element files), because `PROMETHEIA_ELEMENTS_CENTRE_*`
+  beside `PROMETHEIA_CENTER_*` was a misreading waiting to happen. Only the
+  wire keeps the protocol's "centre".
+- **`ephem`**: `hyp:TOKEN` and `hyp:all` as bodies, `--hypotheticals FILE`,
+  and `$PROMETHEIA_HYPOTHETICALS`.
+- The claim that orbit points are geometric, stale since corrections began
+  applying to them, turned up a fourth time (SERVER.md's list of v4
+  semantics) and a fifth (prometheia.h). Both are corrected, found this time
+  by searching for the phrase rather than by a reader.
+- Not yet: the shipped element values.
 - 0.1.0's notes called kinds 3 and 4 a settled end state. That reflected
   one client's needs and has been reversed; see
   [docs/SERVER.md](docs/SERVER.md).

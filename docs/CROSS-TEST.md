@@ -161,6 +161,29 @@ time there is thousandths of an arcsecond, so a geometric leg cannot drift the
 way an apparent one can when either engine changes its correction conventions.
 That is what moved 10.5″ under them in the first place.
 
+**The elements tier — self-adjudicating.** A kind-4 answer is a pure function
+of the elements the client sent: two-body motion by a rule both sides agreed,
+with the mean motion taken from the Gaussian constant and not from either
+server's ephemeris ([HYPOTHETICALS.md](HYPOTHETICALS.md)). No model choice is
+left to hide behind, so two implementations must agree to the precision of
+their Kepler solvers, and any disagreement is a defect in one of them. That
+makes it the one leg in this plan that needs no external anchor. It is also
+the one where a disagreement is *informative* rather than ambiguous.
+
+It runs as a fixture rather than a live diagonal, since the Astrolog client
+does not send kind 4. The protocol owner generates element sets and answers
+from its implementation; this server is checked against them, numbers only.
+The first cases are the ones that are degrees apart under a wrong rule:
+
+- two sets differing only in the term count, a century from the epoch;
+- two terms with M's second coefficient zero and the node drifting — the case
+  a count-keyed rule freezes;
+- a genuine M(T) set, where the polynomial is the whole mean anomaly;
+- an Earth-centred orbit, which pins the mass-ratio divisor.
+
+Compare at TT (the `_ut` forms bring in each engine's Delta T and belong to a
+different tier), geometric first, then with each correction.
+
 ## The bisection ladder
 
 When a number disagrees, add one thing at a time. Each rung isolates exactly
@@ -271,6 +294,9 @@ Worth stating so nobody reads a green matrix as more than it is.
   plan.
 - **Load and duration.** Single-client, short-session. No soak, no concurrent
   clients, no memory-growth measurement.
-- **Correctness of anything only one side implements.** Kinds 3 and 4 are
-  unadvertised on both sides by agreement (see [SERVER.md](SERVER.md)), so
-  there is nothing to cross-test there.
+- **Kinds 3 and 4 against the Astrolog client.** This server now serves
+  named hypotheticals and bodies from elements; the Astrolog client does not
+  request them from any server, because its user's own element file defines
+  those bodies and a local Kepler solution is exact. So there is no
+  diagonal cell for them. Kind 4 is tested another way, below, and more
+  strongly than anything else here.

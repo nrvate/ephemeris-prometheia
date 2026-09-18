@@ -383,9 +383,11 @@ two sides agreed these semantics:
   the mean one. True of date takes the true ayanamsa, mean of date the mean,
   J2000 and ICRF a constant zero point on the J2000 ecliptic — what the
   engine already does.
-- **Orbit points** are geometric, on the ecliptic of the profile's frame,
-  heliocentric for planets and geocentric for the Moon. A mean model must
-  name itself in the object's source string.
+- **Orbit points** lie on the ecliptic of the profile's frame, heliocentric
+  for planets and geocentric for the Moon, and take the profile's corrections
+  exactly as a body does (3.5a): they are interoperable applied in full or
+  not at all ([ORBIT-POINTS.md](ORBIT-POINTS.md)). A mean model must name
+  itself in the object's source string.
 - **Fixed stars** have a normative name grammar (IAU name, Bayer with
   component numbers, Flamsteed, HR/HD/HIP). An ambiguous name is a per-object
   error rather than a silent choice, and an object without a parallax

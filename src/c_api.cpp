@@ -11,8 +11,10 @@
 #include <cstring>
 #include <new>
 #include <string>
+#include <vector>
 
 #include "prometheia/engine.hpp"
+#include "prometheia/hypotheticals.hpp"
 #include "prometheia/prometheia.hpp"
 #include "prometheia/time.hpp"
 
@@ -359,6 +361,183 @@ prometheia_status prometheia_calc_orbit_point_ut(prometheia_engine* engine, int 
                                                         static_cast<OrbitElements>(elements), jd,
                                                         o);
                        });
+}
+
+// ---- bodies from elements, named hypotheticals ------------------------------
+
+namespace {
+
+// C elements -> PolynomialElements, rejecting out-of-range selectors. The
+// engine checks the term count and the orbit itself.
+bool to_elements(const prometheia_elements& c, PolynomialElements& p, prometheia_error* err,
+                 prometheia_status& status) {
+    if (c.equinox < PROMETHEIA_EQUINOX_J2000 || c.equinox > PROMETHEIA_EQUINOX_EXPLICIT) {
+        status = argument(err, "elements: equinox out of range");
+        return false;
+    }
+    if (c.origin != PROMETHEIA_ELEMENTS_ORIGIN_SUN &&
+        c.origin != PROMETHEIA_ELEMENTS_ORIGIN_EARTH) {
+        status = argument(err, "elements: origin out of range");
+        return false;
+    }
+    p.epoch_jd_tt = c.epoch_jd_tt;
+    p.equinox = static_cast<ElementEquinox>(c.equinox);
+    p.equinox_jd_tt = c.equinox_jd_tt;
+    p.origin = static_cast<ElementOrigin>(c.origin);
+    p.n_terms = c.n_terms;
+    for (int k = 0; k < 5; ++k) {
+        p.mean_anomaly[k] = c.mean_anomaly[k];
+        p.semi_major_axis[k] = c.semi_major_axis[k];
+        p.eccentricity[k] = c.eccentricity[k];
+        p.arg_perihelion[k] = c.arg_perihelion[k];
+        p.ascending_node[k] = c.ascending_node[k];
+        p.inclination[k] = c.inclination[k];
+    }
+    return true;
+}
+
+void from_elements(const PolynomialElements& p, prometheia_elements& c) {
+    c.epoch_jd_tt = p.epoch_jd_tt;
+    c.equinox = static_cast<int>(p.equinox);
+    c.equinox_jd_tt = p.equinox_jd_tt;
+    c.origin = static_cast<int>(p.origin);
+    c.n_terms = p.n_terms;
+    for (int k = 0; k < 5; ++k) {
+        c.mean_anomaly[k] = p.mean_anomaly[k];
+        c.semi_major_axis[k] = p.semi_major_axis[k];
+        c.eccentricity[k] = p.eccentricity[k];
+        c.arg_perihelion[k] = p.arg_perihelion[k];
+        c.ascending_node[k] = p.ascending_node[k];
+        c.inclination[k] = p.inclination[k];
+    }
+}
+
+prometheia_status calc_elements_common(prometheia_engine* engine,
+                                       const prometheia_elements* elements, double jd,
+                                       const prometheia_options* opts, prometheia_result* result,
+                                       prometheia_error* err, bool ut) {
+    if (!elements) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        return argument(err, "elements is NULL");
+    }
+    PolynomialElements p;
+    prometheia_status status = PROMETHEIA_OK;
+    if (!to_elements(*elements, p, err, status)) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        return status;
+    }
+    return calc_common(engine, 0, jd, opts, result, err,
+                       [&p, ut](Engine& e, int, double t, const CalcOptions& o) {
+                           return ut ? e.calc_elements_ut(p, t, o) : e.calc_elements(p, t, o);
+                       });
+}
+
+prometheia_status calc_hypothetical_common(prometheia_engine* engine, const char* token, double jd,
+                                           const prometheia_options* opts,
+                                           prometheia_result* result, prometheia_error* err,
+                                           bool ut) {
+    if (!token) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        return argument(err, "token is NULL");
+    }
+    return calc_common(engine, 0, jd, opts, result, err,
+                       [token, ut](Engine& e, int, double t, const CalcOptions& o) {
+                           return ut ? e.calc_hypothetical_ut(token, t, o)
+                                     : e.calc_hypothetical(token, t, o);
+                       });
+}
+
+} // namespace
+
+prometheia_status prometheia_calc_elements(prometheia_engine* engine,
+                                           const prometheia_elements* elements, double jd_tt,
+                                           const prometheia_options* opts,
+                                           prometheia_result* result, prometheia_error* err) {
+    return calc_elements_common(engine, elements, jd_tt, opts, result, err, false);
+}
+
+prometheia_status prometheia_calc_elements_ut(prometheia_engine* engine,
+                                              const prometheia_elements* elements, double jd_ut1,
+                                              const prometheia_options* opts,
+                                              prometheia_result* result, prometheia_error* err) {
+    return calc_elements_common(engine, elements, jd_ut1, opts, result, err, true);
+}
+
+prometheia_status prometheia_engine_add_hypotheticals(prometheia_engine* engine,
+                                                      const char* element_file_path,
+                                                      prometheia_error* err) {
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!element_file_path)
+        return argument(err, "element file path is NULL");
+    return guarded(err, [&] {
+        auto r = engine->engine.add_hypotheticals(element_file_path);
+        return r ? succeed(err) : report(err, r.error());
+    });
+}
+
+int prometheia_hypothetical_count(const prometheia_engine* engine) {
+    if (!engine)
+        return 0;
+    try {
+        return static_cast<int>(engine->engine.hypothetical_tokens().size());
+    } catch (...) {
+        return 0;
+    }
+}
+
+const char* prometheia_hypothetical_token(const prometheia_engine* engine, int index) {
+    if (!engine || index < 0)
+        return nullptr;
+    try {
+        const std::vector<std::string> tokens = engine->engine.hypothetical_tokens();
+        if (size_t(index) >= tokens.size())
+            return nullptr;
+        // The engine's own copy, which outlives this call.
+        const hypotheticals::Body* b = engine->engine.hypothetical(tokens[size_t(index)]);
+        return b ? b->token.c_str() : nullptr;
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+prometheia_status prometheia_hypothetical_get(const prometheia_engine* engine, const char* token,
+                                              prometheia_hypothetical* out, prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!token)
+        return argument(err, "token is NULL");
+    if (!out)
+        return argument(err, "output pointer is NULL");
+    return guarded(err, [&] {
+        const hypotheticals::Body* b = engine->engine.hypothetical(token);
+        if (!b)
+            return report(err, PROMETHEIA_ERROR_NOT_FOUND, "hypothetical body is not defined");
+        out->token = b->token.c_str();
+        out->name = b->name.c_str();
+        out->set = b->set.c_str();
+        out->citation = b->citation.c_str();
+        from_elements(b->elements, out->elements);
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_calc_hypothetical(prometheia_engine* engine, const char* token,
+                                               double jd_tt, const prometheia_options* opts,
+                                               prometheia_result* result, prometheia_error* err) {
+    return calc_hypothetical_common(engine, token, jd_tt, opts, result, err, false);
+}
+
+prometheia_status prometheia_calc_hypothetical_ut(prometheia_engine* engine, const char* token,
+                                                  double jd_ut1, const prometheia_options* opts,
+                                                  prometheia_result* result,
+                                                  prometheia_error* err) {
+    return calc_hypothetical_common(engine, token, jd_ut1, opts, result, err, true);
 }
 
 int prometheia_star_count(void) {

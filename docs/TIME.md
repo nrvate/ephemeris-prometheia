@@ -172,10 +172,13 @@ reported to us in 2026-09 from the Astrolog side against a different
 library: there, Delta T drew its tidal acceleration from the currently
 open ephemeris file, setting the ephemeris path implicitly closed it, and
 until a file was open again the constant fell back to a default for a
-different DE. Asking for Delta T *before* the first position then used
--25.80 where the answer should have used -25.936 — 0.037 s of Delta T at
-1900, and every body wrong by its own motion over those 0.037 s. Nothing
-about it looks like a bug at the call site.
+different DE. Asking for Delta T *before* the first position then used a
+lunar tidal acceleration of −25.80″/cy² where the loaded file's was
+−25.936″/cy². Those are accelerations, not times: the 0.136″/cy² between
+them reaches Delta T through a tidal correction that grows as the square of
+the distance from the mid-twentieth century, and at 1900 it comes to
+0.037 s. Every body was then wrong by its own motion over those 0.037 s.
+Nothing about it looks like a bug at the call site.
 
 The rule this repository keeps, then: **if a future model wants a constant
 that lives in a DE header, it takes it as a constructor argument and the

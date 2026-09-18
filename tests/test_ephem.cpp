@@ -51,8 +51,9 @@ std::string slurp(const std::string& path) {
 Run ephem(const std::string& args, const std::string& env = "") {
     TempFile err_file("ephem-stderr");
     const std::string cmd =
-        "env -u PROMETHEIA_EPHEMERIS -u PROMETHEIA_CATALOGS -u PROMETHEIA_PERTURBERS " + env + " " +
-        EPHEM_BIN + " " + args + " 2>" + err_file.path.string();
+        "env -u PROMETHEIA_EPHEMERIS -u PROMETHEIA_CATALOGS -u PROMETHEIA_PERTURBERS "
+        "-u PROMETHEIA_HYPOTHETICALS " +
+        env + " " + EPHEM_BIN + " " + args + " 2>" + err_file.path.string();
     Run r;
     if (FILE* p = popen(cmd.c_str(), "r")) {
         char buf[4096];
@@ -334,6 +335,53 @@ TEST_CASE("ephem_star_bodies") {
     CHECK(same(rows[2], k.engine.calc_star(stars::find("M45").value(), 2451545.0).value()));
     r = ephem(k.arg + " -j 2451545.0 star:Vulcan");
     CHECK(r.status != 0);
+}
+
+TEST_CASE("ephem_hypothetical_bodies") {
+    Kernel k;
+    // Two invented bodies; every number is made up for the test.
+    TempFile file("ephem-hyp");
+    {
+        FILE* f = std::fopen(file.path.c_str(), "wb");
+        REQUIRE(f);
+        std::fputs(
+            R"({"token":"testone","name":"Test One","set":"Invented","citation":"tests/test_ephem.cpp","epoch":2451545.0,"equinox":"J2000","M":[10],"a":[40],"e":[0.02],"w":[20],"node":[30],"i":[1.5]})"
+            "\n"
+            R"({"token":"testtwo","set":"Invented","citation":"tests/test_ephem.cpp","epoch":2415020.0,"equinox":"J1900","origin":"earth","M":[5,1000],"a":[0.01],"e":[0],"w":[0],"node":[0],"i":[0]})"
+            "\n",
+            f);
+        std::fclose(f);
+    }
+    REQUIRE(k.engine.add_hypotheticals(file.path.string()).ok());
+    const std::string opt = " --hypotheticals " + file.path.string();
+
+    Run r = ephem(k.arg + opt + " -j 2452000.5 -f csv hyp:testone hyp:TestTwo");
+    auto rows = parse_csv(r.out);
+    CHECK(r.status == 0);
+    REQUIRE(rows.size() == 2);
+    CHECK(same(rows[0], k.engine.calc_hypothetical("testone", 2452000.5).value()));
+    CHECK(same(rows[1], k.engine.calc_hypothetical("testtwo", 2452000.5).value()));
+
+    // hyp:all is every body defined; the environment variable adds files too.
+    r = ephem(k.arg + " -j 2452000.5 -f csv hyp:all",
+              "PROMETHEIA_HYPOTHETICALS=" + file.path.string());
+    CHECK(r.status == 0);
+    CHECK(parse_csv(r.out).size() == k.engine.hypothetical_tokens().size());
+
+    r = ephem(k.arg + opt + " -j 2452000.5 hyp:nosuch");
+    CHECK(r.status == 1);
+    CHECK(r.err.find("unknown hypothetical body 'nosuch'") != std::string::npos);
+
+    // A malformed element file stops ephem before any output, naming the line.
+    {
+        FILE* f = std::fopen(file.path.c_str(), "wb");
+        REQUIRE(f);
+        std::fputs("{\"token\":\"broken\"}\n", f);
+        std::fclose(f);
+    }
+    r = ephem(k.arg + opt + " -j 2452000.5 hyp:all");
+    CHECK(r.status == 2);
+    CHECK(r.err.find(":1:") != std::string::npos);
 }
 
 TEST_CASE("ephem_table_and_json") {

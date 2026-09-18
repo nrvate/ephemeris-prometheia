@@ -332,7 +332,7 @@ std::string seg_key_prefix(const ServerConfig& cfg, const eph::Request& q,
         raw(&el.epoch_jd_tt, sizeof el.epoch_jd_tt);
         u8(uint8_t(el.equinox));
         raw(&el.equinox_jd_tt, sizeof el.equinox_jd_tt);
-        u8(uint8_t(el.centre));
+        u8(uint8_t(el.origin));
         u8(uint8_t(el.n_terms));
         for (const double* c : {el.mean_anomaly, el.semi_major_axis, el.eccentricity,
                                 el.arg_perihelion, el.ascending_node, el.inclination}) {

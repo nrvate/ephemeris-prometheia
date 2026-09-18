@@ -58,8 +58,43 @@ The fixed-star functions (`prometheia_star_find`, `_lookup`, `_info`,
 [STARS.md](STARS.md).
 
 `prometheia_calc_orbit_point` and `_ut` wrap `Engine::calc_orbit_point`
-([ENGINE.md](ENGINE.md), "Nodes and apsides"). An orbit point or elements
+([ENGINE.md](ENGINE.md), "Nodes and apsides"). The options' corrections
+apply to an orbit point as to a body, and all three off give the geometric
+point ([ORBIT-POINTS.md](ORBIT-POINTS.md)). An orbit point or elements
 selector out of range is `PROMETHEIA_ERROR_ARGUMENT`.
+
+**Hypothetical bodies (ABI version 5).** Two kinds, as in the ephemeris
+protocol ([HYPOTHETICALS.md](HYPOTHETICALS.md)):
+
+```c
+/* A body from orbital elements the caller supplies (protocol kind 4). */
+prometheia_elements el = {0};
+el.epoch_jd_tt = 2415020.0;
+el.equinox = PROMETHEIA_EQUINOX_J1900;
+el.origin = PROMETHEIA_ELEMENTS_ORIGIN_SUN;
+el.n_terms = 1;
+el.mean_anomaly[0] = /* ... */;  /* and a, e, w, node, i */
+prometheia_calc_elements(eph, &el, jd_tt, &opts, &r, &err);
+
+/* A body by name (protocol kind 3), from the shipped set or a file. */
+prometheia_engine_add_hypotheticals(eph, "my-elements.jsonl", &err);
+prometheia_calc_hypothetical(eph, "cupido", jd_tt, &opts, &r, &err);
+printf("%s\n", r.source);    /* the element set's name */
+```
+
+- A client whose user supplies their own element file should fill a
+  `prometheia_elements` from it and call `prometheia_calc_elements`, so that
+  what is computed is exactly the user's definition. `prometheia_calc_hypothetical`
+  is for Prometheia's own named set, or a set loaded with
+  `prometheia_engine_add_hypotheticals`.
+- `prometheia_hypothetical_count` and `_token` enumerate the tokens, and
+  `prometheia_hypothetical_get` returns a token's name, set, citation and
+  elements. Tokens match ASCII case-insensitively. The strings stay valid
+  until the engine is closed or another element file is added.
+- An undefined token is `PROMETHEIA_ERROR_NOT_FOUND`. Elements out of range,
+  or not a bound orbit at the instant, give `PROMETHEIA_ERROR_ARGUMENT`. A
+  malformed element file gives `PROMETHEIA_ERROR_FORMAT`, with the file and
+  line in the message.
 
 ## Conventions
 
@@ -111,7 +146,7 @@ selector out of range is `PROMETHEIA_ERROR_ARGUMENT`.
 
 ## ABI stability
 
-`PROMETHEIA_ABI_VERSION` (currently 4; version 2 added `prometheia_options.sigma`, version 3 `prometheia_options.precession`, version 4 `PROMETHEIA_CENTER_BODY` and `prometheia_options.center_body`) names the struct layouts and
+`PROMETHEIA_ABI_VERSION` (currently 5; version 2 added `prometheia_options.sigma`, version 3 `prometheia_options.precession`, version 4 `PROMETHEIA_CENTER_BODY` and `prometheia_options.center_body`, version 5 the hypothetical-body functions and the `prometheia_elements` and `prometheia_hypothetical` structs, purely additive) names the struct layouts and
 function signatures. Any change to them bumps the version, and bindings
 can compare against `prometheia_abi_version()` at load time. Before 1.0,
 expect the version to move as the engine grows (houses, fixed stars,

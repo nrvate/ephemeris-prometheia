@@ -9,7 +9,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <unistd.h>
 
 #include <prometheia/catalog.hpp>
 #include <prometheia/engine.hpp>
@@ -532,3 +534,120 @@ TEST_CASE("c_api_from_c") {
 }
 
 } // namespace
+
+TEST_CASE("c_api_hypotheticals_match_the_engine") {
+    TempFile tf("capi-hyp");
+    synth::write_linear_spk(tf.path);
+    auto cpp = Engine::open(tf.path.string());
+    REQUIRE(cpp.ok());
+    CHandle c;
+    prometheia_error err;
+    REQUIRE(prometheia_engine_open(tf.path.c_str(), &c.e, &err) == PROMETHEIA_OK);
+
+    // An invented body, through both front doors: the C elements struct and
+    // the C++ one must give the same answer to the bit.
+    prometheia_elements ce{};
+    ce.epoch_jd_tt = 2451545.0;
+    ce.equinox = PROMETHEIA_EQUINOX_J1900;
+    ce.origin = PROMETHEIA_ELEMENTS_ORIGIN_SUN;
+    ce.n_terms = 2;
+    ce.mean_anomaly[0] = 10.0;
+    ce.semi_major_axis[0] = 40.0;
+    ce.eccentricity[0] = 0.02;
+    ce.arg_perihelion[0] = 20.0;
+    ce.ascending_node[0] = 30.0;
+    ce.ascending_node[1] = 0.8; // a drifting node, M at epoch
+    ce.inclination[0] = 1.5;
+    PolynomialElements pe;
+    pe.epoch_jd_tt = 2451545.0;
+    pe.equinox = ElementEquinox::J1900;
+    pe.n_terms = 2;
+    pe.mean_anomaly[0] = 10.0;
+    pe.semi_major_axis[0] = 40.0;
+    pe.eccentricity[0] = 0.02;
+    pe.arg_perihelion[0] = 20.0;
+    pe.ascending_node[0] = 30.0;
+    pe.ascending_node[1] = 0.8;
+    pe.inclination[0] = 1.5;
+
+    prometheia_result r{};
+    REQUIRE(prometheia_calc_elements(c.e, &ce, 2452000.0, nullptr, &r, &err) == PROMETHEIA_OK);
+    auto want = cpp.value().calc_elements(pe, 2452000.0);
+    REQUIRE(want.ok());
+    CHECK(r.lon_deg == want.value().pos.lon_deg);
+    CHECK(r.lat_deg == want.value().pos.lat_deg);
+    CHECK(r.dist_au == want.value().pos.dist_au);
+    CHECK(r.lon_speed == want.value().pos.lon_speed);
+    CHECK(std::string(r.source) == "two-body orbital elements");
+
+    // Selectors out of range are refused before the engine sees them.
+    prometheia_elements bad = ce;
+    bad.equinox = 5;
+    CHECK(prometheia_calc_elements(c.e, &bad, 2452000.0, nullptr, &r, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    bad = ce;
+    bad.origin = 2;
+    CHECK(prometheia_calc_elements(c.e, &bad, 2452000.0, nullptr, &r, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    bad = ce;
+    bad.eccentricity[0] = 1.5;
+    CHECK(prometheia_calc_elements(c.e, &bad, 2452000.0, nullptr, &r, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_calc_elements(c.e, nullptr, 2452000.0, nullptr, &r, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+
+    // Named: add a file, list it, read it back, compute it.
+    struct Scratch {
+        std::string path = (std::filesystem::temp_directory_path() /
+                            ("prometheia-capi-hyp-" + std::to_string(::getpid()) + ".jsonl"))
+                               .string();
+        ~Scratch() { std::remove(path.c_str()); }
+    } scratch;
+    {
+        FILE* f = std::fopen(scratch.path.c_str(), "wb");
+        REQUIRE(f);
+        std::fputs(
+            R"({"token":"testbody","name":"Test Body","set":"Invented for tests","citation":"tests/test_c_api.cpp","epoch":2451545.0,"equinox":"J1900","M":[10.0],"a":[40.0],"e":[0.02],"w":[20.0],"node":[30.0,0.8],"i":[1.5]})"
+            "\n",
+            f);
+        std::fclose(f);
+    }
+    const int before = prometheia_hypothetical_count(c.e);
+    CHECK(prometheia_calc_hypothetical(c.e, "testbody", 2452000.0, nullptr, &r, &err) ==
+          PROMETHEIA_ERROR_NOT_FOUND);
+    REQUIRE(prometheia_engine_add_hypotheticals(c.e, scratch.path.c_str(), &err) == PROMETHEIA_OK);
+    CHECK(prometheia_hypothetical_count(c.e) == before + 1);
+    CHECK(std::string(prometheia_hypothetical_token(c.e, before)) == "testbody");
+    CHECK(prometheia_hypothetical_token(c.e, before + 1) == nullptr);
+    CHECK(prometheia_hypothetical_token(c.e, -1) == nullptr);
+
+    prometheia_hypothetical h{};
+    REQUIRE(prometheia_hypothetical_get(c.e, "TESTBODY", &h, &err) == PROMETHEIA_OK);
+    CHECK(std::string(h.token) == "testbody");
+    CHECK(std::string(h.name) == "Test Body");
+    CHECK(std::string(h.set) == "Invented for tests");
+    CHECK(h.elements.n_terms == 2);
+    CHECK(h.elements.ascending_node[1] == 0.8);
+    CHECK(prometheia_hypothetical_get(c.e, "nosuch", &h, &err) == PROMETHEIA_ERROR_NOT_FOUND);
+
+    prometheia_result named{};
+    REQUIRE(prometheia_calc_hypothetical(c.e, "testbody", 2452000.0, nullptr, &named, &err) ==
+            PROMETHEIA_OK);
+    prometheia_result direct{};
+    REQUIRE(prometheia_calc_elements(c.e, &ce, 2452000.0, nullptr, &direct, &err) == PROMETHEIA_OK);
+    CHECK(named.lon_deg == direct.lon_deg);
+    CHECK(named.lat_deg == direct.lat_deg);
+    CHECK(std::string(named.source) == "Invented for tests");
+
+    // A malformed file is refused whole, with the line in the message.
+    {
+        FILE* f = std::fopen(scratch.path.c_str(), "wb");
+        REQUIRE(f);
+        std::fputs("{\"token\":\"broken\"}\n", f);
+        std::fclose(f);
+    }
+    CHECK(prometheia_engine_add_hypotheticals(c.e, scratch.path.c_str(), &err) ==
+          PROMETHEIA_ERROR_FORMAT);
+    CHECK(std::string(err.message).find(":1:") != std::string::npos);
+    CHECK(prometheia_hypothetical_count(c.e) == before + 1);
+}

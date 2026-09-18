@@ -131,8 +131,9 @@ enum class ElementEquinox {
     Explicit, // ... of PolynomialElements::equinox_jd_tt
 };
 
-// The body the elements' orbit is about (v4 A.21).
-enum class ElementCentre {
+// The body the elements' orbit is about: the protocol's "centre" (v4 A.21),
+// named origin here so it cannot be read as the observer's Center.
+enum class ElementOrigin {
     Sun,
     Earth,
 };
@@ -140,13 +141,13 @@ enum class ElementCentre {
 // A body defined by its orbital elements rather than by an ephemeris: a
 // hypothetical planet, a predicted one, a fictitious moon. Each element is a
 // polynomial in T = (t_TT - epoch) / 36525 Julian centuries, and the motion is
-// pure two-body Keplerian about the centre, with no perturbations. This is
+// pure two-body Keplerian about its origin, with no perturbations. This is
 // ephemeris protocol v4's kind 4; docs/HYPOTHETICALS.md has the conventions.
 struct PolynomialElements {
     double epoch_jd_tt = 2451545.0;
     ElementEquinox equinox = ElementEquinox::J2000;
-    double equinox_jd_tt = 0.0; // ElementEquinox::Explicit only
-    ElementCentre centre = ElementCentre::Sun;
+    double equinox_jd_tt = 0.0; // ElementEquinox::Explicit only; zero otherwise
+    ElementOrigin origin = ElementOrigin::Sun;
     int n_terms = 1; // 1..5: the terms each polynomial below uses
     // Coefficients of T^0 .. T^(n_terms-1), in the protocol's order: mean
     // anomaly (deg), semi-major axis (AU), eccentricity, argument of

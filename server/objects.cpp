@@ -146,7 +146,7 @@ Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine) {
         el.epoch_jd_tt = spec.epoch.jd1 + spec.epoch.jd2;
         el.equinox = kEquinoxes[spec.equinox];
         el.equinox_jd_tt = spec.equinoxJd;
-        el.centre = spec.centre == 1 ? ElementCentre::Earth : ElementCentre::Sun;
+        el.origin = spec.centre == 1 ? ElementOrigin::Earth : ElementOrigin::Sun;
         el.n_terms = spec.nTerms;
         double* const rows[6] = {el.mean_anomaly,   el.semi_major_axis, el.eccentricity,
                                  el.arg_perihelion, el.ascending_node,  el.inclination};

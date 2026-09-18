@@ -360,11 +360,11 @@ std::string body_of(const Value& v, Body& b) {
             } else {
                 why = "must be \"J2000\", \"B1950\", \"J1900\", \"of date\" or a Julian date";
             }
-        } else if (key == "centre") {
+        } else if (key == "origin") {
             if (x.kind == Value::Kind::String && x.str == "sun")
-                el.centre = ElementCentre::Sun;
+                el.origin = ElementOrigin::Sun;
             else if (x.kind == Value::Kind::String && x.str == "earth")
-                el.centre = ElementCentre::Earth;
+                el.origin = ElementOrigin::Earth;
             else
                 why = "must be \"sun\" or \"earth\"";
         } else if (key == "M") {

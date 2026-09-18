@@ -29,7 +29,8 @@ Six orbital elements, each a polynomial of 1 to 5 terms in
 | longitude of the ascending node Ω | degrees |
 | inclination i | degrees |
 
-The orbit is about a **centre**, the Sun or the Earth (protocol A.21), and the
+The orbit is about an **origin**, the Sun or the Earth (the protocol's *centre*,
+A.21, renamed here so it cannot be confused with the observer's centre), and the
 elements are referred to the **mean ecliptic and equinox** of one of five
 epochs (protocol A.16):
 
@@ -51,7 +52,7 @@ Two conventions here are choices, stated so that nobody has to rediscover them:
   retards the body to t − τ, its elements are evaluated at t − τ and referred
   to the mean ecliptic of t − τ. The body's own plane moves with its own time.
 
-The motion is **pure two-body Keplerian about the centre**. There are no
+The motion is **pure two-body Keplerian about the origin**. There are no
 perturbations, and the body is massless.
 
 ## Mean anomaly and mean motion
@@ -143,7 +144,7 @@ a JSON object, blank lines ignored. The format is Prometheia's own. It mirrors
 the protocol's kind-4 fields one to one and borrows nothing from any other
 program's element file.
 
-    {"token":"example","name":"Example","set":"Worked example","citation":"docs/HYPOTHETICALS.md","epoch":2415020.0,"equinox":"J1900","centre":"sun","M":[123.4],"a":[41.0],"e":[0.0],"w":[0.0],"node":[0.0],"i":[0.0]}
+    {"token":"example","name":"Example","set":"Worked example","citation":"docs/HYPOTHETICALS.md","epoch":2415020.0,"equinox":"J1900","origin":"sun","M":[123.4],"a":[41.0],"e":[0.0],"w":[0.0],"node":[0.0],"i":[0.0]}
 
 | field | required | meaning |
 |---|---|---|
@@ -153,7 +154,7 @@ program's element file.
 | `citation` | yes | where the numbers come from, precisely enough to check |
 | `epoch` | yes | the elements' epoch, JD TT |
 | `equinox` | yes | `"J2000"`, `"B1950"`, `"J1900"`, `"of date"`, or a number: an explicit equinox, JD TT |
-| `centre` | no | `"sun"` (the default) or `"earth"` |
+| `origin` | no | the body the orbit is about: `"sun"` (the default) or `"earth"` — the protocol's *centre*, named apart from the observer's |
 | `M`, `a`, `e`, `w`, `node`, `i` | yes | each a list of 1–5 coefficients of T⁰, T¹, …: mean anomaly (deg), semi-major axis (AU), eccentricity, argument of perihelion (deg), ascending node (deg), inclination (deg) |
 
 The lists may differ in length. The body's term count is the longest, and
