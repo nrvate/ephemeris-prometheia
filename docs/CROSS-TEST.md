@@ -383,39 +383,52 @@ Astrolog side owns everything that drives its client or its daemon.
 
 ### First run, 2026-09-18
 
-`docs/crosstest/2026-09-18.tsv`: 206 rows. `prometheiad` on DE440 and
-`astrolog-ephd` on its Swiss files, both on loopback, driven by
-`prometheia-wire-client`.
+`docs/crosstest/2026-09-18.tsv`: 734 rows, legs 2, 6, 7, 8 and 9 plus the
+heliocentric anchor. `prometheiad` on DE440 and `astrolog-ephd` on its Swiss
+files, both on loopback, driven by `prometheia-wire-client`. Verdicts: 394
+agree, 6 expected-difference, 205 findings, 40 findings attributed to the
+Astrolog server by the anchor, 1 unadjudicated, 66 unanswered.
 
-- **Each server against Horizons** (astrometric ICRF, geocentric, ten bodies
+- **Each server against Horizons, geocentric** (astrometric ICRF, ten bodies
   at the corpus's epochs). `prometheiad`: 2–4 µas for the Sun and planets,
   5.8 mas for the Moon, reproducing VALIDATION.md through the wire.
-  `astrolog-ephd`: 0.3–0.8 mas for the planets and 1.2 mas for the Moon,
-  the refit's fidelity. So the gap between the two servers is almost
-  entirely the refit, and the anchor is what says so.
-- **Both servers, the same question** (mask 0). 144 of the numeric rows
-  agree within 2 mas. The Moon's gap grows away from the present, to 21 mas
-  at 1800: DE440 against DE441, which each server reproduces separately
-  (VALIDATION.md). Where the anchor could be asked, the harness records those
-  rows as *expected-difference*, because each server sits inside its own
-  Horizons band there.
-- **Hamburg points by name**: the eight bodies at 1900, 2000 and 2100 agree
-  within 0.62 mas, and their distances to 10⁻¹² AU. The same elements pass
-  through two engines, and they differ only by the precession models'
-  rotation of the J1900 equinox.
-- **Findings**, all on the Astrolog side, and sent there:
-  - At exactly 1800-01-01, where its `.se1` files begin, `astrolog-ephd`
-    refuses light time with error 4 (data unavailable) for every body, while
-    answering geometric positions at the same instant. The refusal is
-    honest, with no silent Moshier, but error 3 (outside the data's time
-    coverage) is the meaning.
-  - Venus at 2020-06-01, 0.29 AU away near inferior conjunction, is 2.03 mas
-    from Horizons against a 2-mas band. That is plausibly the refit's
-    kilometre-scale error seen from close, and only the Astrolog side knows
-    how that fidelity is defined.
-- **Not yet run:** legs 3–5 (the Astrolog client can drive them), leg 8
-  (apparent place, every observer), and the heliocentric and topocentric
-  anchors, which the corpus has.
+  `astrolog-ephd`: 0.3–0.8 mas for the planets and 1.2 mas for the Moon, its
+  refit's fidelity. So the geocentric gap between the servers is the refit.
+- **Both servers, the same question** (mask 0): within 2 mas except the
+  Moon, whose DE440-against-DE441 gap (21 mas at 1800) the anchor marks as
+  expected.
+- **Hamburg points by name**: within 0.62 mas at 1900, 2000 and 2100, and
+  the distances to 10⁻¹² AU.
+- **Apparent place from other observers** is where the findings are, each
+  bisected to one term by varying the mask or the ΔT sent:
+  - **Heliocentric light time**, attributed by the anchor. From the Sun's
+    centre, astrometric, `prometheiad` is 1–6 µas from Horizons and
+    `astrolog-ephd` 0.38″ (Mercury), 0.28″ (Venus) and 0.11″ (Mars).
+    Geometric positions agree to 0.3 mas, and light time alone moves Venus
+    24.208″ on one server and 24.452″ on the other: the retardation itself
+    differs by 1%.
+  - **The ΔT a request sends is ignored** by `astrolog-ephd`. Changing it by
+    100 s moves `prometheiad`'s topocentric Moon by 16.9″ and
+    `astrolog-ephd`'s by 0.000″. §3.5 makes the request's ΔT govern, and
+    this is the whole of the 12″ topocentric Moon gap.
+  - **Deflection advertised but not applied** for barycentric and
+    planet-centred observers. Masks 0, 1 and 5 agree, and the gap appears
+    only with the deflection bit: 3.2″ on Venus from the barycentre at
+    J2000, 7 mas on Mars from Jupiter. `astrolog-ephd`'s WELCOME lists
+    mask 7 for those observers, and its `corrApplied` claims deflection.
+    `corrapplied.py` could not see it, because checking deflection alone
+    needs a mask that server cannot express. Only a second engine could.
+- **Smaller:** error 4 where 3 is meant, at the first instant of the Swiss
+  files (1800-01-01, with light time); and Venus 2.03 mas from Horizons at
+  its 2020 inferior conjunction, just over the 2-mas band. That is plausibly
+  the refit seen from 0.29 AU, a question for the Astrolog side.
+- **A harness bug this run caught in itself**: the first full run
+  adjudicated every apparent-place gap against the *geocentric* anchor, and
+  called 204 rows expected. That hid the ΔT and deflection findings. An
+  anchor now judges only rows from its own observer.
+- **Not yet run:** legs 3–5, which the Astrolog client can drive, and the
+  topocentric anchor, which needs Horizons' UT1 recovered from its sidereal
+  time first.
 
 ### What it leaves behind
 
