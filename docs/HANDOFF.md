@@ -8,16 +8,15 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Released
 
-- **v0.2.0**, published 2026-09-18 (tag on `33c697a`,
-  https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.2.0). The
-  library and tools are 0.2.0; `prometheiad` is 0.3.0.
-- **Since then (Unreleased):** C ABI version 6,
-  `prometheia_options.sidereal_plane` (`76f588d`). The Astrolog side
-  reviewed it and the maintainer approved it. Their plugin consumes it
-  (ephv4 `1be4518`) and now serves all three sidereal planes, including
-  Astrolog's solar-system-plane charts. In one real chart on that plane,
-  Swiss and Prometheia differ by 31″ (Sun) and 27″ (Moon), with latitudes
-  within 1″: Part A's zero point, below.
+- **v0.3.0**, published 2026-09-18
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.3.0).
+  - The library and tools are 0.3.0, with C ABI 6
+    (`prometheia_options.sidereal_plane`). The Astrolog plugin consumes it
+    (ephv4 `1be4518`).
+  - `prometheiad` is 0.4.0: a node asked for in a fixed frame is now the node
+    of date (§3.5a Part B).
+  - Two new outside checks: the FK5 stars, and the `sidsweep` leg.
+- **v0.2.0**, the same day (tag on `33c697a`).
 
 ## Next
 

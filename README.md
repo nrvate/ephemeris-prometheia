@@ -22,7 +22,7 @@ version and a plain statement of what is *not* in it:
 ## Status
 
 All six milestones complete, plus protocol version 4 (2026-09-17) and, in
-release 0.2.0 (2026-09-18), the work below the list:
+releases 0.2.0 and 0.3.0 (2026-09-18), the work below the list:
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
@@ -133,7 +133,9 @@ release 0.2.0 (2026-09-18), the work below the list:
   Horizons and textbook formulas, across bodies, observers, corrections,
   orbit points, sidereal planes, fixed stars and the Uranian points, and an
   application-level test that casts real Astrolog charts through
-  `prometheiad`. [docs/CROSS-TEST.md](docs/CROSS-TEST.md).
+  `prometheiad`. Every zodiac token is swept over every sidereal plane, and
+  the fixed stars are checked against the FK5, a catalogue independent of
+  both servers'. [docs/CROSS-TEST.md](docs/CROSS-TEST.md).
 - **Logging and traceability** — one timestamped line per connection,
   request and error, joined to the client by request id, and never a
   birth date or place. [docs/SERVER.md](docs/SERVER.md), "Logging".

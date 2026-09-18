@@ -11,8 +11,33 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.3.0 — 2026-09-18
 
+The protocol's §3.5a amendment and C ABI 6, with two new outside checks.
+
+Versions:
+- the library and tools are 0.3.0, and the C ABI is 6;
+- `prometheiad` is 0.4.0: its answers for a node in a fixed frame changed.
+
+The cross-test's current record is `docs/crosstest/2026-09-18g.tsv`
+(docs/CROSS-TEST.md).
+
+- **Fixed stars checked against the FK5** (Fricke et al. 1988), a
+  ground-based catalogue that predates Hipparcos, so an error both servers'
+  Hipparcos-derived catalogues share would show.
+  `tools/check/stars_fk5.py` (docs/STARS.md, "Checked against FK5").
+  - Both servers: 24 ordinary stars within 0.56″ over 1900–2100, and within
+    0.007″ of each other.
+  - Four astrometric binaries up to 2.3″ (Sirius), and α Cen A to 28.6″ at
+    1900: straight-line motion from the Hipparcos epoch, now a documented
+    limit.
+- **Every zodiac token on every sidereal plane** (the cross-test's
+  `sidsweep` leg), graded on whether a plane request moves the answer. A
+  plane accepted and ignored is a finding. `prometheiad` passes all 288
+  rows.
+- **The invariable plane's zero point** (§3.5a Part A, approved by both
+  maintainers): the zodiac's zero-point direction projected onto the plane,
+  which is what Prometheia already did. No change here.
 - **A node lies on the mean ecliptic of date in every frame** (protocol v4
   §3.5a, amended 2026-09-18, approved by both maintainers). A node asked in
   J2000 or ICRF is now the node of date, rotated; before, it lay on the
@@ -25,6 +50,8 @@ documented, not that it is frozen.
   values. The field is appended, so bindings must rebuild: the ABI check is
   equality. The Astrolog side reviewed it before it landed; it lets their
   plugin serve Astrolog's solar-system-plane charts. `ephem --sid-plane`.
+- **Declined: zstd wire payloads.** Measured, real f64 DATA compresses to
+  96.8% at best (docs/SERVER.md, "Not implemented").
 
 ## 0.2.0 — 2026-09-18
 
