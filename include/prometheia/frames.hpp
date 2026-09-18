@@ -172,6 +172,24 @@ std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt);
 // -sidudef anchor).
 Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt);
 
+// A published zodiac's zero point: the TT epoch of its definition and the
+// MEAN ayanamsha there. nullopt for any other mode.
+struct AyanamsaAnchor {
+    double t0_jtdb;
+    double mean0_deg;
+};
+std::optional<AyanamsaAnchor> ayanamsa_anchor(int mode);
+
+// The invariable plane of the solar system: the unit normal to the total
+// angular momentum of the Sun, the planetary-system barycentres and Pluto,
+// in ICRF, from JPL DE440's states and GM constants at J2000.0. Computed by
+// tests/test_frames.cpp's invariable_plane_from_de440 (which recomputes it
+// when the DE440 file is present); constant across 1800-2200 to 1e-9, i.e.
+// the mass set conserves it. On the J2000 ecliptic: inclination 1.578700
+// deg, ascending node 107.582322 deg.
+inline constexpr double kInvariablePoleIcrf[3] = {0.026262993692212, -0.389990518230968,
+                                                  0.920444268194584};
+
 // The same, with the general precession of the given model.
 std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt, PrecessionModel model);
 Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt,

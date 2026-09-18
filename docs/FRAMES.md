@@ -173,6 +173,48 @@ IAU 2006 remains the default.
     equator of date 3.1 → 1.9 mas with the option selected; the remaining
     ~2 mas are SWE conventions outside precession.
 
+## Sidereal planes (protocol v4 A.8)
+
+`CalcOptions::sidereal_plane` picks the plane a sidereal longitude is
+counted along. The engine and `prometheiad` expose it; the C ABI does not
+yet, because its structs are frozen per ABI version.
+
+- **Ecliptic of date** (the default): the ayanamsha is subtracted as it
+  moves, as above.
+- **Ecliptic of the anchor epoch:** the position is rotated into the mean
+  ecliptic and equinox of the zodiac's anchor epoch t0. Longitude is counted
+  from A0 there, with no precession term. At t = t0 this equals plane 0 in
+  the mean frame (tested to 1e-10°).
+- **Invariable plane:** the unit normal to the total angular momentum
+  of the Sun, the planetary-system barycentres (the Earth–Moon barycentre
+  included) and Pluto, from DE440's states and GM constants at J2000.0.
+  `frames::kInvariablePoleIcrf` is ICRF (0.026262993692212,
+  −0.389990518230968, 0.920444268194584): inclination 1.578700° and node
+  107.582322° on the J2000 ecliptic. It holds to 1e-9 over 1800–2200, so the
+  mass set conserves it. `invariable_plane_from_de440` recomputes it when the
+  DE440 file is present. The zodiac's zero point (longitude A0 on the mean
+  ecliptic of t0) is projected onto the plane, and longitude is the angle
+  about the pole from that projection. A test builds the projection
+  independently from the public frame matrices and agrees to 1e-9°.
+- Both fixed planes need ecliptic coordinates (the protocol's codec
+  refuses a zodiac on the equator anyway), ignore the frame option, and
+  report A0 as the ayanamsa. Rates rotate with the positions: the planes
+  do not move.
+
+**Against `astrolog-ephd`** (Swiss's plane options), 2026-09-18, Sun, Moon,
+Mars, Jupiter and Saturn at 1900, 2000 and 2026, Fagan-Bradley and Lahiri:
+- plane 0 and plane 1 agree to ≤ 0.003″;
+- plane 2 agrees in latitude to ≤ 0.03″, so the two planes' orientations
+  agree, but every longitude differs by a constant −31.51″ (Fagan-Bradley)
+  or −30.42″ (Lahiri).
+
+The protocol says the zero point is "carried onto" the plane and does not
+say how. Projection (ours) and a rotation about the planes' common node
+line (which preserves arcs) differ by 8–10″ here and reproduce the 1.1″
+difference between the two zodiacs, but not the rest. The definition is
+open with the Astrolog side, and the Astrolog application's
+solar-system-plane chart shows the same −31.51″.
+
 ## Accuracy notes
 
 - ICRF vs the J2000 mean equator/ecliptic differ by the ~0.02″ frame

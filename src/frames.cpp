@@ -577,6 +577,12 @@ std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt) {
     return ayanamsa(mode, jd_tt, PrecessionModel::IAU2006);
 }
 
+std::optional<AyanamsaAnchor> ayanamsa_anchor(int mode) {
+    if (mode < 0 || size_t(mode) >= sizeof kAyanAnchors / sizeof kAyanAnchors[0])
+        return std::nullopt;
+    return AyanamsaAnchor{kAyanAnchors[mode].t0_jtdb, kAyanAnchors[mode].mean0_deg};
+}
+
 std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt, PrecessionModel model) {
     if (mode < 0 || size_t(mode) >= sizeof kAyanAnchors / sizeof kAyanAnchors[0])
         return std::nullopt;

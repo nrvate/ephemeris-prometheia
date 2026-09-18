@@ -55,6 +55,8 @@ constexpr const char* kUsage =
     "                      1 light time, 2 deflection, 4 aberration\n"
     "  --sid TOKEN         a zodiac (fagan-bradley, lahiri, user)\n"
     "  --sidu T0,AYAN      a user zodiac's anchor (mean ayanamsa at TT epoch)\n"
+    "  --sid-plane P       the sidereal plane (A.8): date (default), anchor (the\n"
+    "                      ecliptic of the zodiac's anchor epoch) or invariable\n"
     "  --topo LON,LAT,ELV  observer site (degrees east, degrees, metres)\n"
     "  --f32               ask for float32 values\n"
     "  --chunk N           chunk-size hint (default: the server's maximum)\n"
@@ -238,6 +240,18 @@ int main(int argc, char** argv) {
             corrections_given = true;
         } else if (arg == "--sid") {
             pf.zodiac = value();
+        } else if (arg == "--sid-plane") {
+            const std::string plane = value();
+            if (plane == "date") {
+                pf.siderealPlane = eph::kSidPlaneDate;
+            } else if (plane == "anchor") {
+                pf.siderealPlane = eph::kSidPlaneAnchor;
+            } else if (plane == "invariable") {
+                pf.siderealPlane = eph::kSidPlaneInvariable;
+            } else {
+                std::fprintf(stderr, "--sid-plane: date, anchor or invariable\n%s", kUsage);
+                return 2;
+            }
         } else if (arg == "--sidu") {
             if (std::sscanf(value(), "%lf,%lf", &pf.anchorEpoch.jd1, &pf.anchorAyanamsaDeg) != 2) {
                 std::fputs(kUsage, stderr);

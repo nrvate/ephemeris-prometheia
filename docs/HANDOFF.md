@@ -152,8 +152,13 @@ astrolog d80a6b3:
     agrees). Sent.
   - The ~31° gap at wire level on a Mars-CENTRED node is a separate,
     unasked question.
-- Sidereal on the solar-system plane is refused here (ERROR 11): a
-  capability gap, not yet planned.
+- Sidereal on the solar-system plane: served since 2026-09-18 (all three
+  A.8 planes; FRAMES.md, "Sidereal planes"). The app's chart now gets an
+  answer. The invariable plane's longitude origin differs from Swiss's by a
+  constant ~31″ (latitudes agree to 0.03″): the protocol does not say how
+  the zero point is "carried onto" the plane. Open with the Astrolog side.
+- The true descending node's distance: fixed on their side (822c2a4),
+  0.0 km now.
 - The Uranian points, measured (scenario 10, astrolog f0f3488): the app
   sends all eight as kind 3 (daemon log: `hyp:8`). Asked the way the app
   asks (geocentric, full corrections), our server and theirs agree to

@@ -216,9 +216,9 @@ does with them:
 - **Profiles** resolve to the engine's `CalcOptions` once per request
   (session.cpp). Every object names its profile, so one request can mix a
   geocentric apparent chart with a heliocentric rectangular one. A profile
-  this engine cannot serve (a zodiac it does not implement, a sidereal
-  plane other than the ecliptic of date) refuses the whole REQUEST with
-  ERROR 11; a body the data does not carry fails alone.
+  this engine cannot serve (a zodiac it does not implement, or a fixed
+  sidereal plane asked as segments) refuses the whole REQUEST with ERROR
+  11; a body the data does not carry fails alone.
 - **Times.** Rows are in the request's time scale (UT1, TT, TDB). The
   delta T comes from the request's table TLV (piecewise linear, TT
   instants), its one value, or — the canonical NaN — the engine's observed
@@ -475,6 +475,17 @@ two sides agreed these semantics:
   the mean one. True of date takes the true ayanamsa, mean of date the mean,
   J2000 and ICRF a constant zero point on the J2000 ecliptic — what the
   engine already does.
+- **Sidereal planes (A.8)**, all three served since 2026-09-18:
+  - the ecliptic of date;
+  - the ecliptic of the anchor epoch: the mean ecliptic and equinox of t0,
+    longitude from A0;
+  - the invariable plane: DE440's, which WELCOME's engine string names
+    ("invariable plane: DE440 total angular momentum at J2000 …").
+  For planes 1 and 2 the profile's frame is ignored (the plane is the
+  frame), and the ayanamsa column reports A0 (FRAMES.md, "Sidereal
+  planes"). Segments serve plane 0 only: they carry the ayanamsa as a
+  longitude shift, and a fixed plane is a rotation. A fixed plane asked as
+  segments is ERROR 11, and rows are the way to ask.
 - **Orbit points** lie on the ecliptic of the profile's frame, heliocentric
   for planets and geocentric for the Moon, and take the profile's corrections
   exactly as a body does (3.5a): they are interoperable applied in full or

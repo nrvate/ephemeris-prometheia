@@ -606,13 +606,47 @@ TEST_CASE("server_profiles") {
         const auto r = drain(s);
         REQUIRE(r.size() == 1);
         CHECK(error_of(r[0]).code == eph::kErrUnsupported);
-        // The anchor-epoch sidereal plane is not served either.
-        pf.zodiac = "lahiri";
-        pf.siderealPlane = eph::kSidPlaneAnchor;
-        eph::Request req2 = base_request(jd, 1);
-        req2.profiles[0] = pf;
-        req2.objs = {body_obj(5)};
-        CHECK(s.on_message(request(req2, 211), true));
+    }
+    SUBCASE("the fixed sidereal planes are served, as rows and on the ecliptic") {
+        // A.8 planes 1 and 2 answer what the engine answers; the ayanamsa
+        // column reports the anchor's A0 there.
+        for (const auto [plane, engine_plane] :
+             {std::pair{eph::kSidPlaneAnchor, SiderealPlane::EclipticOfAnchor},
+              std::pair{eph::kSidPlaneInvariable, SiderealPlane::Invariable}}) {
+            CalcOptions o;
+            o.sidereal = SiderealMode::Lahiri;
+            o.sidereal_plane = engine_plane;
+            const CalcResult want = engine(o);
+            eph::Profile pf;
+            pf.zodiac = "lahiri";
+            pf.siderealPlane = plane;
+            const Data d = one(pf, eph::kColAyanamsa);
+            REQUIRE(d.cols.size() >= 7);
+            CHECK(d.cols[0] == want.pos.lon_deg);
+            CHECK(d.cols[1] == want.pos.lat_deg);
+            CHECK(d.cols[6] == *want.ayanamsa_deg);
+        }
+        // A zodiac on the equator is malformed (the codec's rule, whatever
+        // the sidereal plane).
+        eph::Profile eq;
+        eq.zodiac = "lahiri";
+        eq.siderealPlane = eph::kSidPlaneInvariable;
+        eq.plane = eph::kPlaneEquator;
+        eph::Request req = base_request(jd, 1);
+        req.profiles[0] = eq;
+        req.objs = {body_obj(5)};
+        CHECK(s.on_message(request(req, 212), true));
+        CHECK(error_of(drain(s)[0]).code == eph::kErrMalformed);
+        // Segments carry the ayanamsa as a longitude shift, which a fixed
+        // plane is not: refused (ERROR 11), rows are the way to ask.
+        eph::Request seg = base_request(jd, 4);
+        seg.representation = 1;
+        seg.segTargetErrArcsec = 0.01f;
+        seg.profiles[0].zodiac = "lahiri";
+        seg.profiles[0].siderealPlane = eph::kSidPlaneAnchor;
+        seg.profiles[0].form = eph::kFormRectangular;
+        seg.objs = {body_obj(5)};
+        CHECK(s.on_message(request(seg, 213), true));
         CHECK(error_of(drain(s)[0]).code == eph::kErrUnsupported);
     }
     SUBCASE("an observer equal to the object is a per-object error") {

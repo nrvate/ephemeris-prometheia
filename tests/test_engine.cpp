@@ -24,7 +24,9 @@
 #include <vector>
 
 #include <prometheia/apparent.hpp>
+#include <prometheia/de.hpp>
 #include <prometheia/engine.hpp>
+#include <prometheia/forces.hpp>
 #include <prometheia/frames.hpp>
 
 #include "synthetic_spk.hpp"
@@ -843,6 +845,172 @@ TEST_CASE("de440_engine_rates_match_differenced_swetest") {
     CHECK(worst_lon < 5e-6);
     CHECK(worst_lat < 5e-6);
     CHECK(worst_dist < 1e-7);
+}
+
+// The fixed sidereal planes (protocol v4 A.8), by their definitions.
+TEST_CASE("sidereal_fixed_planes") {
+    TempFile tf("engine-sidplane");
+    Engine e = open_synthetic(tf);
+    const double t = kJ2000 + 1234.5;
+    const auto unit_of = [](double lon, double lat, double u[3]) {
+        const double a = lon * M_PI / 180.0, b = lat * M_PI / 180.0;
+        u[0] = std::cos(b) * std::cos(a);
+        u[1] = std::cos(b) * std::sin(a);
+        u[2] = std::sin(b);
+    };
+
+    // The anchor ecliptic at its own epoch is the mean ecliptic of date
+    // there, and A0 is the mean ayanamsha there: a user zodiac anchored at
+    // t answers the same on plane 1 as on plane 0 in the mean frame.
+    CalcOptions date = CalcOptions::apparent();
+    date.frame = Frame::MeanOfDate;
+    date.sidereal = SiderealMode::User;
+    date.sidereal_epoch_jtdb = t;
+    date.sidereal_ayanamsa_deg = 23.5;
+    CalcOptions anchor = date;
+    anchor.sidereal_plane = SiderealPlane::EclipticOfAnchor;
+    for (int id : {body::kSun, body::kJupiter}) {
+        auto a = e.calc(id, t, date), b = e.calc(id, t, anchor);
+        INFO(id, " ", a.ok() ? "" : a.error().message);
+        REQUIRE(a.ok());
+        REQUIRE(b.ok());
+        CHECK(std::fabs(wrap360(b.value().pos.lon_deg - a.value().pos.lon_deg + 180.0) - 180.0) <
+              1e-10);
+        CHECK(std::fabs(b.value().pos.lat_deg - a.value().pos.lat_deg) < 1e-10);
+        CHECK(b.value().ayanamsa_deg.value_or(-1) == 23.5);
+    }
+
+    // The invariable plane: latitude is the angle from the plane, so its
+    // sine is the ICRF direction's component along the pole; the reported
+    // ayanamsa is the anchor's A0.
+    CalcOptions icrf = CalcOptions::apparent();
+    icrf.frame = Frame::ICRF;
+    icrf.coords = Coords::Equatorial;
+    CalcOptions inv = CalcOptions::apparent();
+    inv.sidereal = SiderealMode::Lahiri;
+    inv.sidereal_plane = SiderealPlane::Invariable;
+    const auto anchor_lahiri = frames::ayanamsa_anchor(1);
+    REQUIRE(anchor_lahiri.has_value());
+    for (int id : {body::kSun, body::kJupiter}) {
+        auto q = e.calc(id, t, icrf), r = e.calc(id, t, inv);
+        REQUIRE(q.ok());
+        REQUIRE(r.ok());
+        double u[3];
+        unit_of(q.value().pos.lon_deg, q.value().pos.lat_deg, u);
+        const double* n = frames::kInvariablePoleIcrf;
+        CHECK(std::fabs(std::sin(r.value().pos.lat_deg * M_PI / 180.0) -
+                        (u[0] * n[0] + u[1] * n[1] + u[2] * n[2])) < 1e-12);
+        CHECK(std::fabs(r.value().pos.dist_au - q.value().pos.dist_au) <
+              1e-12 * q.value().pos.dist_au);
+        CHECK(r.value().ayanamsa_deg.value_or(-1) == anchor_lahiri->mean0_deg);
+    }
+
+    // The invariable longitude's origin, built independently: the zero point
+    // (longitude A0 on the mean ecliptic of t0) through the public frames
+    // matrices, projected onto the plane; a body's longitude is the signed
+    // angle from it to the body's own projection, about the pole.
+    {
+        double ecl[9], bias[9], m0[9];
+        frames::mean_ecliptic_of_date_matrix(anchor_lahiri->t0_jtdb, ecl);
+        frames::frame_bias_matrix(bias);
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c)
+                m0[3 * r + c] = ecl[3 * r] * bias[c] + ecl[3 * r + 1] * bias[3 + c] +
+                                ecl[3 * r + 2] * bias[6 + c];
+        const double a0 = anchor_lahiri->mean0_deg * M_PI / 180.0;
+        const double ze[3] = {std::cos(a0), std::sin(a0), 0.0};
+        double z[3];
+        for (int c = 0; c < 3; ++c)
+            z[c] = m0[c] * ze[0] + m0[3 + c] * ze[1] + m0[6 + c] * ze[2]; // transpose
+        const double* n = frames::kInvariablePoleIcrf;
+        const auto project = [&](const double v[3], double out[3]) {
+            const double d = v[0] * n[0] + v[1] * n[1] + v[2] * n[2];
+            for (int i = 0; i < 3; ++i)
+                out[i] = v[i] - d * n[i];
+        };
+        double pz[3];
+        project(z, pz);
+        for (int id : {body::kSun, body::kJupiter}) {
+            auto q = e.calc(id, t, icrf), r = e.calc(id, t, inv);
+            REQUIRE((q.ok() && r.ok()));
+            double u[3], pu[3];
+            unit_of(q.value().pos.lon_deg, q.value().pos.lat_deg, u);
+            project(u, pu);
+            const double cx[3] = {pz[1] * pu[2] - pz[2] * pu[1], pz[2] * pu[0] - pz[0] * pu[2],
+                                  pz[0] * pu[1] - pz[1] * pu[0]};
+            const double lon = std::atan2(cx[0] * n[0] + cx[1] * n[1] + cx[2] * n[2],
+                                          pz[0] * pu[0] + pz[1] * pu[1] + pz[2] * pu[2]) *
+                               180.0 / M_PI;
+            CHECK(std::fabs(wrap360(r.value().pos.lon_deg - lon + 180.0) - 180.0) < 1e-9);
+        }
+    }
+
+    // A fixed plane's rates are the positions' own derivative.
+    const double h = 0.01;
+    auto m = e.calc(body::kJupiter, t - h, inv), c = e.calc(body::kJupiter, t, inv),
+         p = e.calc(body::kJupiter, t + h, inv);
+    REQUIRE((m.ok() && c.ok() && p.ok()));
+    const double dlon =
+        (wrap360(p.value().pos.lon_deg - m.value().pos.lon_deg + 180.0) - 180.0) / (2 * h);
+    CHECK(std::fabs(dlon - c.value().pos.lon_speed) < 1e-6);
+    CHECK(std::fabs((p.value().pos.lat_deg - m.value().pos.lat_deg) / (2 * h) -
+                    c.value().pos.lat_speed) < 1e-6);
+
+    // A fixed plane is an ecliptic: equatorial coordinates are refused.
+    CalcOptions eq = inv;
+    eq.coords = Coords::Equatorial;
+    CHECK_FALSE(e.calc(body::kSun, t, eq).ok());
+    // The ecliptic of date is untouched by the option when tropical.
+    CalcOptions trop = CalcOptions::apparent();
+    CalcOptions trop_plane = trop;
+    trop_plane.sidereal_plane = SiderealPlane::Invariable;
+    auto t1 = e.calc(body::kSun, t, trop), t2 = e.calc(body::kSun, t, trop_plane);
+    REQUIRE((t1.ok() && t2.ok()));
+    CHECK(t1.value().pos.lon_deg == t2.value().pos.lon_deg);
+}
+
+// frames::kInvariablePoleIcrf, recomputed: the unit normal to the total
+// angular momentum of the Sun, the planetary-system barycentres and Pluto
+// from DE440's states and GM constants, at J2000 and, as a check that the
+// mass set conserves it, at 1800 and 2200.
+TEST_CASE("invariable_plane_from_de440") {
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto f = de::DeFile::open(kDe440Path);
+    REQUIRE(f.ok());
+    struct B {
+        de::Target t;
+        double gm;
+    };
+    const B bodies[] = {
+        {de::Target::Sun, gm::kSun},         {de::Target::Mercury, gm::kMercury},
+        {de::Target::Venus, gm::kVenus},     {de::Target::EarthMoonBary, gm::kEarthMoonBary},
+        {de::Target::Mars, gm::kMars},       {de::Target::Jupiter, gm::kJupiter},
+        {de::Target::Saturn, gm::kSaturn},   {de::Target::Uranus, gm::kUranus},
+        {de::Target::Neptune, gm::kNeptune}, {de::Target::Pluto, gm::kPluto}};
+    const auto pole = [&](double jd, double n[3]) {
+        double L[3] = {0, 0, 0};
+        for (const B& b : bodies) {
+            double s[6];
+            REQUIRE(f.value().relative_state(b.t, de::Target::SolarSystemBary, jd, s).ok());
+            L[0] += b.gm * (s[1] * s[5] - s[2] * s[4]);
+            L[1] += b.gm * (s[2] * s[3] - s[0] * s[5]);
+            L[2] += b.gm * (s[0] * s[4] - s[1] * s[3]);
+        }
+        const double len = std::sqrt(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
+        for (int i = 0; i < 3; ++i)
+            n[i] = L[i] / len;
+    };
+    double n[3];
+    pole(kJ2000, n);
+    for (int i = 0; i < 3; ++i)
+        CHECK(std::fabs(n[i] - frames::kInvariablePoleIcrf[i]) < 1e-14);
+    for (double jd : {2378496.5, 2524593.5}) {
+        double m[3];
+        pole(jd, m);
+        for (int i = 0; i < 3; ++i)
+            CHECK(std::fabs(m[i] - n[i]) < 1e-8);
+    }
 }
 
 TEST_CASE("de440_sidereal_matches_swetest") {

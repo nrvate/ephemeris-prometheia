@@ -54,6 +54,7 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
 | `frame` | `ICRF`, `J2000` (ICRF + frame bias), `MeanOfDate` (+ IAU 2006 precession), `TrueOfDate` (+ IAU 2000A nutation) | true of date |
 | `coords` | `Ecliptic`, `Equatorial` | ecliptic |
 | `sidereal` | `Tropical`, `FaganBradley`, `Lahiri`, `User` (+ `sidereal_epoch_jtdb`, `sidereal_ayanamsa_deg`) | tropical |
+| `sidereal_plane` | `EclipticOfDate`, `EclipticOfAnchor`, `Invariable` (fixed planes: [FRAMES.md](FRAMES.md), "Sidereal planes") | ecliptic of date |
 | `precession` | `IAU2006`, `Vondrak2011` (long-term; [FRAMES.md](FRAMES.md)) | IAU 2006 |
 | `light_time`, `deflection`, `aberration` | independent switches | all on |
 | `speed` | rates by central difference (3× the work) | on |

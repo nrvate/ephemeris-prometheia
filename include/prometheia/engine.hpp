@@ -97,6 +97,21 @@ enum class SiderealMode : int {
     User = 255,
 };
 
+// The plane a sidereal longitude is counted along (protocol v4 A.8). The
+// ecliptic of date subtracts the ayanamsha as it moves; the other two are
+// fixed planes where longitude is counted from the zodiac's zero point with
+// no precession term: the mean ecliptic and equinox of the zodiac's anchor
+// epoch t0, or the invariable plane of the solar system
+// (frames::kInvariablePoleIcrf), with the zero point (longitude A0 on the
+// ecliptic of t0) projected onto it. The fixed planes need ecliptic
+// coordinates and ignore CalcOptions::frame (their plane is the frame);
+// Position::ayanamsa_deg reports A0 for them (docs/FRAMES.md).
+enum class SiderealPlane : int {
+    EclipticOfDate = 0,
+    EclipticOfAnchor = 1,
+    Invariable = 2,
+};
+
 // Precession model of the date frames (and of the sidereal zodiacs' drift).
 // IAU 2006 is the standard near the present; Vondrak, Capitaine & Wallace
 // (2011) stays valid over +-200 millennia (docs/FRAMES.md). Nutation is IAU
@@ -165,6 +180,7 @@ struct CalcOptions {
     Frame frame = Frame::TrueOfDate;
     Coords coords = Coords::Ecliptic;
     SiderealMode sidereal = SiderealMode::Tropical;
+    SiderealPlane sidereal_plane = SiderealPlane::EclipticOfDate; // with a sidereal zodiac
     Precession precession = Precession::IAU2006;
     double sidereal_epoch_jtdb = 0.0;   // SiderealMode::User anchor epoch
     double sidereal_ayanamsa_deg = 0.0; // SiderealMode::User anchor value

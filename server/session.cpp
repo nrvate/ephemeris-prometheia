@@ -164,8 +164,18 @@ std::optional<std::string> plan_profiles(const eph::Request& q, std::vector<Prof
         p.opts.aberration = (pf.corrections & eph::kCorrAberration) != 0;
         p.opts.speed = pf.speeds != 0;
         p.opts.sigma = (pf.columns & eph::kColSigma) != 0;
-        if (pf.siderealPlane != eph::kSidPlaneDate) {
-            return "a sidereal plane this engine does not serve (only the ecliptic of date)";
+        // A.8: the ecliptic of date, of the anchor epoch, or the invariable
+        // plane (the codec has already refused a plane with no zodiac).
+        switch (pf.siderealPlane) {
+        case eph::kSidPlaneAnchor:
+            p.opts.sidereal_plane = SiderealPlane::EclipticOfAnchor;
+            break;
+        case eph::kSidPlaneInvariable:
+            p.opts.sidereal_plane = SiderealPlane::Invariable;
+            break;
+        default:
+            p.opts.sidereal_plane = SiderealPlane::EclipticOfDate;
+            break;
         }
         if (pf.zodiac.empty()) {
             p.opts.sidereal = SiderealMode::Tropical;
@@ -324,6 +334,16 @@ check_segments(const eph::Request& q, const ServerConfig& cfg, SegmentsParams& o
     if (!(out.jd_to_tt > out.jd_from_tt)) {
         // One instant, or a grid degenerate to it: the cell covering it.
         out.jd_to_tt = out.jd_from_tt + 1e-9;
+    }
+    for (const eph::Profile& pf : q.profiles) {
+        // Segments carry tropical coefficients and the ayanamsa as its own
+        // series, a longitude shift; a fixed sidereal plane is a rotation,
+        // which that shape cannot carry.
+        if (!pf.zodiac.empty() && pf.siderealPlane != eph::kSidPlaneDate) {
+            return std::make_pair(eph::kErrUnsupported,
+                                  std::string("segments serve the ecliptic of date only; a fixed "
+                                              "sidereal plane is answered as rows"));
+        }
     }
     if (!(out.jd_to_tt - out.jd_from_tt <= double(cfg.max_seg_span_days))) {
         return std::make_pair(eph::kErrLimits,
@@ -506,7 +526,8 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
     c.orbitMethods = (1u << eph::kMethMean) | (1u << eph::kMethOsculating);
     c.columns = eph::kColMask;
     c.zodiacs = {"fagan-bradley", "lahiri", "user"};
-    c.siderealPlanes = 1u << eph::kSidPlaneDate;
+    c.siderealPlanes = (1u << eph::kSidPlaneDate) | (1u << eph::kSidPlaneAnchor) |
+                       (1u << eph::kSidPlaneInvariable);
     c.timeScales = (1u << eph::kTimeUT1) | (1u << eph::kTimeTT) | (1u << eph::kTimeTDB);
     c.deltaTModel = kDeltaTModelName;
     c.lookupMax = kLookupMax;

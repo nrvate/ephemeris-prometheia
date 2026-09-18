@@ -1340,6 +1340,14 @@ struct Engine::Impl {
     // ecliptic of J2000. Error for an unknown mode or a non-finite
     // user anchor.
     Result<double> sidereal_shift(const CalcOptions& o, double jd_tt) const {
+        if (o.sidereal_plane != SiderealPlane::EclipticOfDate) {
+            // A fixed plane: the zero point does not move, and the value
+            // reported is the anchor's A0 (protocol v4 3.5a).
+            auto a = sidereal_anchor(o);
+            if (!a)
+                return a.error();
+            return a.value().mean0_deg;
+        }
         const auto model = frames::PrecessionModel(int(o.precession));
         std::optional<frames::Ayanamsa> aya;
         if (o.sidereal == SiderealMode::User) {
@@ -1365,6 +1373,64 @@ struct Engine::Impl {
             return aya->mean_deg - frames::precession_in_longitude_deg(jd_tt, model);
         }
         return make_error(ErrorCode::ArgumentError, "unknown frame");
+    }
+
+    // The zodiac's zero point: its anchor epoch t0 (TT) and MEAN ayanamsha
+    // A0 there, for the user anchor or a published mode.
+    Result<frames::AyanamsaAnchor> sidereal_anchor(const CalcOptions& o) const {
+        if (o.sidereal == SiderealMode::User) {
+            if (!std::isfinite(o.sidereal_epoch_jtdb) || !std::isfinite(o.sidereal_ayanamsa_deg))
+                return make_error(ErrorCode::ArgumentError, "sidereal User anchor is not finite");
+            return frames::AyanamsaAnchor{o.sidereal_epoch_jtdb, o.sidereal_ayanamsa_deg};
+        }
+        auto a = frames::ayanamsa_anchor(int(o.sidereal));
+        if (!a)
+            return make_error(ErrorCode::ArgumentError, "unknown sidereal mode");
+        return *a;
+    }
+
+    // ICRF to a fixed sidereal plane with the longitude zero at the zodiac's
+    // zero point (SiderealPlane::EclipticOfAnchor or ::Invariable).
+    Result<void> fixed_sidereal_matrix(const CalcOptions& o, double m[9]) {
+        auto a = sidereal_anchor(o);
+        if (!a)
+            return a.error();
+        const double a0 = a.value().mean0_deg / kRad2Deg;
+        // ICRF to the mean ecliptic and equinox of t0.
+        const EpochFrames& f0 = frames_at(a.value().t0_jtdb, false, o.precession);
+        double ecl0[9];
+        rot1(f0.eps_mean, ecl0);
+        matmul(ecl0, f0.pb, ecl0);
+        if (o.sidereal_plane == SiderealPlane::EclipticOfAnchor) {
+            // Longitude counted from A0 on that ecliptic: rot3(A0) moves
+            // longitudes by -A0.
+            double r[9];
+            rot3(a0, r);
+            matmul(r, ecl0, m);
+            return {};
+        }
+        // The invariable plane: rows x, y, n with n the pole and x its
+        // ascending node on the ICRF equator (any in-plane x would do: the
+        // zero point below fixes the longitude origin).
+        const double* n = frames::kInvariablePoleIcrf;
+        double x[3] = {-n[1], n[0], 0.0}; // k x n
+        const double xn = std::sqrt(x[0] * x[0] + x[1] * x[1]);
+        x[0] /= xn;
+        x[1] /= xn;
+        const double y[3] = {n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2],
+                             n[0] * x[1] - n[1] * x[0]};
+        const double inv[9] = {x[0], x[1], x[2], y[0], y[1], y[2], n[0], n[1], n[2]};
+        // The zero point: longitude A0 on the ecliptic of t0, carried into
+        // ICRF, then projected onto the plane; its in-plane angle is theta0.
+        const double z_ecl[3] = {std::cos(a0), std::sin(a0), 0.0};
+        double z_icrf[3], z_inv[3];
+        apply_transpose(ecl0, z_ecl, z_icrf);
+        apply(inv, z_icrf, z_inv);
+        const double theta0 = std::atan2(z_inv[1], z_inv[0]);
+        double r[9];
+        rot3(theta0, r);
+        matmul(r, inv, m);
+        return {};
     }
 
     // Body barycentric position at jd_tdb - tau. The subtraction is done
@@ -1926,6 +1992,18 @@ struct Engine::Impl {
 
     // An ICRF vector (km) into the requested output frame and zodiac.
     Result<void> to_output(double jd_tt, const CalcOptions& o, const double p[3], double out[3]) {
+        if (o.sidereal != SiderealMode::Tropical &&
+            o.sidereal_plane != SiderealPlane::EclipticOfDate) {
+            if (o.coords != Coords::Ecliptic)
+                return make_error(ErrorCode::ArgumentError,
+                                  "a fixed sidereal plane needs ecliptic coordinates");
+            double m[9];
+            auto r = fixed_sidereal_matrix(o, m);
+            if (!r)
+                return r;
+            apply(m, p, out);
+            return {};
+        }
         const bool need_nut = o.frame == Frame::TrueOfDate;
         double m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
         switch (o.frame) {

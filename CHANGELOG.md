@@ -29,6 +29,12 @@ documented, not that it is frozen.
   close, each with a connection id and the request id, at `--log-level
   quiet|info|debug` (default `info`). It never logs instants, sites, names
   or tokens (SERVER.md, "Logging").
+- All three protocol v4 sidereal planes: the ecliptic of date, the
+  ecliptic of the anchor epoch, and the solar system's invariable plane
+  (derived from DE440's angular momentum). Available as
+  `CalcOptions::sidereal_plane` in the engine (not yet in the C ABI) and
+  through `prometheiad`; `prometheia-wire-client --sid-plane`. Segments
+  serve the ecliptic of date only.
 - `prometheia-wire-client --node` asked for the ascending node whatever
   point was named, and read the point letter as the method. It is now
   `NAIF.P[.M]`: point `a|d|p|A`, method `m`, `o` or 0–4, and a bad point is

@@ -21,6 +21,10 @@ using namespace prometheia::server;
 
 namespace {
 
+constexpr const char* kInvariablePlaneNote =
+    "; invariable plane: DE440 total angular momentum at J2000 (inclination 1.5787 deg, "
+    "node 107.5823 deg on the J2000 ecliptic)";
+
 constexpr const char* kUsage =
     "usage: prometheiad --ephemeris FILE [options]\n"
     "  --ephemeris FILE      JPL DE binary or SPK kernel (required)\n"
@@ -217,7 +221,9 @@ int main(int argc, char** argv) {
         const Dataset dataset =
             make_dataset("Prometheia 0.1.0, " + std::string(probe.value().source()), ephemeris,
                          catalogs, perturbers, hypothetical_files);
-        options.config.engine = dataset.engine;
+        // A.8's invariable plane names its orientation in the engine
+        // description (3.5a); the dataset id keeps the bare engine string.
+        options.config.engine = dataset.engine + kInvariablePlaneNote;
         options.config.hypotheticals = probe.value().hypothetical_tokens();
         options.config.dataset_id = dataset.id;
         options.config.ephemeris_name = dataset.ephemeris;
