@@ -799,7 +799,8 @@ every field.
 **First runs, 2026-09-18** (10 minutes per target, after 1-minute runs):
 - **`fuzz_session`:** 2.36 million inputs, 7,444 edges covered, no failure.
   Our session never crashed, leaked, hung, or sent a frame that failed to
-  parse or re-encode.
+  parse or re-encode. A further 30-minute run gave 4.46 million
+  inputs and 8,264 edges, also with no failure.
 - **`fuzz_frame`:** one finding, in the vendored codec, after 589,000 inputs.
   `ParseData` accepts any value in DATA: infinities, and NaNs with any bit
   pattern. §3.1 allows only finite values, plus the canonical quiet NaN
