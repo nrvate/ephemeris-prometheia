@@ -148,7 +148,12 @@ printf("%s\n", r.source);    /* the element set's name */
 
 `PROMETHEIA_ABI_VERSION` (currently 5; version 2 added `prometheia_options.sigma`, version 3 `prometheia_options.precession`, version 4 `PROMETHEIA_CENTER_BODY` and `prometheia_options.center_body`, version 5 the hypothetical-body functions and the `prometheia_elements` and `prometheia_hypothetical` structs, purely additive) names the struct layouts and
 function signatures. Any change to them bumps the version, and bindings
-can compare against `prometheia_abi_version()` at load time. Before 1.0,
+compare against `prometheia_abi_version()` at load time. **The check is
+equality, not `>=`, while we are on 0.x.** Versions 2 to 4 each appended
+fields to `prometheia_options`, and a caller passes its own struct, so a
+newer library would read past the end of an older caller's struct. A
+binding refuses to bind when `prometheia_abi_version() !=
+PROMETHEIA_ABI_VERSION`. Before 1.0,
 expect the version to move as the engine grows (houses, fixed stars,
 transports). Enumerated values and error codes are only ever appended.
 
