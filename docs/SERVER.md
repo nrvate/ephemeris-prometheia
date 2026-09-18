@@ -581,8 +581,30 @@ flags you want when probing a correction question by hand.
   this server does not yet choose a cheaper strategy (samples rather than a
   fit) to meet one.
 - **Hypothetical bodies and polynomial elements** (kinds 3 and 4): not
-  served, not advertised (per-object error 2). The engine has no models
-  for them; a client that needs a body from particular elements will find
-  them in a later version of this server.
+  served, not advertised (per-object error 2). This is a settled end state,
+  not a gap waiting on work, and the reasoning is worth recording because it
+  came from the client that would have used them.
+
+  Astrolog's hypotheticals are not a catalog but `seorbel.txt`, a local
+  user-editable file of osculating elements. The user's own elements *are*
+  the definition of the body, so a server substituting its own set would
+  silently discard them and the same chart would move when a fallback chain
+  picked a different source. §3.5a already decides this from the other end:
+  hypothetical elements are server-defined, and a client needing identical
+  numbers everywhere sends kind 4. Kind 3 was therefore never the door that
+  client was going to come through.
+
+  Kind 4 would be the right vehicle and is still not worth sending. A body
+  from a polynomial element set with no perturbations is a Kepler solution:
+  microseconds locally, no ephemeris data, bit-identical wherever it runs.
+  Six polynomials over a socket to retrieve an answer the client can compute
+  exactly is strictly worse than computing it.
+
+  If either is ever built here, build **kind 4**. It is the one that can be
+  conformance-checked — the client supplies the elements, the answer is a
+  pure function of them, and two servers must agree to the bit modulo their
+  Kepler solvers. Kind 3 cannot be checked across engines by construction,
+  because the elements belong to the server, so a disagreement is never a
+  defect. A gate is the difference between the two.
 - **TDB's own timescale machinery**: TDB instants convert to TT through the
   Fairhead-Bretagnon series (a few ns against its own ~10 us; TIME.md).

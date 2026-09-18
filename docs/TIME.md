@@ -157,6 +157,34 @@ are CC BY 4.0: free to use with credit, which this section, the header
 comment and the generated table give. The HM Nautical Almanac Office's
 web copies of the same tables are Crown copyright and are not used.
 
+### Delta T takes no state from the ephemeris, deliberately
+
+`DeltaTModel::delta_t_seconds(jd_tt)` is a pure function of the instant.
+No branch of it reads an open ephemeris, a DE header constant or a tidal
+acceleration; the tables are compiled in (`src/delta_t_table.inc`), the
+long-term parabola is a published constant, and the only `static` in the
+path is the default model instance. Opening or closing an ephemeris
+therefore cannot change a Delta T, and the order in which a caller asks for
+one relative to its first position does not matter.
+
+That is worth stating because the alternative is a real and subtle trap,
+reported to us in 2026-09 from the Astrolog side against a different
+library: there, Delta T drew its tidal acceleration from the currently
+open ephemeris file, setting the ephemeris path implicitly closed it, and
+until a file was open again the constant fell back to a default for a
+different DE. Asking for Delta T *before* the first position then used
+-25.80 where the answer should have used -25.936 — 0.037 s of Delta T at
+1900, and every body wrong by its own motion over those 0.037 s. Nothing
+about it looks like a bug at the call site.
+
+The rule this repository keeps, then: **if a future model wants a constant
+that lives in a DE header, it takes it as a constructor argument and the
+caller owns the lifetime.** It must not reach for whatever file happens to
+be open, because that reintroduces an order dependence the API currently
+does not have. The server relies on this — it installs a request's Delta T
+model per compute slice and restores the default with an RAII guard, so a
+model never outlives the request that asked for it.
+
 ### Refreshing the tables
 
 `tools/gen/gen_smh_delta_t.py` builds `src/delta_t_smh_table.inc` from
