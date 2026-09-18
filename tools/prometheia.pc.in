@@ -1,4 +1,6 @@
-# Relocatable: paths are relative to this file (lib/pkgconfig/prometheia.pc).
+# The install-time copy: paths are relative to this file
+# (<prefix>/lib/pkgconfig/prometheia.pc). The build-tree copy comes from
+# prometheia.pc.build.in instead, with absolute paths to the build.
 prefix=${pcfiledir}/../..
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
@@ -6,7 +8,6 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: prometheia
 Description: Ephemeris Prometheia: cleanroom solar-system ephemeris (C++20 library with a C interface)
 Version: @PROJECT_VERSION@
-Requires.private: libzstd
-Libs: -L${libdir} -lprometheia
-Libs.private: -lstdc++ -lm
+Requires: libzstd
+Libs: -L${libdir} -lprometheia -lstdc++ -lm
 Cflags: -I${includedir}

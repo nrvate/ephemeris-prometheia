@@ -181,6 +181,10 @@ install(TARGETS prometheia ephem prometheia-info prometheia-convert prometheia-s
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(DIRECTORY include/prometheia DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-configure_file(tools/prometheia.pc.in prometheia.pc @ONLY)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/prometheia.pc
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+# Two pkg-config files: the build-tree copy points at the real uninstalled
+# artifacts (PKG_CONFIG_PATH=build works, as the Astrolog plugin's build
+# does), and the installed copy stays relocatable around its install prefix.
+configure_file(tools/prometheia.pc.build.in prometheia.pc @ONLY)
+configure_file(tools/prometheia.pc.in prometheia.pc.install @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/prometheia.pc.install
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig RENAME prometheia.pc)

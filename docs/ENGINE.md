@@ -190,8 +190,14 @@ central differences as `calc`.
 - **The reference plane:** the output frame's ecliptic, the mean ecliptic of
   date for the date frames and of J2000 for J2000 and ICRF. A node is where
   the orbit crosses it.
-- **The point is geometric.** It is not a body, so light time, deflection
-  and aberration do not apply, and `sigma_arcsec` is never set.
+- **The corrections apply as sent, exactly as to a body.** Light time (the
+  point's slow fixed-point), deflection (Sun-observer skip) and aberration
+  mean the same here as in `calc`, and `CalcOptions::geometric()` answers
+  the bare point, unchanged to the bit. A point exists to be compared with
+  apparent positions, so it answers in the frame those are in; see
+  [ORBIT-POINTS.md](ORBIT-POINTS.md) for the rule, the measured magnitudes
+  (the observer-velocity term is 21″ on Jupiter's node where light time is
+  0.0003″) and the joint version-4 settlement. `sigma_arcsec` is never set.
 - **Points:**
   - ascending node, the northward crossing;
   - descending node;
