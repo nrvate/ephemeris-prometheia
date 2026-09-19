@@ -777,7 +777,7 @@ bisection ladder for when a number disagrees.
 
 ## Fuzzing
 
-`tools/fuzz.sh [SECONDS]` runs two libFuzzer targets under ASan and UBSan.
+`tools/fuzz.sh [SECONDS]` runs three libFuzzer targets under ASan and UBSan.
 It builds them with clang in `build-fuzz/` and runs each for SECONDS
 (default 60). It is never part of the gate.
 - **`fuzz_frame`**: any bytes into the protocol codec's whole-message parser
@@ -791,9 +791,20 @@ It builds them with clang in `build-fuzz/` and runs each for SECONDS
     session.
   - Every reply must parse as a v4 frame and re-encode to the same bytes,
     whatever the server was sent.
+- **`fuzz_json`**: `prometheia-json`'s messages into its MCP dispatcher, on
+  the same synthetic kernel, through the one parser every transport uses
+  (`mcp::parse`).
+  - A mode byte either sends the text as the whole message or wraps it as
+    one tool's arguments, so the fuzzer reaches argument handling without
+    having to discover the JSON-RPC envelope.
+  - Besides the sanitizers: no exception escapes, every reply serialises,
+    and every reply is a JSON-RPC 2.0 response (`"jsonrpc"`, a string,
+    number or null `id`, exactly one of `result` and `error`).
+  - Seeds are the examples in JSON_API.md; `fuzz/json.dict` holds the
+    methods, argument names and vocabulary.
 
-Corpora start from the protocol's conformance set, read from the Astrolog
-tree (`$PROMETHEIA_ASTROLOG`). Both targets also get `fuzz/protocol.dict`:
+Corpora for the binary targets start from the protocol's conformance set,
+read from the Astrolog tree (`$PROMETHEIA_ASTROLOG`). Both also get `fuzz/protocol.dict`:
 the magic, the message types, canonical and non-canonical NaNs, the zodiac
 tokens and some names. Those are byte strings blind mutation rarely
 guesses, which the planted-fault run below shows is its weak spot. They grow in `fuzz-corpus/`, and failures land
@@ -846,6 +857,22 @@ every field.
   - Regression tests replay the fuzzer's request.
   - The session fuzzer then ran 340,000 inputs against the fixed server
     and the stricter codec, with no failure.
+
+**`fuzz_json`, 2026-09-18/19** (10 minutes, 8 workers, `-fork=8`):
+- **Before the fixes:** 26.7 million inputs, three failures, and a fourth
+  found by reading the transports it feeds:
+  - an `id` that is an object was echoed in the reply, where JSON-RPC
+    requires null (the one crash);
+  - a topocentric site 4.4e19 m up: two timeouts. Light time from there
+    runs centuries back, and a small body was integrated that far before
+    the call failed. On the real catalogue it cost 30 s of CPU per body;
+  - JSON nested 500,000 deep crashed `prometheia-json` with a stack
+    overflow. The fuzzer's inputs are too short to reach that depth; a
+    1 MiB body is not;
+  - the HTTP log wrote the client's method and tool strings verbatim.
+  Each is fixed (JSON_API.md, "Guardrails"), and each has a regression test
+  that fails without its fix.
+- **After:** 19.2 million inputs, 35,386 edges, no failure.
 
 ## Load and soak
 

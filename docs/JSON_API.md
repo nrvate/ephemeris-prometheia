@@ -121,12 +121,18 @@ The agent-facing summary of what to ask, and how, is the MCP resource
 ```
 
 - **Time:**
-  - `time` is an ISO 8601 UTC string (with an offset or `Z`), or
+  - `time` is an ISO 8601 clock time (with an offset or `Z`), or
     `{"utc": …}`, `{"jd_tt": …}` or `{"jd_ut1": …}`.
   - `times` is a list of those.
   - `series` is `{"start", "step_days", "count"}`.
   - UTC goes through the leap-second table and the engine's ΔT
     (`convert_time` shows both).
+  - **Before 1972 a clock time is read as UT1**, since UTC with integer
+    leap seconds begins then, and before it civil time kept UT to under a
+    second (from 1961). So a birth chart can be asked by clock time in any
+    year. A reply names the scale: each row's `time` is `{"jd_tt", "utc"}`
+    from 1972 and `{"jd_tt", "ut1"}` before it, as does `convert_time`.
+    A leap second (`:60`) before 1972 is refused (maintainer, 2026-09-19).
 - **Defaults** are what a chart wants: apparent (all three corrections),
   geocentric, the true ecliptic of date, tropical, rates on. Each can be
   overridden: `observer`, `frame`, `coordinates`, `corrections`, `zodiac`,
@@ -222,7 +228,22 @@ from here when it asks Astrolog to draw it.
   (`--max-objects`, `--max-times`). A token goes in
   `Authorization: Bearer`.
 - The logs never carry instants, sites, names or tokens (SERVER.md,
-  "Logging"). A birth chart is personal data.
+  "Logging"). A birth chart is personal data. A method or tool name is
+  logged only when it is one this server has; anything else is logged as
+  `unknown`, since a client could put anything in that string.
+- **Hostile input is refused, never crashes the server** (fuzzed:
+  SERVER.md, "Fuzzing"):
+  - JSON nested more than 64 deep is a parse error (-32700), refused
+    before it is built. A 1 MiB body can hold half a million levels, and
+    copying a value that deep overflowed the stack.
+  - An `id` that is not a string, a number or null is an invalid request,
+    answered with a null id (JSON-RPC 2.0, sections 4 and 5).
+  - A reply goes out even if something put bytes in it that are not UTF-8:
+    they become U+FFFD instead of stopping the transport.
+  - A topocentric site's `height_m` is within −12,000..100,000 m, from the
+    deepest trench to the Kármán line. A far higher "site" put light time
+    centuries back, and a small body was integrated all that way before
+    the call failed (30 s of CPU).
 - No request contents in error text.
 
 ## How the two projects divide the work

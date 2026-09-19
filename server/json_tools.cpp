@@ -16,6 +16,12 @@
 namespace prometheia::server::jsontools {
 namespace {
 
+// A topocentric site's height above the ellipsoid, metres (docs/JSON_API.md).
+constexpr double kSiteMinHeightM = -12000.0, kSiteMaxHeightM = 100000.0;
+
+// The first year of UTC with integer leap seconds.
+constexpr int kUtcFromYear = 1972;
+
 std::string lower(std::string_view s) {
     std::string out(s);
     for (char& c : out)
@@ -153,12 +159,36 @@ std::optional<double> parse_utc(const std::string& s, Bad& bad) {
         mi = int((secs - h * 3600.0) / 60.0);
         sec = secs - h * 3600.0 - mi * 60.0;
     }
+    // Before 1972 there is no UTC with integer leap seconds: a civil clock
+    // time then is read as UT1 (what UTC approximated, to under a second
+    // from 1961), and reported back as "ut1", never "utc".
+    if (y < kUtcFromYear) {
+        if (sec >= 60.0) {
+            bad.message = "there are no leap seconds before 1972";
+            return std::nullopt;
+        }
+        return time::jd_tt_from_ut1(time::jd_from_ymdhms(y, mo, d, h, mi, sec));
+    }
     auto tt = time::utc_to_tt(y, mo, d, h, mi, sec);
     if (!tt) {
         bad.message = tt.error().message;
         return std::nullopt;
     }
     return tt.value();
+}
+
+// A JD as ISO 8601 with a Z, to the millisecond: for UT1 before 1972.
+std::string format_civil(double jd) {
+    const double jdr = std::floor(jd * 86400000.0 + 0.5) / 86400000.0;
+    const time::Civil c = time::civil_from_jd(jdr);
+    const int day = int(std::floor(c.day));
+    long long ms = std::llround((c.day - day) * 86400000.0);
+    ms = std::min(ms, 86400000LL - 1);
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%s%04d-%02d-%02dT%02lld:%02lld:%02lld.%03lldZ",
+                  c.year < 0 ? "-" : "", std::abs(c.year), c.month, day, ms / 3600000,
+                  ms / 60000 % 60, ms / 1000 % 60, ms % 1000);
+    return buf;
 }
 
 std::string format_utc(double jd_tt) {
@@ -170,6 +200,15 @@ std::string format_utc(double jd_tt) {
     std::snprintf(buf, sizeof buf, "%s%04d-%02d-%02dT%02d:%02d:%06.3fZ", t.year < 0 ? "-" : "",
                   std::abs(t.year), t.month, t.day, t.hour, t.minute, t.second);
     return buf;
+}
+
+// An instant as the replies give it: JD(TT), and UTC from 1972, or before it
+// the UT1 a clock then kept.
+Json time_of(double jd_tt) {
+    const std::string utc = format_utc(jd_tt);
+    if (!utc.empty())
+        return {{"jd_tt", jd_tt}, {"utc", utc}};
+    return {{"jd_tt", jd_tt}, {"ut1", format_civil(time::jd_ut1_from_tt(jd_tt))}};
 }
 
 // The instants a call asks for, TT.
@@ -410,9 +449,15 @@ std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
         const double h = site.contains("height_m") && site["height_m"].is_number()
                              ? site["height_m"].get<double>()
                              : (site.contains("height_m") ? NAN : 0.0);
-        if (!(std::fabs(lon) <= 180.0) || !(std::fabs(lat) <= 90.0) || !std::isfinite(h)) {
+        // A site is a place on or above the Earth: from the deepest trench to
+        // the Karman line. Beyond it the "site" is a spacecraft, and far
+        // beyond, light time from it runs centuries back: a small body was
+        // then integrated that far before the call failed (30 s of CPU at
+        // 4e19 m, fuzz_json, 2026-09-18).
+        if (!(std::fabs(lon) <= 180.0) || !(std::fabs(lat) <= 90.0) ||
+            !(h >= kSiteMinHeightM && h <= kSiteMaxHeightM)) {
             bad.message = "a site's longitude is within ±180°, its latitude within ±90°, and its "
-                          "height_m is a number";
+                          "height_m within -12000..100000";
             return std::nullopt;
         }
         o.center = Center::Topocentric;
@@ -696,7 +741,7 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
             if (source.empty())
                 source = std::string(cr.provenance.source);
             Json row;
-            row["time"] = {{"jd_tt", jd}, {"utc", format_utc(jd)}};
+            row["time"] = time_of(jd);
             const bool ecl = o.coords == Coords::Ecliptic;
             row[ecl ? "longitude_deg" : "right_ascension_deg"] = cr.pos.lon_deg;
             row[ecl ? "latitude_deg" : "declination_deg"] = cr.pos.lat_deg;
@@ -844,17 +889,20 @@ Result<Json> convert_time(const Json& a, ToolError* err) {
     }
     const double tt = t->front();
     const double dt = time::delta_t(tt);
-    return Json{{"utc", format_utc(tt)},
-                {"jd_tt", tt},
-                {"jd_tdb", time::tdb_from_tt(tt)},
-                {"jd_ut1", time::jd_ut1_from_tt(tt)},
-                {"delta_t_s", dt},
-                {"notes", "TT-UT1 (delta T) is observed from 1657 to the present month, a "
-                          "reconstruction before and a trend after (docs/TIME.md)"}};
+    Json out = time_of(tt);
+    out.update(Json{{"jd_tt", tt},
+                    {"jd_tdb", time::tdb_from_tt(tt)},
+                    {"jd_ut1", time::jd_ut1_from_tt(tt)},
+                    {"delta_t_s", dt},
+                    {"notes", "TT-UT1 (delta T) is observed from 1657 to the present month, a "
+                              "reconstruction before and a trend after (docs/TIME.md). Before "
+                              "1972 a clock time is read as UT1, and given back as \"ut1\""}});
+    return out;
 }
 
 Json schema_positions() {
-    const Json time = {{"description", "ISO 8601 UTC string (e.g. \"1990-06-15T14:30:00+02:00\"), "
+    const Json time = {{"description", "ISO 8601 clock time with offset (e.g. "
+                                       "\"1990-06-15T14:30:00+02:00\"; UTC from 1972, UT1 before), "
                                        "or {\"jd_tt\": n} or {\"jd_ut1\": n}"}};
     return {
         {"type", "object"},
@@ -889,7 +937,10 @@ Json schema_positions() {
             {"properties",
              {{"lon_deg", {{"type", "number"}}},
               {"lat_deg", {{"type", "number"}}},
-              {"height_m", {{"type", "number"}}}}}}},
+              {"height_m",
+               {{"type", "number"},
+                {"minimum", kSiteMinHeightM},
+                {"maximum", kSiteMaxHeightM}}}}}}},
           {"zodiac",
            {{"description", "\"tropical\" (default), a zodiac token (see capabilities), or "
                             "{\"user\": {\"epoch_jd_tt\", \"ayanamsa_deg\"}}"}}},
@@ -943,7 +994,9 @@ std::vector<Tool> tools() {
          "One instant in UTC, TT, TDB and UT1, with delta T, using the leap-second table.",
          {{"type", "object"},
           {"properties",
-           {{"time", {{"description", "ISO 8601 UTC string, or {\"jd_tt\"} or {\"jd_ut1\"}"}}}}},
+           {{"time",
+             {{"description", "ISO 8601 clock time (UTC from 1972, UT1 before), or "
+                              "{\"jd_tt\"} or {\"jd_ut1\"}"}}}}},
           {"required", {"time"}}}},
     };
 }
@@ -998,8 +1051,9 @@ std::string llms_txt() {
 ## Tools
 
 - positions: objects by name ("Sun", "Moon", "Mars", "true node", "Lilith",
-  "Spica", "Ceres", "cupido") at "time" (ISO 8601 UTC with offset, e.g.
-  "1990-06-15T14:30:00+02:00"), "times" or "series". Defaults are what a chart
+  "Spica", "Ceres", "cupido") at "time" (ISO 8601 clock time with offset, e.g.
+  "1990-06-15T14:30:00+02:00": UTC from 1972, UT1 before it, and the reply
+  says which), "times" or "series". Defaults are what a chart
   wants: apparent, geocentric, the ecliptic of date, tropical, with rates.
   Options: observer (topocentric with "site", or "body" with "center"),
   zodiac (e.g. "lahiri"), sidereal_plane, frame, coordinates, corrections,

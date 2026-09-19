@@ -16,6 +16,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "json_tools.hpp"
 
@@ -29,6 +30,25 @@ inline constexpr const char* kProtocolVersions[] = {"2025-06-18", "2025-03-26", 
 // Whether a revision is one of kProtocolVersions.
 bool supported_version(const std::string& v);
 
+// JSON nested deeper than this is refused unparsed. The tools' arguments are
+// a few levels deep; a 1 MiB body of brackets is half a million, and copying
+// a value that deep overflows the stack (measured: prometheia-json crashed
+// at 500,000, 2026-09-18).
+inline constexpr int kMaxDepth = 64;
+
+// The one parser every transport uses: the value, or a discarded value with
+// *why set ("not JSON", or nested too deeply).
+Json parse(std::string_view text, std::string* why);
+
+// A reply as the transports send it. dump() throws on a string that is not
+// UTF-8; nothing should produce one, but a transport must answer rather than
+// die, so any such bytes become U+FFFD.
+std::string wire(const Json& reply);
+
+// The method, for the log: one this server knows, "unknown" otherwise, or
+// "batch". Never the client's own string, which could carry anything.
+std::string method_for_log(const Json& message);
+
 // A message's method for the log: "batch", or "?" when it has none.
 std::string method_name(const Json& message);
 
@@ -41,8 +61,9 @@ public:
     // for a notification (and for a batch of notifications only).
     std::optional<Json> handle(const Json& message);
 
-    // A message that did not parse as JSON: JSON-RPC's parse error.
-    static Json parse_error(const std::string& why);
+    // A message that did not parse (why: from parse()): JSON-RPC's parse
+    // error, naming what was sent ("the body", "the line").
+    static Json parse_error(const std::string& what, const std::string& why);
 
 private:
     std::optional<Json> one(const Json& message);

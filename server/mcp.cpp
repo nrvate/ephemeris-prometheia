@@ -12,6 +12,16 @@ constexpr int kInvalidParams = -32602;
 
 constexpr const char* kLlmsUri = "prometheia://llms.txt";
 
+// JSON-RPC 2.0 section 4: an id is a string, a number or null. The id a reply
+// may echo: the message's own when it is one of those, else null (section 5:
+// "if there was an error in detecting the id ... it MUST be Null").
+bool valid_id(const Json& id) {
+    return id.is_string() || id.is_number() || id.is_null();
+}
+Json reply_id(const Json& m) {
+    return m.is_object() && m.contains("id") && valid_id(m["id"]) ? m["id"] : Json(nullptr);
+}
+
 // A string member, or empty when it is absent or not a string.
 std::string str(const Json& o, const char* key) {
     return o.contains(key) && o[key].is_string() ? o[key].get<std::string>() : std::string();
@@ -26,6 +36,59 @@ bool supported_version(const std::string& v) {
     return false;
 }
 
+Json parse(std::string_view text, std::string* why) {
+    // The deepest nesting, outside strings, before anything is built.
+    int depth = 0;
+    bool in_string = false, escaped = false;
+    for (char c : text) {
+        if (in_string) {
+            if (escaped)
+                escaped = false;
+            else if (c == '\\')
+                escaped = true;
+            else if (c == '"')
+                in_string = false;
+        } else if (c == '"') {
+            in_string = true;
+        } else if (c == '[' || c == '{') {
+            if (++depth > kMaxDepth) {
+                *why = "nested more than " + std::to_string(kMaxDepth) + " deep";
+                return Json(Json::value_t::discarded);
+            }
+        } else if (c == ']' || c == '}') {
+            --depth;
+        }
+    }
+    Json v = Json::parse(text, nullptr, false);
+    if (v.is_discarded())
+        *why = "not JSON";
+    return v;
+}
+
+std::string wire(const Json& reply) {
+    return reply.dump(-1, ' ', false, Json::error_handler_t::replace);
+}
+
+std::string method_for_log(const Json& m) {
+    static const char* const known[] = {"initialize",
+                                        "ping",
+                                        "tools/list",
+                                        "tools/call",
+                                        "resources/list",
+                                        "resources/read",
+                                        "resources/templates/list",
+                                        "prompts/list",
+                                        "notifications/initialized",
+                                        "notifications/cancelled"};
+    const std::string name = method_name(m);
+    if (name == "batch")
+        return name;
+    for (const char* k : known)
+        if (name == k)
+            return name;
+    return "unknown";
+}
+
 std::string method_name(const Json& m) {
     if (m.is_array())
         return "batch";
@@ -34,8 +97,8 @@ std::string method_name(const Json& m) {
                : std::string("?");
 }
 
-Json Dispatcher::parse_error(const std::string& why) {
-    return error(nullptr, kParseError, "not JSON: " + why);
+Json Dispatcher::parse_error(const std::string& what, const std::string& why) {
+    return error(nullptr, kParseError, what + ": " + why);
 }
 
 Json Dispatcher::result(const Json& id, Json r) const {
@@ -67,9 +130,10 @@ std::optional<Json> Dispatcher::one(const Json& m) {
         // A response the client sent us (we send no requests), or not a message.
         if (m.is_object() && (m.contains("result") || m.contains("error")))
             return std::nullopt;
-        return error(m.is_object() && m.contains("id") ? m["id"] : Json(nullptr), kInvalidRequest,
-                     "not a JSON-RPC 2.0 request");
+        return error(reply_id(m), kInvalidRequest, "not a JSON-RPC 2.0 request");
     }
+    if (m.contains("id") && !valid_id(m["id"]))
+        return error(nullptr, kInvalidRequest, "id is a string, a number or null");
     const std::string method = m["method"].get<std::string>();
     const bool notification = !m.contains("id");
     const Json id = notification ? Json(nullptr) : m["id"];
@@ -121,11 +185,11 @@ std::optional<Json> Dispatcher::one(const Json& m) {
                 return error(id, kInvalidParams, "no tool is called " + name);
             // The tool's own failure: a result the agent can read and act on.
             const Json body = {{"error", {{"code", err.code}, {"message", err.message}}}};
-            return result(id, {{"content", {{{"type", "text"}, {"text", body.dump()}}}},
+            return result(id, {{"content", {{{"type", "text"}, {"text", wire(body)}}}},
                                {"structuredContent", body},
                                {"isError", true}});
         }
-        return result(id, {{"content", {{{"type", "text"}, {"text", r.value().dump()}}}},
+        return result(id, {{"content", {{{"type", "text"}, {"text", wire(r.value())}}}},
                            {"structuredContent", r.value()},
                            {"isError", false}});
     }

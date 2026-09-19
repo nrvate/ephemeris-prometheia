@@ -18,6 +18,20 @@ documented, not that it is frozen.
   observer is the object". A point is a place in space, so only the body
   itself is refused now (docs/ORBIT-POINTS.md, "From any observer";
   docs/SERVER.md, per-object errors).
+- **`prometheia-json` reads a clock time before 1972 as UT1** (maintainer,
+  2026-09-19). It refused any date before 1972, so an agent could not ask
+  for most birth charts by clock time. UTC with integer leap seconds begins
+  in 1972, and before it civil time kept UT. The reply names the scale
+  (`"ut1"` in place of `"utc"`) (docs/JSON_API.md, "Time").
+- **`prometheia-json` hardened against hostile input**, found by a new
+  fuzzer, `fuzz_json` (docs/SERVER.md, "Fuzzing"; docs/JSON_API.md,
+  "Guardrails"). Deeply nested JSON crashed the process (a stack overflow at
+  500,000 levels, which fits in a 1 MiB body); it is now a parse error past
+  64. An object or array `id` was echoed; it is now answered with null. A
+  site 4e19 m up cost 30 s of CPU per small body; `height_m` is now
+  −12,000..100,000 m. The HTTP log wrote the client's method and tool
+  strings; it now writes only names the server knows. Replies that could
+  not serialise now go out with U+FFFD.
 - **The cross-test sees orbit points from elsewhere.** The `points` leg asks
   every point from the Sun, the barycentre and Mars's centre, at masks 0
   and 1. The Moon's points are also checked against the Earth answered

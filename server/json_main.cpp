@@ -137,13 +137,14 @@ int serve_http(Http& h, const std::string& bind, int port) {
         }
         read_body(res, [&h, res](const std::string& body) {
             const auto t0 = std::chrono::steady_clock::now();
-            Json msg = Json::parse(body, nullptr, false);
+            std::string why;
+            Json msg = mcp::parse(body, &why);
             if (msg.is_discarded()) {
                 send(res, "400 Bad Request", "application/json",
-                     mcp::Dispatcher::parse_error("the body").dump());
+                     mcp::wire(mcp::Dispatcher::parse_error("the body", why)));
                 return;
             }
-            const std::string method = mcp::method_name(msg);
+            const std::string method = mcp::method_for_log(msg);
             auto reply = h.mcp.handle(msg);
             h.log.write(
                 LogLevel::Info, "http mcp %s ms=%.1f", method.c_str(),
@@ -152,7 +153,7 @@ int serve_http(Http& h, const std::string& bind, int port) {
             if (!reply)
                 send(res, "202 Accepted", nullptr, "");
             else
-                send(res, "200 OK", "application/json", reply->dump());
+                send(res, "200 OK", "application/json", mcp::wire(*reply));
         });
     });
     // No server-initiated messages, so no stream to open; sessions are not kept.
@@ -175,7 +176,7 @@ int serve_http(Http& h, const std::string& bind, int port) {
                             {"description", t.description},
                             {"input_schema", t.input_schema},
                             {"route", "POST /v1/" + t.name}});
-        send(res, "200 OK", "application/json", Json{{"tools", list}}.dump());
+        send(res, "200 OK", "application/json", mcp::wire(Json{{"tools", list}}));
     });
     app.post("/v1/:tool", [&h](auto* res, auto* req) {
         const std::string tool(req->getParameter(0));
@@ -186,22 +187,27 @@ int serve_http(Http& h, const std::string& bind, int port) {
             return;
         }
         read_body(res, [&h, res, tool](const std::string& body) {
-            Json args = body.empty() ? Json::object() : Json::parse(body, nullptr, false);
+            std::string why;
+            Json args = body.empty() ? Json::object() : mcp::parse(body, &why);
             if (args.is_discarded()) {
                 send(res, "400 Bad Request", "application/json",
-                     R"({"error":{"code":"invalid-arguments","message":"the body is not JSON"}})");
+                     mcp::wire(
+                         Json{{"error",
+                               {{"code", "invalid-arguments"}, {"message", "the body: " + why}}}}));
                 return;
             }
             jsontools::ToolError err;
             auto r = jsontools::call(h.engine, h.ctx, tool, args, &err);
-            h.log.write(LogLevel::Info, "http v1 %s %s", tool.c_str(), r ? "ok" : err.code.c_str());
+            h.log.write(LogLevel::Info, "http v1 %s %s",
+                        err.code == "unknown-tool" ? "unknown" : tool.c_str(),
+                        r ? "ok" : err.code.c_str());
             if (!r) {
                 send(res, err.code == "unknown-tool" ? "404 Not Found" : "400 Bad Request",
                      "application/json",
-                     Json{{"error", {{"code", err.code}, {"message", err.message}}}}.dump());
+                     mcp::wire(Json{{"error", {{"code", err.code}, {"message", err.message}}}}));
                 return;
             }
-            send(res, "200 OK", "application/json", r.value().dump());
+            send(res, "200 OK", "application/json", mcp::wire(r.value()));
         });
     });
     app.get("/llms.txt", [](auto* res, auto*) {
@@ -226,13 +232,14 @@ int serve_stdio(mcp::Dispatcher& mcp, const Log& log) {
     while (std::getline(std::cin, line)) {
         if (line.find_first_not_of(" \t\r") == std::string::npos)
             continue;
-        Json msg = Json::parse(line, nullptr, false);
+        std::string why;
+        Json msg = mcp::parse(line, &why);
         std::optional<Json> reply =
-            msg.is_discarded() ? mcp::Dispatcher::parse_error("the line") : mcp.handle(msg);
-        if (msg.is_object())
-            log.write(LogLevel::Debug, "stdio %s", mcp::method_name(msg).c_str());
+            msg.is_discarded() ? mcp::Dispatcher::parse_error("the line", why) : mcp.handle(msg);
+        if (!msg.is_discarded())
+            log.write(LogLevel::Debug, "stdio %s", mcp::method_for_log(msg).c_str());
         if (reply) {
-            std::cout << reply->dump() << '\n';
+            std::cout << mcp::wire(*reply) << '\n';
             std::cout.flush();
         }
     }

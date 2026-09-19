@@ -64,6 +64,27 @@ TEST_CASE("json_times_and_names") {
     CHECK(out["results"][2]["error"]["code"] == "invalid-arguments");
 }
 
+TEST_CASE("json_clock_times_before_1972_are_ut1") {
+    // A clock time before 1972 is read as UT1 and given back as "ut1"
+    // (maintainer, 2026-09-19): agents ask for birth charts by clock time.
+    synth::TempFile tf("json-ut1");
+    Engine e = synth::open_synthetic(tf);
+    const Json a = run(e, "convert_time", {{"time", "1955-03-01T10:00:00+01:00"}});
+    REQUIRE(a.is_object());
+    CHECK(a["jd_ut1"] == 2435167.875);
+    CHECK(a["ut1"] == "1955-03-01T09:00:00.000Z");
+    CHECK_FALSE(a.contains("utc"));
+    const Json b = run(e, "convert_time", {{"time", {{"jd_ut1", 2435167.875}}}});
+    CHECK(a["jd_tt"] == b["jd_tt"]);
+    const Json rows = run(e, "positions", {{"time", "1955-03-01T09:00:00Z"}, {"objects", {"Sun"}}});
+    CHECK(rows["results"][0]["rows"][0]["time"]["ut1"] == "1955-03-01T09:00:00.000Z");
+    // From 1972 it is UTC, leap seconds and all; before, there are none.
+    CHECK(run(e, "convert_time", {{"time", "1972-01-01T00:00:00Z"}}).contains("utc"));
+    jsontools::ToolError err;
+    CHECK(run(e, "convert_time", {{"time", "1971-12-31T23:59:60Z"}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+}
+
 TEST_CASE("json_bad_arguments_are_whole_call_errors") {
     synth::TempFile tf("json-bad");
     Engine e = synth::open_synthetic(tf);
@@ -229,6 +250,73 @@ TEST_CASE("json_wrong_types_are_errors_not_exceptions") {
     auto r = d.handle(Json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", 5}});
     REQUIRE(r);
     CHECK((*r)["error"]["code"] == -32600);
+}
+
+TEST_CASE("json_hostile_messages") {
+    synth::TempFile tf("json-hostile");
+    Engine e = synth::open_synthetic(tf);
+    mcp::Dispatcher d(e, jsontools::Context{}, "0.0.0");
+    const auto nested = [](int depth) {
+        return std::string(size_t(depth), '[') + std::string(size_t(depth), ']');
+    };
+
+    SUBCASE("nesting is refused unparsed past kMaxDepth") {
+        // prometheia-json crashed (stack overflow) on 500,000 levels, which
+        // a 1 MiB body holds (fuzz_json, 2026-09-18).
+        std::string why;
+        CHECK(!mcp::parse(nested(mcp::kMaxDepth), &why).is_discarded());
+        CHECK(mcp::parse(nested(mcp::kMaxDepth + 1), &why).is_discarded());
+        CHECK(why.find("nested") != std::string::npos);
+        CHECK(mcp::parse(nested(500000), &why).is_discarded());
+        // Brackets inside strings are text, not nesting.
+        const std::string text = "{\"a\":\"" + nested(1000) + "\\\"[\"}";
+        CHECK(!mcp::parse(text, &why).is_discarded());
+        CHECK(mcp::parse("{\"a\":", &why).is_discarded());
+        CHECK(why == "not JSON");
+    }
+    SUBCASE("an id that is not a string, number or null is answered with null") {
+        // JSON-RPC 2.0, sections 4 and 5; the dispatcher echoed it (fuzz_json).
+        for (const Json& id : {Json::object({{"a", 1}}), Json::array({1}), Json(true)}) {
+            for (const Json& m :
+                 {Json{{"id", id}}, Json{{"jsonrpc", "2.0"}, {"id", id}, {"method", "ping"}}}) {
+                auto r = d.handle(m);
+                REQUIRE(r);
+                CHECK((*r)["id"].is_null());
+                CHECK((*r)["error"]["code"] == -32600);
+            }
+        }
+        auto r = d.handle(Json{{"jsonrpc", "2.0"}, {"id", "x"}, {"method", "ping"}});
+        REQUIRE(r);
+        CHECK((*r)["id"] == "x");
+    }
+    SUBCASE("the log never carries the client's method string") {
+        CHECK(mcp::method_for_log(Json{{"method", "tools/call"}}) == "tools/call");
+        CHECK(mcp::method_for_log(Json{{"method", "1990-06-15 Zurich\nforged line"}}) == "unknown");
+        CHECK(mcp::method_for_log(Json::array()) == "batch");
+    }
+    SUBCASE("a site is on the Earth: -12 km to the Karman line") {
+        // 4e19 m cost 30 s of CPU per small body (fuzz_json, 2026-09-18).
+        const auto at = [&](double h) {
+            jsontools::ToolError err;
+            const Json args = {{"time", "2000-01-01T12:00:00Z"},
+                               {"observer", "topocentric"},
+                               {"site", {{"lon_deg", 8.55}, {"lat_deg", 47.37}, {"height_m", h}}},
+                               {"objects", {"Sun"}}};
+            return !run(e, "positions", args, &err).is_null();
+        };
+        CHECK(at(-12000.0));
+        CHECK(at(100000.0));
+        CHECK_FALSE(at(-12000.5));
+        CHECK_FALSE(at(100000.5));
+        CHECK_FALSE(at(4e19));
+    }
+    SUBCASE("a reply with bytes that are not UTF-8 still goes out") {
+        const Json bad = {{"text", std::string("a\xff"
+                                               "b")}};
+        CHECK_THROWS(bad.dump());
+        CHECK(mcp::wire(bad) == "{\"text\":\"a\xef\xbf\xbd"
+                                "b\"}");
+    }
 }
 
 TEST_CASE("json_vocabulary_matches_the_registries") {

@@ -106,17 +106,7 @@ target_include_directories(prometheia_server SYSTEM PUBLIC ${CMAKE_CURRENT_SOURC
 target_link_libraries(prometheia_server PUBLIC prometheia)
 target_compile_options(prometheia_server PRIVATE -Wall -Wextra -Werror)
 
-# libFuzzer targets (docs/SERVER.md, "Fuzzing"): clang only, built by
-# tools/fuzz.sh in build-fuzz/, never by the gate.
 option(PROMETHEIA_FUZZ "Build the libFuzzer targets (clang)" OFF)
-if(PROMETHEIA_FUZZ)
-  foreach(target fuzz_session fuzz_frame)
-    add_executable(${target} fuzz/${target}.cpp)
-    target_link_libraries(${target} PRIVATE prometheia_server)
-    target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-    target_link_options(${target} PRIVATE -fsanitize=fuzzer)
-  endforeach()
-endif()
 
 # The JSON tools (docs/JSON_API.md): JSON and MCP for agents and scripts, over
 # the binary server's own object resolution. Its own library, so nlohmann/json
@@ -127,6 +117,18 @@ target_link_libraries(prometheia_json PUBLIC prometheia_server)
 target_compile_options(prometheia_json PRIVATE -Wall -Wextra -Werror)
 prometheia_test(json_tools tests/test_json_tools.cpp)
 target_link_libraries(test_json_tools PRIVATE prometheia_json)
+
+# libFuzzer targets (docs/SERVER.md, "Fuzzing"): clang only, built by
+# tools/fuzz.sh in build-fuzz/, never by the gate.
+if(PROMETHEIA_FUZZ)
+  foreach(target fuzz_session fuzz_frame fuzz_json)
+    add_executable(${target} fuzz/${target}.cpp)
+    target_link_libraries(${target} PRIVATE prometheia_server)
+    target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    target_link_options(${target} PRIVATE -fsanitize=fuzzer)
+  endforeach()
+  target_link_libraries(fuzz_json PRIVATE prometheia_json)
+endif()
 
 prometheia_test(server tests/test_server.cpp)
 target_link_libraries(test_server PRIVATE prometheia_server)
