@@ -864,6 +864,31 @@ unanswered 9, and 135 findings (theirs), all in the new leg:
 - **`sidsweep`, ours:** 14 tokens, 266 rows agree, and 22 refused. The
   refusals are the eleven on plane 1 at both epochs, as the clause says.
 
+### The true anchor, 2026-09-18 (`docs/crosstest/2026-09-18m.tsv`)
+
+Against the Astrolog daemon from their clean `b0b6a19`, which includes the
+true anchor (`789f3c2`).
+- The header reads `b0b6a19+dirty` and STALE. The harness names the tree and
+  binary as they are now, and they had rebuilt from a working tree after
+  launching. Their launch script printed the running daemon's commit
+  (`b0b6a19`, clean).
+
+Totals: agree 2,031, expected-difference 243, refused 70, unadjudicated 1,
+unanswered 9, and 15 findings (theirs).
+- **`sidinstant`:** the aberration pattern of record l is gone.
+  - The star modes agree to 0.002–0.023″.
+  - The Galactic-Centre modes agree to −0.064 … +0.022″, drifting with the
+    epoch.
+  - The modern-pole node modes agree to 4 mas.
+  - What remains is the anchors' data: the stars from two catalogues, and
+    Sgr A*'s place and motion from different sources. The leg allows it with
+    `INSTANT_ANCHOR_BAND`, 0.1″ (an estimate).
+- **The 15 findings** are `galequ-iau1958` at −0.18″, the ICRS transfer of
+  the IAU 1958 pole. Adopting Liu et al.'s transfer is before their
+  maintainer.
+- **Wilhelm's zodiac** agrees with the rest since ours moved to the mean pole
+  of date (FRAMES.md).
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

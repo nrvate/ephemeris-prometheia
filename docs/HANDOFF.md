@@ -28,8 +28,7 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    the C API already says "library 0.4", and `prometheiad` 0.5.0.
 3. **Waiting on the Astrolog side**, with every decision already made by
    the maintainer on 2026-09-18:
-   - **Anchor at its true position** for the eleven zodiacs defined at the
-     instant, on plane 0. This closes the 135 `sidinstant` findings.
+   - ~~Anchor at its true position~~: landed (their `789f3c2`), record m.
    - **The §3.5a text drop:** a zodiac with no anchor epoch has the
      instant's zero point on plane 2 and no plane 1, with its anchor at its
      true position. The class is "no anchor epoch", not a list.
@@ -66,10 +65,10 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `bary`, `deflection` (textbook formula);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18l.tsv`. The only findings are
-  theirs, in the new `sidinstant` leg: their anchor is apparent, where the
-  published definition is the true position, so rows differ by the anchor's
-  aberration (CROSS-TEST.md, "Zodiacs defined at the instant").
+- **Latest record:** `docs/crosstest/2026-09-18m.tsv`. The only findings are
+  the 15 `galequ-iau1958` rows (their pole transfer, before their
+  maintainer); the zodiacs defined at the instant otherwise agree (CROSS-TEST.md,
+  "The true anchor").
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;

@@ -860,14 +860,18 @@ def leg_sidereal(client, ours, theirs, table, verbose):
 
 
 # Zodiacs defined at the instant (docs/FRAMES.md): plane 0, both servers, for
-# the tokens both list. astrolog-ephd took the anchor's apparent position
-# (aberration included) where the published definition, and the proposed
-# 3.5a sentence, take its true position: its rows differ by the anchor's
-# aberration, up to ~20", until it adopts the true anchor (2026-09-18).
+# the tokens both list. Until their 789f3c2, astrolog-ephd took the anchor's
+# apparent position, and its rows differed by the anchor's aberration (up to
+# ~20", record l); both now take the true position, as published.
 INSTANT_TOKENS = ["true-citra", "true-revati", "true-pushya", "true-mula", "galcent-0sag",
                   "galcent-cochrane", "galcent-rgilbrand", "galcent-mula-wilhelm",
                   "galequ-iau1958", "galequ-true", "galequ-mula"]
 INSTANT_EPOCHS = [2415020.5, 2451545.0, 2488069.5]
+# The anchors come from different data on the two sides: the stars from two
+# catalogues (the stars leg holds those within STAR_BAND), Sgr A*'s place and
+# motion from different sources. An estimate; the definitions agree once
+# astrolog-ephd took the true anchor (their 789f3c2, 2026-09-18).
+INSTANT_ANCHOR_BAND = 0.1
 
 
 def leg_sidinstant(client, ours, theirs, table, verbose):
@@ -907,14 +911,14 @@ def leg_sidinstant(client, ours, theirs, table, verbose):
                     continue
                 s = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
                 trop = tropical.get((jd, b), 0.0)
-                band = trop + SIDEREAL_EXTRA
+                band = trop + SIDEREAL_EXTRA + INSTANT_ANCHOR_BAND
                 dl = ((va[0] - vb[0] + 180.0) % 360.0 - 180.0) * 3600.0
                 offsets.append(dl)
                 table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
                           band=band, verdict="agree" if s <= band else "finding (theirs)",
                           note=f"longitude offset {dl:+.4f}\"; the anchor at its true position "
-                               "(published definition, 3.5a as proposed); theirs apparent "
-                               "until they adopt it")
+                               "(published definition, 3.5a); the band allows the anchors' "
+                               "different catalogues")
         print(f"  {token:22s} longitude offset {min(offsets):+.4f}..{max(offsets):+.4f}\"")
 
 
