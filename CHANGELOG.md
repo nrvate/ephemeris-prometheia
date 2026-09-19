@@ -30,7 +30,7 @@ documented, not that it is frozen.
     (was 0.66 s), 0.57 s with the full catalogue (was 2.19 s). The id's
     digest changes once as a result.
   - A JSON call for three distant small bodies at 1,000 instants: 19.2 →
-    4.4 s.
+    1.8 s, the same answer.
   - the Moon's natural apsides scan their passages in fixed 50-day blocks,
     kept per engine: 266 → 33 µs a call at scattered instants, and a
     passage no longer depends on which instant was asked first (answers
@@ -38,6 +38,8 @@ documented, not that it is frozen.
   - the nutation series with rates: 22.6 → 18.4 µs a node.
   - a small body's first integration is 2.3× faster: the perturbers' table
     reads each ephemeris record once, not once per body;
+  - the force model interpolates a velocity only for the Sun, the one it
+    uses: small-body integration 1.4× faster, the same values;
   - a DE (or SPK) state computes its Chebyshev recurrences once for x, y
     and z: 81 → 55 ns, bit-identical;
   - `add_catalog` verifies chunks without decoding records (315 → 235 ms),

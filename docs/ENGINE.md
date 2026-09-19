@@ -420,9 +420,9 @@ server's CPU (2026-09-19).
 `add_catalog` of the full catalogue (137 MB) takes 235 ms: it decompresses
 and CRC-checks every chunk, so a corrupt file fails there. The first lookup
 by name then builds the name index, about 420 ms, most of it decompressing
-the catalogue again. A small body's first integration costs about 0.5 ms
-for each year between its elements' epoch and the instant: Ceres at 1600
-from a 2025 epoch took 227 ms.
+the catalogue again. A small body's first integration costs about 0.2–0.4 ms
+for each year between its elements' epoch and the instant: forty numbered
+asteroids integrated to 1600 took 3.8 s together, about 95 ms each.
 
 **Found and fixed, 2026-09-19** (the same outputs, byte for byte):
 - **A small body's record was decoded on every call.** The record cache
@@ -436,7 +436,8 @@ from a 2025 epoch took 227 ms.
 - **CRC-32 went a byte at a time.** Slicing-by-8 halves `add_catalog`
   (634 → 315 ms).
 - Together: one JSON call for three distant small bodies at 1,000 instants
-  over 1,000 years went from 19.2 s to 4.4 s, with the same 2.2 MB answer.
+  over 1,000 years went from 19.2 s to 4.4 s after these three, and to 1.8 s
+  after the integration changes below, with the same 2.2 MB answer.
 - **The perturbers' table read the ephemeris a body at a time**, so each
   of the eleven bodies walked the same dozen 32-day records of a year, with
   only one record kept decoded. Reading an epoch at a time loads each
@@ -446,6 +447,11 @@ from a 2025 epoch took 227 ms.
   covers the raw chunk: `Reader::verify()` checks the chunks alone, 315 →
   235 ms. The name index reads only each record's SPK-ID and names
   (`for_each_name`).
+- **The force model interpolated all eleven perturbers' velocities** at
+  every evaluation, though it uses only the Sun's (for the relativistic
+  term). `PerturberStates::positions` interpolates a velocity only where
+  asked: forty asteroids integrated to 1600 in 3.8 s (was 5.3 s), with the
+  same values.
 - **A DE state evaluated its Chebyshev recurrences three times,** once for
   each of x, y and z, which share tau. `chebyshev_eval3` computes them once:
   81 → 55 ns a state, bit-identical over 3.9 million states and all fifteen

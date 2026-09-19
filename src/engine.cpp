@@ -589,6 +589,28 @@ public:
         }
     }
 
+    // Positions of every mass, and a velocity for one: the force model uses
+    // velocities only for the Sun's relativistic term, and interpolating
+    // them for all eleven was half of a small body's integration
+    // (2026-09-19). The same weights as states(), so the same values.
+    void positions(double t, double* out, long with_velocity) override {
+        const size_t n = ids_.size();
+        if (!ok_ || n == 0 || rows() == 0) {
+            for (size_t k = 0; k < 6 * n; ++k)
+                out[k] = 0.0;
+            return;
+        }
+        const Row r = locate(t);
+        for (size_t i = 0; i < n; ++i) {
+            if (r.clamped)
+                copy_sample(at(r.lo, i), out + 6 * i);
+            else if (long(i) == with_velocity)
+                r.weights.apply(at(r.lo, i), at(r.lo + 1, i), out + 6 * i);
+            else
+                r.weights.apply_position(at(r.lo, i), at(r.lo + 1, i), out + 6 * i);
+        }
+    }
+
     size_t count() const override { return ids_.size(); }
     const double* mus() const override { return mus_.data(); }
     bool ok() const override { return ok_; }
@@ -723,6 +745,11 @@ private:
             d10 = 3 * u2 - 4 * u + 1;
             d01 = (-6 * u2 + 6 * u) / dt;
             d11 = 3 * u2 - 2 * u;
+        }
+        void apply_position(const TrajSample& a, const TrajSample& b, double out[3]) const {
+            out[0] = h00 * a.px + h10 * dt * a.vx + h01 * b.px + h11 * dt * b.vx;
+            out[1] = h00 * a.py + h10 * dt * a.vy + h01 * b.py + h11 * dt * b.vy;
+            out[2] = h00 * a.pz + h10 * dt * a.vz + h01 * b.pz + h11 * dt * b.vz;
         }
         void apply(const TrajSample& a, const TrajSample& b, double out[6]) const {
             out[0] = h00 * a.px + h10 * dt * a.vx + h01 * b.px + h11 * dt * b.vx;

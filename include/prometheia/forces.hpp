@@ -144,6 +144,15 @@ struct PerturberStates {
             state(i, t, out + 6 * i);
     }
 
+    // The force model's call: every position, but a velocity only for the
+    // perturber `with_velocity` (the Sun, for the relativistic term; -1 for
+    // none). The other velocity slots are left as they are. The default
+    // computes everything.
+    virtual void positions(double t, double* out, long with_velocity) {
+        (void)with_velocity;
+        states(t, out);
+    }
+
     virtual size_t count() const = 0;
     // GM per perturber (AU^3/day^2), count() entries.
     virtual const double* mus() const = 0;
@@ -196,7 +205,7 @@ struct BarycentricForce {
             large.resize(6 * n);
             all = large.data();
         }
-        perturbers->states(t, all);
+        perturbers->positions(t, all, sun);
         double ax = 0.0, ay = 0.0, az = 0.0;
         for (size_t i = 0; i < n; ++i) {
             if (long(i) == self)
