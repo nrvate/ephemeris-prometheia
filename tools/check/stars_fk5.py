@@ -43,6 +43,9 @@ import warnings
 
 import erfa
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import binary_orbits  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # The cross-test's stars leg (tools/check/crosstest.py, STARS).
@@ -52,14 +55,24 @@ STARS = ["Aldebaran", "Regulus", "Spica", "Antares", "Fomalhaut", "Sirius", "Alg
          "Bellatrix", "Acrux", "Hadar", "Mirach", "Alphecca", "Scheat"]
 EPOCHS = [2415020.5, 2451545.0, 2488069.5]  # 1900, 2000, 2100 (TT)
 
+# Checked here but not in the stars leg: alpha Cen A, whose FK5 entry is the
+# referee for its barycentre (below).
+EXTRA = ["Rigil Kentaurus"]
+
 BAND = 1.0  # arcsec; an estimate (see the docstring)
 BINARIES = {
     # Separation allowed, and why. Each has a companion whose orbit moves the
-    # bright star's photocentre; Hipparcos measured about three years of it.
-    "Sirius": (3.0, "astrometric binary (Sirius B)"),
-    "Procyon": (3.0, "astrometric binary (Procyon B)"),
-    "Polaris": (3.0, "astrometric binary (Polaris Ab)"),
-    "Achernar": (3.0, "binary (Achernar B)"),
+    # bright star's photocentre.
+    "Polaris": (3.0, "astrometric binary (Polaris Ab), no orbit applied"),
+    "Achernar": (3.0, "binary (Achernar B), no orbit applied"),
+    # These carry their orbit in the engine (binary_orbits.py). The FK5 fits a
+    # straight line to two centuries of the star wobbling about its
+    # barycentre, which finds the barycentre, so what is compared is ours: the
+    # server's star less the orbit's offset, computed here independently. What
+    # remains is the two catalogues' barycentric proper motions.
+    "Sirius": (3.0, "barycentre compared (Sirius B's orbit applied)"),
+    "Procyon": (3.0, "barycentre compared (Procyon B's orbit applied)"),
+    "Rigil Kentaurus": (3.0, "barycentre compared (alpha Cen B's orbit applied)"),
 }
 
 
@@ -76,15 +89,16 @@ def sep_arcsec(u, v):
 
 
 def load(raw):
-    hr_of = {}
-    pat = re.compile(r'\s*\{(\d+), \d+, .*"([^"]*)"\},$')
+    hr_of, hip_of = {}, {}
+    pat = re.compile(r'\s*\{(\d+), \d+, (\d+), .*"([^"]*)"\},$')
     with open(os.path.join(ROOT, "src", "star_catalog.inc")) as f:
         for line in f:
             m = pat.match(line)
             if m:
-                for n in m.group(2).split("|"):
+                for n in m.group(3).split("|"):
                     if n:
                         hr_of.setdefault(n, int(m.group(1)))
+                        hip_of.setdefault(n, int(m.group(2)))
     fk5_of_hr = {}
     with gzip.open(os.path.join(raw, "V_50_catalog.gz"), "rt", encoding="latin-1") as f:
         for l in f:
@@ -94,7 +108,7 @@ def load(raw):
     with gzip.open(os.path.join(raw, "I_149A_catalog.gz"), "rt") as f:
         for l in f:
             fk5[int(l[0:4])] = l
-    return hr_of, fk5_of_hr, fk5
+    return hr_of, hip_of, fk5_of_hr, fk5
 
 
 def reference(l):
@@ -148,10 +162,11 @@ def main():
                     help="NAME=PORT (repeatable; default ours=47190)")
     a = ap.parse_args()
     servers = [s.split("=", 1) for s in a.server] or [["ours", "47190"]]
-    hr_of, fk5_of_hr, fk5 = load(a.raw_dir)
+    hr_of, hip_of, fk5_of_hr, fk5 = load(a.raw_dir)
+    orbits = binary_orbits.load(a.raw_dir)
 
     refs = {}
-    for name in STARS:
+    for name in STARS + EXTRA:
         hr = hr_of.get(name)
         n = fk5_of_hr.get(hr) if hr else None
         if n is None or n not in fk5:
@@ -178,7 +193,14 @@ def main():
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", erfa.ErfaWarning)
                     p = erfa.pmsafe(*star, 2451545.0, 0.0, jd, 0.0)
-                s = sep_arcsec(unit(math.degrees(p[0]), math.degrees(p[1])), unit(*rows[k]))
+                ra, dec = rows[k]
+                orbit = orbits.get(hip_of.get(name, 0))
+                if orbit:
+                    # The server's star less its orbit's offset: our barycentre.
+                    de, dn = binary_orbits.offset(orbit, jd)
+                    ra -= de / 3600.0 / math.cos(math.radians(dec))
+                    dec -= dn / 3600.0
+                s = sep_arcsec(unit(math.degrees(p[0]), math.degrees(p[1])), unit(ra, dec))
                 bad |= s > band
                 if not why:
                     worst = max(worst, s)

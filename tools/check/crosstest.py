@@ -63,6 +63,7 @@ import argparse
 import datetime
 import json
 import math
+import re
 import os
 import shutil
 import subprocess
@@ -74,6 +75,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "tools", "fetch"))
 sys.path.insert(0, os.path.join(REPO, "tools", "gen"))
 import wirelib  # noqa: E402
+import binary_orbits  # noqa: E402
 import horizons_fetch as hf  # noqa: E402  (the corpus's request declarations)
 import gen_horizons_corpus as gen  # noqa: E402  (its reader of a Horizons table)
 
@@ -702,6 +704,56 @@ STARS = ["Aldebaran", "Regulus", "Spica", "Antares", "Fomalhaut", "Sirius", "Alg
          "Pollux", "Castor", "Procyon", "Capella", "Alcyone", "Zubenelgenubi", "Zubeneschamali",
          "Bellatrix", "Acrux", "Hadar", "Mirach", "Alphecca", "Scheat"]
 STAR_BAND = 0.02
+# A binary star's servers differ by our orbit's bend; this allows the two
+# catalogues' straight lines and the bend's projection (an estimate).
+BINARY_EXTRA = 0.05
+
+
+def _star_records():
+    """name -> catalog record, and hip -> record (src/star_catalog.inc)."""
+    pat = re.compile(r'\s*\{\d+, \d+, (\d+), [^"]*"[^"]*", \d+, \d+, [^,]+, ([^,]+), ([^,]+), '
+                     r'([^,]+), ([^,]+), ([^,]+), .*"([^"]*)"\},$')
+    by_name, by_hip = {}, {}
+    with open(os.path.join(REPO, "src", "star_catalog.inc")) as f:
+        for line in f:
+            m = pat.match(line)
+            if m:
+                g = m.groups()
+                rec = {"hip": int(g[0]), "ra": float(g[1]), "dec": float(g[2]),
+                       "epoch": float(g[3]), "pmra": float(g[4]), "pmdec": float(g[5])}
+                by_hip.setdefault(rec["hip"], rec)
+                for n in g[6].split("|"):
+                    if n:
+                        by_name.setdefault(n, rec)
+    return by_name, by_hip
+
+
+_ORBITS = None
+
+
+def orbit_bend(name, jd):
+    """How far our orbit model moves a binary from its catalog's straight line
+    at jd (arcsec), or None for a star without one."""
+    global _ORBITS
+    if _ORBITS is None:
+        by_name, by_hip = _star_records()
+        orbits = binary_orbits.load(os.path.join(REPO, "stars-raw"))
+        _ORBITS = {n: (o, rec, by_hip.get(o["partner"]) if o["partner"] else None)
+                   for n, rec in by_name.items()
+                   for h, o in orbits.items() if rec["hip"] == h}
+    entry = _ORBITS.get(name)
+    if entry is None:
+        return None
+    o, rec, partner = entry
+    epoch = 2451545.0 + (rec["epoch"] - 2000.0) * 365.25
+    if partner:  # a secondary, placed from its primary
+        orbits = binary_orbits.load(os.path.join(REPO, "stars-raw"))
+        e, n = binary_orbits.bend(o, jd, epoch, binary_orbits.line_delta(rec, partner, jd),
+                                  orbits[partner["hip"]],
+                                  2451545.0 + (partner["epoch"] - 2000.0) * 365.25)
+    else:
+        e, n = binary_orbits.bend(o, jd, epoch)
+    return math.hypot(e, n)
 # alpha Cen A and B: the two sides take them from different catalogues (ours
 # Hipparcos, theirs SIMBAD), for the fastest-moving bright pair in the sky; an
 # estimate, measured 0.007" (A) and 0.040" (B) at J2000, 2026-09-18.
@@ -735,6 +787,19 @@ def leg_stars(client, ours, theirs, table, verbose):
                     table.add(**base, verdict="unanswered", note=f"errCode ours {ea} theirs {eb}")
                     continue
                 sep = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+                bent = orbit_bend(name, jd)
+                if bent is not None:
+                    # Our model adds the star's orbit to the catalog's straight
+                    # line (STARS.md, "Binary stars"); theirs is the line. The
+                    # servers then differ by the bend, computed here
+                    # independently (binary_orbits.py).
+                    ok = abs(sep - bent) <= STAR_BAND + BINARY_EXTRA
+                    table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=sep,
+                              band=f"bend {bent:.3f} +- {STAR_BAND + BINARY_EXTRA}",
+                              verdict="expected-difference" if ok else "finding",
+                              note=f"our orbit model bends the straight line by {bent:.3f}\" "
+                                   "here; theirs is the line")
+                    continue
                 worst = max(worst, sep)
                 table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=sep,
                           band=STAR_BAND, verdict="agree" if sep <= STAR_BAND else "finding")
@@ -755,15 +820,18 @@ def leg_stars(client, ours, theirs, table, verbose):
     table.add(leg="stars-alcen", epoch_tt=2451545.0, object="Rigil Kentaurus", frame="ICRF",
               plane="equator", mask=0, ours=(a_o[0], a_o[1]), theirs=(a_t[0], a_t[1]),
               sep_servers=sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])), tier=3,
-              verdict="agree" if sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])) <= ALCEN_BAND
+              verdict="expected-difference"
+              if abs(sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])) -
+                     orbit_bend("Rigil Kentaurus", 2451545.0)) <= ALCEN_BAND
               else "finding (theirs)",
-              note="the IAU's Rigil Kentaurus is alpha Cen A itself (astrolog 554288b; before it,"
-                   " their entry sat 38% of the way to B)")
+              note="the IAU's Rigil Kentaurus is alpha Cen A itself (astrolog 554288b); ours adds "
+                   f"the AB orbit's bend, {orbit_bend('Rigil Kentaurus', 2451545.0):.3f}\" here")
     table.add(leg="stars-alcen", epoch_tt=2451545.0, object="Toliman", frame="ICRF",
               plane="equator", mask=0, ours=(b_o[0], b_o[1]), theirs=(b_t[0], b_t[1]),
               sep_servers=sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1])), tier=3,
-              verdict="agree" if theirs_split > 1.0 and sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1]))
-              <= ALCEN_BAND else "finding (theirs)",
+              verdict="expected-difference" if theirs_split > 1.0 and abs(
+                  sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1])) -
+                  orbit_bend("Toliman", 2451545.0)) <= ALCEN_BAND else "finding (theirs)",
               note=f"the IAU's Toliman is alpha Cen B; A to B is {ours_split:.2f}\" here "
                    f"and {theirs_split:.2f}\" on theirs (0 = both names answer one star)")
     print(f"  alpha Cen: A-B {ours_split:.2f}\" ours, {theirs_split:.2f}\" theirs")

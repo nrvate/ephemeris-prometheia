@@ -13,6 +13,7 @@
 #include <prometheia/engine.hpp>
 #include <prometheia/stars.hpp>
 
+#include "synthetic_spk.hpp"
 #include <doctest/doctest.h>
 
 using namespace prometheia;
@@ -180,4 +181,54 @@ TEST_CASE("stars_apparent_place_vs_erfa") {
     CHECK(worst_app < 1.0);
     CHECK(worst_ecl < 1.0);
     CHECK(worst_astro < 1.0);
+}
+
+// Binary stars (STARS.md, "Binary stars"): the orbit on top of the straight
+// line. Barycentric, geometric, ICRF: no ephemeris is needed, so the synthetic
+// kernel serves.
+TEST_CASE("stars_binary_orbits") {
+    synth::TempFile tf("stars-binary");
+    Engine e = synth::open_synthetic(tf);
+    CalcOptions o = CalcOptions::geometric();
+    o.center = Center::Barycentric;
+    o.frame = Frame::ICRF;
+    o.coords = Coords::Equatorial;
+    const auto radec = [&](size_t star, double jd) {
+        auto r = e.calc_star(star, jd, o);
+        REQUIRE(r.ok());
+        return std::pair{r.value().pos.lon_deg, r.value().pos.lat_deg};
+    };
+    const size_t a = must_find("HR 5459"), b = must_find("HR 5460"), sirius = must_find("Sirius");
+
+    // alpha Cen A is a component solution: at its catalog epoch the orbit adds
+    // nothing, so it sits exactly at its catalog place.
+    const stars::Object& ao = stars::at(a);
+    const double t0 = 2451545.0 + (ao.epoch_jyear - 2000.0) * 365.25;
+    const auto [ra0, dec0] = radec(a, t0);
+    CHECK(sep_mas(ra0, dec0, ao.ra_deg, ao.dec_deg) < 1e-3);
+
+    // alpha Cen B is placed from A by the relative orbit: B - A is the orbit's
+    // separation, against the Sixth Catalog's own published ephemeris
+    // (stars-raw/orb6ephem.txt, 2025.0-2029.0, Besselian; mas precision).
+    const double published[] = {8.737, 9.294, 9.765, 10.121, 10.329};
+    for (int k = 0; k < 5; ++k) {
+        const double jd = 2415020.31352 + (125.0 + k) * 365.242198781;
+        const auto [ra_a, dec_a] = radec(a, jd);
+        const auto [ra_b, dec_b] = radec(b, jd);
+        INFO("year ", 2025 + k);
+        CHECK(std::fabs(sep_mas(ra_a, dec_a, ra_b, dec_b) / 1000.0 - published[k]) < 0.002);
+    }
+
+    // Sirius's catalog line is its barycentre's (a Hipparcos orbital
+    // solution), so the star sits off it by A's share of the orbit: 1.018 /
+    // 3.081 of the published 11.256" in 2025.0.
+    const stars::Object& so = stars::at(sirius);
+    const double jd = 2415020.31352 + 125.0 * 365.242198781;
+    const double years = (jd - (2451545.0 + (so.epoch_jyear - 2000.0) * 365.25)) / 365.25;
+    const double line_ra =
+        so.ra_deg + so.pm_ra_mas_yr * years / 3.6e6 / std::cos(so.dec_deg * 3.14159265358979 / 180);
+    const double line_dec = so.dec_deg + so.pm_dec_mas_yr * years / 3.6e6;
+    const auto [sra, sdec] = radec(sirius, jd);
+    CHECK(std::fabs(sep_mas(sra, sdec, line_ra, line_dec) / 1000.0 - 11.256 * 1.018 / 3.081) <
+          0.01);
 }

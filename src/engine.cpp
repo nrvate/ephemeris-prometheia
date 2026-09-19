@@ -113,6 +113,89 @@ constexpr double kSgrAMuLMasYr = -6.411, kSgrAMuBMasYr = -0.219;
 constexpr double kPoleIau1958RaDeg = 192.859477875, kPoleIau1958DecDeg = 27.128252416667;
 constexpr double kPoleModernRaDeg = 192.902979992083, kPoleModernDecDeg = 27.103109214444;
 
+// ---------------------------------------------------------------------------
+// Binary stars whose companion bends the bright star's path (STARS.md,
+// "Binary stars"). The catalog's straight line is Hipparcos's, a few years'
+// motion that carries the orbit's velocity at its epoch; over centuries the
+// orbit's curvature takes the star arcseconds from it (FK5: alpha Cen A 28.6",
+// Sirius 2.3", Procyon 1.5"). Relative orbits from the Sixth Catalog of Orbits
+// of Visual Binary Stars (USNO; tools/fetch/stars_fetch.py, orb6), masses from
+// the orbits' own papers (the same tool's arxiv-* sources).
+// What the catalog's straight line describes, from its Hipparcos solution
+// type (I/311): the system's barycentre, where the published catalog fitted
+// the orbit ("orbital binary", old-reduction type 4); or the star itself at
+// the catalog epoch, orbital velocity included (an ordinary 5-parameter
+// solution of one component).
+// A secondary is placed from its primary's model plus the relative orbit, so
+// the two stars keep the orbit's separation exactly: two independent
+// component solutions do not (alpha Cen A and B's disagree by more than a
+// second of arc in ten years), and the primary's solution is the better one
+// (alpha Cen A's proper motion to 3-4 mas/yr, B's 20-26; FK5 holds A's
+// implied barycentre to 0.72" over two centuries). The secondary's own
+// catalog line then gives only its distance.
+enum class BinaryLine { Barycentre, Component, Secondary };
+
+struct BinaryOrbit {
+    int hip; // the catalog star this bends
+    BinaryLine line;
+    int partner_hip;  // BinaryLine::Secondary: the primary
+    double fraction;  // its share of the relative orbit: -M_B/M for a primary,
+                      // +M_A/M for the secondary (the orbit is B about A)
+    double period_yr; // P
+    double a_arcsec;  // semi-major axis of the relative orbit
+    double i_deg, node_deg, omega_deg, e;
+    double t_peri_yr; // periastron, Besselian year
+};
+
+constexpr BinaryOrbit kBinaryOrbits[] = {
+    // Sirius A (Bond et al. 2017: 2.063 and 1.018 Msun).
+    {32349, BinaryLine::Barycentre, 0, -1.018 / (2.063 + 1.018), 50.1284, 7.4957, 136.336, 45.400,
+     149.161, 0.59142, 1994.5715},
+    // Procyon A (Bond et al. 2015: 1.478 and 0.592 Msun).
+    {37279, BinaryLine::Barycentre, 0, -0.592 / (1.478 + 0.592), 40.840, 4.3075, 31.408, 100.683,
+     89.23, 0.39785, 1968.076},
+    // alpha Cen A and B (orbit: Akeson et al. 2021; masses: Pourbaix & Boffin
+    // 2016, 1.13 and 0.97 Msun).
+    {71683, BinaryLine::Component, 0, -0.97 / (1.13 + 0.97), 79.762, 17.4930, 79.2430, 205.073,
+     231.519, 0.51947, 1955.564},
+    {71681, BinaryLine::Secondary, 71683, 1.13 / (1.13 + 0.97), 79.762, 17.4930, 79.2430, 205.073,
+     231.519, 0.51947, 1955.564},
+};
+
+const BinaryOrbit* binary_orbit(int hip) {
+    for (const BinaryOrbit& b : kBinaryOrbits) {
+        if (b.hip == hip)
+            return &b;
+    }
+    return nullptr;
+}
+
+// The star's offset from its system's barycentre at jd, arcsec toward east
+// (RA x cos Dec) and north: the relative orbit (Thiele-Innes; position angle
+// from north through east) scaled by the star's share.
+void binary_offset(const BinaryOrbit& b, double jd, double& east, double& north) {
+    constexpr double kRad = 3.14159265358979323846 / 180.0;
+    const double t_peri_jd = 2415020.31352 + (b.t_peri_yr - 1900.0) * 365.242198781;
+    const double mean = kTwoPi * (jd - t_peri_jd) / (b.period_yr * 365.25);
+    double ecc = mean; // Kepler's equation, Newton's method
+    for (int k = 0; k < 30; ++k) {
+        const double d = (ecc - b.e * std::sin(ecc) - mean) / (1.0 - b.e * std::cos(ecc));
+        ecc -= d;
+        if (std::fabs(d) < 1e-15)
+            break;
+    }
+    const double x = std::cos(ecc) - b.e, y = std::sqrt(1.0 - b.e * b.e) * std::sin(ecc);
+    const double cw = std::cos(b.omega_deg * kRad), sw = std::sin(b.omega_deg * kRad);
+    const double cn = std::cos(b.node_deg * kRad), sn = std::sin(b.node_deg * kRad);
+    const double ci = std::cos(b.i_deg * kRad);
+    const double A = b.a_arcsec * (cw * cn - sw * sn * ci),
+                 B = b.a_arcsec * (cw * sn + sw * cn * ci);
+    const double F = b.a_arcsec * (-sw * cn - cw * sn * ci),
+                 G = b.a_arcsec * (-sw * sn + cw * cn * ci);
+    north = b.fraction * (A * x + F * y);
+    east = b.fraction * (B * x + G * y);
+}
+
 void unit_radec(double ra_deg, double dec_deg, double u[3]) {
     const double a = ra_deg / kRad2Deg, d = dec_deg / kRad2Deg;
     u[0] = std::cos(d) * std::cos(a);
@@ -848,6 +931,8 @@ struct Engine::Impl {
     EpochFrames cache[3];
     // Catalog stars that anchor a zodiac, by HR number (star_by_hr).
     std::unordered_map<int, size_t> star_by_hr_;
+    // A binary's partner component, by HIP number (star_by_hip).
+    std::unordered_map<int, size_t> star_by_hip_;
     int cache_next = 0;
 
     // Small-body overlay: EPM1 catalogs, newest wins. Positions are
@@ -1476,6 +1561,19 @@ struct Engine::Impl {
         return make_error(ErrorCode::ArgumentError, "unknown frame");
     }
 
+    // A catalog star's index by HIP number, remembered after the first search.
+    Result<size_t> star_by_hip(int hip) {
+        if (auto it = star_by_hip_.find(hip); it != star_by_hip_.end())
+            return it->second;
+        for (size_t i = 0; i < stars::count(); ++i) {
+            if (stars::at(i).hip == hip) {
+                star_by_hip_.emplace(hip, i);
+                return i;
+            }
+        }
+        return make_error(ErrorCode::NotFound, "no catalog star HIP " + std::to_string(hip));
+    }
+
     // A catalog star's index by HR number, remembered after the first search.
     Result<size_t> star_by_hr(int hr) {
         if (auto it = star_by_hr_.find(hr); it != star_by_hr_.end())
@@ -2091,12 +2189,12 @@ struct Engine::Impl {
     }
 
     // Observer -> catalog object vector in the output frame (km).
-    // A catalog star's barycentric position (km, ICRF) at jd_tdb: its place
-    // at the catalog epoch moved by its space velocity, which is the proper
-    // motion across the line of sight at the parallax distance and the radial
-    // velocity along it (only with a parallax: without a distance a velocity
-    // along the line of sight has no meaning).
-    static void star_barycentric_km(const stars::Object& star, double jd_tdb, double pos[3]) {
+    // A catalog star's straight line: its barycentric position (km, ICRF) at
+    // jd_tdb, its place at the catalog epoch moved by its space velocity, which
+    // is the proper motion across the line of sight at the parallax distance
+    // and the radial velocity along it (only with a parallax: without a
+    // distance a velocity along the line of sight has no meaning).
+    static void star_line_km(const stars::Object& star, double jd_tdb, double pos[3]) {
         const double a = star.ra_deg / kRad2Deg, d = star.dec_deg / kRad2Deg;
         const double ca = std::cos(a), sa = std::sin(a), cd = std::cos(d), sd = std::sin(d);
         const double u[3] = {cd * ca, cd * sa, sd};
@@ -2108,12 +2206,63 @@ struct Engine::Impl {
         const double pm_a = star.pm_ra_mas_yr / kMasPerRad / 365.25; // rad/day
         const double pm_d = star.pm_dec_mas_yr / kMasPerRad / 365.25;
         const double rv = has_parallax ? star.rv_km_s * 86400.0 / kAuKm : 0.0; // AU/day
-        const double epoch_jd = kJ2000 + (star.epoch_jyear - 2000.0) * 365.25;
-        const double dt = jd_tdb - epoch_jd;
+        const double dt = jd_tdb - (kJ2000 + (star.epoch_jyear - 2000.0) * 365.25);
         for (int i = 0; i < 3; ++i) {
             const double v = dist_au * (pm_a * east[i] + pm_d * north[i]) + rv * u[i];
             pos[i] = (dist_au * u[i] + v * dt) * kAuKm;
         }
+    }
+
+    // A catalog star's barycentric position (km, ICRF) at jd_tdb: its straight
+    // line, and for a binary the orbit the line misses (kBinaryOrbits):
+    // - a barycentre line misses all of the star's offset;
+    // - a component's line holds the offset and its rate at the catalog epoch,
+    //   so only the rest is added;
+    // - a secondary is its primary's position plus the relative orbit, at its
+    //   own catalog distance.
+    void star_barycentric_km(const stars::Object& star, double jd_tdb, double pos[3]) {
+        star_line_km(star, jd_tdb, pos);
+        const BinaryOrbit* b = star.hip ? binary_orbit(star.hip) : nullptr;
+        if (!b)
+            return;
+        const double r = std::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
+        const stars::Object* at = &star; // the star whose tangent plane the offset is in
+        double e1, n1;                   // arcsec
+        if (b->line == BinaryLine::Secondary) {
+            auto primary = star_by_hip(b->partner_hip);
+            const BinaryOrbit* pb = primary ? binary_orbit(b->partner_hip) : nullptr;
+            if (!pb)
+                return;
+            at = &stars::at(primary.value());
+            star_barycentric_km(*at, jd_tdb, pos); // the primary, orbit included
+            const double pr = std::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
+            for (int i = 0; i < 3; ++i)
+                pos[i] *= r / pr; // at this star's distance
+            // The relative orbit: this star's offset less the primary's.
+            double es, ns, ep, np;
+            binary_offset(*b, jd_tdb, es, ns);
+            binary_offset(*pb, jd_tdb, ep, np);
+            e1 = es - ep;
+            n1 = ns - np;
+        } else {
+            binary_offset(*b, jd_tdb, e1, n1);
+            if (b->line == BinaryLine::Component) {
+                const double epoch_jd = kJ2000 + (star.epoch_jyear - 2000.0) * 365.25;
+                double e0, n0, ep, np, em, nm;
+                binary_offset(*b, epoch_jd, e0, n0);
+                binary_offset(*b, epoch_jd + 1.0, ep, np);
+                binary_offset(*b, epoch_jd - 1.0, em, nm);
+                const double dt = jd_tdb - epoch_jd;
+                e1 -= e0 + (ep - em) / 2.0 * dt;
+                n1 -= n0 + (np - nm) / 2.0 * dt;
+            }
+        }
+        const double a = at->ra_deg / kRad2Deg, d = at->dec_deg / kRad2Deg;
+        const double east[3] = {-std::sin(a), std::cos(a), 0.0};
+        const double north[3] = {-std::sin(d) * std::cos(a), -std::sin(d) * std::sin(a),
+                                 std::cos(d)};
+        for (int i = 0; i < 3; ++i)
+            pos[i] += r * (e1 * east[i] + n1 * north[i]) / 206264.80624709636;
     }
 
     Result<void> star_vector_at(const stars::Object& star, double jd_tt, const CalcOptions& o,

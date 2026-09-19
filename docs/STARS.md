@@ -39,6 +39,8 @@ non-commercial terms.
 | SIMBAD, one query | Sgr A*'s ICRS position (Petrov et al. 2011), for the Galactic-Centre zodiacs | CDS: free use, acknowledge |
 | Reid & Brunthaler 2020 (ApJ 892, 39), arXiv abstract | Sgr A*'s apparent proper motion | facts from a public abstract |
 | Liu, Zhu & Zhang 2011 (A&A 526, A16), arXiv abstract and paper | the IAU 1958 galactic pole in the ICRS and the modern pole, for the galactic-node zodiacs | facts from a public preprint |
+| Sixth Catalog of Orbits of Visual Binary Stars (USNO/GSU), orbits, format and ephemeris | the relative orbits of Sirius, Procyon and α Cen AB ("Binary stars"), and the published ephemeris that checks them | US Government work, public |
+| Bond et al. 2017, Bond et al. 2015, Pourbaix & Boffin 2016: arXiv title searches | the component masses of Sirius, Procyon and α Cen, which split each orbit between its stars | facts from public abstracts |
 
 Acknowledgements the terms ask for:
 - This research has made use of the SIMBAD database and the VizieR catalogue
@@ -51,8 +53,8 @@ Acknowledgements the terms ask for:
 The fetched files are not committed. `stars-raw/` is gitignored.
 
 ```sh
-tools/fetch/stars_fetch.py --list                       # the 20 sources
-tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~15 MB, 20 requests, 5 s apart
+tools/fetch/stars_fetch.py --list                       # the 26 sources
+tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~17 MB, 26 requests, 5 s apart
 tools/fetch/stars_fetch.py --raw-dir stars-raw --verify # against the pinned checksums
 ```
 
@@ -264,39 +266,97 @@ predates Hipparcos:
 Measured 2026-09-18 on `prometheiad`:
 - **The ordinary stars:** 24 of them, all within 0.56″ over the two
   centuries. The worst is Antares in 1900. At 2000 all are within 0.31″.
-- **The astrometric binaries:** Sirius 2.33″, Procyon 1.55″, Achernar
-  1.01″ and Polaris 0.78″, each largest at 1900 or 2100.
-  - The Hipparcos proper motion is a few years' motion. It carries the
-    companion's orbit, which a century multiplies.
-  - The FK5's motion is a long-run mean. So the difference is the model
-    (straight-line motion from Hipparcos), not the catalog.
 - **Size of the differences:** several times the FK5's stated mean errors.
   Those errors leave out the FK5's system errors, per its ReadMe.
+- **Binaries.** The FK5 fits a straight line to about two centuries of each
+  star wobbling about its barycentre, which finds the barycentre. For the
+  stars that carry their orbit ("Binary stars" below), what is compared is
+  ours: the server's star less its orbit offset, which `binary_orbits.py`
+  computes independently.
+  - **α Cen A:** 0.73/0.32/0.73″ at 1900/2000/2100. The straight line had
+    been 28.6/6.8/17.4″ off: Hipparcos's α Cen A carries the orbit's
+    velocity of 1991.
+  - **Sirius and Procyon:** 1.76/0.69/2.33″ and 1.35/0.17/1.55″. These are
+    exactly the old straight-line numbers, because both lines were already
+    barycentric (Hipparcos orbital solutions).
+    - What is left is the two catalogues' barycentric proper motions, about
+      20 mas/yr apart, not the orbit.
+    - An earlier version of this section said Hipparcos carried the
+      companion's orbit for these two. That was wrong.
+  - **Achernar and Polaris** (1.01″, 0.78″) carry no orbit here. Their
+    orbits are much less certain.
 
-**`astrolog-ephd`** (Astrolog `qt` at `c04cdf6`), the same day: the same
-picture, within 0.007″ of `prometheiad` on every star and epoch. The binaries
-are therefore a limit both servers share: straight-line Hipparcos motion. They
-are not a defect in either, and not something to chase.
+**`astrolog-ephd`** (Astrolog `qt` at `c04cdf6`, before the orbits here): the
+same picture for the stars both serve, within 0.007″ of `prometheiad` on every
+star and epoch.
 
 The FK5 cannot check the α Centauri names. It lists α Cen A only (FK5 538),
 with no separate entry for B, and Proxima is far too faint for it.
 
-The band is 1″, and 3″ for the four binaries. **Both are estimates, not
+The band is 1″, and 3″ for the binaries. **Both are estimates, not
 measurements.** The check is there to catch a wrong star, a wrong proper
 motion or a wrong epoch, which are arcseconds or more. A proper motion off by
 10 mas/yr, injected into Vega, shows as 1.1″ and fails.
+
+### Binary stars
+
+Four stars move on their orbits, not in straight lines. For each, the catalog's
+straight line comes from Hipparcos, and what that line *is* decides how the
+orbit is added. That is read from the star's Hipparcos solution type (I/311,
+new and old reductions):
+
+| star | Hipparcos line | how the orbit is added |
+|---|---|---|
+| Sirius A (HIP 32349) | the barycentre (an orbital solution in the published catalog, kept in the new reduction) | the star's whole offset from its barycentre |
+| Procyon A (HIP 37279) | the barycentre (as Sirius) | the whole offset |
+| α Cen A (HIP 71683) | the star itself in 1991, orbital velocity included (a 5-parameter component solution) | the offset less its value and rate at the catalog epoch: only the curvature the line misses |
+| α Cen B (HIP 71681) | a weak component solution (proper motion ±20–26 mas/yr) | placed from α Cen A plus the relative orbit; its own line gives only its distance |
+
+- **The relative orbits** are from the Sixth Catalog of Orbits of Visual
+  Binary Stars (USNO): Bond et al. 2017 for Sirius, Bond et al. 2015 for
+  Procyon, Akeson et al. 2021 for α Cen.
+  - They are evaluated with the Thiele–Innes constants, position angle
+    from north through east.
+  - They match the catalog's own published ephemeris to the milliarcsecond
+    in separation. The position angles differ by 0.1–0.2°, which is the
+    precession the ephemeris applies to the date.
+- **The split between the two stars** is by mass: Sirius 2.063 and 1.018
+  M☉ (Bond et al. 2017), Procyon 1.478 and 0.592 M☉ (Bond et al. 2015),
+  α Cen 1.13 and 0.97 M☉ (Pourbaix & Boffin 2016). A primary is offset by
+  −M_B/M of the relative orbit; the other star is the relative orbit away
+  from it.
+- **What it changes:**
+  - Sirius A moves about its barycentre by up to 3.9″ and Procyon A by up
+    to 1.7″, which the straight line never showed.
+  - α Cen A no longer drifts away: 28.6″ from the FK5 at 1900 before, and
+    0.73″ for its barycentre now.
+  - α Cen B − A is the orbit's separation exactly (14.11″ at J2000, against
+    the orbit's 14.13″), where the two straight lines gave 16.47″.
+- **Why α Cen B is placed from A:** its own solution is poor. A barycentre
+  shared by both lines, weighted by mass, took B's proper motion with it,
+  and the FK5 then put that barycentre 6.4″ off at 1900, against 0.73″
+  from A's solution alone.
+- **Tested** (`tests/test_stars.cpp`, "stars_binary_orbits"):
+  - α Cen A sits exactly at its catalog place at the catalog epoch.
+  - α Cen B − A matches the published ephemeris's separations for
+    2025–2029 to 2 mas.
+  - Sirius sits off its barycentre line by its share of the published
+    separation.
+  - The ERFA fixtures (`gen_star_fixtures.py`) apply the orbit
+    independently, from ORB6's own file.
+- **Against `astrolog-ephd`,** which moves stars in straight lines, the
+  cross-test's `stars` leg expects each of these stars to differ by exactly
+  our orbit's bend, and it does, to 3 mas.
 
 ## Known limits
 
 - Stars without a radial velocity in either source move in proper motion
   only. This matters only for fast, near stars over centuries.
-- Motion is a straight line from the Hipparcos epoch. A star with an unseen
-  companion wobbles about that line. Sirius is 2.3″ from the FK5 at 1900
-  and 2100 ("Checked against FK5").
-  - α Cen A is the extreme case, with an 80-year orbit about B. FK5 538 is
-    28.6″ from ours at 1900 and 17.4″ at 2100.
-  - The FK5's single α Cen entry is itself not simply A: it is 6.8″ from
-    ours at 2000. So those numbers bound the effect rather than measure it.
+- Motion is a straight line from the Hipparcos epoch, except for the four
+  stars that carry their orbits ("Binary stars").
+  - Other stars with unseen companions still wobble about their lines,
+    among them Achernar (1.0″ from the FK5 at 2100) and Polaris (0.78″).
+  - Their orbits are too uncertain to apply.
 - Deep-sky positions are their SIMBAD centres. Extended objects have no
   single position; M 40 and M 73 are loose groups.
 

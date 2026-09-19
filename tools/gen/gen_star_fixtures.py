@@ -26,9 +26,13 @@ import sys
 
 import erfa
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "check"))
+import binary_orbits  # noqa: E402
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CATALOG = os.path.join(REPO, "src", "star_catalog.inc")
 OUT = os.path.join(REPO, "tests", "star_fixtures.inc")
+ORBITS = binary_orbits.load(os.path.join(REPO, "stars-raw"))
 
 # (label, how the test finds it)
 OBJECTS = [
@@ -80,6 +84,18 @@ def to_j2000(rec):
     return tuple(float(x) for x in out[:6])
 
 
+def with_orbit(rec, rc, dc, jd_tt):
+    """A binary's catalog place moved by what its orbit adds to the straight
+    line at jd_tt (tools/check/binary_orbits.py, independent of the engine),
+    as a tangent-plane offset."""
+    orbit = ORBITS.get(rec["hip"])
+    if not orbit:
+        return rc, dc
+    epoch = 2451545.0 + (rec["epoch"] - 2000.0) * 365.25
+    east, north = binary_orbits.bend(orbit, jd_tt, epoch)
+    return rc + math.radians(east / 3600.0) / math.cos(dc), dc + math.radians(north / 3600.0)
+
+
 def main():
     catalog = load_catalog()
     lines = [
@@ -91,8 +107,9 @@ def main():
     ]
     for label, key in OBJECTS:
         rec = catalog[key]
-        rc, dc, pr, pd, px, rv = to_j2000(rec)
+        rc0, dc0, pr, pd, px, rv = to_j2000(rec)
         for jd_tt in EPOCHS_TT:
+            rc, dc = with_orbit(rec, rc0, dc0, jd_tt)
             dt = erfa.dtdb(jd_tt, 0.0, 0.0, 0.0, 0.0, 0.0) / 86400.0
             tdb = jd_tt + dt
             astrom, eo = erfa.apci13(tdb, 0.0)

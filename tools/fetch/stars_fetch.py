@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetchlog  # noqa: E402  (one timestamped line per GET)
 
 USER_AGENT = ("prometheia-fetch/0.1.0 "
-              "(Ephemeris Prometheia fixed-star catalog; sequential, 20 requests)")
+              "(Ephemeris Prometheia fixed-star catalog; sequential, 26 requests)")
 PAUSE_S = 5.0
 
 CDS = "https://cdsarc.cds.unistra.fr/ftp/"
@@ -107,6 +107,25 @@ SOURCES = [
     ("reid-2020", "reid-2020-abs.html", "https://arxiv.org/abs/2001.04386", "611f288a2e49c3533bd922c67bb0846e4e87ec0afd601d1a92d398a43407f813",
      "Reid & Brunthaler, The Proper Motion of Sagittarius A*. III (ApJ 892, 39, 2020), "
      "arXiv abstract page; Sgr A*'s apparent proper motion. Facts only"),
+    ("orb6", "orb6orbits.txt", "https://www.astro.gsu.edu/wds/orb6/orb6orbits.txt", "dbca5302763cbb9d39ec71f016cd46905d8b58e97aeb30a19cf3346043125852",
+     "Sixth Catalog of Orbits of Visual Binary Stars (Hartkopf, Mason & Worley; USNO/"
+     "GSU), US Government work, public; relative orbits of the binaries whose "
+     "photocentres the catalog moves (STARS.md, \"Binary stars\")"),
+    ("orb6-format", "orb6format.txt", "https://www.astro.gsu.edu/wds/orb6/orb6format.txt", "25b831d84c559d5dce71aebb5509511f58dfa13fa0c9443e7d780db78684bc62",
+     "as orb6; the file's column layout"),
+    ("orb6-ephem", "orb6ephem.txt", "https://www.astro.gsu.edu/wds/orb6/orb6ephem.txt", "bdca44d6c73ac9fbca8754dbb7303f90786fbc0f2a2e40b70cb3dcbf86038af3",
+     "as orb6; each orbit's published ephemeris of position angle and separation, the "
+     "check on the orbit arithmetic"),
+    ("arxiv-sirius", "arxiv-sirius.html",
+     "https://arxiv.org/search/?" + urllib.parse.urlencode({"query": "Sirius System and Its Astrophysical Puzzles", "searchtype": "title"}),
+     "a1cbdc293af348aa128cd57eb9e1eeb4635cbbd1bd6f308b73924ae258600693", "arXiv title search (abstracts, free to read): Bond et al. 2017, the masses "
+     "of Sirius A and B. Facts only"),
+    ("arxiv-procyon", "arxiv-procyon.html",
+     "https://arxiv.org/search/?" + urllib.parse.urlencode({"query": "Astrometry of the Procyon System", "searchtype": "title"}),
+     "d068961685075d79ec3b43845eb4b2e9de7e06bfa8feb82fa85510b859049bde", "as arxiv-sirius: Bond et al. 2015, the masses of Procyon A and B"),
+    ("arxiv-alcen", "arxiv-alcen.html",
+     "https://arxiv.org/search/?" + urllib.parse.urlencode({"query": "Parallax and masses of alpha Centauri revisited", "searchtype": "title"}),
+     "7ecb33918065a636e632f2c7170213e90cf290aa504b3ed7c61802f24aecf9cf", "as arxiv-sirius: Pourbaix & Boffin 2016, the masses of alpha Cen A and B"),
     ("simbad-rv", "simbad-rv.csv",
      tap("SELECT i.id AS hip, b.rvz_radvel, b.rvz_err, b.rvz_qual FROM ident AS i "
          "JOIN basic AS b ON i.oidref = b.oid WHERE i.id LIKE 'HIP %' "

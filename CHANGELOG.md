@@ -13,6 +13,17 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Binary stars move on their orbits** (docs/STARS.md, "Binary stars"):
+  Sirius A, Procyon A, and α Cen A and B.
+  - Orbits are from the Sixth Catalog of Orbits of Visual Binary Stars, and
+    masses from the orbits' own papers. How each orbit is added follows what
+    the star's Hipparcos line is.
+  - α Cen A no longer drifts: its barycentre is 0.73″ from the FK5 at 1900,
+    where the straight line was 28.6″ off.
+  - α Cen B − A is the orbit's separation (14.11″ at J2000, against 14.13″),
+    and matches the catalog's published ephemeris to 2 mas.
+  - Sirius A and Procyon A now show their wobble about their barycentres (up
+    to 3.9″ and 1.7″).
 - **Fixed: a "successful" answer with NaN coordinates** (found by fuzzing
   after the codec re-pin, docs/SERVER.md "Fuzzing").
   - A topocentric site far below the ground gave rowsOk 1 with −NaN
