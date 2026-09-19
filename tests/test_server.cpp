@@ -1390,49 +1390,57 @@ TEST_CASE("server_segments") {
     }
 
     SUBCASE("a sidereal profile carries its ayanamsa series") {
-        eph::Request req = seg_request(2451545.5, 10, 4.0);
-        req.profiles[0].zodiac = "lahiri";
-        req.objs = {body_obj(5)};
-        CHECK(s.on_message(request(req, 5), true));
-        const Segments d = join_segs(drain(s));
-        CHECK(d.meta[0].errCode == eph::kOErrNone);
-        REQUIRE(d.ayan.size() == 1);
-        CHECK(d.ayan[0].profile == 0);
-        REQUIRE(!d.ayan[0].segs.empty());
+        // An anchored zodiac, a star defined at the instant, and the polar one.
+        uint32_t id = 5;
+        for (const auto& [token, mode] :
+             {std::pair{"lahiri", SiderealMode::Lahiri},
+              std::pair{"true-citra", SiderealMode::TrueCitra},
+              std::pair{"galcent-mula-wilhelm", SiderealMode::GalacticCentreMulaWilhelm}}) {
+            INFO(token);
+            eph::Request req = seg_request(2451545.5, 10, 4.0);
+            req.profiles[0].zodiac = token;
+            req.objs = {body_obj(5)};
+            CHECK(s.on_message(request(req, id++), true));
+            const Segments d = join_segs(drain(s));
+            CHECK(d.meta[0].errCode == eph::kOErrNone);
+            REQUIRE(d.ayan.size() == 1);
+            CHECK(d.ayan[0].profile == 0);
+            REQUIRE(!d.ayan[0].segs.empty());
 
-        // The ayanamsa series answers the engine's own ayanamsa within its
-        // declared error.
-        CalcOptions sid; // the ayanamsa is observer-independent; the Sun is
-        // asked geocentrically so the engine always has it.
-        sid.center = Center::Geocentric;
-        sid.sidereal = SiderealMode::Lahiri;
-        sid.sigma = false;
-        double worst = 0.0, worst_declared = 0.0;
-        for (const eph::AyanSeg& g : d.ayan[0].segs) {
-            worst_declared = std::max(worst_declared, double(g.errArcsec));
-        }
-        const double ayan_from = Lattice::cell_start(Lattice::cell_of(2451545.5));
-        const double ayan_to = Lattice::cell_end(Lattice::cell_of(2451545.5 + 36.0));
-        for (int i = 0; i <= 400; ++i) {
-            const double jd = ayan_from + i * (ayan_to - ayan_from) / 400.0;
-            const eph::AyanSeg* seg = nullptr;
+            // The ayanamsa series answers the engine's own ayanamsa within its
+            // declared error.
+            CalcOptions sid; // the ayanamsa is observer-independent; the Sun is
+            // asked geocentrically so the engine always has it.
+            sid.center = Center::Geocentric;
+            sid.sidereal = mode;
+            sid.sigma = false;
+            double worst = 0.0, worst_declared = 0.0;
             for (const eph::AyanSeg& g : d.ayan[0].segs) {
-                if (jd >= g.mid.jd1 - g.halfSpanDays - 1e-9 &&
-                    jd <= g.mid.jd1 + g.halfSpanDays + 1e-9) {
-                    seg = &g;
-                    break;
-                }
+                worst_declared = std::max(worst_declared, double(g.errArcsec));
             }
-            REQUIRE(seg != nullptr);
-            const auto r = check.calc(10, jd, sid);
-            REQUIRE(r.ok());
-            REQUIRE(r.value().ayanamsa_deg.has_value());
-            worst = std::max(
-                worst,
-                std::fabs(seg->Eval(eph::Time{jd, 0.0}) - r.value().ayanamsa_deg.value()) * 3600.0);
+            const double ayan_from = Lattice::cell_start(Lattice::cell_of(2451545.5));
+            const double ayan_to = Lattice::cell_end(Lattice::cell_of(2451545.5 + 36.0));
+            for (int i = 0; i <= 400; ++i) {
+                const double jd = ayan_from + i * (ayan_to - ayan_from) / 400.0;
+                const eph::AyanSeg* seg = nullptr;
+                for (const eph::AyanSeg& g : d.ayan[0].segs) {
+                    if (jd >= g.mid.jd1 - g.halfSpanDays - 1e-9 &&
+                        jd <= g.mid.jd1 + g.halfSpanDays + 1e-9) {
+                        seg = &g;
+                        break;
+                    }
+                }
+                REQUIRE(seg != nullptr);
+                const auto r = check.calc(10, jd, sid);
+                REQUIRE(r.ok());
+                REQUIRE(r.value().ayanamsa_deg.has_value());
+                worst = std::max(worst, std::fabs(seg->Eval(eph::Time{jd, 0.0}) -
+                                                  r.value().ayanamsa_deg.value()) *
+                                            3600.0);
+            }
+            CHECK(worst_declared <= 0.1f);
+            CHECK(worst <= 0.1);
         }
-        CHECK(worst_declared <= 0.1f);
-        CHECK(worst <= 0.1);
     }
 
     SUBCASE("objects this server does not fit are per-object errors") {

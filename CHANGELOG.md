@@ -13,6 +13,14 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Sidereal positions four times faster:** 85.6 → 20.3 µs for the Sun
+  with Lahiri, the same as tropical, measured over 100,000 instants on
+  DE440.
+  - The anchored zodiacs summed the full IAU 2000A nutation series on every
+    call, three times per position with rates.
+  - They now take Δψ from the engine's epoch cache, like the zodiacs defined
+    at the instant, which cost 1–2 µs over tropical. The cached value is
+    interpolated, 0.004 µas from the series.
 - **Zodiacs defined at the instant** (docs/FRAMES.md): eleven sidereal
   modes whose zero point is where a star, the Galactic Centre or the
   galactic node sits at the moment asked. The modes are True Chitra,

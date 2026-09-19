@@ -1437,15 +1437,21 @@ struct Engine::Impl {
             if (fixed_frame)
                 return a.value().mean_deg;
             aya = a.value();
-        } else if (o.sidereal == SiderealMode::User) {
-            if (!std::isfinite(o.sidereal_epoch_jtdb) || !std::isfinite(o.sidereal_ayanamsa_deg))
-                return make_error(ErrorCode::ArgumentError, "sidereal User anchor is not finite");
-            aya = frames::ayanamsa_anchored(o.sidereal_epoch_jtdb, o.sidereal_ayanamsa_deg, jd_tt,
-                                            model);
         } else {
-            aya = frames::ayanamsa(int(o.sidereal), jd_tt, model);
-            if (!aya)
-                return make_error(ErrorCode::ArgumentError, "unknown sidereal mode");
+            // An anchored zodiac: frames::ayanamsa_anchored's arithmetic, with
+            // the nutation in longitude from the epoch cache (interpolated,
+            // 0.004 uas from the full series) rather than the full series on
+            // every call, which cost ~60 us a position (three calls with rates).
+            auto a = sidereal_anchor(o, jd_tt);
+            if (!a)
+                return a.error();
+            const double mean = a.value().mean0_deg +
+                                frames::precession_in_longitude_deg(jd_tt, model) -
+                                frames::precession_in_longitude_deg(a.value().t0_jtdb, model);
+            const double dpsi = o.frame == Frame::TrueOfDate
+                                    ? frames_at(jd_tt, true, o.precession).dpsi * kRad2Deg
+                                    : 0.0;
+            aya = frames::Ayanamsa{mean, mean + dpsi};
         }
         switch (o.frame) {
         case Frame::TrueOfDate:
