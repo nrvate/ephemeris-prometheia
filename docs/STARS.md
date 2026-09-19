@@ -317,9 +317,20 @@ new and old reductions):
   Procyon, Akeson et al. 2021 for α Cen.
   - They are evaluated with the Thiele–Innes constants, position angle
     from north through east.
-  - They match the catalog's own published ephemeris to the milliarcsecond
-    in separation. The position angles differ by 0.1–0.2°, which is the
-    precession the ephemeris applies to the date.
+  - The nodes refer to the equinox of 2000 (the catalog's equinox field;
+    blank for α Cen, where the ephemeris fits 2000 too). The orbit is used
+    in that fixed frame, never re-precessed.
+  - The offset is laid in the tangent plane at the line's direction *at the
+    date*, whose north is the one position angles are measured from. The
+    catalog position's plane, used until 2026-09-18, turned α Cen's orbit
+    by d(RA)·sin(Dec) of its proper motion since 1991: 0.065° by 2025, about
+    10 mas at its separation.
+  - They match the catalog's published ephemeris, 2025–2029, in both
+    coordinates. The separations agree to the milliarcsecond. The position
+    angles agree to 0.024° once the ephemeris's precession to the date is
+    taken off, inside its 0.1° printing; that precession is 0.13–0.21° for
+    these three. The Astrolog session found the position-angle convention
+    and asked that it be checked.
 - **The split between the two stars** is by mass: Sirius 2.063 and 1.018
   M☉ (Bond et al. 2017), Procyon 1.478 and 0.592 M☉ (Bond et al. 2015),
   α Cen 1.13 and 0.97 M☉ (Pourbaix & Boffin 2016). A primary is offset by
@@ -338,10 +349,11 @@ new and old reductions):
   from A's solution alone.
 - **Tested** (`tests/test_stars.cpp`, "stars_binary_orbits"):
   - α Cen A sits exactly at its catalog place at the catalog epoch.
-  - α Cen B − A matches the published ephemeris's separations for
-    2025–2029 to 2 mas.
+  - α Cen B − A matches the published ephemeris for 2025–2029: separations
+    to 2 mas, position angles to 0.06° (measured 0.024°). With the orbit in
+    the catalog position's plane, three of the five epochs fail.
   - Sirius sits off its barycentre line by its share of the published
-    separation.
+    separation, in the published direction.
   - The ERFA fixtures (`gen_star_fixtures.py`) apply the orbit
     independently, from ORB6's own file.
 - **Against `astrolog-ephd`,** which moves stars in straight lines, the

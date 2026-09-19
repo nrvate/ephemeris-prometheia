@@ -37,6 +37,13 @@ documented, not that it is frozen.
   - `capabilities` lists each zodiac's sidereal planes. `anchor` on a
     zodiac defined at the instant is refused before anything is computed.
 
+- Binary stars' orbits are laid in the sky's plane at the date, not at the
+  catalog position. The catalog position's plane turned α Cen's orbit by
+  0.065° by 2025, about 10 mas. The test now checks position angle as well
+  as separation, against the Sixth Catalog's ephemeris; the separation
+  check could not see the turn. The Astrolog session found the convention
+  and asked that it be checked.
+
 ## 0.4.0 — 2026-09-18
 
 The same day as 0.3.0.

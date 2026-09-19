@@ -2226,15 +2226,14 @@ struct Engine::Impl {
         if (!b)
             return;
         const double r = std::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
-        const stars::Object* at = &star; // the star whose tangent plane the offset is in
-        double e1, n1;                   // arcsec
+        double e1, n1; // arcsec
         if (b->line == BinaryLine::Secondary) {
             auto primary = star_by_hip(b->partner_hip);
             const BinaryOrbit* pb = primary ? binary_orbit(b->partner_hip) : nullptr;
             if (!pb)
                 return;
-            at = &stars::at(primary.value());
-            star_barycentric_km(*at, jd_tdb, pos); // the primary, orbit included
+            star_barycentric_km(stars::at(primary.value()), jd_tdb,
+                                pos); // the primary, orbit included
             const double pr = std::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
             for (int i = 0; i < 3; ++i)
                 pos[i] *= r / pr; // at this star's distance
@@ -2257,7 +2256,14 @@ struct Engine::Impl {
                 n1 -= n0 + (np - nm) / 2.0 * dt;
             }
         }
-        const double a = at->ra_deg / kRad2Deg, d = at->dec_deg / kRad2Deg;
+        // East and north at the date, at the line's direction (the primary's,
+        // for a secondary): position angles are measured from the north of
+        // the date, and the catalog's own ephemeris agrees only in this
+        // plane (STARS.md, "Binary stars"). The catalog position's plane
+        // would turn the orbit by the proper motion's d(RA) sin(Dec): 0.065
+        // deg for alpha Cen by 2025.
+        const double a = std::atan2(pos[1], pos[0]);
+        const double d = std::atan2(pos[2], std::sqrt(pos[0] * pos[0] + pos[1] * pos[1]));
         const double east[3] = {-std::sin(a), std::cos(a), 0.0};
         const double north[3] = {-std::sin(d) * std::cos(a), -std::sin(d) * std::sin(a),
                                  std::cos(d)};

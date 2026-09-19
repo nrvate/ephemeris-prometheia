@@ -36,6 +36,30 @@ size_t must_find(const char* q) {
     return r.value();
 }
 
+// The position angle of 2 seen from 1, degrees east of north [0, 360).
+double pa_deg(double ra1, double dec1, double ra2, double dec2) {
+    const double k = 3.14159265358979323846 / 180.0;
+    const double y = std::sin((ra2 - ra1) * k) * std::cos(dec2 * k);
+    const double x = std::cos(dec1 * k) * std::sin(dec2 * k) -
+                     std::sin(dec1 * k) * std::cos(dec2 * k) * std::cos((ra2 - ra1) * k);
+    const double pa = std::atan2(y, x) / k;
+    return pa < 0.0 ? pa + 360.0 : pa;
+}
+
+// A position angle in the frame of the equinox of 2000 (the ICRF, near
+// enough), carried to the equinox of `years` later: the precession of
+// position angle, 20.04"/yr x sin(RA) sec(Dec). The Sixth Catalog prints its
+// ephemeris at the equinox of date, and its nodes refer to 2000.
+double pa_of_date(double pa2000, double ra, double dec, double years) {
+    const double k = 3.14159265358979323846 / 180.0;
+    return pa2000 + 20.04 / 3600.0 * std::sin(ra * k) / std::cos(dec * k) * years;
+}
+
+// The difference of two angles in degrees, in (-180, 180].
+double dangle(double a, double b) {
+    return std::remainder(a - b, 360.0);
+}
+
 double sep_mas(double ra1, double dec1, double ra2, double dec2) {
     const double k = 3.14159265358979323846 / 180.0;
     const double a[3] = {std::cos(dec1 * k) * std::cos(ra1 * k),
@@ -210,13 +234,20 @@ TEST_CASE("stars_binary_orbits") {
     // alpha Cen B is placed from A by the relative orbit: B - A is the orbit's
     // separation, against the Sixth Catalog's own published ephemeris
     // (stars-raw/orb6ephem.txt, 2025.0-2029.0, Besselian; mas precision).
+    // Both coordinates: the separation, and the position angle, which the
+    // catalog prints at the equinox of date (0.1 deg; the precession of
+    // position angle is -0.18 deg here by 2025, so a frame slip shows).
     const double published[] = {8.737, 9.294, 9.765, 10.121, 10.329};
+    const double published_pa[] = {9.2, 11.9, 14.3, 16.5, 18.6};
     for (int k = 0; k < 5; ++k) {
         const double jd = 2415020.31352 + (125.0 + k) * 365.242198781;
         const auto [ra_a, dec_a] = radec(a, jd);
         const auto [ra_b, dec_b] = radec(b, jd);
         INFO("year ", 2025 + k);
         CHECK(std::fabs(sep_mas(ra_a, dec_a, ra_b, dec_b) / 1000.0 - published[k]) < 0.002);
+        const double pa =
+            pa_of_date(pa_deg(ra_a, dec_a, ra_b, dec_b), ra_a, dec_a, (jd - 2451545.0) / 365.25);
+        CHECK(std::fabs(dangle(pa, published_pa[k])) < 0.06);
     }
 
     // Sirius's catalog line is its barycentre's (a Hipparcos orbital
@@ -231,4 +262,9 @@ TEST_CASE("stars_binary_orbits") {
     const auto [sra, sdec] = radec(sirius, jd);
     CHECK(std::fabs(sep_mas(sra, sdec, line_ra, line_dec) / 1000.0 - 11.256 * 1.018 / 3.081) <
           0.01);
+    // A is opposite B: its position angle from the barycentre is the
+    // catalog's 59.0 deg (of date) turned half a circle.
+    const double spa = pa_of_date(pa_deg(line_ra, line_dec, sra, sdec), line_ra, line_dec,
+                                  (jd - 2451545.0) / 365.25);
+    CHECK(std::fabs(dangle(spa, 59.0 + 180.0)) < 0.06);
 }

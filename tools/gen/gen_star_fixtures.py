@@ -87,7 +87,14 @@ def to_j2000(rec):
 def with_orbit(rec, rc, dc, jd_tt):
     """A binary's catalog place moved by what its orbit adds to the straight
     line at jd_tt (tools/check/binary_orbits.py, independent of the engine),
-    as a tangent-plane offset."""
+    as a tangent-plane offset.
+
+    The offset belongs in the tangent plane of the date, where position angles
+    are measured (STARS.md, "Binary stars"). Shifting the J2000 place is
+    enough: ERFA carries the shifted place with the same RA and Dec rates, so
+    the offset stays aligned with north at the date. Checked against laying
+    it at the date directly, 2026-09-18: 0.5 mas for Sirius, 1.2 mas for
+    alpha Cen, a century from J2000."""
     orbit = ORBITS.get(rec["hip"])
     if not orbit:
         return rc, dc
