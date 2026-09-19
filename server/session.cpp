@@ -252,6 +252,14 @@ bool has_naif(eph::ObjKind kind) {
     return kind == eph::kObjBody || kind == eph::kObjOrbitPoint || kind == eph::kObjDesignation;
 }
 
+// The object is the observing body itself: a body or a designation that
+// resolves to it. An orbit point of the observer's body is not: it is a
+// place in space (docs/ORBIT-POINTS.md), and is answered from there.
+bool is_the_observer(eph::ObjKind kind, const ResolvedObject& obj, const CalcOptions& opts) {
+    return (kind == eph::kObjBody || kind == eph::kObjDesignation) && opts.center == Center::Body &&
+           opts.center_body == obj.naif_id;
+}
+
 // ---- engine failure -> A.17 -------------------------------------------------
 
 // 3.9a: errors by meaning, not convenience; 3.8: the text names no instant.
@@ -684,8 +692,7 @@ public:
             t.obj = std::move(resolved).value();
             t.resolved = true;
             // A body observer with observerBody equal to the object (3.5).
-            if (has_naif(t.kind) && plan.opts.center == Center::Body &&
-                plan.opts.center_body == t.obj.naif_id) {
+            if (is_the_observer(t.kind, t.obj, plan.opts)) {
                 t.why = "the observer is the object";
                 t.code = eph::kOErrUnsupported;
                 t.resolved = false;
@@ -1085,8 +1092,7 @@ private:
         }
         s.obj = std::move(resolved).value();
         const ProfilePlan& plan = plans_[spec.profile];
-        if (plan.opts.center == Center::Body && plan.opts.center_body == s.obj.naif_id &&
-            has_naif(s.kind)) {
+        if (is_the_observer(s.kind, s.obj, plan.opts)) {
             s.why = "the observer is the object";
             s.code = eph::kOErrUnsupported;
             return;

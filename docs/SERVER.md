@@ -314,7 +314,7 @@ does with them:
   |---|---|---|
   | 1 unknown | a NAIF/SPK-ID no loaded data answers; no star, designation or token of that name | not a body, name or token this server knows |
   | 2 unsupported | a NAIF id that is not a body id, or the barycentre; an orbit method or object kind not served; elements not a bound orbit at the instant; a kind not fitted as segments; the Moon's osculating apsides as segments | not supported by this server for this object (or the server's own reason) |
-  | 2 unsupported | a body observer that is the object | the observer is the object |
+  | 2 unsupported | a body observer that is the object (a body, or a designation resolving to it; that body's orbit points are places and are answered) | the observer is the object |
   | 3 coverage | outside the ephemeris's time span, or its perturbers' | outside the ephemeris's time coverage |
   | 4 data | a data file unreadable or corrupt | the data this object needs is not loaded |
   | 5 undefined | a node of an orbit in the ecliptic, an apsis of a circle, the aphelion of an open orbit | the point is undefined for this orbit |

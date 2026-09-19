@@ -958,11 +958,15 @@ the sign of one, so this was a blind spot, not a detail.
     |dε/dt · sin λ| for each body, to a ratio of 0.95–1.01. The longitude
     rate lacks light time, and aberration for the Sun. The topocentric Moon
     is Swiss's and is kept.
-  - **A spec gap, not a defect:** §3 does not say which quantity a rate
-    column is the rate of. The Astrolog session is taking a sentence to
-    their maintainer: each rate is the time derivative of the quantity
-    reported beside it, corrections and frame rotations included. Ours
-    already conforms (ENGINE.md, "Rates").
+  - **Conformance failures, not a spec gap.** §3.5a's "Rates" already says
+    the rate columns are the time derivatives of the coordinates answered,
+    "including every change of the pipeline with time (light time,
+    aberration, precession, nutation, the ayanamsa...)". A gap was first
+    suspected here and withdrawn once the section was read. Ours conforms
+    (ENGINE.md, "Rates"). §3.5a's one honest way not to conform is META's
+    `ratesApprox` with the largest difference stated in A.3 0x0013. Their
+    stated figure was 3e-6 °/day, measured at 4.05e-3 (the topocentric
+    lunar node), and corrected to 5e-3 at their `429c764`.
 - **Heliocentric runs at mask 1.** From the Sun the advertised masks
   (A.3 `0x0004`, `0x0014`) differ by object kind, and §3.5a makes any
   unlisted mask ERROR 11 for the whole request. Mask 1 is listed for every
@@ -1006,6 +1010,47 @@ and `1ecb8b9` (the plane-2 star origin), on a spare port.
   `46cf57d`. The rest (91 rows, 1e-6 to 8e-4 °/day) are their library's
   speeds, reported to them.
 - **Everything else is unchanged from record q.**
+
+### Orbit points from elsewhere, 2026-09-18 (`docs/crosstest/2026-09-18s.tsv`)
+
+The `points` leg asked everything from the Earth's centre, so a point seen
+from anywhere else was a coordinate no check could see. It now also asks
+every point from the Sun, the barycentre and Mars's centre, at masks 0 and
+1. A point is a place in space (ORBIT-POINTS.md, "From any observer"), so
+two servers should agree there as they do geocentrically. The Moon's points
+are also held to the Earth answered in the same request: from anywhere they
+must lie within 0.003 AU of it. At mask 1 they must also be retarded as the
+Earth is, within 1″ (ours 0.19″ at worst). That check says whose a
+difference is. Run against Astrolog's `429c764` on the spare port.
+
+- **It found one defect of ours, fixed.** `prometheiad` refused a planet's
+  own points from its centre (Mars's perihelion from Mars) as "the
+  observer is the object". Now answered; the body alone is refused.
+- **From the Sun and the barycentre at mask 0 the servers agree:** the
+  Moon's points to 0.021″, the inner planets' and Mars's mean points to
+  0.58″, osculating points to 1.6″, as geocentrically.
+- **Findings, theirs:**
+  - At mask 1 their Moon points from the Sun or barycentre are their mask-0
+    answer: no light time. The Earth beside them moves 20.9″. That is
+    15,000 km of the Earth's motion in 500 s, which a point riding with it
+    shares.
+  - From Mars's centre they refuse most points (errCode 2). But they answer
+    the Moon's mean apogee and its osculating nodes and apogee, at
+    0.23–2.4 AU from the Earth, where the Moon's points cannot be.
+    This is the ~31° gap HANDOFF once parked as a definition question. It
+    is not one: nothing reachable from the Earth by 0.003 AU is 31° from
+    it as seen from Mars.
+  - Rates (`rates` now includes Mars's mean perihelion): their mean
+    perihelia put the latitude itself in the latitude-rate column. From
+    the Sun, Mars's reads −1.77351 against a latitude of −1.77351°; the
+    same holds for Jupiter's. The osculating perihelia and the mean nodes
+    are right.
+- **Refusals recorded, not graded:** from the Sun and barycentre they
+  refuse the Moon's mean apogee and osculating nodes and apogee. At 1650
+  they refuse the Earth itself, so those nine rows have no Earth to hold
+  to and stay unattributed.
+- **Everything else is unchanged from record r.** The `rates` leg has the
+  same 91 rows of theirs, plus Mars's mean perihelion's 16.
 
 ### What it leaves behind
 

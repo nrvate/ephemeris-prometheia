@@ -106,6 +106,16 @@ skipped for an observer at the Sun's centre, where it is not defined, and
 for the Sun itself as the point. It is applied at the barycentre, which
 sits about 0.005 AU from the Sun's centre, close enough to deflect.
 
+**From any observer.** A point is a place in space, so an observer other
+than the orbit's focus sees it re-centred like a body: the Moon's node from
+the Sun is the Earth-riding point about 1 AU away, and with light time it is
+retarded exactly as the Earth is (about 20.5″ from the Sun, in Earth's
+motion). This includes a planet's own points seen from that planet's centre:
+Mars's perihelion from Mars is the point on its orbit, 0.56 AU away at
+J2000. Only the body itself is refused from its own centre. Until
+2026-09-18 the server refused a planet's own points there too, as if they
+were the planet (`docs/SERVER.md`, per-object errors).
+
 ## The natural apsides
 
 The Moon's natural (interpolated) apogee and perigee, A.14 method 2, are

@@ -88,15 +88,21 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
     graded on whether a plane moves the answer), `stars`;
   - `rates`: each server's rates against a five-point difference of its own
     positions (CROSS-TEST.md, "Rates, a new leg").
-- **Latest record:** `docs/crosstest/2026-09-18r.tsv`, against Astrolog's
-  build with the binary orbits (`13d3e5e`) and the plane-2 star fix
-  (`1ecb8b9`), run on a spare port (47392). Results:
-  - The four binaries now agree like any star (8 mas), direction included.
-  - The natural apsides pass the Moon at its actual passages on both sides
-    (ours 0.002″, theirs 44″).
-  - Their `true-citra` rate misses match `lahiri`'s now.
-  - The findings left are theirs: 91 `rates` rows (their library's speeds,
-    with them) and the 15 `galequ-iau1958` rows (their pole transfer).
+- **Latest record:** `docs/crosstest/2026-09-18s.tsv`, against Astrolog's
+  `429c764` on a spare port (47392). Orbit points are now asked from the
+  Sun, the barycentre and Mars's centre too (CROSS-TEST.md, "Orbit points
+  from elsewhere"). Results:
+  - One defect of ours, fixed: a planet's own points from its centre were
+    refused.
+  - New findings, theirs, sent: no light time on the Moon's points from
+    the Sun or barycentre; Moon points from Mars placed 0.23–2.4 AU from
+    the Earth; mean perihelia with the latitude in the latitude-rate
+    column.
+  - Unchanged: 91 `rates` rows (their library's speeds, now diagnosed on
+    their side and recorded as §3.5a non-conformance under `ratesApprox`)
+    and the 15 `galequ-iau1958` rows (their pole transfer).
+  - Record r had closed the binaries (8 mas, direction included) and the
+    natural apsides at passages (ours 0.002″, theirs 44″).
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;
@@ -177,5 +183,3 @@ Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
 - The `deadlineMs` strategy switch: parsed and advisory today, and
   documented as unimplemented in SERVER.md.
 - Nightly or automated catalogue release builds: an idea only.
-- The Moon's node seen *from* a planet's centre, where the two servers
-  disagree by ~31°: a definition no client asks for yet.

@@ -11,6 +11,19 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **A planet's own orbit points, seen from its centre, are answered.**
+  `prometheiad` refused Mars's node and perihelion from Mars's centre as "the
+  observer is the object". A point is a place in space, so only the body
+  itself is refused now (docs/ORBIT-POINTS.md, "From any observer";
+  docs/SERVER.md, per-object errors).
+- **The cross-test sees orbit points from elsewhere.** The `points` leg asks
+  every point from the Sun, the barycentre and Mars's centre, at masks 0
+  and 1. The Moon's points are also checked against the Earth answered
+  beside them, so a difference is attributed. The `rates` leg adds Mars's
+  mean perihelion (docs/CROSS-TEST.md, record s).
+
 ## 0.6.0 — 2026-09-18
 
 The library and tools are 0.6.0; the C ABI is unchanged (6), with one new

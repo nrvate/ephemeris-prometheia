@@ -701,6 +701,22 @@ TEST_CASE("server_profiles") {
         CHECK(d.meta[0].rowsOk == 0);
         CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
     }
+    SUBCASE("the observer's own orbit points are places, answered from there") {
+        eph::Request req = base_request(jd, 1);
+        req.profiles[0].observer = eph::kObsBody;
+        req.profiles[0].observerBody = 5;
+        eph::Object node = body_obj(5);
+        node.kind = eph::kObjOrbitPoint;
+        node.point = eph::kPtAscNode;
+        node.method = eph::kMethOsculating;
+        req.objs = {body_obj(5), node};
+        CHECK(s.on_message(request(req, 99), true));
+        const Data d = join(drain(s));
+        REQUIRE(d.meta.size() == 2);
+        CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
+        CHECK(d.meta[1].errCode == eph::kOErrNone);
+        CHECK(d.meta[1].rowsOk == 1);
+    }
 }
 
 TEST_CASE("server_time_and_columns") {

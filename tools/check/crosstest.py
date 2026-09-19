@@ -30,7 +30,9 @@ running daemons:
              (mask 3 against its own mask 1) against the textbook formula
   points     orbit points (Moon and planets, mean and osculating) by
              direction and distance, mask 0, and the node of date asked in
-             the J2000 frame (3.5a as amended)
+             the J2000 frame (3.5a as amended); then the same points from
+             the Sun, the barycentre and Mars's centre at masks 0 and 1, the
+             Moon's held to the Earth answered beside them
   sidereal   the three A.8 sidereal planes for two zodiacs
   stars      29 fixed stars by name, tropical and sidereal, and the two
              IAU names of alpha Centauri
@@ -736,6 +738,113 @@ def natural_at_passages(client, ours, theirs, table, verbose, epochs):
     print(f"    worst: ours {worst['ours']:.4f}\"  theirs {worst['theirs']:.2f}\"")
 
 
+POINT_OBSERVERS = [("helio", ["--helio"]), ("bary", ["--bary"]), ("Mars", ["--center", "4"])]
+# The Moon's points ride with the Earth, within its osculating apogee (~0.0029
+# AU at most) of its centre; so from anywhere each must lie within that of the
+# Earth answered in the same request, in direction and distance.
+MOON_REACH_AU = 0.003
+# With light time (mask 1) a Moon point is retarded as the Earth is: its own
+# motion about the Earth over ~500 s moves it <= 0.5" more (osculating apsides
+# swing fastest). Measured on ours <= 0.19" (the osculating apogee from Mars,
+# 2026-09-18).
+MOON_RETARD_BAND = 1.0
+
+
+def _moon_anchor(v, earth, v0, earth0):
+    """Why a Moon point v (mask m) is inconsistent with the Earth answered
+    beside it, or "" when it is not. v0/earth0: the same at mask 0, when the
+    row is mask 1 and both are at hand (the light-time check)."""
+    lim = math.degrees(math.asin(min(1.0, MOON_REACH_AU / earth[2]))) * 3600.0
+    s = sep_arcsec((v[0], v[1]), (earth[0], earth[1]))
+    if s > lim or abs(v[2] - earth[2]) > MOON_REACH_AU:
+        return f"{s:.0f}\" and {abs(v[2] - earth[2]):.4f} AU from the Earth (reach {lim:.0f}\")"
+    if v0 is not None and earth0 is not None:
+        moved = sep_arcsec((v[0], v[1]), (v0[0], v0[1]))
+        e_moved = sep_arcsec((earth[0], earth[1]), (earth0[0], earth0[1]))
+        if abs(moved - e_moved) > MOON_RETARD_BAND:
+            return (f"light time moves it {moved:.2f}\", the Earth {e_moved:.2f}\" "
+                    f"(band {MOON_RETARD_BAND}\")")
+    return ""
+
+
+def points_from_elsewhere(client, ours, theirs, table, verbose, epochs):
+    """The same points seen from the Sun, the barycentre and Mars's centre, at
+    mask 0 and mask 1. A point is a place in space (ORBIT-POINTS.md), so from
+    elsewhere it is re-centred like a body, and mask 1 adds light time and
+    nothing else: 3.5a honours the bits as sent. A server may refuse an
+    observer per object (errCode); that is recorded, not graded. The Moon's
+    points are also held to the Earth answered in the same request
+    (_moon_anchor), which says whose a difference is."""
+    print("\n  from elsewhere: Sun, barycentre, Mars; masks 0 and 1")
+    specs = [s for s in POINT_SPECS if point_class(s) != "natural"]
+    replies = {}
+    for obs, oargs in POINT_OBSERVERS:
+        for mask in (0, 1):
+            for jd in epochs:
+                args = ["--jd", repr(jd), "--corrections", str(mask), "--deltat", str(DELTA_T)]
+                args += oargs
+                for spec in specs:
+                    args += ["--node", spec]
+                args += ["--obj", "399"]
+                ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+                replies[obs, mask, jd] = (ra, rb)
+
+    def ok(v):
+        return v is not None and not any(math.isnan(x) for x in v[:3])
+
+    worst = {}
+    for (obs, mask, jd), (ra, rb) in replies.items():
+        table.asked(ra, rb)
+        r0 = replies.get((obs, 0, jd)) if mask == 1 else None
+        for k, spec in enumerate(specs):
+            cls = point_class(spec)
+            va, vb = ra.row(k), rb.row(k)
+            base = dict(leg="points-observer", epoch_tt=jd, object=spec, observer=obs,
+                        frame="true of date", plane="ecliptic", mask=mask,
+                        deltat=DELTA_T, tier=2)
+            if not ok(va) or not ok(vb):
+                ea = ra.objects[k].err if k < len(ra.objects) else -1
+                eb = rb.objects[k].err if k < len(rb.objects) else -1
+                who = "ours" if ok(vb) else "theirs" if ok(va) else "both"
+                table.add(**base, verdict=f"refused ({who})",
+                          note=f"errCode ours {ea} theirs {eb}")
+                continue
+            s = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+            dkm = abs(va[2] - vb[2]) * AU_KM
+            w = worst.setdefault((obs, mask, cls), [0.0, 0.0, ""])
+            if s > w[0]:
+                w[0], w[2] = s, spec
+            w[1] = max(w[1], dkm)
+            note = f"distance diff {dkm:.1f} km"
+            if cls == "model":
+                table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
+                          sep_servers=s, verdict="expected-difference",
+                          note=note + "; mean elements from two published sources")
+                continue
+            band_s, band_km = POINT_BANDS[cls]
+            within = s <= band_s and dkm <= band_km
+            if cls == "moon":
+                why = {}
+                for who, r, i in (("ours", ra, 0), ("theirs", rb, 1)):
+                    n = len(specs)
+                    v0 = e0 = None
+                    if r0 is not None:
+                        v0, e0 = r0[i].row(k), r0[i].row(n)
+                        if not ok(v0) or not ok(e0):
+                            v0 = e0 = None
+                    why[who] = _moon_anchor(r.row(k), r.row(n), v0, e0) if ok(r.row(n)) else ""
+                bad = [w for w in ("ours", "theirs") if why[w]]
+                verdict = "agree" if within and not bad else \
+                    f"finding ({bad[0]})" if len(bad) == 1 else "finding"
+                note += "".join(f"; {w}: {why[w]}" for w in bad)
+            else:
+                verdict = "agree" if within else "finding"
+            table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
+                      band=f"{band_s}\" {band_km} km", verdict=verdict, note=note)
+    for (obs, mask, cls), (s, d, spec) in sorted(worst.items()):
+        print(f"    {obs:6s} mask {mask} {cls:10s} worst {s:10.3f}\" ({spec})  {d:11.1f} km")
+
+
 def leg_points(client, ours, theirs, table, verbose):
     """Orbit points by direction AND distance, mask 0, true ecliptic of date;
     then 3.5a's rule, as amended on 2026-09-18, that a node lies on the mean
@@ -785,6 +894,7 @@ def leg_points(client, ours, theirs, table, verbose):
         print(f"  {spec:8s} worst {s:9.3f}\"  {d:11.1f} km  ({point_class(spec)})")
 
     natural_at_passages(client, ours, theirs, table, verbose, epochs)
+    points_from_elsewhere(client, ours, theirs, table, verbose, epochs)
 
     print("  node of date in the J2000 frame (3.5a as amended: the frame gives the coordinates)")
     band_s, _ = POINT_BANDS["moon"]
@@ -974,8 +1084,10 @@ RATE_BAND_AU = 1e-9  # AU/day per AU of distance (150 m/day at 1 AU)
 RATE_H_DAYS = 1.0 / 1024.0
 RATE_EPOCHS = [2451545.0, 2461300.5]
 RATE_OBJECTS = [["--obj", "10"], ["--obj", "301"], ["--obj", "199"], ["--obj", "4"],
-                ["--obj", "5"], ["--obj", "9"], ["--node", "301.a.m"], ["--star", "Sirius"]]
-RATE_LABELS = ["Sun", "Moon", "Mercury", "Mars", "Jupiter", "Pluto", "Moon mean node", "Sirius"]
+                ["--obj", "5"], ["--obj", "9"], ["--node", "301.a.m"], ["--node", "4.p.m"],
+                ["--star", "Sirius"]]
+RATE_LABELS = ["Sun", "Moon", "Mercury", "Mars", "Jupiter", "Pluto", "Moon mean node",
+               "Mars mean perihelion", "Sirius"]
 RATE_CONFIGS = [
     ("geo apparent, true of date, ecliptic", ["--corrections", "7"]),
     ("geo apparent, true of date, equatorial", ["--corrections", "7", "--eq"]),
