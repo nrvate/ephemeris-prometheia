@@ -1011,7 +1011,8 @@ def _rate_error(v):
 
 
 def leg_rates(client, ours, theirs, table, verbose):
-    print(f"\n== rates: each server's rates against its own positions at t -/+ {RATE_H_DAYS} d")
+    print(f"\n== rates: each server's rates against its own positions at t -/+ {RATE_H_DAYS} d"
+          " (lon/lat deg/day; dist AU/day divided by the distance in AU)")
     worst = {"ours": [0.0, 0.0, 0.0], "theirs": [0.0, 0.0, 0.0]}
     for label, cfg in RATE_CONFIGS:
         for jd in RATE_EPOCHS:
