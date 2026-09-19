@@ -654,9 +654,12 @@ private:
         const double step = days / double(n);
         const size_t nb = ids_.size();
         // block[i * nb + b]: sample i of the block (i = 0 is the boundary).
+        // Epochs outer, bodies inner: the ephemeris keeps one record (every
+        // body, 32 days in DE440) decoded, so this reads each record once
+        // where bodies-outer read the block's dozen records once per body.
         std::vector<TrajSample> block(size_t(n + 1) * nb);
-        for (size_t b = 0; b < nb; ++b) {
-            for (int i = 0; i <= n; ++i) {
+        for (int i = 0; i <= n; ++i) {
+            for (size_t b = 0; b < nb; ++b) {
                 const double tt = from + step * double(i);
                 double st[6];
                 auto r = sources_[b]->barycentric(ids_[b], tt, st);
@@ -1018,11 +1021,11 @@ struct Engine::Impl {
             return {};
         std::vector<std::pair<uint64_t, uint64_t>> entries;
         entries.reserve(size_t(catalogs[i]->record_count()) + 1024);
-        auto fe = catalogs[i]->for_each([&](const catalog::Record& rec, const catalog::Names& n) {
+        auto fe = catalogs[i]->for_each_name([&](uint64_t spkid, const catalog::Names& n) {
             if (!n.pdes.empty())
-                entries.emplace_back(name_hash(lowercase(n.pdes)), rec.spkid);
+                entries.emplace_back(name_hash(lowercase(n.pdes)), spkid);
             if (!n.name.empty())
-                entries.emplace_back(name_hash(lowercase(n.name)), rec.spkid);
+                entries.emplace_back(name_hash(lowercase(n.name)), spkid);
         });
         if (!fe)
             return fe.error();
@@ -2862,10 +2865,12 @@ Result<void> Engine::add_catalog(const std::string& path) {
     if (!r)
         return r.error();
 
-    // Stream and CRC-verify the whole container before the engine owns it,
-    // so a corrupt file fails add_catalog cleanly. The name index is built
-    // on the first lookup().
-    auto fe = r.value().for_each([](const catalog::Record&, const catalog::Names&) {});
+    // CRC-verify the whole container before the engine owns it, so a
+    // corrupt file fails add_catalog cleanly. The CRC covers each chunk's
+    // raw bytes, so decoding the records adds nothing to the check (it was
+    // 40% of loading, 2026-09-19). The name index is built on the first
+    // lookup().
+    auto fe = r.value().verify();
     if (!fe)
         return fe.error();
 

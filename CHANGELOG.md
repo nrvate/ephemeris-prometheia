@@ -36,6 +36,11 @@ documented, not that it is frozen.
     passage no longer depends on which instant was asked first (answers
     moved by up to 0.03 mas);
   - the nutation series with rates: 22.6 → 18.4 µs a node.
+  - a small body's first integration is 2.3× faster: the perturbers' table
+    reads each ephemeris record once, not once per body;
+  - `add_catalog` verifies chunks without decoding records (315 → 235 ms),
+    and the name index reads only SPK-IDs and names (new
+    `catalog::Reader::verify` and `for_each_name`).
 - **`prometheia-json` reads a clock time before 1972 as UT1** (maintainer,
   2026-09-19). It refused any date before 1972, so an agent could not ask
   for most birth charts by clock time. UTC with integer leap seconds begins

@@ -555,6 +555,52 @@ Result<Record> Reader::lookup(uint64_t spkid) const {
     return make_error(ErrorCode::NotFound, "spkid not in catalog");
 }
 
+Result<void>
+Reader::for_each_name(const std::function<void(uint64_t spkid, const Names&)>& fn) const {
+    Record r; // only spkid, flags and name_offset are read into it
+    for (uint64_t i = 0; i < entries_.size(); ++i) {
+        auto chunk = load_chunk(i);
+        if (!chunk.ok())
+            return chunk.error();
+        const char* p = chunk.value()->data();
+        const char* end = p + chunk.value()->size();
+        for (uint32_t k = 0; k < entries_[size_t(i)].record_count; ++k) {
+            // The layout decode_record reads, with the fixed-size fields
+            // stepped over by what the flags say is present.
+            if (!(p = get_uvarint(p, end, r.spkid)) || end - p < 2)
+                return make_error(ErrorCode::CorruptionError, "record: truncated");
+            if (!body_class_valid(uint8_t(p[0])) || (uint8_t(p[1]) & ~kKnownFlagMask))
+                return make_error(ErrorCode::CorruptionError, "record: bad class or flags");
+            r.flags = uint8_t(p[1]);
+            size_t skip = 2 + 7 * 8; // class, flags; epoch and six elements
+            if (r.has(RecordFlags::kSigmas))
+                skip += 6 * 4;
+            if (r.has(RecordFlags::kHg))
+                skip += 2 * 4;
+            if (r.has(RecordFlags::kDiameter))
+                skip += 4;
+            if (r.has(RecordFlags::kCovariance))
+                skip += (1 + 6 + 21) * 8;
+            if (end - p < std::ptrdiff_t(skip))
+                return make_error(ErrorCode::CorruptionError, "record: truncated");
+            p += skip;
+            if (!(p = get_uvarint(p, end, r.name_offset)) || r.name_offset > pool_.size())
+                return make_error(ErrorCode::CorruptionError, "record: bad name offset");
+            fn(r.spkid, record_names(pool_, r));
+        }
+    }
+    return {};
+}
+
+Result<void> Reader::verify() const {
+    for (uint64_t i = 0; i < entries_.size(); ++i) {
+        auto c = load_chunk(i);
+        if (!c)
+            return c.error();
+    }
+    return {};
+}
+
 Result<void> Reader::for_each(const std::function<void(const Record&, const Names&)>& fn) const {
     for (uint64_t i = 0; i < entries_.size(); ++i) {
         auto chunk = load_chunk(i);

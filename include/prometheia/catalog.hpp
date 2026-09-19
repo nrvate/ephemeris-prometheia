@@ -164,6 +164,15 @@ public:
     // chunk's CRC. Returns the first error encountered.
     Result<void> for_each(const std::function<void(const Record&, const Names&)>& fn) const;
 
+    // Streams every record's SPK-ID and names, in file order, verifying each
+    // chunk's CRC like for_each but decoding nothing else: what a name
+    // index needs, at a fraction of the cost.
+    Result<void> for_each_name(const std::function<void(uint64_t spkid, const Names&)>& fn) const;
+
+    // Reads every chunk and checks its CRC, decoding no record: the whole
+    // container's integrity at the cost of decompression alone.
+    Result<void> verify() const;
+
     const ReaderStats& stats() const { return stats_; }
 
 private:

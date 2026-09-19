@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include <prometheia/catalog.hpp>
 #include <prometheia/cbor.hpp>
@@ -162,6 +163,23 @@ TEST_CASE("roundtrip_small_mixed") {
     CHECK(fe.ok());
     CHECK(seen == 10);
 
+    // for_each_name steps over each record by its flags: it must land on the
+    // same SPK-IDs and names as the full decode, through every flag mix.
+    std::vector<std::string> full, light;
+    CHECK(reader
+              .for_each([&](const Record& rec, const Names& n) {
+                  full.push_back(std::to_string(rec.spkid) + "|" + std::string(n.pdes) + "|" +
+                                 std::string(n.name));
+              })
+              .ok());
+    CHECK(reader
+              .for_each_name([&](uint64_t spkid, const Names& n) {
+                  light.push_back(std::to_string(spkid) + "|" + std::string(n.pdes) + "|" +
+                                  std::string(n.name));
+              })
+              .ok());
+    CHECK(light == full);
+
     // Lookups across chunk boundaries (chunk_records = 3 -> 4 chunks).
     for (uint64_t spkid : {20000001ull, 20000003ull, 20000004ull, 20000010ull}) {
         auto rec = reader.lookup(spkid);
@@ -297,6 +315,10 @@ TEST_CASE("corruption_detected") {
         auto fe = r.value().for_each([&](const Record&, const Names&) {});
         CHECK(!fe.ok());
         CHECK(fe.error().code == ErrorCode::CorruptionError);
+        // verify(), what Engine::add_catalog runs, catches it too.
+        auto v = r.value().verify();
+        CHECK(!v.ok());
+        CHECK(v.error().code == ErrorCode::CorruptionError);
         auto lk = r.value().lookup(20000003);
         CHECK(!lk.ok());
         CHECK(lk.error().code == ErrorCode::CorruptionError);
