@@ -103,6 +103,11 @@ HAMBURG_BAND = 0.002  # same elements; the J1900 precession models differ sub-ma
 # is seen from.
 BARY_SUN_KM = {"ours": 0.001, "theirs": REFIT_KM[10]}
 AU_KM = 149597870.7
+# Our light-time range against Horizons' delta: measured 1.1 m geocentric and
+# 0.25 m heliocentric (2026-09-18); the band is an estimate, 4x that. Theirs
+# is recorded (1-22 km, their compressed files), not graded: nothing
+# published gives a band for it.
+RANGE_BAND_OURS_KM = 0.005
 DELTA_T = 69.2  # sent explicitly; a TT request does not use it, a UT1 one would
 
 HAMBURG = ["cupido", "hades", "zeus", "kronos", "apollon", "admetos", "vulcanus", "poseidon"]
@@ -264,8 +269,9 @@ def leg_refusals(client, ours, theirs, a, b, table, verbose):
 
 
 def corpus(prefix="geo-", center="'500@399'"):
-    """(name, body, [(jd_tt, ra, dec)]) of every corpus request from one centre:
-    the astrometric ICRF RA/Dec (Horizons quantity 1) at each of its instants."""
+    """(name, body, [(jd_tt, ra, dec, delta)]) of every corpus request from one
+    centre: the astrometric ICRF RA/Dec (Horizons quantity 1) and the
+    light-time range in AU (quantity 20, `delta`) at each of its instants."""
     raw = os.path.join(REPO, "horizons-raw")
     out = []
     for name, _, params in hf.requests():
@@ -276,7 +282,8 @@ def corpus(prefix="geo-", center="'500@399'"):
         cols, rows = gen.table(result)
         idx = {c: i for i, c in enumerate(cols)}
         pts = [(gen.num(r[idx["Date_________JDTT"]]), gen.num(r[idx["R.A.___(ICRF)"]]),
-                gen.num(r[idx["DEC____(ICRF)"]])) for r in rows]
+                gen.num(r[idx["DEC____(ICRF)"]]),
+                gen.num(r[idx["delta"]]) if "delta" in idx else None) for r in rows]
         out.append((name, int(params["COMMAND"].strip("'")), pts))
     return out
 
@@ -293,6 +300,7 @@ def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observe
     bodies = [(name, body) for name, body, _ in corpus]
     suffix = "" if observer == "geo" else "-" + observer
     anchors = {(body, p[0]): (p[1], p[2]) for _, body, pts in corpus for p in pts}
+    ranges = {(body, p[0]): p[3] for _, body, pts in corpus for p in pts}
     worst = {}
     for mask, leg0, wanted in ((0, "same", do_same), (1, "horizons", do_horizons)):
         leg = leg0 + suffix
@@ -349,12 +357,26 @@ def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observe
                                tier=2, verdict=verdict)
                     worst[("ours", body)] = max(worst.get(("ours", body), 0.0), so)
                     worst[("theirs", body)] = max(worst.get(("theirs", body), 0.0), st)
+                    # Distance: the positions above are angles only, blind to
+                    # range. Horizons' delta is the light-time range, which is
+                    # what mask 1 answers.
+                    rng = ranges.get((body, jd))
+                    if rng is not None:
+                        ko, kt = abs(va[2] - rng) * AU_KM, abs(vb[2] - rng) * AU_KM
+                        row["note"] = f"range vs Horizons: ours {ko:.4f} km, theirs {kt:.3f} km"
+                        if ko > RANGE_BAND_OURS_KM:
+                            row["verdict"] = "finding (ours)"
+                            row["note"] += f" (ours over {RANGE_BAND_OURS_KM} km)"
+                        worst[("ours-km", body)] = max(worst.get(("ours-km", body), 0.0), ko)
+                        worst[("theirs-km", body)] = max(worst.get(("theirs-km", body), 0.0), kt)
                 table.add(**row)
         for (who, body), w in sorted(worst.items()):
             if (leg0 == "same") == (who == "same"):
                 label = {"same": "ours vs theirs", "ours": "ours vs Horizons",
-                         "theirs": "theirs vs Horizons"}[who]
-                print(f"  body {body:4d}  worst {label}: {w:.6f}\"")
+                         "theirs": "theirs vs Horizons", "ours-km": "range ours vs Horizons",
+                         "theirs-km": "range theirs vs Horizons"}[who]
+                unit = " km" if who.endswith("-km") else "\""
+                print(f"  body {body:4d}  worst {label}: {w:.6f}{unit}")
 
 
 def leg_hamburg(client, ours, theirs, table, verbose):

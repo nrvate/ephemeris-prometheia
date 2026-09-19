@@ -955,6 +955,21 @@ the sign of one, so this was a blind spot, not a detail.
   one refusal fails the whole request.
 - **The other legs are unchanged from record o.**
 
+### Range, graded against Horizons, 2026-09-18 (`docs/crosstest/2026-09-18q.tsv`)
+
+The same audit's second gap. The `horizons` legs compared directions only,
+so a distance error was invisible to every leg except `points` and `bary`.
+Horizons' `delta`, the light-time range, is what mask 1 answers, and it was
+already in the corpus.
+
+- **Ours:** 1.1 m geocentric at worst (the outer planets), 0.25 m
+  heliocentric. Graded at 5 m, an estimate at 4× that. With the band set to
+  1 mm, 68 rows turn into findings, so the check does fire.
+- **Theirs:** 1–22 km (Mercury heliocentric 22 km, Neptune 15.6 km, the
+  Sun 1 km, the Moon 3 m). Recorded in each row's note, not graded:
+  nothing published gives a band for their compressed files.
+- **Verdicts otherwise identical to record p.**
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
