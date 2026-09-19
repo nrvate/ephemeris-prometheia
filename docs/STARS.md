@@ -371,6 +371,20 @@ new and old reductions):
     separations still pass. Suggested by the Astrolog session.
   - The ERFA fixtures (`gen_star_fixtures.py`) apply the orbit
     independently, from ORB6's own file.
+  - **Proper motions, against an independent barycentre** (2026-09-19).
+    Akeson et al. 2021, Table 9, fits the system's barycentric proper motion
+    from ALMA and Hipparcos together: −3639.95, +700.40 mas/yr at 2019.5,
+    or −3638.21, +700.07 carried back to 1991.25 through the perspective
+    change. Adding each star's orbital velocity from the ORB6 orbit
+    predicts its proper motion then:
+    - A: catalogue less prediction +2.2 mas/yr east, −7.3 north. A's line,
+      which carries our A and, through it, our B, is sound to that: at most
+      0.7″ a century, an estimate of the model's limit here.
+    - B: −27 and −157 mas/yr. B's own solution is the poor one, which is
+      why B is placed from A. It is also why the catalogue's B − A proper
+      motion is only 69% of the orbit's (the Astrolog session's
+      measurement, which prompted this): that ratio is B's error, not the
+      orbit's.
 - **Against `astrolog-ephd`,** which applies the same orbits since
   Astrolog `13d3e5e`, these stars agree like any other star: within 8 mas
   in the cross-test's `stars` leg (record r), and α Cen B − A is 14.11″
