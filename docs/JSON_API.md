@@ -112,48 +112,61 @@ The agent-facing summary of what to ask, and how, is the MCP resource
 
 ```json
 {
-  "time": {"utc": "1990-06-15T14:30:00+02:00"},
-  "observer": {"topocentric": {"lon_deg": 8.55, "lat_deg": 47.37, "height_m": 500}},
+  "time": "1990-06-15T14:30:00+02:00",
+  "observer": "topocentric",
+  "site": {"lon_deg": 8.55, "lat_deg": 47.37, "height_m": 500},
   "zodiac": "lahiri",
-  "objects": [
-    {"body": "Sun"}, {"body": "Moon"}, {"body": "Mars"},
-    {"point": "lunar-node", "method": "mean"},
-    {"star": "Spica"}, {"asteroid": "Ceres"}, {"hypothetical": "cupido"}
-  ]
+  "objects": ["Mars", {"point": "ascending-node", "of": "Moon", "method": "mean"}, "Spica"]
 }
 ```
 
 - **Time:**
-  - `time` takes `utc` (ISO 8601, with an offset or `Z`), `tt` or `jd_tt`.
-  - `times` takes a list, or `{"start", "step", "count"}`.
-  - UTC is converted with the leap-second table and the server's ΔT,
-    exactly as the binary protocol's UT1 scale.
+  - `time` is an ISO 8601 UTC string (with an offset or `Z`), or
+    `{"utc": …}`, `{"jd_tt": …}` or `{"jd_ut1": …}`.
+  - `times` is a list of those.
+  - `series` is `{"start", "step_days", "count"}`.
+  - UTC goes through the leap-second table and the engine's ΔT
+    (`convert_time` shows both).
 - **Defaults** are what a chart wants: apparent (all three corrections),
-  geocentric, the ecliptic of date, rates on. Each can be overridden:
-  `frame`, `coordinates`, `corrections`, `sidereal_plane`, `precision`.
+  geocentric, the true ecliptic of date, tropical, rates on. Each can be
+  overridden: `observer`, `frame`, `coordinates`, `corrections`, `zodiac`,
+  `sidereal_plane`, `precession`, `rates`.
 - **Objects by name**, not NAIF numbers.
-  - A name that is ambiguous or unknown is a per-object error that says so,
-    never a silent guess.
-  - `{"naif": 499}` stays available.
+  - Bare names resolve in a fixed order: planet, the Moon's points ("true
+    node", "Lilith"…), hypothetical, star, catalog body.
+  - A name that is unknown is a per-object error that says so, never a
+    silent guess.
+  - `{"body"|"star"|"asteroid"|"hypothetical"|"naif": …}` and
+    `{"point", "of", "method"}` say exactly which.
 
 ## An answer
+
+The answer to the request above, as served (the first result only, the
+digits cut):
 
 ```json
 {
   "engine": "Prometheia 0.4.0, JPL DE440 binary",
-  "dataset": "…#dc7c04b4",
+  "dataset": "Prometheia 0.4.0, JPL DE440 binary/linux_p1550p2650.440/-#a0c302f5",
   "results": [
     {
-      "object": {"asked": {"body": "Mars"}, "resolved": "Mars (NAIF 4, system barycentre)"},
-      "rows": [{"time": {"jd_tt": 2448058.10, "utc": "1990-06-15T12:30:00Z"},
-                "longitude_deg": 12.345678, "latitude_deg": -1.234567, "distance_au": 1.234,
-                "rates": {"longitude_deg_per_day": 0.61}, "ayanamsa_deg": 23.72}],
+      "object": {"asked": "Mars", "kind": "body", "naif": 4, "resolved": "Mars"},
+      "rows": [{"time": {"jd_tt": 2448058.0214952, "utc": "1990-06-15T12:30:00.000Z"},
+                "longitude_deg": 347.3272534, "latitude_deg": -1.9861654,
+                "distance_au": 1.2789454, "light_time_days": 0.0073866,
+                "ayanamsa_deg": 23.7272979,
+                "rates": {"longitude_deg_per_day": 0.7182236,
+                          "latitude_deg_per_day": -0.0057857,
+                          "distance_au_per_day": -0.0053913}}],
       "provenance": {
         "source": "JPL DE440 binary",
-        "corrections": ["light-time", "deflection", "aberration"],
-        "frame": "true ecliptic and equinox of date",
-        "zodiac": {"token": "lahiri", "definition": "…", "doc": "docs/FRAMES.md#…"},
-        "accuracy": {"statement": "6 µas against JPL Horizons", "doc": "docs/VALIDATION.md#…"}
+        "corrections": ["light-time", "gravitational-deflection", "aberration"],
+        "frame": "true equator/ecliptic and equinox of date",
+        "coordinates": "ecliptic",
+        "zodiac": {"token": "lahiri",
+                   "doc": "docs/FRAMES.md (zodiacs) and docs/ENGINE.md (ayanamshas)"},
+        "accuracy": {"statement": "JPL planetary ephemeris; positions agree with JPL Horizons to 6 µas",
+                     "doc": "docs/VALIDATION.md"}
       },
       "error": null
     }
@@ -163,29 +176,43 @@ The agent-facing summary of what to ask, and how, is the MCP resource
 
 - **Every number is named with its unit.** No positional columns.
 - **Provenance is per object:** the source, the corrections actually
-  applied, the frame, and the zodiac's published definition.
+  applied, the frame, and the zodiac.
   - The accuracy statement is a measured number with the document that
     measured it, never a promise.
-- **Flags stay flags:** `approximated`, `extrapolated` and `no_distance`
-  appear as booleans. An agent must never receive an approximation
-  unmarked.
-- **Errors** are per object, with a code (`unknown-name`, `ambiguous-name`,
-  `outside-coverage`, `unsupported`, `numerical-failure`) and a sentence.
-  - Whole-request errors (malformed, over a limit, rate-limited) are HTTP
-    4xx with the same codes and a `retry_after_s` where it applies.
+- **Errors** come in two kinds.
+  - A per-object error has a code (`unknown-name`, `ambiguous-name`,
+    `outside-coverage`,
+    `unsupported`, `numerical-failure`, `data-unavailable`) and a sentence.
+    The other objects are still answered.
+  - A whole-call error (`invalid-arguments`) is MCP's `isError` result, or
+    HTTP 400 on `/v1`.
 
-## Words (to agree with Astrolog)
+## Words (shared with Astrolog)
 
-One vocabulary for both projects' JSON:
+One vocabulary for both projects. The rule: the protocol v4 registry
+(`third_party/ephproto/v4/registries.json`) is the authority, and a JSON
+token is its name in lower case, hyphenated. Checked entry by entry by the
+Astrolog session, 2026-09-18. It matters because the agent names what it got
+from here when it asks Astrolog to draw it.
 - **Bodies:** Sun, Moon, Mercury … Pluto, and the A.15 hypothetical tokens.
 - **Zodiacs:** the A.11 tokens.
-- **Points:** `lunar-node`, `lunar-apogee`, `node`/`perihelion`/… of a body,
-  with `mean`/`osculating`.
+  - `capabilities` gives each zodiac's `sidereal_planes`.
+  - A zodiac defined at the instant (true-citra, the galactic ones) has no
+    anchor epoch, so no `anchor` plane (§3.5a).
+- **Points (A.13):** `ascending-node`, `descending-node`, `perihelion`,
+  `aphelion` of a body. For the Moon they read as perigee and apogee.
+- **Orbit methods (A.14):** `mean`, `osculating`, `interpolated`,
+  `osculating-barycentric`, `focal-point`.
+  - This engine computes the first two.
+  - The other three are refused as `unsupported`, never answered with
+    another method.
 - **Frames:** `true-of-date`, `mean-of-date`, `j2000`, `icrf`.
-- **Sidereal planes:** `date`, `anchor`, `invariable`.
-- **Corrections:** `light-time`, `deflection`, `aberration`.
-- **Observers:** `geocentric`, `topocentric`, `heliocentric`, `barycentric`,
-  `body-centre`.
+- **Sidereal planes (A.8):** `date`, `anchor`, `invariable`.
+- **Corrections (A.7):** `light-time`, `gravitational-deflection`,
+  `aberration`, with the shorthands `apparent`, `astrometric` and
+  `geometric`. `deflection` is still read, and never written.
+- **Observers (A.5):** `geocentric`, `topocentric` (with `site`),
+  `heliocentric`, `barycentric`, `body` (with `center`: a name or NAIF id).
 
 ## Guardrails
 
@@ -196,9 +223,15 @@ One vocabulary for both projects' JSON:
   "Logging"). A birth chart is personal data.
 - No request contents in error text.
 
+## How the two projects divide the work
+
+Astrolog stays a desktop application, and exposes no chart tools (the
+Astrolog session, 2026-09-18, on its maintainer's instruction). An agent
+gets positions here, and may ask Astrolog, through its own interface, to
+*display* them: Astrolog draws what the agent already knows. That is why
+the words above must be one vocabulary.
+
 ## Open questions
 
-- Should Astrolog's chart-as-data answers use the same answer shape, so one
-  agent-facing schema covers both?
-- Should `/llms.txt` and the OpenAPI schema live in both repositories, or
-  should one project host a combined one?
+- Should `/llms.txt` live in both repositories, or should one project host a
+  combined one?

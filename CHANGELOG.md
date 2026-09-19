@@ -27,6 +27,15 @@ documented, not that it is frozen.
   - nlohmann/json (MIT) is vendored for these alone.
 - The Moon's apsides are named perigee and apogee in answers, rather than
   perihelion and aphelion.
+- The JSON words follow the v4 registries, as amended by the Astrolog
+  session.
+  - A body-centred observer (`"observer": "body", "center": "Jupiter"`).
+  - `gravitational-deflection` for the correction (`deflection` is still
+    read).
+  - All five A.14 orbit methods are named. The three not computed are
+    refused as `unsupported`.
+  - `capabilities` lists each zodiac's sidereal planes. `anchor` on a
+    zodiac defined at the instant is refused before anything is computed.
 
 ## 0.4.0 — 2026-09-18
 

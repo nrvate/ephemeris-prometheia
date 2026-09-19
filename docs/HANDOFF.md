@@ -41,12 +41,12 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    and streamable HTTP; the fast paths stay C++, C and the binary protocol).
    - `prometheia-json` serves the JSON tools over MCP (stdio and streamable
      HTTP) and plain JSON (docs/JSON_API.md).
-   - Negotiating with the Astrolog session over the agent channel:
-     - the shared vocabulary ("Words");
-     - Astrolog's charts as data. They have no machine-readable chart
-       representation yet, and prefer one combined MCP server over two.
-   - Their session takes the MCP direction from their own maintainer, not
-     relayed.
+   - The vocabulary ("Words") follows the v4 registries, as amended by the
+     Astrolog session. Astrolog exposes no chart tools: it is to be a
+     display endpoint that draws what an agent got from here.
+   - Open: the interpolated ("natural") lunar apogee, A.14 method 2. It is
+     named and refused as `unsupported`. Computing it is an engine feature
+     not yet begun.
 
 ## The cross-test
 

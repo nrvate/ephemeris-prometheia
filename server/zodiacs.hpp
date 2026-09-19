@@ -2,7 +2,7 @@
 //
 // The zodiac tokens this server serves (protocol v4 A.11), and the engine's
 // mode for each: prometheiad's WELCOME and its profile mapping, and the agent
-// tools (server/agent_tools.hpp), read this one list.
+// tools (server/json_tools.hpp), read this one list.
 #ifndef PROMETHEIA_SERVER_ZODIACS_HPP
 #define PROMETHEIA_SERVER_ZODIACS_HPP
 
@@ -32,6 +32,15 @@ inline constexpr ZodiacToken kZodiacTokens[] = {
     {"galcent-mula-wilhelm", SiderealMode::GalacticCentreMulaWilhelm},
     {"galcent-cochrane", SiderealMode::GalacticCentreCochrane},
 };
+
+// Whether a zodiac is defined at the instant (a star, the Galactic Centre or
+// the galactic node held at a fixed longitude) rather than anchored at an
+// epoch: such a zodiac has no anchor epoch, so no plane of the anchor
+// (protocol v4 §3.5a; engine.hpp, SiderealMode).
+constexpr bool defined_at_instant(SiderealMode m) {
+    return m != SiderealMode::Tropical && m != SiderealMode::FaganBradley &&
+           m != SiderealMode::Lahiri && m != SiderealMode::User;
+}
 
 } // namespace prometheia::server
 

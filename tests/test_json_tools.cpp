@@ -2,6 +2,7 @@
 //
 // The JSON tools (server/json_tools.hpp) on the synthetic kernel: the answers
 // are the engine's, names resolve as documented, and failures are typed.
+#include <algorithm>
 #include <cmath>
 
 #include "json_tools.hpp"
@@ -57,7 +58,8 @@ TEST_CASE("json_times_and_names") {
                           {"objects", {"Spica", "Nosuchbody", Json{{"point", "sideways"}}}}});
     REQUIRE(out["results"].size() == 3);
     CHECK(out["results"][0]["object"]["kind"] == "star");
-    CHECK(out["results"][0]["provenance"]["corrections"] == Json({"deflection", "aberration"}));
+    CHECK(out["results"][0]["provenance"]["corrections"] ==
+          Json({"gravitational-deflection", "aberration"}));
     CHECK(out["results"][1]["error"]["code"] == "unknown-name");
     CHECK(out["results"][2]["error"]["code"] == "invalid-arguments");
 }
@@ -227,4 +229,88 @@ TEST_CASE("json_wrong_types_are_errors_not_exceptions") {
     auto r = d.handle(Json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", 5}});
     REQUIRE(r);
     CHECK((*r)["error"]["code"] == -32600);
+}
+
+TEST_CASE("json_vocabulary_matches_the_registries") {
+    synth::TempFile tf("json-words");
+    Engine e = synth::open_synthetic(tf);
+    // A.5's body observer: the engine's Center::Body, by name or NAIF id.
+    CalcOptions o;
+    o.center = Center::Body;
+    o.center_body = 5;
+    auto want = e.calc(10, 2451545.0, o);
+    REQUIRE(want.ok());
+    for (const Json& center : {Json("Jupiter"), Json(5)}) {
+        const Json out = run(e, "positions",
+                             {{"time", {{"jd_tt", 2451545.0}}},
+                              {"objects", {"Sun"}},
+                              {"observer", "body"},
+                              {"center", center}});
+        REQUIRE(out.is_object());
+        CHECK(out["results"][0]["rows"][0]["longitude_deg"].get<double>() ==
+              want.value().pos.lon_deg);
+    }
+    // Seen from the Sun, nothing is deflected by it.
+    Json from_sun = run(e, "positions",
+                        {{"time", {{"jd_tt", 2451545.0}}},
+                         {"objects", {"Earth"}},
+                         {"observer", "body"},
+                         {"center", "Sun"}});
+    CHECK(from_sun["results"][0]["provenance"]["corrections"] ==
+          Json({"light-time", "aberration"}));
+    jsontools::ToolError err;
+    CHECK(run(e, "positions",
+              {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}, {"observer", "body"}}, &err)
+              .is_null());
+    CHECK(err.code == "invalid-arguments");
+    // A.7's word, and the old one still read.
+    for (const char* word : {"gravitational-deflection", "deflection"}) {
+        const Json out = run(
+            e, "positions",
+            {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Jupiter"}}, {"corrections", {word}}});
+        CHECK(out["results"][0]["provenance"]["corrections"] == Json({"gravitational-deflection"}));
+    }
+    // A.14: the three methods this engine does not compute are named, and
+    // refused as unsupported; never answered with another method.
+    for (const char* m : {"interpolated", "osculating-barycentric", "focal-point"}) {
+        const Json out =
+            run(e, "positions",
+                {{"time", {{"jd_tt", 2451545.0}}},
+                 {"objects", {{{"point", "aphelion"}, {"of", "Earth"}, {"method", m}}}}});
+        CHECK(out["results"][0]["error"]["code"] == "unsupported");
+        CHECK_FALSE(out["results"][0].contains("rows"));
+    }
+    // §3.5a: a zodiac defined at the instant has no anchor plane, and
+    // capabilities says so before the agent asks.
+    const Json caps = run(e, "capabilities", Json::object());
+    bool saw_instant = false, saw_epoch = false;
+    for (const Json& z : caps["zodiacs"]) {
+        const bool anchor = std::find(z["sidereal_planes"].begin(), z["sidereal_planes"].end(),
+                                      Json("anchor")) != z["sidereal_planes"].end();
+        if (z["name"] == "true-citra") {
+            saw_instant = true;
+            CHECK_FALSE(anchor);
+            CHECK(z["defined"] == "at the instant");
+        }
+        if (z["name"] == "lahiri") {
+            saw_epoch = true;
+            CHECK(anchor);
+        }
+    }
+    CHECK(saw_instant);
+    CHECK(saw_epoch);
+    CHECK(run(e, "positions",
+              {{"time", {{"jd_tt", 2451545.0}}},
+               {"objects", {"Sun"}},
+               {"zodiac", "true-citra"},
+               {"sidereal_plane", "anchor"}},
+              &err)
+              .is_null());
+    CHECK(err.message.find("no anchor") != std::string::npos);
+    CHECK_FALSE(run(e, "positions",
+                    {{"time", {{"jd_tt", 2451545.0}}},
+                     {"objects", {"Sun"}},
+                     {"zodiac", "lahiri"},
+                     {"sidereal_plane", "anchor"}})
+                    .is_null());
 }

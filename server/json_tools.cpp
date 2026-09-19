@@ -344,8 +344,16 @@ Asked parse_object(Engine& engine, const Json& o) {
         const std::string m = o.contains("method") && o["method"].is_string()
                                   ? lower(o["method"].get<std::string>())
                                   : std::string("mean");
+        if (m == "interpolated" || m == "osculating-barycentric" || m == "focal-point") {
+            // A.14 names them; this engine computes mean and osculating
+            // orbits only, and says so rather than answer with another.
+            a.why = "the " + m + " method is not served; this engine serves mean and osculating";
+            a.code = "unsupported";
+            return a;
+        }
         if (m != "mean" && m != "osculating") {
-            a.why = "a point's method is mean or osculating";
+            a.why = "a point's method is mean, osculating, interpolated, osculating-barycentric "
+                    "or focal-point";
             a.code = "invalid-arguments";
             return a;
         }
@@ -370,7 +378,7 @@ struct Options {
     bool sidereal = false;
 };
 
-std::optional<Options> parse_options(const Json& a, Bad& bad) {
+std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
     Options out;
     CalcOptions& o = out.opts;
     const auto str = [&](const char* key, const char* dflt) {
@@ -403,8 +411,18 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
         }
         o.center = Center::Topocentric;
         o.site = {lon * 3.14159265358979323846 / 180.0, lat * 3.14159265358979323846 / 180.0, h};
+    } else if (obs == "body") {
+        // A.5's fifth observer: the centre of a body ("Jupiter as seen from
+        // Io" is {"observer": "body", "center": "Io"}).
+        auto c = a.contains("center") ? body_naif(engine, a["center"]) : std::nullopt;
+        if (!c) {
+            bad.message = "a body observer needs \"center\": a body's name or NAIF id";
+            return std::nullopt;
+        }
+        o.center = Center::Body;
+        o.center_body = *c;
     } else {
-        bad.message = "the observer is geocentric, topocentric, heliocentric or barycentric";
+        bad.message = "the observer is geocentric, topocentric, heliocentric, barycentric or body";
         return std::nullopt;
     }
     const std::string frame = str("frame", "true-of-date");
@@ -440,12 +458,13 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
             const std::string n = c.is_string() ? lower(c.get<std::string>()) : std::string();
             if (n == "light-time") {
                 o.light_time = true;
-            } else if (n == "deflection") {
+            } else if (n == "gravitational-deflection" || n == "deflection") {
                 o.deflection = true;
             } else if (n == "aberration") {
                 o.aberration = true;
             } else {
-                bad.message = "corrections are light-time, deflection and aberration";
+                bad.message = "corrections are light-time, gravitational-deflection and "
+                              "aberration";
                 return std::nullopt;
             }
         }
@@ -460,7 +479,7 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
             o.light_time = o.deflection = o.aberration = false;
         } else {
             bad.message = "corrections are apparent, astrometric, geometric, or a list of "
-                          "light-time, deflection and aberration";
+                          "light-time, gravitational-deflection and aberration";
             return std::nullopt;
         }
     }
@@ -514,6 +533,12 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
             bad.message = "a sidereal plane needs a sidereal zodiac";
             return std::nullopt;
         }
+        if (plane == "anchor" && defined_at_instant(o.sidereal)) {
+            bad.message = "the " + out.zodiac_token +
+                          " zodiac is defined at the instant and has no anchor epoch, so no "
+                          "anchor plane; it is counted along date or invariable";
+            return std::nullopt;
+        }
         o.sidereal_plane =
             plane == "anchor" ? SiderealPlane::EclipticOfAnchor : SiderealPlane::Invariable;
         out.frame_words = plane == "anchor"
@@ -534,11 +559,12 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
 // (positions are directions of arrival), deflection not at or of the Sun.
 Json corrections_applied(const ResolvedObject& obj, const CalcOptions& o) {
     Json out = Json::array();
-    const bool sun_observer = o.center == Center::Heliocentric;
+    const bool sun_observer = o.center == Center::Heliocentric ||
+                              (o.center == Center::Body && o.center_body == body::kSun);
     if (o.light_time && obj.kind != ResolvedObject::Kind::Star)
         out.push_back("light-time");
     if (o.deflection && !sun_observer && !obj.is_sun)
-        out.push_back("deflection");
+        out.push_back("gravitational-deflection");
     if (o.aberration)
         out.push_back("aberration");
     return out;
@@ -616,7 +642,7 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
         *err = {"invalid-arguments", bad.message};
         return make_error(ErrorCode::ArgumentError, bad.message);
     }
-    auto options = parse_options(a, bad);
+    auto options = parse_options(engine, a, bad);
     if (!options) {
         *err = {"invalid-arguments", bad.message};
         return make_error(ErrorCode::ArgumentError, bad.message);
@@ -745,10 +771,21 @@ Result<Json> lookup(Engine& engine, const Json& a, ToolError* err) {
 }
 
 Result<Json> capabilities(Engine& engine, const Context& ctx) {
-    Json zodiacs = Json::array({"tropical"});
+    // Each zodiac with how it is defined and the planes it can be counted
+    // along: one defined at the instant has no anchor epoch, so no "anchor"
+    // plane (protocol v4 §3.5a).
+    Json zodiacs = Json::array({{{"name", "tropical"},
+                                 {"defined", "equinox of date"},
+                                 {"sidereal_planes", Json::array()}}});
+    const auto zodiac = [](const char* name, bool instant) {
+        return Json{{"name", name},
+                    {"defined", instant ? "at the instant" : "at an anchor epoch"},
+                    {"sidereal_planes", instant ? Json::array({"date", "invariable"})
+                                                : Json::array({"date", "anchor", "invariable"})}};
+    };
     for (const ZodiacToken& z : kZodiacTokens)
-        zodiacs.push_back(z.token);
-    zodiacs.push_back("user");
+        zodiacs.push_back(zodiac(z.token, defined_at_instant(z.mode)));
+    zodiacs.push_back(zodiac("user", false));
     Json planets = Json::array();
     for (const Planet& p : kPlanets)
         planets.push_back({{"name", std::string(1, char(std::toupper(p.name[0]))) + (p.name + 1)},
@@ -768,12 +805,15 @@ Result<Json> capabilities(Engine& engine, const Context& ctx) {
                   "or Flamsteed designation, or HR/HD/HIP number"},
         {"asteroids", "catalog bodies by name, designation or number, when a catalog is loaded"},
         {"zodiacs", zodiacs},
-        {"sidereal_planes", {"date", "anchor", "invariable"}},
         {"frames", {"true-of-date", "mean-of-date", "j2000", "icrf"}},
         {"coordinates", {"ecliptic", "equatorial"}},
-        {"observers", {"geocentric", "topocentric", "heliocentric", "barycentric"}},
+        {"observers", {"geocentric", "topocentric", "heliocentric", "barycentric", "body"}},
         {"corrections",
-         {"apparent", "astrometric", "geometric", "light-time", "deflection", "aberration"}},
+         {"apparent", "astrometric", "geometric", "light-time", "gravitational-deflection",
+          "aberration"}},
+        {"orbit_methods",
+         {{"served", {"mean", "osculating"}},
+          {"not_served", {"interpolated", "osculating-barycentric", "focal-point"}}}},
         {"precession", {"iau2006", "vondrak2011"}},
         {"limits", {{"max_objects", ctx.limits.max_objects}, {"max_times", ctx.limits.max_times}}}};
     if (!ctx.dataset.empty())
@@ -828,12 +868,15 @@ Json schema_positions() {
                             "\"Ceres\", \"cupido\") or {\"body\"|\"star\"|\"asteroid\"|"
                             "\"hypothetical\"|\"naif\": ...} or {\"point\": \"ascending-node\"|"
                             "\"descending-node\"|\"perihelion\"|\"aphelion\", \"of\": body, "
-                            "\"method\": \"mean\"|\"osculating\"}"},
+                            "\"method\": \"mean\"|\"osculating\"} (interpolated, "
+                            "osculating-barycentric and focal-point are named but not served)"},
             {"minItems", 1}}},
           {"observer",
            {{"type", "string"},
-            {"enum", {"geocentric", "topocentric", "heliocentric", "barycentric"}},
+            {"enum", {"geocentric", "topocentric", "heliocentric", "barycentric", "body"}},
             {"default", "geocentric"}}},
+          {"center",
+           {{"description", "for a body observer: the body's name or NAIF id (\"Jupiter\", 599)"}}},
           {"site",
            {{"type", "object"},
             {"description", "for a topocentric observer"},
@@ -845,7 +888,11 @@ Json schema_positions() {
            {{"description", "\"tropical\" (default), a zodiac token (see capabilities), or "
                             "{\"user\": {\"epoch_jd_tt\", \"ayanamsa_deg\"}}"}}},
           {"sidereal_plane",
-           {{"type", "string"}, {"enum", {"date", "anchor", "invariable"}}, {"default", "date"}}},
+           {{"type", "string"},
+            {"enum", {"date", "anchor", "invariable"}},
+            {"default", "date"},
+            {"description", "a zodiac defined at the instant has no anchor plane; capabilities "
+                            "lists each zodiac's planes"}}},
           {"frame",
            {{"type", "string"},
             {"enum", {"true-of-date", "mean-of-date", "j2000", "icrf"}},
@@ -854,7 +901,7 @@ Json schema_positions() {
            {{"type", "string"}, {"enum", {"ecliptic", "equatorial"}}, {"default", "ecliptic"}}},
           {"corrections",
            {{"description", "\"apparent\" (default), \"astrometric\", \"geometric\", or a list of "
-                            "\"light-time\", \"deflection\", \"aberration\""}}},
+                            "\"light-time\", \"gravitational-deflection\", \"aberration\""}}},
           {"rates", {{"type", "boolean"}, {"default", true}}},
           {"precession",
            {{"type", "string"}, {"enum", {"iau2006", "vondrak2011"}}, {"default", "iau2006"}}}}},
@@ -948,8 +995,9 @@ std::string llms_txt() {
   "Spica", "Ceres", "cupido") at "time" (ISO 8601 UTC with offset, e.g.
   "1990-06-15T14:30:00+02:00"), "times" or "series". Defaults are what a chart
   wants: apparent, geocentric, the ecliptic of date, tropical, with rates.
-  Options: observer (topocentric with "site"), zodiac (e.g. "lahiri"),
-  sidereal_plane, frame, coordinates, corrections, precession.
+  Options: observer (topocentric with "site", or "body" with "center"),
+  zodiac (e.g. "lahiri"), sidereal_plane, frame, coordinates, corrections,
+  precession.
 - lookup: what a name could mean.
 - capabilities: what is served, and the limits.
 - convert_time: UTC, TT, TDB, UT1 and delta T for one instant.
@@ -968,7 +1016,11 @@ guess.
 - Longitudes in degrees [0, 360); rates per day; distances in AU.
 - Mars to Pluto are their system barycentres (JPL's planetary files).
 - "true node" is the osculating lunar node, "mean node" the mean one; "Lilith"
-  is the mean lunar apogee, "true Lilith" the osculating one.
+  is the mean lunar apogee, "true Lilith" the osculating one. The interpolated
+  ("natural") apogee is not served: asking for it is an "unsupported" error,
+  never the osculating one in its place.
+- A zodiac defined at the instant (true-citra, the galactic ones) has no
+  anchor plane; capabilities lists each zodiac's planes.
 - Times before 1657 or in the future carry delta T from a model (convert_time).
 )";
 }
