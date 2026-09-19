@@ -104,10 +104,11 @@ def true_ayanamsha(mode, jd, catalog):
     elif kind == "gc":
         lon, _ = mean_ecliptic_lon(jd, gc_icrs(jd))
     elif kind == "gc-polar":
-        q = erfa.rxp(erfa.pnm06a(jd, 0.0), gc_icrs(jd))  # true equator of date
+        # The hour circle through the mean pole of date (precession only),
+        # on the mean equator and ecliptic with the mean equinox.
+        q = erfa.rxp(erfa.pmat06(jd, 0.0), gc_icrs(jd))
         ra = math.atan2(q[1], q[0])
-        eps = erfa.obl06(jd, 0.0) + deps
-        lon = math.atan2(math.sin(ra), math.cos(eps) * math.cos(ra)) - dpsi  # to the mean equinox
+        lon = math.atan2(math.sin(ra), math.cos(erfa.obl06(jd, 0.0)) * math.cos(ra))
     else:
         _, p = mean_ecliptic_lon(jd, pole_icrs(data))
         lon = math.atan2(p[0], -p[1])  # n = k x p

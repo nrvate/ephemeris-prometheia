@@ -256,6 +256,15 @@ and equinox of date**.
 - It is a longitude, not a polar projection. The exception is Wilhelm's
   mode, which is polar by its definition: the point where the great circle
   through the celestial pole and Sgr A* meets the ecliptic.
+  - The pole is the **mean** pole of date, and the equinox then slides by
+    Δψ as for every other zodiac.
+  - §3.5a's true ayanamsha is the mean one plus Δψ and nothing else.
+    Through the true pole, the pole's own nutation would enter the zero
+    point: about 0.6″, wobbling over the 18.6-year nutation cycle.
+  - For the other modes the choice does not arise: the ecliptic does not
+    nutate, so their longitudes differ between the frames by Δψ alone.
+  - The Astrolog side reads it the same way. Our first version used the
+    true pole and differed by 0.58″ (record l).
 - The galactic node is where the galactic equator crosses the ecliptic of
   date. Of the two crossings, it is the one near 0° Capricorn.
 - The true ayanamsha is the anchor's longitude less the defined one. The

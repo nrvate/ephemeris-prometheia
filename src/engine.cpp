@@ -1551,14 +1551,18 @@ struct Engine::Impl {
                 star_barycentric_km(galactic_centre(), jd_tdb, pos);
             }
             if (z.anchor == ZodiacAnchor::GalacticCentrePolar) {
-                // The ecliptic point on the anchor's hour circle: the same
-                // right ascension on the true equator of date, so
-                // tan(lon) = tan(ra) / cos(eps) on the true ecliptic.
+                // The ecliptic point on the anchor's hour circle, through the
+                // MEAN pole of date: the same right ascension on the mean
+                // equator, tan(lon) = tan(ra) / cos(eps) on the ecliptic with
+                // the mean equinox, then the equinox slides by dpsi like every
+                // other zodiac's. The true pole would carry its nutation into
+                // the zero point itself (~0.6", an 18.6-year wobble), where
+                // 3.5a's true ayanamsha is the mean one plus dpsi and nothing
+                // else.
                 double q[3];
-                apply(f.npb, pos, q);
+                apply(f.pb, pos, q);
                 const double ra = std::atan2(q[1], q[0]);
-                const double eps = f.eps_mean + f.deps;
-                lon = std::atan2(std::sin(ra), std::cos(eps) * std::cos(ra));
+                lon = std::atan2(std::sin(ra), std::cos(f.eps_mean) * std::cos(ra)) + f.dpsi;
             } else {
                 double v[3];
                 apply(e, pos, v);
