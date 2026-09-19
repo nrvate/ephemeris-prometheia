@@ -250,6 +250,30 @@ TEST_CASE("stars_binary_orbits") {
         CHECK(std::fabs(dangle(pa, published_pa[k])) < 0.06);
     }
 
+    // Direction from data no orbit code touches: Hipparcos measured A and B
+    // at the same epoch, so their catalog places give B - A at 1991.25
+    // directly. The orbit's B - A must agree in east and north separately
+    // (measured 73 and 28 mas apart); a flipped sign or a wrong sense of the
+    // node misses by 22-31". Suggested by the Astrolog session.
+    {
+        const stars::Object& bo = stars::at(b);
+        const double k = 3.14159265358979323846 / 180.0;
+        const auto tangent = [&](double ra0, double dec0, double ra, double dec) {
+            const double den = std::sin(dec * k) * std::sin(dec0 * k) +
+                               std::cos(dec * k) * std::cos(dec0 * k) * std::cos((ra - ra0) * k);
+            return std::pair{std::cos(dec * k) * std::sin((ra - ra0) * k) / den / k * 3600.0,
+                             (std::sin(dec * k) * std::cos(dec0 * k) -
+                              std::cos(dec * k) * std::sin(dec0 * k) * std::cos((ra - ra0) * k)) /
+                                 den / k * 3600.0};
+        };
+        REQUIRE(bo.epoch_jyear == ao.epoch_jyear);
+        const auto [ce, cn] = tangent(ao.ra_deg, ao.dec_deg, bo.ra_deg, bo.dec_deg);
+        const auto [rb, db] = radec(b, t0);
+        const auto [oe, on] = tangent(ra0, dec0, rb, db);
+        CHECK(std::fabs(oe - ce) < 0.1);
+        CHECK(std::fabs(on - cn) < 0.1);
+    }
+
     // Sirius's catalog line is its barycentre's (a Hipparcos orbital
     // solution), so the star sits off it by A's share of the orbit: 1.018 /
     // 3.081 of the published 11.256" in 2025.0.

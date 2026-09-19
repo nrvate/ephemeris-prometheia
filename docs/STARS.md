@@ -281,6 +281,11 @@ Measured 2026-09-18 on `prometheiad`:
     barycentric (Hipparcos orbital solutions).
     - What is left is the two catalogues' barycentric proper motions, about
       20 mas/yr apart, not the orbit.
+    - This check could not see Sirius's orbit anyway: its period is 50.13
+      years, so 1900, 2000 and 2100 all fall at the same orbital phase. As a
+      vector the residual is a straight line in time (the Astrolog session,
+      2026-09-18). An FK5 place is itself a straight line, so it can only
+      ever test a constant and a slope.
     - An earlier version of this section said Hipparcos carried the
       companion's orbit for these two. That was wrong.
   - **Achernar and Polaris** (1.01″, 0.78″) carry no orbit here. Their
@@ -354,6 +359,11 @@ new and old reductions):
     the catalog position's plane, three of the five epochs fail.
   - Sirius sits off its barycentre line by its share of the published
     separation, in the published direction.
+  - **Direction, from data no orbit code touches:** Hipparcos measured α Cen
+    A and B at the same epoch. The orbit's B − A at 1991.25 agrees with
+    their catalog places to 73 mas east and 28 mas north (within 0.1″ in
+    each). An east sign flipped in the orbit misses this by 22″, while its
+    separations still pass. Suggested by the Astrolog session.
   - The ERFA fixtures (`gen_star_fixtures.py`) apply the orbit
     independently, from ORB6's own file.
 - **Against `astrolog-ephd`,** which moves stars in straight lines, the
