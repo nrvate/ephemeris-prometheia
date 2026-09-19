@@ -35,6 +35,10 @@ non-commercial terms.
 | NASA HEASARC Messier Nebulae table (from *Sky Catalogue 2000.0* vol. 2) | the Messier objects' constellations; a second set of positions to cross-check SIMBAD | US Government service |
 | Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42 | the constellation boundaries (Delporte 1930), equinox B1875.0 | CDS: free use, acknowledge |
 | Basic Fifth Fundamental Catalogue, FK5 Part I (Fricke et al. 1988), CDS I/149A | not used by the catalog: the outside check on its positions ("Checked against FK5") | CDS: free use, acknowledge |
+| Swiss Ephemeris general documentation (Astrodienst), published | not used by the catalog: the published definitions of the zodiacs defined at the instant (FRAMES.md). Read, never copied; its code is never read | published documentation |
+| SIMBAD, one query | Sgr A*'s ICRS position (Petrov et al. 2011), for the Galactic-Centre zodiacs | CDS: free use, acknowledge |
+| Reid & Brunthaler 2020 (ApJ 892, 39), arXiv abstract | Sgr A*'s apparent proper motion | facts from a public abstract |
+| Liu, Zhu & Zhang 2011 (A&A 526, A16), arXiv abstract and paper | the IAU 1958 galactic pole in the ICRS and the modern pole, for the galactic-node zodiacs | facts from a public preprint |
 
 Acknowledgements the terms ask for:
 - This research has made use of the SIMBAD database and the VizieR catalogue
@@ -47,8 +51,8 @@ Acknowledgements the terms ask for:
 The fetched files are not committed. `stars-raw/` is gitignored.
 
 ```sh
-tools/fetch/stars_fetch.py --list                       # the 15 sources
-tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~13 MB, 15 requests, 5 s apart
+tools/fetch/stars_fetch.py --list                       # the 20 sources
+tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~15 MB, 20 requests, 5 s apart
 tools/fetch/stars_fetch.py --raw-dir stars-raw --verify # against the pinned checksums
 ```
 

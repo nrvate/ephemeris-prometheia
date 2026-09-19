@@ -13,6 +13,19 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Zodiacs defined at the instant** (docs/FRAMES.md): eleven sidereal
+  modes whose zero point is where a star, the Galactic Centre or the
+  galactic node sits at the moment asked. The modes are True Chitra,
+  Revati, Pushya and Mula; four Galactic-Centre modes (0° Sag, Cochrane,
+  Gil Brand, Wilhelm); and three galactic-equator modes.
+  - The definitions are the published ones, with the anchor at its true
+    position on the true ecliptic of date.
+  - Checked against ERFA by independent routes to 0.06 mas, and against
+    two statements in the published documentation.
+  - They have no anchor epoch, so the ecliptic of the anchor epoch is
+    refused for them. On the invariable plane their zero point is the
+    instant's.
+  - Engine only so far: the C API and `prometheiad` follow.
 - **Fuzzing** (docs/SERVER.md, "Fuzzing"): `tools/fuzz.sh` runs libFuzzer
   targets over the protocol codec and over `prometheiad`'s session, under
   ASan and UBSan. The check is the protocol's own: every reply must parse

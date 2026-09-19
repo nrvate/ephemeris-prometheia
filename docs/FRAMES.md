@@ -220,6 +220,93 @@ zero-point direction … projected onto the plane". Both maintainers approved
 it on 2026-09-18. The Astrolog side changes its answers by ~31″; nothing
 changes here.
 
+## Zodiacs defined at the instant
+
+Most published zodiacs are anchored at an epoch: a mean ayanamsha A0 at t0,
+moved by precession. Eleven are defined by where something in the sky is at
+the moment asked. The definitions come from the Swiss Ephemeris general
+documentation (Astrodienst, published: sections 2.8.7–2.8.9, and 2.8.12
+items 4 and 5; the documentation only, never its code). They are
+`SiderealMode` values numbered as the protocol's A.11 tokens:
+
+| mode | token | the anchor, at this sidereal longitude |
+|---:|---|---|
+| 27 | `true-citra` | Spica (α Vir, HR 5056) at 180° |
+| 28 | `true-revati` | ζ Psc (HR 361) at 359°50′ |
+| 29 | `true-pushya` | δ Cnc (HR 3461) at 106° |
+| 35 | `true-mula` | λ Sco (HR 6527) at 240° |
+| 17 | `galcent-0sag` | the Galactic Centre (Sgr A*) at 240° |
+| 40 | `galcent-cochrane` | Sgr A* at 270° |
+| 30 | `galcent-rgilbrand` | Sgr A* at the golden section of 0° Sco–0° Aqu, 244.3769° |
+| 36 | `galcent-mula-wilhelm` | the ecliptic point on Sgr A*'s hour circle, at 246°40′ |
+| 31 | `galequ-iau1958` | the galactic node (IAU 1958 pole) at 240° |
+| 32 | `galequ-true` | the galactic node (Liu et al.'s pole) at 240° |
+| 33 | `galequ-mula` | the galactic node (Liu et al.'s pole) at 246°40′ |
+
+**The definition, as published:** the anchor's *true* position (no
+aberration, no deflection) is held at that longitude on the **true ecliptic
+and equinox of date**.
+- It is a longitude, not a polar projection. The exception is Wilhelm's
+  mode, which is polar by its definition: the point where the great circle
+  through the celestial pole and Sgr A* meets the ecliptic.
+- The galactic node is where the galactic equator crosses the ecliptic of
+  date. Of the two crossings, it is the one near 0° Capricorn.
+- The true ayanamsha is the anchor's longitude less the defined one. The
+  mean ayanamsha is that less the nutation in longitude, as for the
+  anchored modes. The J2000 and ICRF frames use the constant mean value at
+  J2000.0 (protocol v4 §3.5a).
+
+**Data**, each from a pinned source in `tools/fetch/stars_fetch.py`:
+- **The stars:** this catalog (Hipparcos, the new reduction), moved by the
+  same space-motion model as `calc_star`, barycentric.
+- **Sgr A\*:** SIMBAD's ICRS position (Petrov et al. 2011, VLBI), taken at
+  epoch J2000.0. Its apparent motion is from Reid & Brunthaler (2020):
+  −6.411 mas/yr along the Galactic plane and −0.219 mas/yr toward the pole,
+  turned into proper motion about the IAU 1958 pole.
+- **The galactic poles:** from Liu, Zhu & Zhang (2011).
+  - Their eq. 19 is the IAU 1958 pole carried into the ICRS.
+  - Their eq. 22 is the pole of a system centred on Sgr A*. That is the
+    "true/modern" pole: its node lies 190.3″ from the IAU 1958 node, and the
+    documentation says the correction is 3′11″.
+
+**Two readings were ours to make, and each was checked against a statement
+in the documentation:**
+- **Gil Brand's golden section:** of the two sections of the 90° from 0°
+  Scorpio to 0° Aquarius, the one 90°/φ² from 0° Scorpio (244.3769°). That
+  gives 22.47° at J2000, which is "very close to the ayanamsha of B.V.
+  Raman"; the other section is not.
+- **The modern pole:** see the 3′11″ check above.
+
+A third statement holds without our doing anything: Wilhelm's mode (20.0411°
+at J2000) and True Revati (20.0403°) are 3″ apart. The documentation says
+that with the Galactic Centre in mid-Mula, Revati is "almost exactly" at
+29°50′ Pisces.
+
+**The fixed planes:** these zodiacs have no anchor epoch.
+- **The ecliptic of the anchor epoch (plane 1)** is refused (ArgumentError,
+  errCode 2 on the wire).
+- **The invariable plane (plane 2):** the zero point is sidereal longitude 0
+  on the mean ecliptic of the instant asked, projected onto the plane. For
+  a zodiac defined at the instant, that is its definition rather than an
+  approximation of one.
+- This is the §3.5a clause proposed to both maintainers on 2026-09-18.
+  The Astrolog side agreed the reading and is taking it to theirs as a
+  text drop.
+
+**Tested** (`tests/test_engine.cpp`):
+- **Against ERFA**, by other routes (`tools/gen/gen_zodiac_fixtures.py`):
+  rigorous `pmsafe` for the stars, the Galactic Centre's motion in galactic
+  coordinates, ERFA's own ecliptic and nutation, and the Hipparcos
+  catalogue's IAU 1958 pole. Worst 0.06 mas over 1900–2100. The IAU 1958
+  node is within 0.012″, which is the milliarcseconds between the two
+  published transfers of the pole, magnified by the node's shallow
+  crossing.
+- **Each star zodiac** puts its own star exactly at its defined longitude
+  (to 1e-10″).
+- **On the invariable plane**, a zodiac defined at the instant answers
+  exactly as a user zodiac anchored at that instant with that instant's
+  mean ayanamsha.
+
 ## Accuracy notes
 
 - ICRF vs the J2000 mean equator/ecliptic differ by the ~0.02″ frame

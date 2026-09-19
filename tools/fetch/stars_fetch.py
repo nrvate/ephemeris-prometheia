@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetchlog  # noqa: E402  (one timestamped line per GET)
 
 USER_AGENT = ("prometheia-fetch/0.1.0 "
-              "(Ephemeris Prometheia fixed-star catalog; sequential, 15 requests)")
+              "(Ephemeris Prometheia fixed-star catalog; sequential, 20 requests)")
 PAUSE_S = 5.0
 
 CDS = "https://cdsarc.cds.unistra.fr/ftp/"
@@ -90,6 +90,23 @@ SOURCES = [
      "CDS: free use with acknowledgement. Ground-based and pre-Hipparcos: the "
      "outside check on the Hipparcos-derived positions (docs/STARS.md)"),
     ("fk5", "I_149A_catalog.gz", CDS + "I/149A/catalog.gz", "67a228e2adacdb559ea5ec8305ca84d1d81f278af70483aac46beacd8e308a13", "as fk5-readme"),
+    ("swisseph-doc", "swisseph.htm", "https://www.astro.com/swisseph/swisseph.htm", "7ca3f8863d31001f3a1411139d4759813cc8c3d3c51312fbc45aa84382f05aa2",
+     "Swiss Ephemeris general documentation (Astrodienst), published; read for the "
+     "published definitions of the star- and frame-anchored zodiacs (docs/FRAMES.md), "
+     "never copied. Its code is never read (CLAUDE.md, Cleanroom)"),
+    ("simbad-sgra", "simbad-sgra.csv",
+     tap("SELECT b.main_id, b.ra, b.dec, b.coo_err_maj, b.coo_bibcode, b.pmra, b.pmdec, "
+         "b.pm_bibcode FROM ident AS i JOIN basic AS b ON i.oidref = b.oid "
+         "WHERE i.id = 'NAME Sgr A*'"),
+     "cfaacc0dbb56c7a4f1eac72f76cfe545ed54f7ed42888bf56c5fd56a691f6690", "as simbad-hr-hip; the Galactic Centre (Sgr A*) for the galactic-centre zodiacs"),
+    ("liu-2011", "liu-2011-abs.html", "https://arxiv.org/abs/1010.3773", "d16888d88e5cd1a24b939aee8655395b275c6f51cae8f4b20ae0dd9c501bd3fd",
+     "Liu, Zhu & Zhang, Reconsidering the galactic coordinate system, A&A 526, A16 "
+     "(2011), arXiv abstract page (arXiv's own terms: abstracts free to read); the "
+     "modern galactic pole of galequ-true and galequ-mula. Facts only"),
+    ("liu-2011-pdf", "liu-2011.pdf", "https://arxiv.org/pdf/1010.3773", "f5dc2c8bc5a2f421a42e3d88b4e9858364177fa51e99fd332eea7a5fd992cc9e", "as liu-2011; the paper, for the pole's coordinates"),
+    ("reid-2020", "reid-2020-abs.html", "https://arxiv.org/abs/2001.04386", "611f288a2e49c3533bd922c67bb0846e4e87ec0afd601d1a92d398a43407f813",
+     "Reid & Brunthaler, The Proper Motion of Sagittarius A*. III (ApJ 892, 39, 2020), "
+     "arXiv abstract page; Sgr A*'s apparent proper motion. Facts only"),
     ("simbad-rv", "simbad-rv.csv",
      tap("SELECT i.id AS hip, b.rvz_radvel, b.rvz_err, b.rvz_qual FROM ident AS i "
          "JOIN basic AS b ON i.oidref = b.oid WHERE i.id LIKE 'HIP %' "

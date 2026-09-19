@@ -90,10 +90,28 @@ enum class Coords {
 // -ay<mode>). User anchors the zodiac at an explicit epoch and value
 // (CalcOptions::sidereal_epoch_jtdb, sidereal_ayanamsa_deg — the MEAN
 // ayanamsha at that TT epoch).
+//
+// The rest are defined at the instant rather than at an epoch: a star, the
+// Galactic Centre or the galactic node held at a fixed sidereal longitude on
+// the true ecliptic of date, at its true position (no aberration, no
+// deflection), per the published definitions (docs/FRAMES.md, "Zodiacs
+// defined at the instant"). They have no anchor epoch, so the ecliptic of
+// the anchor epoch (SiderealPlane::EclipticOfAnchor) is refused for them.
 enum class SiderealMode : int {
     Tropical = -1,
     FaganBradley = 0,
     Lahiri = 1,
+    GalacticCentre0Sag = 17,        // Sgr A* at 240°
+    TrueCitra = 27,                 // Spica (alpha Vir) at 180°
+    TrueRevati = 28,                // zeta Psc at 359°50'
+    TruePushya = 29,                // delta Cnc at 106°
+    GalacticCentreGilBrand = 30,    // Sgr A* at the golden section of 0° Sco..0° Aqu
+    GalacticEquatorIau1958 = 31,    // the galactic node (IAU 1958 pole) at 240°
+    GalacticEquatorTrue = 32,       // the galactic node (Liu et al. 2011 pole) at 240°
+    GalacticEquatorMula = 33,       // the galactic node (Liu et al. 2011 pole) at 246°40'
+    TrueMula = 35,                  // lambda Sco at 240°
+    GalacticCentreMulaWilhelm = 36, // Sgr A* projected along its hour circle to 246°40'
+    GalacticCentreCochrane = 40,    // Sgr A* at 270°
     User = 255,
 };
 
@@ -105,7 +123,11 @@ enum class SiderealMode : int {
 // (frames::kInvariablePoleIcrf), with the zero point (longitude A0 on the
 // ecliptic of t0) projected onto it. The fixed planes need ecliptic
 // coordinates and ignore CalcOptions::frame (their plane is the frame);
-// Position::ayanamsa_deg reports A0 for them (docs/FRAMES.md).
+// Position::ayanamsa_deg reports A0 for them (docs/FRAMES.md). A zodiac
+// defined at the instant has no t0: the ecliptic of the anchor epoch is
+// refused, and on the invariable plane the zero point is sidereal longitude
+// 0 on the mean ecliptic of the instant asked, with its mean ayanamsha
+// reported.
 enum class SiderealPlane : int {
     EclipticOfDate = 0,
     EclipticOfAnchor = 1,

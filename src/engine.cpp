@@ -48,6 +48,79 @@ constexpr long kOldSpkidNumberedBase = 2000000;
 constexpr double kSpeedStepDays = 1e-3;
 
 // ---------------------------------------------------------------------------
+// Zodiacs defined at the instant (docs/FRAMES.md, "Zodiacs defined at the
+// instant"). Definitions from the Swiss Ephemeris general documentation
+// (Astrodienst, published; tools/fetch/stars_fetch.py, swisseph-doc),
+// sections 2.8.7-2.8.9 and 2.8.12 items 4-5: the anchor's TRUE position (no
+// aberration, no deflection) held at a fixed longitude on the true ecliptic
+// of date; longitude, not polar, except Wilhelm's, which is polar by
+// definition. Data, each from a pinned source in the same fetch tool:
+// - the four stars: this catalog (Hipparcos new reduction), by HR number;
+// - Sgr A*: SIMBAD's ICRS position (Petrov et al. 2011, VLBI), with the
+//   apparent motion of Reid & Brunthaler 2020 (ApJ 892, 39): -6.411 mas/yr
+//   along the Galactic plane, -0.219 mas/yr toward the pole;
+// - the galactic poles in ICRS from Liu, Zhu & Zhang 2011 (A&A 526, A16):
+//   the IAU 1958 pole carried into the ICRS (their eq. 19) and the pole of
+//   the system centred on Sgr A* (their eq. 22), which is the "true/modern"
+//   one: it moves the galactic node by the 3'11" the documentation quotes.
+enum class ZodiacAnchor {
+    Star,                // a catalog star at `at_deg`
+    GalacticCentre,      // Sgr A* at `at_deg`
+    GalacticCentrePolar, // the ecliptic point on Sgr A*'s hour circle at `at_deg`
+    GalacticNode,        // the galactic equator's node near 0° Capricorn at `at_deg`
+};
+
+struct InstantZodiac {
+    SiderealMode mode;
+    ZodiacAnchor anchor;
+    int hr;           // ZodiacAnchor::Star
+    bool modern_pole; // ZodiacAnchor::GalacticNode: Liu et al.'s eq. 22 pole
+    double at_deg;    // the anchor's sidereal longitude
+};
+
+constexpr double kMula = 246.0 + 40.0 / 60.0; // the middle of the nakshatra Mula
+// Gil Brand: the golden section of the 90° from 0° Scorpio to 0° Aquarius,
+// the shorter part from 0° Scorpio (the documentation: "very close to the
+// ayanamsha of B.V. Raman", which the other section is not).
+constexpr double kGilBrand = 210.0 + 90.0 * 0.38196601125010515;
+
+constexpr InstantZodiac kInstantZodiacs[] = {
+    {SiderealMode::GalacticCentre0Sag, ZodiacAnchor::GalacticCentre, 0, false, 240.0},
+    {SiderealMode::TrueCitra, ZodiacAnchor::Star, 5056, false, 180.0},
+    {SiderealMode::TrueRevati, ZodiacAnchor::Star, 361, false, 359.0 + 50.0 / 60.0},
+    {SiderealMode::TruePushya, ZodiacAnchor::Star, 3461, false, 106.0},
+    {SiderealMode::GalacticCentreGilBrand, ZodiacAnchor::GalacticCentre, 0, false, kGilBrand},
+    {SiderealMode::GalacticEquatorIau1958, ZodiacAnchor::GalacticNode, 0, false, 240.0},
+    {SiderealMode::GalacticEquatorTrue, ZodiacAnchor::GalacticNode, 0, true, 240.0},
+    {SiderealMode::GalacticEquatorMula, ZodiacAnchor::GalacticNode, 0, true, kMula},
+    {SiderealMode::TrueMula, ZodiacAnchor::Star, 6527, false, 240.0},
+    {SiderealMode::GalacticCentreMulaWilhelm, ZodiacAnchor::GalacticCentrePolar, 0, false, kMula},
+    {SiderealMode::GalacticCentreCochrane, ZodiacAnchor::GalacticCentre, 0, false, 270.0},
+};
+
+const InstantZodiac* instant_zodiac(SiderealMode mode) {
+    for (const InstantZodiac& z : kInstantZodiacs) {
+        if (z.mode == mode)
+            return &z;
+    }
+    return nullptr;
+}
+
+// Sgr A* (SIMBAD, ICRS; epoch taken as J2000.0) and its apparent motion.
+constexpr double kSgrARaDeg = 266.41681662499997, kSgrADecDeg = -29.00782497222222;
+constexpr double kSgrAMuLMasYr = -6.411, kSgrAMuBMasYr = -0.219;
+// North galactic poles in the ICRS (Liu, Zhu & Zhang 2011, eqs. 19 and 22).
+constexpr double kPoleIau1958RaDeg = 192.859477875, kPoleIau1958DecDeg = 27.128252416667;
+constexpr double kPoleModernRaDeg = 192.902979992083, kPoleModernDecDeg = 27.103109214444;
+
+void unit_radec(double ra_deg, double dec_deg, double u[3]) {
+    const double a = ra_deg / kRad2Deg, d = dec_deg / kRad2Deg;
+    u[0] = std::cos(d) * std::cos(a);
+    u[1] = std::cos(d) * std::sin(a);
+    u[2] = std::sin(d);
+}
+
+// ---------------------------------------------------------------------------
 // Ephemeris sources: barycentric ICRF states in km and km/day.
 
 class Source {
@@ -773,6 +846,8 @@ struct Engine::Impl {
     double bias[9];
     double eps_j2000 = 0.0;
     EpochFrames cache[3];
+    // Catalog stars that anchor a zodiac, by HR number (star_by_hr).
+    std::unordered_map<int, size_t> star_by_hr_;
     int cache_next = 0;
 
     // Small-body overlay: EPM1 catalogs, newest wins. Positions are
@@ -1339,18 +1414,30 @@ struct Engine::Impl {
     // (J2000, ICRF) the zero point's fixed longitude on the mean
     // ecliptic of J2000. Error for an unknown mode or a non-finite
     // user anchor.
-    Result<double> sidereal_shift(const CalcOptions& o, double jd_tt) const {
+    Result<double> sidereal_shift(const CalcOptions& o, double jd_tt) {
         if (o.sidereal_plane != SiderealPlane::EclipticOfDate) {
             // A fixed plane: the zero point does not move, and the value
-            // reported is the anchor's A0 (protocol v4 3.5a).
-            auto a = sidereal_anchor(o);
+            // reported is the anchor's A0 (protocol v4 3.5a); for a zodiac
+            // defined at the instant, its mean ayanamsha then.
+            auto a = sidereal_anchor(o, jd_tt);
             if (!a)
                 return a.error();
             return a.value().mean0_deg;
         }
         const auto model = frames::PrecessionModel(int(o.precession));
         std::optional<frames::Ayanamsa> aya;
-        if (o.sidereal == SiderealMode::User) {
+        if (const InstantZodiac* z = instant_zodiac(o.sidereal)) {
+            // The J2000 and ICRF frames: the zero point's longitude on the
+            // mean ecliptic of J2000, which is the mean ayanamsha there (3.5a:
+            // "the constant A(J2000.0) mean").
+            const bool fixed_frame = o.frame == Frame::J2000 || o.frame == Frame::ICRF;
+            auto a = instant_ayanamsa(*z, fixed_frame ? kJ2000 : jd_tt, o.precession);
+            if (!a)
+                return a.error();
+            if (fixed_frame)
+                return a.value().mean_deg;
+            aya = a.value();
+        } else if (o.sidereal == SiderealMode::User) {
             if (!std::isfinite(o.sidereal_epoch_jtdb) || !std::isfinite(o.sidereal_ayanamsa_deg))
                 return make_error(ErrorCode::ArgumentError, "sidereal User anchor is not finite");
             aya = frames::ayanamsa_anchored(o.sidereal_epoch_jtdb, o.sidereal_ayanamsa_deg, jd_tt,
@@ -1375,9 +1462,133 @@ struct Engine::Impl {
         return make_error(ErrorCode::ArgumentError, "unknown frame");
     }
 
+    // A catalog star's index by HR number, remembered after the first search.
+    Result<size_t> star_by_hr(int hr) {
+        if (auto it = star_by_hr_.find(hr); it != star_by_hr_.end())
+            return it->second;
+        for (size_t i = 0; i < stars::count(); ++i) {
+            if (stars::at(i).hr == hr) {
+                star_by_hr_.emplace(hr, i);
+                return i;
+            }
+        }
+        return make_error(ErrorCode::NotFound, "no catalog star HR " + std::to_string(hr));
+    }
+
+    // Sgr A* as a catalog object: SIMBAD's ICRS place, and the apparent motion
+    // Reid & Brunthaler measured in galactic coordinates turned into proper
+    // motion in RA and Dec about the IAU 1958 pole (theirs is measured in the
+    // standard galactic system). No parallax: the motion is an angle a year.
+    static stars::Object galactic_centre() {
+        double u[3], p[3];
+        unit_radec(kSgrARaDeg, kSgrADecDeg, u);
+        unit_radec(kPoleIau1958RaDeg, kPoleIau1958DecDeg, p);
+        // e_b: toward the pole across the line of sight; e_l = e_b x u, the
+        // direction of increasing galactic longitude (x to the centre, z to
+        // the pole, y = z x x).
+        const double pu = p[0] * u[0] + p[1] * u[1] + p[2] * u[2];
+        double eb[3] = {p[0] - pu * u[0], p[1] - pu * u[1], p[2] - pu * u[2]};
+        const double nb = std::sqrt(eb[0] * eb[0] + eb[1] * eb[1] + eb[2] * eb[2]);
+        for (double& x : eb)
+            x /= nb;
+        const double el[3] = {eb[1] * u[2] - eb[2] * u[1], eb[2] * u[0] - eb[0] * u[2],
+                              eb[0] * u[1] - eb[1] * u[0]};
+        double mu[3];
+        for (int i = 0; i < 3; ++i)
+            mu[i] = kSgrAMuLMasYr * el[i] + kSgrAMuBMasYr * eb[i];
+        const double a = kSgrARaDeg / kRad2Deg, d = kSgrADecDeg / kRad2Deg;
+        const double east[3] = {-std::sin(a), std::cos(a), 0.0};
+        const double north[3] = {-std::sin(d) * std::cos(a), -std::sin(d) * std::sin(a),
+                                 std::cos(d)};
+        stars::Object gc;
+        gc.ra_deg = kSgrARaDeg;
+        gc.dec_deg = kSgrADecDeg;
+        gc.epoch_jyear = 2000.0;
+        gc.pm_ra_mas_yr = mu[0] * east[0] + mu[1] * east[1] + mu[2] * east[2];
+        gc.pm_dec_mas_yr = mu[0] * north[0] + mu[1] * north[1] + mu[2] * north[2];
+        return gc;
+    }
+
+    // The ayanamsha of a zodiac defined at the instant, true and mean
+    // (degrees): the anchor's longitude on the true ecliptic and equinox of
+    // date less the longitude the zodiac gives it; the mean value is that less
+    // the nutation in longitude, as for the anchored modes.
+    Result<frames::Ayanamsa> instant_ayanamsa(const InstantZodiac& z, double jd_tt,
+                                              Precession precession) {
+        const EpochFrames& f = frames_at(jd_tt, true, precession);
+        // ICRF to the true ecliptic and equinox of date, as to_output builds it.
+        double e[9], a[9], b[9];
+        rot3(-f.dpsi, a);
+        rot1(f.eps_mean, b);
+        matmul(a, b, e);
+        matmul(e, f.pb, e);
+        double lon = 0.0; // radians
+        if (z.anchor == ZodiacAnchor::GalacticNode) {
+            // The node lies on both great circles, so it is perpendicular to
+            // both poles: n = k x p in ecliptic coordinates, k the ecliptic
+            // pole. Of n and -n, the one near 0° Capricorn (the documentation:
+            // "at present ... near 0 Capricorn").
+            double p[3], v[3];
+            if (z.modern_pole)
+                unit_radec(kPoleModernRaDeg, kPoleModernDecDeg, p);
+            else
+                unit_radec(kPoleIau1958RaDeg, kPoleIau1958DecDeg, p);
+            apply(e, p, v);
+            lon = std::atan2(v[0], -v[1]);
+            if (lon < 0.0)
+                lon += kTwoPi;
+            if (lon < kTwoPi / 2.0)
+                lon += kTwoPi / 2.0;
+        } else {
+            double pos[3];
+            const double jd_tdb = time::tdb_from_tt(jd_tt);
+            if (z.anchor == ZodiacAnchor::Star) {
+                auto idx = star_by_hr(z.hr);
+                if (!idx)
+                    return idx.error();
+                star_barycentric_km(stars::at(idx.value()), jd_tdb, pos);
+            } else {
+                star_barycentric_km(galactic_centre(), jd_tdb, pos);
+            }
+            if (z.anchor == ZodiacAnchor::GalacticCentrePolar) {
+                // The ecliptic point on the anchor's hour circle: the same
+                // right ascension on the true equator of date, so
+                // tan(lon) = tan(ra) / cos(eps) on the true ecliptic.
+                double q[3];
+                apply(f.npb, pos, q);
+                const double ra = std::atan2(q[1], q[0]);
+                const double eps = f.eps_mean + f.deps;
+                lon = std::atan2(std::sin(ra), std::cos(eps) * std::cos(ra));
+            } else {
+                double v[3];
+                apply(e, pos, v);
+                lon = std::atan2(v[1], v[0]);
+            }
+        }
+        double aya = std::fmod(lon * kRad2Deg - z.at_deg, 360.0);
+        if (aya > 180.0)
+            aya -= 360.0;
+        else if (aya <= -180.0)
+            aya += 360.0;
+        return frames::Ayanamsa{aya - f.dpsi * kRad2Deg, aya};
+    }
+
     // The zodiac's zero point: its anchor epoch t0 (TT) and MEAN ayanamsha
-    // A0 there, for the user anchor or a published mode.
-    Result<frames::AyanamsaAnchor> sidereal_anchor(const CalcOptions& o) const {
+    // A0 there, for the user anchor or a published mode. A zodiac defined at
+    // the instant has no t0: on the invariable plane its zero point is the
+    // one of the instant asked (t0 = jd_tt), and the ecliptic of the anchor
+    // epoch, which needs a t0 of the zodiac's own, is refused.
+    Result<frames::AyanamsaAnchor> sidereal_anchor(const CalcOptions& o, double jd_tt) {
+        if (const InstantZodiac* z = instant_zodiac(o.sidereal)) {
+            if (o.sidereal_plane == SiderealPlane::EclipticOfAnchor)
+                return make_error(ErrorCode::ArgumentError,
+                                  "a zodiac defined at the instant has no anchor epoch, so no "
+                                  "ecliptic of the anchor epoch");
+            auto a = instant_ayanamsa(*z, jd_tt, o.precession);
+            if (!a)
+                return a.error();
+            return frames::AyanamsaAnchor{jd_tt, a.value().mean_deg};
+        }
         if (o.sidereal == SiderealMode::User) {
             if (!std::isfinite(o.sidereal_epoch_jtdb) || !std::isfinite(o.sidereal_ayanamsa_deg))
                 return make_error(ErrorCode::ArgumentError, "sidereal User anchor is not finite");
@@ -1391,8 +1602,8 @@ struct Engine::Impl {
 
     // ICRF to a fixed sidereal plane with the longitude zero at the zodiac's
     // zero point (SiderealPlane::EclipticOfAnchor or ::Invariable).
-    Result<void> fixed_sidereal_matrix(const CalcOptions& o, double m[9]) {
-        auto a = sidereal_anchor(o);
+    Result<void> fixed_sidereal_matrix(const CalcOptions& o, double jd_tt, double m[9]) {
+        auto a = sidereal_anchor(o, jd_tt);
         if (!a)
             return a.error();
         const double a0 = a.value().mean0_deg / kRad2Deg;
@@ -1862,17 +2073,12 @@ struct Engine::Impl {
     }
 
     // Observer -> catalog object vector in the output frame (km).
-    Result<void> star_vector_at(const stars::Object& star, double jd_tt, const CalcOptions& o,
-                                double out[3]) {
-        const double jd_tdb = time::tdb_from_tt(jd_tt);
-        double obs[6];
-        auto r = observer(o, jd_tt, jd_tdb, obs);
-        if (!r)
-            return r;
-        // Barycentric position at the catalog epoch, and the space velocity:
-        // proper motion across the line of sight at the parallax distance,
-        // radial velocity along it (only with a parallax: without a distance
-        // a velocity along the line of sight has no meaning).
+    // A catalog star's barycentric position (km, ICRF) at jd_tdb: its place
+    // at the catalog epoch moved by its space velocity, which is the proper
+    // motion across the line of sight at the parallax distance and the radial
+    // velocity along it (only with a parallax: without a distance a velocity
+    // along the line of sight has no meaning).
+    static void star_barycentric_km(const stars::Object& star, double jd_tdb, double pos[3]) {
         const double a = star.ra_deg / kRad2Deg, d = star.dec_deg / kRad2Deg;
         const double ca = std::cos(a), sa = std::sin(a), cd = std::cos(d), sd = std::sin(d);
         const double u[3] = {cd * ca, cd * sa, sd};
@@ -1886,11 +2092,21 @@ struct Engine::Impl {
         const double rv = has_parallax ? star.rv_km_s * 86400.0 / kAuKm : 0.0; // AU/day
         const double epoch_jd = kJ2000 + (star.epoch_jyear - 2000.0) * 365.25;
         const double dt = jd_tdb - epoch_jd;
-        double pos[3];
         for (int i = 0; i < 3; ++i) {
             const double v = dist_au * (pm_a * east[i] + pm_d * north[i]) + rv * u[i];
             pos[i] = (dist_au * u[i] + v * dt) * kAuKm;
         }
+    }
+
+    Result<void> star_vector_at(const stars::Object& star, double jd_tt, const CalcOptions& o,
+                                double out[3]) {
+        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        double obs[6];
+        auto r = observer(o, jd_tt, jd_tdb, obs);
+        if (!r)
+            return r;
+        double pos[3];
+        star_barycentric_km(star, jd_tdb, pos);
         double p[3] = {pos[0] - obs[0], pos[1] - obs[1], pos[2] - obs[2]};
         // Deflection is honoured for every observer that is not the Sun
         // itself (3.5a): the barycentre sits ~0.005 AU from the Sun's
@@ -1985,7 +2201,7 @@ struct Engine::Impl {
                 return make_error(ErrorCode::ArgumentError,
                                   "a fixed sidereal plane needs ecliptic coordinates");
             double m[9];
-            auto r = fixed_sidereal_matrix(o, m);
+            auto r = fixed_sidereal_matrix(o, jd_tt, m);
             if (!r)
                 return r;
             apply(m, p, out);

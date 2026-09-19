@@ -28,6 +28,7 @@
 #include <prometheia/engine.hpp>
 #include <prometheia/forces.hpp>
 #include <prometheia/frames.hpp>
+#include <prometheia/stars.hpp>
 
 #include "synthetic_spk.hpp"
 #include <doctest/doctest.h>
@@ -998,6 +999,121 @@ TEST_CASE("sidereal_fixed_planes") {
 // angular momentum of the Sun, the planetary-system barycentres and Pluto
 // from DE440's states and GM constants, at J2000 and, as a check that the
 // mass set conserves it, at 1800 and 2200.
+#include "zodiac_fixtures.inc"
+
+// The zodiacs defined at the instant (docs/FRAMES.md): their true ayanamsha
+// against ERFA, built by other routes (tools/gen/gen_zodiac_fixtures.py).
+TEST_CASE("zodiacs_at_the_instant_match_erfa") {
+    TempFile tf("engine-instant-zodiac");
+    Engine e = open_synthetic(tf);
+    // The ayanamsha does not depend on the object: a star seen from the
+    // barycentre needs no ephemeris coverage, which the synthetic kernel
+    // lacks at 1900 and 2100.
+    auto star = stars::find("Vega");
+    REQUIRE(star.ok());
+    double worst = 0.0, worst_node = 0.0;
+    for (const ZodiacFixture& f : kZodiacFixtures) {
+        CalcOptions o = CalcOptions::geometric();
+        o.center = Center::Barycentric;
+        o.frame = Frame::TrueOfDate;
+        o.sidereal = SiderealMode(f.mode);
+        auto r = e.calc_star(star.value(), f.jd_tt, o);
+        INFO("mode ", f.mode, " jd ", f.jd_tt, " ", r.ok() ? "" : r.error().message);
+        REQUIRE(r.ok());
+        const double d = std::fabs(*r.value().ayanamsa_deg - f.true_deg) * 3600.0;
+        // The IAU 1958 pole: the engine takes Liu et al.'s ICRS value (their
+        // eq. 19), ERFA the Hipparcos catalogue's transfer; they differ by
+        // milliarcseconds, which the node's shallow crossing magnifies.
+        if (f.mode == int(SiderealMode::GalacticEquatorIau1958))
+            worst_node = std::max(worst_node, d);
+        else
+            worst = std::max(worst, d);
+        // The mean ayanamsha (the mean frame's) is the true one less the
+        // nutation in longitude, as for the anchored zodiacs.
+        CalcOptions mean = o;
+        mean.frame = Frame::MeanOfDate;
+        auto rm = e.calc_star(star.value(), f.jd_tt, mean);
+        REQUIRE(rm.ok());
+        double dpsi, deps;
+        frames::nutation(f.jd_tt, dpsi, deps);
+        CHECK(std::fabs(*rm.value().ayanamsa_deg - (*r.value().ayanamsa_deg - dpsi * 180.0 / kPi)) *
+                  3600.0 <
+              1e-9);
+    }
+    MESSAGE("worst against ERFA: ", worst, "\" (IAU 1958 node ", worst_node, "\")");
+    CHECK(worst < 0.001);
+    CHECK(worst_node < 0.02);
+}
+
+// Each star zodiac, asked for its own anchor star at its true position
+// (barycentric, no aberration, no deflection) on the true ecliptic of date,
+// puts the star exactly where its definition does.
+TEST_CASE("zodiacs_at_the_instant_hold_their_star") {
+    TempFile tf("engine-instant-star");
+    Engine e = open_synthetic(tf);
+    const struct {
+        SiderealMode mode;
+        const char* star;
+        double at_deg;
+    } cases[] = {
+        {SiderealMode::TrueCitra, "HR 5056", 180.0},
+        {SiderealMode::TrueRevati, "HR 361", 359.0 + 50.0 / 60.0},
+        {SiderealMode::TruePushya, "HR 3461", 106.0},
+        {SiderealMode::TrueMula, "HR 6527", 240.0},
+    };
+    for (const auto& c : cases) {
+        auto idx = stars::find(c.star);
+        REQUIRE(idx.ok());
+        for (double t : {2415020.5, kJ2000, 2488069.5}) {
+            CalcOptions o = CalcOptions::geometric();
+            o.center = Center::Barycentric;
+            o.frame = Frame::TrueOfDate;
+            o.sidereal = c.mode;
+            auto r = e.calc_star(idx.value(), t, o);
+            INFO(c.star, " at ", t, " ", r.ok() ? "" : r.error().message);
+            REQUIRE(r.ok());
+            double dl = r.value().pos.lon_deg - c.at_deg;
+            dl -= 360.0 * std::round(dl / 360.0);
+            CHECK(std::fabs(dl) * 3600.0 < 1e-6);
+        }
+    }
+}
+
+// Planes (3.5a, the clause for zodiacs defined at the instant): no ecliptic of
+// the anchor epoch; on the invariable plane, the zero point of the instant.
+TEST_CASE("zodiacs_at_the_instant_on_the_fixed_planes") {
+    TempFile tf("engine-instant-planes");
+    Engine e = open_synthetic(tf);
+    const double t = kJ2000 + 1234.5;
+    CalcOptions o;
+    o.sidereal = SiderealMode::GalacticCentre0Sag;
+    o.sidereal_plane = SiderealPlane::EclipticOfAnchor;
+    CHECK_FALSE(e.calc(body::kSun, t, o).ok());
+
+    // The invariable plane: the same answer as a user zodiac anchored at this
+    // instant with this instant's mean ayanamsha, whose plane-2 construction
+    // sidereal_fixed_planes already holds to the frame matrices.
+    CalcOptions mean = o;
+    mean.frame = Frame::MeanOfDate;
+    mean.sidereal_plane = SiderealPlane::EclipticOfDate;
+    auto m = e.calc(body::kSun, t, mean);
+    REQUIRE(m.ok());
+    CalcOptions inv = o;
+    inv.sidereal_plane = SiderealPlane::Invariable;
+    CalcOptions user = inv;
+    user.sidereal = SiderealMode::User;
+    user.sidereal_epoch_jtdb = t;
+    user.sidereal_ayanamsa_deg = *m.value().ayanamsa_deg;
+    for (int id : {body::kSun, body::kJupiter}) {
+        auto a = e.calc(id, t, inv), b = e.calc(id, t, user);
+        REQUIRE(a.ok());
+        REQUIRE(b.ok());
+        CHECK(std::fabs(a.value().pos.lon_deg - b.value().pos.lon_deg) * 3600.0 < 1e-9);
+        CHECK(std::fabs(a.value().pos.lat_deg - b.value().pos.lat_deg) * 3600.0 < 1e-9);
+        CHECK(*a.value().ayanamsa_deg == doctest::Approx(*m.value().ayanamsa_deg).epsilon(1e-15));
+    }
+}
+
 TEST_CASE("invariable_plane_from_de440") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;
