@@ -981,8 +981,9 @@ RATE_CONFIGS = [
     ("geo apparent, true of date, equatorial", ["--corrections", "7", "--eq"]),
     ("geo astrometric, ICRF, equatorial", ["--corrections", "1", "--icrs", "--eq"]),
     ("geo apparent, J2000, ecliptic", ["--corrections", "7", "--j2000"]),
-    # mask 1: astrolog-ephd refuses (ERROR 11) the default light time and
-    # aberration from the Sun for some kinds, and one refusal fails the request
+    # mask 1: from the Sun, the advertised masks (0x0004, 0x0014) differ by
+    # kind, and 3.5a makes any unlisted mask ERROR 11 for the whole request;
+    # mask 1 is listed for every kind in this leg, by both servers
     ("helio astrometric, true of date, ecliptic", ["--helio", "--corrections", "1"]),
     ("topo Zurich, apparent", ["--corrections", "7", "--topo", "8.55,47.37,500"]),
     ("geo apparent, lahiri", ["--corrections", "7", "--sid", "lahiri"]),

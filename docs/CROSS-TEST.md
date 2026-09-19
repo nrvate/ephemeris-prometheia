@@ -950,9 +950,12 @@ the sign of one, so this was a blind spot, not a detail.
     to be missing from the rates.
   - Distance rates up to 1.8e-6 AU/day; longitude and latitude rates
     generally 1e-6 to 1e-5 °/day.
-- **Heliocentric runs at mask 1.** `astrolog-ephd` refuses (ERROR 11) the
-  default heliocentric light time and aberration for some object kinds, and
-  one refusal fails the whole request.
+- **Heliocentric runs at mask 1.** From the Sun the advertised masks
+  (A.3 `0x0004`, `0x0014`) differ by object kind, and §3.5a makes any
+  unlisted mask ERROR 11 for the whole request. Mask 1 is listed for every
+  kind in the leg by both servers. (First recorded here as an `astrolog-ephd` refusal;
+  it is the protocol working as written, as the Astrolog session confirmed
+  at their `9431473`.)
 - **The other legs are unchanged from record o.**
 
 ### Range, graded against Horizons, 2026-09-18 (`docs/crosstest/2026-09-18q.tsv`)
