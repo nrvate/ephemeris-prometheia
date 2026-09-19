@@ -1,6 +1,8 @@
-# JSON and MCP interfaces (draft, under negotiation)
+# JSON and MCP interfaces
 
-**Status: a proposal, 2026-09-18.** Nothing here is implemented.
+**Status, 2026-09-18:** implemented as `prometheia-json`, over the tools in
+`server/json_tools.hpp` and the MCP dispatcher in `server/mcp.hpp`. The
+shared vocabulary ("Words") is still being agreed with the Astrolog project.
 
 **What Prometheia is:** a high-speed ephemeris. Its interfaces, fastest first:
 1. **The C++ library**, in process (`prometheia::Engine`, ENGINE.md). This is
@@ -45,6 +47,51 @@ binary protocol and the agent tools cannot disagree about what a question
 means, and the cross-test can check that they do not. The tools are sized
 for questions an agent asks, one chart or a short series. Bulk data belongs
 on the binary protocol.
+
+## Running it
+
+```sh
+# MCP over stdio: what an MCP client launches (Claude Code, Claude Desktop...)
+prometheia-json --ephemeris ephe/linux_p1550p2650.440 --stdio
+
+# MCP over streamable HTTP at /mcp, and plain JSON at /v1/<tool>
+prometheia-json --ephemeris ephe/linux_p1550p2650.440 --http 47290
+curl -d '{"time":"1990-06-15T14:30:00+02:00","objects":["Sun","Moon","true node"]}' \
+     http://127.0.0.1:47290/v1/positions
+```
+
+To register it with Claude Code:
+`claude mcp add prometheia -- /path/to/prometheia-json --ephemeris /path/to/linux_p1550p2650.440 --stdio`.
+The `--catalog`, `--perturbers` and `--hypotheticals` options are those of
+`prometheiad`, and the dataset identity is computed the same way.
+
+**Streamable HTTP, as served:**
+- **`POST /mcp`:** one JSON-RPC message or a batch. Requests are answered
+  with `application/json`; notifications and responses only with 202.
+- **`GET` and `DELETE /mcp`:** 405. The server sends no messages of its own,
+  and keeps no session.
+- **`MCP-Protocol-Version`:** checked when sent. An unsupported one is 400.
+- **Revisions spoken:** 2025-06-18, 2025-03-26 and 2024-11-05, negotiated at
+  `initialize`.
+
+**Plain JSON:**
+- `POST /v1/<tool>` takes the tool's arguments as the body.
+- `GET /v1/tools` lists the tools with their schemas.
+- `GET /llms.txt` is the agent-facing summary.
+- `GET /healthz` answers ok.
+
+**Security defaults:**
+- It binds 127.0.0.1.
+- An `Origin` other than localhost is 403 unless `--allow-origin` names it
+  (against DNS rebinding).
+- `--tokens FILE` requires `Authorization: Bearer`.
+- Bodies over 1 MiB are refused.
+- The log (stderr) names the method and tool, never the arguments.
+
+**Measured, 2026-09-18:** the same question over MCP and over `/v1` gives the
+same number. A `positions` call for one planet takes about 0.15 ms round
+trip over local HTTP (curl, loopback). That is for agents and scripts; bulk
+data goes through the library or `prometheiad`.
 
 ## Tools (`prometheia-json`)
 
@@ -142,8 +189,9 @@ One vocabulary for both projects' JSON:
 
 ## Guardrails
 
-- The same limits, compute budget and tokens as the binary protocol. A
-  token goes in `Authorization: Bearer`.
+- Per-call limits: 64 objects and 1,000 instants by default
+  (`--max-objects`, `--max-times`). A token goes in
+  `Authorization: Bearer`.
 - The logs never carry instants, sites, names or tokens (SERVER.md,
   "Logging"). A birth chart is personal data.
 - No request contents in error text.

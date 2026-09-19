@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "json_tools.hpp"
+#include "mcp.hpp"
 #include "synthetic_spk.hpp"
 #include <doctest/doctest.h>
 
@@ -86,4 +87,144 @@ TEST_CASE("json_tools_list_their_schemas") {
         CHECK(tool.input_schema["type"] == "object");
     }
     CHECK(jsontools::llms_txt().find("positions") != std::string::npos);
+}
+
+// The MCP dispatcher (server/mcp.hpp): JSON-RPC 2.0, whatever the transport.
+TEST_CASE("mcp_dispatcher") {
+    synth::TempFile tf("json-mcp");
+    Engine e = synth::open_synthetic(tf);
+    jsontools::Context ctx;
+    ctx.engine = "test";
+    mcp::Dispatcher d(e, ctx, "0.0.0");
+    const auto req = [](int id, const char* method, Json params = Json::object()) {
+        return Json{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}, {"params", params}};
+    };
+    // Version negotiation: a supported revision is echoed, another gets ours.
+    auto init = d.handle(req(1, "initialize", {{"protocolVersion", "2025-03-26"}}));
+    REQUIRE(init);
+    CHECK((*init)["result"]["protocolVersion"] == "2025-03-26");
+    CHECK((*init)["result"]["serverInfo"]["name"] == "prometheia-json");
+    init = d.handle(req(2, "initialize", {{"protocolVersion", "1999-01-01"}}));
+    CHECK((*init)["result"]["protocolVersion"] == mcp::kProtocolVersions[0]);
+    // A notification has no answer.
+    CHECK_FALSE(d.handle(Json{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}}));
+    // Tools: listed with schemas; a call answers text and structured content.
+    auto list = d.handle(req(3, "tools/list"));
+    CHECK((*list)["result"]["tools"].size() == 4);
+    auto ok =
+        d.handle(req(4, "tools/call",
+                     {{"name", "positions"},
+                      {"arguments", {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}}}}));
+    CHECK((*ok)["result"]["isError"] == false);
+    CHECK((*ok)["result"]["structuredContent"]["results"][0]["object"]["resolved"] == "Sun");
+    CHECK((*ok)["result"]["content"][0]["type"] == "text");
+    // A tool's own failure is a result the agent reads; a protocol error is not.
+    auto bad =
+        d.handle(req(5, "tools/call", {{"name", "positions"}, {"arguments", Json::object()}}));
+    CHECK((*bad)["result"]["isError"] == true);
+    auto unknown_tool = d.handle(req(6, "tools/call", {{"name", "nosuch"}}));
+    CHECK((*unknown_tool)["error"]["code"] == -32602);
+    auto unknown_method = d.handle(req(7, "nosuch/method"));
+    CHECK((*unknown_method)["error"]["code"] == -32601);
+    CHECK((*d.handle(Json{{"not", "rpc"}}))["error"]["code"] == -32600);
+    // Resources: the agent-facing summary.
+    auto read = d.handle(req(8, "resources/read", {{"uri", "prometheia://llms.txt"}}));
+    CHECK((*read)["result"]["contents"][0]["text"].get<std::string>().find("positions") !=
+          std::string::npos);
+    // A batch answers each request, and skips the notifications.
+    auto batch = d.handle(Json::array({req(9, "ping"), Json{{"jsonrpc", "2.0"}, {"method", "x"}}}));
+    REQUIRE(batch);
+    CHECK(batch->size() == 1);
+}
+
+TEST_CASE("json_wrong_types_are_errors_not_exceptions") {
+    // Every argument of every tool, at top level and inside a site or a time,
+    // given every JSON type: the call answers or refuses, and never throws.
+    synth::TempFile tf("json-types");
+    Engine e = synth::open_synthetic(tf);
+    const Json kinds[] = {Json(3.5),
+                          Json(-7),
+                          Json("x"),
+                          Json(true),
+                          Json(nullptr),
+                          Json::array({1, "a"}),
+                          Json::object({{"k", 1}})};
+    const Json base = {{"time", "2000-01-01T12:00:00Z"}, {"objects", {"Sun"}}};
+    const char* nested[][2] = {{"site", "lon_deg"}, {"site", "lat_deg"}, {"site", "height_m"},
+                               {"time", "utc"},     {"time", "jd_tt"},   {"time", "jd_ut1"},
+                               {"series", "start"}, {"series", "count"}, {"series", "step_days"},
+                               {"zodiac", "user"}};
+    const char* object_keys[] = {"naif",         "body",  "star",   "asteroid",
+                                 "hypothetical", "point", "method", "of"};
+    size_t calls = 0;
+    for (const jsontools::Tool& t : jsontools::tools()) {
+        for (const auto& [key, schema] : t.input_schema["properties"].items()) {
+            for (const Json& k : kinds) {
+                Json args = base;
+                args["observer"] = "topocentric";
+                args["site"] = {{"lon_deg", 1.0}, {"lat_deg", 2.0}};
+                args[key] = k;
+                jsontools::ToolError err;
+                CHECK_NOTHROW(run(e, t.name.c_str(), args, &err));
+                ++calls;
+            }
+        }
+    }
+    for (const auto& n : nested) {
+        for (const Json& k : kinds) {
+            Json args = base;
+            args["observer"] = "topocentric";
+            args["site"] = {{"lon_deg", 1.0}, {"lat_deg", 2.0}};
+            if (std::string(n[0]) == "series") {
+                args.erase("time");
+                args["series"] = {
+                    {"start", "2000-01-01T00:00:00Z"}, {"count", 2}, {"step_days", 1}};
+            } else if (std::string(n[0]) == "time") {
+                args["time"] = Json::object();
+            } else if (std::string(n[0]) == "zodiac") {
+                args["zodiac"] = Json::object();
+            }
+            args[n[0]][n[1]] = k;
+            CHECK_NOTHROW(run(e, "positions", args));
+            // And each member of a user zodiac.
+            Json z = base;
+            z["zodiac"] = {{"user", {{"epoch_jd_tt", 2451545.0}, {"ayanamsa_deg", 23.0}}}};
+            z["zodiac"]["user"][std::string(n[1]) == "utc" ? "epoch_jd_tt" : "ayanamsa_deg"] = k;
+            CHECK_NOTHROW(run(e, "positions", z));
+            calls += 2;
+        }
+    }
+    for (const char* key : object_keys) {
+        for (const Json& k : kinds) {
+            Json args = base;
+            args["objects"] = Json::array({Json{{key, k}}, Json{{"point", "mean node"}, {key, k}}});
+            CHECK_NOTHROW(run(e, "positions", args));
+            ++calls;
+        }
+    }
+    CHECK(calls > 100);
+    // The protocol layer: a method, params or id of the wrong type.
+    mcp::Dispatcher d(e, jsontools::Context{}, "0.0.0");
+    for (const Json& k : kinds) {
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", k}}));
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", k}, {"id", 1}, {"method", "ping"}}));
+        CHECK_NOTHROW(
+            d.handle(Json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", k}}));
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", "2.0"},
+                                    {"id", 1},
+                                    {"method", "tools/call"},
+                                    {"params", {{"name", "positions"}, {"arguments", k}}}}));
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", "2.0"},
+                                    {"id", 1},
+                                    {"method", "initialize"},
+                                    {"params", {{"protocolVersion", k}}}}));
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", "2.0"},
+                                    {"id", 1},
+                                    {"method", "resources/read"},
+                                    {"params", {{"uri", k}}}}));
+        CHECK_NOTHROW(mcp::method_name(Json{{"method", k}}));
+    }
+    auto r = d.handle(Json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", 5}});
+    REQUIRE(r);
+    CHECK((*r)["error"]["code"] == -32600);
 }

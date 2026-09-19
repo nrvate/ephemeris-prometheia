@@ -136,6 +136,12 @@ releases 0.2.0 to 0.4.0 (2026-09-18), the work below the list:
   `prometheiad`. Every zodiac token is swept over every sidereal plane, and
   the fixed stars are checked against the FK5, a catalogue independent of
   both servers'. [docs/CROSS-TEST.md](docs/CROSS-TEST.md).
+- **Interfaces, fastest first** — the C++ library in process (the primary
+  interface), the C API, `prometheiad`'s binary protocol for high-speed data
+  over the network, and the `ephem` CLI. For AI agents and scripts,
+  `prometheia-json` serves the same engine over MCP (stdio or streamable
+  HTTP) and plain JSON. It is a convenience surface in its own process, never
+  in the fast paths. [docs/JSON_API.md](docs/JSON_API.md).
 - **Logging and traceability** — one timestamped line per connection,
   request and error, joined to the client by request id, and never a
   birth date or place. [docs/SERVER.md](docs/SERVER.md), "Logging".

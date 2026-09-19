@@ -11,6 +11,23 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **JSON and MCP for AI agents** (docs/JSON_API.md): `prometheia-json`
+  serves four tools (`positions`, `lookup`, `capabilities`,
+  `convert_time`) over MCP, by stdio or streamable HTTP, and as plain JSON
+  over HTTP. It is a convenience surface in its own process. The C++
+  library, the C API and `prometheiad`'s binary protocol stay the fast
+  paths.
+  - Objects go by name, including astrology's ("true node", "Lilith"), and
+    times in ISO 8601 UTC.
+  - Each result names what it resolved to, and carries its source, the
+    corrections applied, the frame and a measured accuracy statement.
+  - Errors are typed.
+  - nlohmann/json (MIT) is vendored for these alone.
+- The Moon's apsides are named perigee and apogee in answers, rather than
+  perihelion and aphelion.
+
 ## 0.4.0 — 2026-09-18
 
 The same day as 0.3.0.

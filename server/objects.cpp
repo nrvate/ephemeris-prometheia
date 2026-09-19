@@ -118,8 +118,11 @@ Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine) {
         out.naif_id = spec.naif;
         out.point = kPoints[spec.point];
         out.elements = spec.method == 0 ? OrbitElements::Mean : OrbitElements::Osculating;
-        out.name =
-            body.value().name + (spec.method == 0 ? " mean " : " ") + kPointSuffix[spec.point];
+        // The Moon's apsides are its perigee and apogee.
+        const char* suffix = spec.naif == 301 && spec.point >= 2
+                                 ? (spec.point == 2 ? "perigee" : "apogee")
+                                 : kPointSuffix[spec.point];
+        out.name = body.value().name + (spec.method == 0 ? " mean " : " ") + suffix;
         return out;
     }
     case eph::kObjHypothetical: {

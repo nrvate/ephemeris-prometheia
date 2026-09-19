@@ -385,7 +385,7 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
     } else if (obs == "barycentric") {
         o.center = Center::Barycentric;
     } else if (obs == "topocentric") {
-        const Json site = a.value("site", Json::object());
+        const Json site = a.contains("site") ? a["site"] : Json::object();
         if (!site.is_object() || !site.contains("lon_deg") || !site.contains("lat_deg") ||
             !site["lon_deg"].is_number() || !site["lat_deg"].is_number()) {
             bad.message = "a topocentric observer needs \"site\": {\"lon_deg\", \"lat_deg\", "
@@ -393,9 +393,12 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
             return std::nullopt;
         }
         const double lon = site["lon_deg"].get<double>(), lat = site["lat_deg"].get<double>();
-        const double h = site.value("height_m", 0.0);
+        const double h = site.contains("height_m") && site["height_m"].is_number()
+                             ? site["height_m"].get<double>()
+                             : (site.contains("height_m") ? NAN : 0.0);
         if (!(std::fabs(lon) <= 180.0) || !(std::fabs(lat) <= 90.0) || !std::isfinite(h)) {
-            bad.message = "a site's longitude is within ±180°, its latitude within ±90°";
+            bad.message = "a site's longitude is within ±180°, its latitude within ±90°, and its "
+                          "height_m is a number";
             return std::nullopt;
         }
         o.center = Center::Topocentric;
@@ -461,7 +464,11 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
             return std::nullopt;
         }
     }
-    o.speed = a.value("rates", true);
+    if (a.contains("rates") && !a["rates"].is_boolean()) {
+        bad.message = "rates is true or false";
+        return std::nullopt;
+    }
+    o.speed = a.contains("rates") ? a["rates"].get<bool>() : true;
     const std::string prec = str("precession", "iau2006");
     if (prec == "iau2006") {
         o.precession = Precession::IAU2006;
@@ -474,7 +481,8 @@ std::optional<Options> parse_options(const Json& a, Bad& bad) {
     // The zodiac: tropical, an A.11 token, or a user anchor.
     if (a.contains("zodiac") && a["zodiac"].is_object() && a["zodiac"].contains("user")) {
         const Json& u = a["zodiac"]["user"];
-        if (!u.is_object() || !u.contains("epoch_jd_tt") || !u.contains("ayanamsa_deg")) {
+        if (!u.is_object() || !u.contains("epoch_jd_tt") || !u.contains("ayanamsa_deg") ||
+            !u["epoch_jd_tt"].is_number() || !u["ayanamsa_deg"].is_number()) {
             bad.message = "a user zodiac is {\"user\": {\"epoch_jd_tt\", \"ayanamsa_deg\"}} (the "
                           "MEAN ayanamsha at that TT epoch)";
             return std::nullopt;
@@ -719,7 +727,8 @@ Result<Json> lookup(Engine& engine, const Json& a, ToolError* err) {
             matches.push_back({{"object", q}, {"kind", "orbit-point"}, {"of", "Moon"}});
     if (engine.hypothetical(lower(q)))
         matches.push_back({{"object", {{"hypothetical", lower(q)}}}, {"kind", "hypothetical"}});
-    for (const stars::Match& m : stars::lookup(q, 8, a.value("prefix", false))) {
+    for (const stars::Match& m : stars::lookup(
+             q, 8, a.contains("prefix") && a["prefix"].is_boolean() && a["prefix"].get<bool>())) {
         const stars::Object& s = stars::at(m.index);
         matches.push_back({{"object", {{"star", s.name()}}},
                            {"kind", "star"},
@@ -886,10 +895,10 @@ std::vector<Tool> tools() {
     };
 }
 
-Result<Json> call(Engine& engine, const Context& ctx, std::string_view tool, const Json& args,
-                  ToolError* error) {
-    ToolError scratch;
-    ToolError* err = error ? error : &scratch;
+namespace {
+
+Result<Json> call_checked(Engine& engine, const Context& ctx, std::string_view tool,
+                          const Json& args, ToolError* err) {
     const Json a = args.is_object() ? args : Json::object();
     if (!args.is_object() && !args.is_null()) {
         *err = {"invalid-arguments", "the arguments are a JSON object"};
@@ -905,6 +914,23 @@ Result<Json> call(Engine& engine, const Context& ctx, std::string_view tool, con
         return convert_time(a, err);
     *err = {"unknown-tool", "no tool is called that"};
     return make_error(ErrorCode::NotFound, err->message);
+}
+
+} // namespace
+
+Result<Json> call(Engine& engine, const Context& ctx, std::string_view tool, const Json& args,
+                  ToolError* error) {
+    ToolError scratch;
+    ToolError* err = error ? error : &scratch;
+    // The tools check each argument's type before reading it; this is the net
+    // under a check that was missed, so a wrong type is the caller's error and
+    // never an exception out of the server.
+    try {
+        return call_checked(engine, ctx, tool, args, err);
+    } catch (const nlohmann::json::exception& e) {
+        *err = {"invalid-arguments", std::string("an argument has the wrong type: ") + e.what()};
+        return make_error(ErrorCode::ArgumentError, err->message);
+    }
 }
 
 std::string llms_txt() {

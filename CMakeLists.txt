@@ -121,7 +121,7 @@ endif()
 # The JSON tools (docs/JSON_API.md): JSON and MCP for agents and scripts, over
 # the binary server's own object resolution. Its own library, so nlohmann/json
 # (third_party/nlohmann, MIT) never enters prometheiad.
-add_library(prometheia_json STATIC server/json_tools.cpp)
+add_library(prometheia_json STATIC server/json_tools.cpp server/mcp.cpp)
 target_include_directories(prometheia_json SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 target_link_libraries(prometheia_json PUBLIC prometheia_server)
 target_compile_options(prometheia_json PRIVATE -Wall -Wextra -Werror)
@@ -178,6 +178,14 @@ target_compile_options(prometheiad PRIVATE -Wall -Wextra -Werror)
 add_executable(prometheia-wire-client server/wire_client_main.cpp)
 target_link_libraries(prometheia-wire-client PRIVATE prometheia_ws)
 target_compile_options(prometheia-wire-client PRIVATE -Wall -Wextra -Werror)
+
+# The JSON and MCP interfaces for agents and scripts (docs/JSON_API.md): its
+# own process, never prometheiad.
+add_executable(prometheia-json server/json_main.cpp)
+target_link_libraries(prometheia-json PRIVATE prometheia_json prometheia_ws)
+target_include_directories(prometheia-json SYSTEM PRIVATE third_party/uWebSockets/src)
+target_compile_definitions(prometheia-json PRIVATE UWS_NO_ZLIB)
+target_compile_options(prometheia-json PRIVATE -Wall -Wextra -Werror)
 
 # Many connections for a while (docs/SERVER.md, "Load and soak"); by hand,
 # never in the gate.

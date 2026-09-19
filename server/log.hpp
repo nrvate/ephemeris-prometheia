@@ -30,13 +30,15 @@ std::optional<LogLevel> parse_log_level(std::string_view s);
 
 class Log {
 public:
-    explicit Log(LogLevel level = LogLevel::Info, std::FILE* out = stderr)
-        : level_(level), out_(out) {}
+    // `program` opens every line (prometheiad's by default).
+    explicit Log(LogLevel level = LogLevel::Info, std::FILE* out = stderr,
+                 const char* program = "prometheiad")
+        : level_(level), out_(out), program_(program) {}
 
     bool enabled(LogLevel l) const { return out_ && int(l) <= int(level_) && l != LogLevel::Quiet; }
     LogLevel level() const { return level_; }
 
-    // One line: "prometheiad <UTC time> <message>". Formatted whole and
+    // One line: "<program> <UTC time> <message>". Formatted whole and
     // written with one call, so lines from different loops never interleave.
     void write(LogLevel l, const char* fmt, ...) const __attribute__((format(printf, 3, 4)));
     // The same line whatever the level: startup, reload, drain, stop and
@@ -46,6 +48,7 @@ public:
 private:
     LogLevel level_;
     std::FILE* out_;
+    const char* program_;
 };
 
 // Text made safe for a log line: printable ASCII only, quotes and

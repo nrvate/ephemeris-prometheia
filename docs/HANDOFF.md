@@ -37,6 +37,17 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    - fuzzing and the load tool, with the codec's float finding fixed and
      re-pinned (`114f2a5`).
 
+5. **The agent interfaces** (maintainer, 2026-09-18: "AI-forward", with MCP
+   and streamable HTTP; the fast paths stay C++, C and the binary protocol).
+   - `prometheia-json` serves the JSON tools over MCP (stdio and streamable
+     HTTP) and plain JSON (docs/JSON_API.md).
+   - Negotiating with the Astrolog session over the agent channel:
+     - the shared vocabulary ("Words");
+     - Astrolog's charts as data. They have no machine-readable chart
+       representation yet, and prefer one combined MCP server over two.
+   - Their session takes the MCP direction from their own maintainer, not
+     relayed.
+
 ## The cross-test
 
 The runbook is [CROSS-TEST.md](CROSS-TEST.md). The harness,
