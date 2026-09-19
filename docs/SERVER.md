@@ -575,6 +575,12 @@ capability set whole instead of intersecting it with the request's mask,
 and no further round is owed on §3 — the remaining work here is our
 migration, below.
 
+**The floats drop, 2026-09-18:** 105/105 at Astrolog `qt` `114f2a5`
+(`set-sha256 cdbd7438…`). The independent reader was taught the DATA float
+rule from the spec text: finite values, or a whole failed row of the
+canonical NaN, which is `0x7FC00000` at f32. It had the same gap as the
+codec until then.
+
 **The per-kind drop, 2026-09-18:** 99/99 at ephv4 `472b21a`
 (`set-sha256 d904e358…`, verified independently), with the reader taught
 0x0014 from the drop text before the codec was read. The reader validates

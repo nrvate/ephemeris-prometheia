@@ -34,10 +34,10 @@
 
 namespace {
 
-// The set of the per-kind correction mask drop (ephv4 472b21a), recorded in
-// third_party/README.md at the 99/99 verdict.
+// The set of the floats drop (Astrolog qt 114f2a5), recorded in
+// third_party/README.md at the 105/105 verdict.
 constexpr const char* kPinnedSetSha256 =
-    "d904e3586c25dc0eeedb0cebb316be92f04b086c2e4d96ae4d2e3bf92337c72d";
+    "cdbd7438570f29ce6ec1d947e7a4210cd3931f413c653801033f14a42df5aef6";
 
 // FIPS 180-4 SHA-256, only to check the fixture set's digest against the
 // manifest's and the pin. Public-domain algorithm, written from the standard.

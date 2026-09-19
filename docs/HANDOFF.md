@@ -162,8 +162,9 @@ terms.
 ## The Astrolog collaboration
 
 - The ephemeris protocol is theirs. We are the §3 counterpart with a
-  vendored, pinned copy (`third_party/ephproto/v4`, ephv4 `eed6429`
-  header, conformance set `d904e358…` at `472b21a`, 99/99, judgements 7/7).
+  vendored, pinned copy (`third_party/ephproto/v4`,
+  header from `qt` `114f2a5` (the floats drop), conformance set `cdbd7438…`,
+  105/105 on both readers, judgements 7/7).
 - Changes arrive as named drops, reviewed from the text first:
   - kind 4;
   - per-kind correction masks;

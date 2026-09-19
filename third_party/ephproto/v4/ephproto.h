@@ -1293,7 +1293,45 @@ inline Outcome ParseData(const uint8_t *p, size_t n, DataChunk *d, std::string *
   size_t esz = d->precision == kPrecF32 ? 4 : 8;
   if (cells * esz != r.left()) { *why = "DATA values do not fill the payload exactly"; return kMalformed; }
   d->values.resize((size_t)cells);
-  for (double &x : d->values) x = d->precision == kPrecF32 ? (double)r.f32() : r.f64();
+  // 3.1: floats MUST be finite, the canonical quiet NaN being the one
+  // exception and allowed only where a field says so. In DATA the only text
+  // that says so is 3.5's row-failure rule -- a failed row is NaN in EVERY
+  // column -- so a NaN anywhere else has no field permitting it, and is a
+  // float violation of the same class as an infinity rather than a judgement
+  // about rows. The bits are compared, not the value: at f64 every bad
+  // pattern re-encodes BIT-IDENTICALLY, so a round-trip oracle is
+  // structurally blind to it and this loop was the only thing that could
+  // ever have caught them. It checked nothing until the 2026-09-18 floats
+  // drop, and Ephemeris Prometheia's fuzzer found it from outside.
+  const bool fF32 = d->precision == kPrecF32;
+  const int cCol = d->Cols();
+  int cNan = 0, iCol = 0;
+  for (double &x : d->values) {
+    uint64_t bits;
+    if (fF32) { uint32_t u = r.u32(); float f; memcpy(&f, &u, 4); x = (double)f;
+                bits = u; }
+    else { bits = r.u64(); memcpy(&x, &bits, 8); }
+    if (std::isnan(x)) {
+      // The canonical quiet NaN, and nothing else. At f32 that is 0x7FC00000,
+      // which is the f64 pattern narrowed and widens back to it exactly.
+      if (bits != (fF32 ? 0x7FC00000ull : 0x7FF8000000000000ull)) {
+        *why = "DATA carries a non-canonical NaN";
+        return kMalformed;
+      }
+      cNan++;
+    } else if (std::isinf(x)) {
+      *why = "DATA carries an infinity";
+      return kMalformed;
+    }
+    if (++iCol == cCol) {
+      // A row is all finite or all NaN. Half a failed row is malformed.
+      if (cNan != 0 && cNan != cCol) {
+        *why = "DATA carries a NaN in some columns of a row and not others";
+        return kMalformed;
+      }
+      cNan = 0; iCol = 0;
+    }
+  }
   *why = v.why();
   return v.outcome();
 }

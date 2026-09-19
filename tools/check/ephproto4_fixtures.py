@@ -27,6 +27,7 @@ import sys
 
 MAGIC = 0x1EF0
 CANONICAL_NAN = 0x7FF8000000000000
+CANONICAL_NAN_F32 = 0x7FC00000  # §3.1 since the floats drop (Astrolog 114f2a5)
 
 ZODIACS = {
     "fagan-bradley", "lahiri", "deluce", "raman", "usha-shashi", "krishnamurti",
@@ -412,8 +413,25 @@ def parse_data(r):
         parse_meta(r, n_obj)
     n_cols = 6 + bin(columns).count("1")
     width = 4 if precision == 1 else 8
-    need = n_obj * n_rows * n_cols * width
-    r.take(need)  # values; NaN marks a failed row, so they are not checked here
+    # §3.1: floats are finite, the canonical quiet NaN the one exception, where
+    # a field allows it. In DATA that is §3.5's failed row, NaN in every column,
+    # so a row is all finite or all canonical NaN; anything else is malformed.
+    fmt, nan_bits = ("<I", CANONICAL_NAN_F32) if precision == 1 else ("<Q", CANONICAL_NAN)
+    ffmt = "<f" if precision == 1 else "<d"
+    for row in range(n_obj * n_rows):
+        nans = 0
+        for col in range(n_cols):
+            raw = r.take(width)
+            bits = struct.unpack(fmt, raw)[0]
+            v = struct.unpack(ffmt, raw)[0]
+            if math.isnan(v):
+                if bits != nan_bits:
+                    raise Malformed(f"DATA value {bits:#x}: a NaN other than the canonical one")
+                nans += 1
+            elif math.isinf(v):
+                raise Malformed("DATA value: an infinity")
+        if nans not in (0, n_cols):
+            raise Malformed("DATA row: NaN in some columns and not others")
     r.done("DATA")
 
 
