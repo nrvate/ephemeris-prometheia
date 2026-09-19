@@ -19,17 +19,22 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 1. ~~Binary-star orbits~~: done (`53d5f58`, STARS.md "Binary stars").
 2. ~~Release v0.4.0~~: done.
-3. **Waiting on the Astrolog side**, with every decision already made by
-   the maintainer on 2026-09-18:
-   - ~~Anchor at its true position~~: landed (their `789f3c2`), record m.
-   - **The §3.5a text drop:** a zodiac with no anchor epoch has the
-     instant's zero point on plane 2 and no plane 1, with its anchor at its
-     true position. The class is "no anchor epoch", not a list.
-   - **Their IAU 1958 pole:** they adopt Liu et al.'s ICRS transfer (0.18″
-     on `galequ-iau1958`).
-   - **Sheoran's zodiac:** epoch-anchored per its published definition.
-   - **Their app's local Swiss path:** still carries the old plane-2 origin
-     (a shared-core change, measured by their suite).
+3. **Astrolog's side of 2026-09-18**, settled (their commits, read from
+   their log):
+   - **§3.5a:** closed at `b5c67d2`. A zodiac with no anchor epoch gets
+     plane 2 from the instant and has no plane 1 (`031f3c9`), with its
+     anchor at its true position (`789f3c2`).
+   - **Their app's own `-Ys` charts** use A.8's plane too, through the
+     server's rotation (`e6c10d6`).
+   - **The IAU 1958 pole:** they keep their library's pole. The 0.175″ is
+     recorded on their side as an ICRS-transfer difference, not a defect
+     (`61759f4`). It stays our 15 `galequ-iau1958` findings.
+   - **Sheoran:** they treat `true-sheoran` as anchorless, because their
+     library does, measured by probe (`f3eaeec`). We keep the published
+     epoch-anchored reading and do not implement the mode, so nothing
+     diverges.
+   - **Still to come from them:** the binary-star offsets. Their elements
+     are in at `7c05f7f`, and the prerequisites at `97d7ab6` and `6838e50`.
 4. **Done on 2026-09-18, for the record:**
    - both §3.5a parts, and every fix they named, verified (records g–k);
    - the FK5 star check;
@@ -69,7 +74,9 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `bary`, `deflection` (textbook formula);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18n.tsv`. The only findings are
+- **Latest record:** `docs/crosstest/2026-09-18o.tsv`, after the binary
+  orbits moved to the date's tangent plane (`618861f`): verdicts identical to
+  record n. The only findings are
   the 15 `galequ-iau1958` rows (their pole transfer, with their
   maintainer). The binary-star rows are expected to differ by our orbit's
   bend, and do (CROSS-TEST.md, "Binary orbits").
