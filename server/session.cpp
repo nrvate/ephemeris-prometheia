@@ -398,7 +398,7 @@ std::string seg_key_prefix(const ServerConfig& cfg, const eph::Request& q,
     raw(&obj.naif_id, sizeof obj.naif_id);
     raw(&obj.star_index, sizeof obj.star_index);
     u8(uint8_t(obj.point));
-    u8(obj.elements == OrbitElements::Mean ? 0 : 1);
+    u8(uint8_t(obj.elements));
     // A named body is its token (the dataset id covers every element file);
     // a body from elements is its elements, all of them, or two requests
     // with different elements would share cells.
@@ -533,7 +533,10 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
     }
     c.orbitPoints = (1u << eph::kPtAscNode) | (1u << eph::kPtDescNode) | (1u << eph::kPtPeri) |
                     (1u << eph::kPtApo);
-    c.orbitMethods = (1u << eph::kMethMean) | (1u << eph::kMethOsculating);
+    // Interpolated for the Moon's apogee and perigee only; any other point
+    // asked by it is a per-object "unsupported".
+    c.orbitMethods =
+        (1u << eph::kMethMean) | (1u << eph::kMethOsculating) | (1u << eph::kMethInterpolated);
     c.columns = eph::kColMask;
     for (const ZodiacToken& z : kZodiacTokens) {
         c.zodiacs.emplace_back(z.token);

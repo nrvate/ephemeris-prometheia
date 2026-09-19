@@ -269,6 +269,9 @@ PROMETHEIA_API prometheia_status prometheia_calc_ut(prometheia_engine* engine, i
 
 #define PROMETHEIA_ELEMENTS_MEAN 0
 #define PROMETHEIA_ELEMENTS_OSCULATING 1
+/* The Moon's apogee and perigee only: interpolated between its actual
+ * passages (the "natural" apsides, docs/ORBIT-POINTS.md). Library 0.6. */
+#define PROMETHEIA_ELEMENTS_INTERPOLATED 2
 
 PROMETHEIA_API prometheia_status prometheia_calc_orbit_point(prometheia_engine* engine, int body,
                                                              int point, int elements, double jd_tt,

@@ -96,8 +96,11 @@ Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine) {
     }
     case eph::kObjOrbitPoint: {
         // parseRequest has bounded point and method to their registries; the
-        // engine serves points 0-3 by methods 0 (mean) and 1 (osculating).
-        if (spec.method > 1) {
+        // engine serves points 0-3 by methods 0 (mean) and 1 (osculating), and
+        // the Moon's apogee and perigee by method 2 (interpolated, "natural").
+        const bool natural =
+            spec.method == eph::kMethInterpolated && spec.naif == 301 && spec.point >= eph::kPtPeri;
+        if (spec.method > 1 && !natural) {
             return make_error(ErrorCode::ArgumentError, "orbit method " +
                                                             std::to_string(spec.method) +
                                                             " is not served by this engine");
@@ -117,12 +120,18 @@ Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine) {
         out.kind = ResolvedObject::Kind::OrbitPoint;
         out.naif_id = spec.naif;
         out.point = kPoints[spec.point];
-        out.elements = spec.method == 0 ? OrbitElements::Mean : OrbitElements::Osculating;
+        out.elements = spec.method == 0   ? OrbitElements::Mean
+                       : spec.method == 1 ? OrbitElements::Osculating
+                                          : OrbitElements::Interpolated;
         // The Moon's apsides are its perigee and apogee.
         const char* suffix = spec.naif == 301 && spec.point >= 2
                                  ? (spec.point == 2 ? "perigee" : "apogee")
                                  : kPointSuffix[spec.point];
-        out.name = body.value().name + (spec.method == 0 ? " mean " : " ") + suffix;
+        out.name = body.value().name +
+                   (spec.method == 0   ? " mean "
+                    : spec.method == 2 ? " natural "
+                                       : " ") +
+                   suffix;
         return out;
     }
     case eph::kObjHypothetical: {

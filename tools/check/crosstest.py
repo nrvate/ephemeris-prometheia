@@ -631,7 +631,7 @@ def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
 POINT_SPECS = ["301.a.m", "301.d.m", "301.p.m", "301.A.m", "301.a.o", "301.d.o", "301.p.o",
                "301.A.o", "199.a.m", "199.p.m", "199.a.o", "199.p.o", "4.a.m", "4.p.m",
                "4.a.o", "4.p.o", "5.a.m", "5.p.m", "5.a.o", "5.p.o", "6.a.m", "6.p.m", "6.a.o",
-               "6.p.o"]
+               "6.p.o", "301.A.2", "301.p.2"]
 POINT_BANDS = {
     # The Moon's mean points follow analytic mean elements on both sides,
     # its osculating points the ephemeris: measured <= 0.49", 1 km.
@@ -645,8 +645,19 @@ POINT_BANDS = {
 }
 
 
+# The natural apsides (A.14 method 2): two published readings of "between
+# the actual passages". Ours interpolates the passages over a deviation model
+# fitted to DE440; Swiss's is analytic (its manual, section 2.2.4). Both pass
+# the actual passages within 0.016 deg; between them, measured 1900-2100,
+# apogee <= 0.10 deg and perigee <= 2.8 deg apart. The bands are estimates
+# at 1.5x that. Distance is recorded, not graded.
+NATURAL_BANDS = {"A": 540.0, "p": 15000.0}
+
+
 def point_class(spec):
-    naif, _, method = spec.split(".")
+    naif, point, method = spec.split(".")
+    if method == "2":
+        return "natural"
     if naif == "301":
         return "moon"
     if method == "o":
@@ -684,6 +695,14 @@ def leg_points(client, ours, theirs, table, verbose):
             w = worst.setdefault(spec, [0.0, 0.0])
             w[0], w[1] = max(w[0], s), max(w[1], dkm)
             note = f"distance ours {va[2] * AU_KM:.1f} km theirs {vb[2] * AU_KM:.1f} km, diff {dkm:.1f} km"
+            if cls == "natural":
+                band_s = NATURAL_BANDS[spec.split(".")[1]]
+                table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
+                          band=f"{band_s}\"", tier=2,
+                          verdict="expected-difference" if s <= band_s else "finding",
+                          note=note + "; two published readings of the natural apse (ours "
+                                      "interpolated over a DE440 model, Swiss's analytic)")
+                continue
             if cls == "model":
                 table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
                           tier=2, verdict="expected-difference",

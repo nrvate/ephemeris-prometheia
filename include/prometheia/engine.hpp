@@ -151,11 +151,15 @@ enum class OrbitPoint {
     Aphelion,       // the farthest point (apogee); elliptic orbits only
 };
 
-// Which orbit: the osculating one of the body's state at the instant, or
-// the mean one (docs/ENGINE.md, "Nodes and apsides").
+// Which orbit: the osculating one of the body's state at the instant, the
+// mean one (docs/ENGINE.md, "Nodes and apsides"), or, for the Moon's apogee
+// and perigee only, the natural one: interpolated between the Moon's actual
+// passages through them (docs/ORBIT-POINTS.md, "The natural apsides"). The
+// values are protocol v4's A.14 methods 0-2.
 enum class OrbitElements {
     Mean,
     Osculating,
+    Interpolated,
 };
 
 // The reference plane and equinox a set of orbital elements is given in

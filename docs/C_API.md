@@ -62,6 +62,10 @@ The fixed-star functions (`prometheia_star_find`, `_lookup`, `_info`,
 apply to an orbit point as to a body, and all three off give the geometric
 point ([ORBIT-POINTS.md](ORBIT-POINTS.md)). An orbit point or elements
 selector out of range is `PROMETHEIA_ERROR_ARGUMENT`.
+`PROMETHEIA_ELEMENTS_INTERPOLATED` (2, library 0.6; the ABI version is
+unchanged, as no layout changed) is the Moon's natural apogee and perigee,
+interpolated between its actual passages. Asked for any other body or point,
+it is `PROMETHEIA_ERROR_ARGUMENT`.
 
 **Hypothetical bodies (ABI version 5).** Two kinds, as in the ephemeris
 protocol ([HYPOTHETICALS.md](HYPOTHETICALS.md)):

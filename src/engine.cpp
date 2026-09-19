@@ -15,7 +15,9 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
+#include "natural_apsides.hpp"
 #include "prometheia/apparent.hpp"
 #include "prometheia/catalog.hpp"
 #include "prometheia/de.hpp"
@@ -27,6 +29,10 @@
 #include "prometheia/spk.hpp"
 
 namespace prometheia {
+
+namespace natural_apsides {
+#include "natural_apsides.inc"
+} // namespace natural_apsides
 namespace {
 
 constexpr double kAuKm = 149597870.7; // IAU 2012 Resolution B2 (exact)
@@ -1861,6 +1867,8 @@ struct Engine::Impl {
                              double jd_tdb, const CalcOptions& o, double out[3], double dt = 0.0) {
         if (elements == OrbitElements::Mean)
             return mean_orbit_point(id, point, jd_tt, jd_tdb, o, out, dt);
+        if (elements == OrbitElements::Interpolated)
+            return natural_apsis(id, point, jd_tdb, out, dt);
         if (id == body::kSun || id == body::kSolarSystemBary)
             return make_error(ErrorCode::ArgumentError, "the Sun has no heliocentric orbit");
         const int center = id == body::kMoon ? body::kEarth : body::kSun;
@@ -2033,6 +2041,252 @@ struct Engine::Impl {
             return r;
         for (int i = 0; i < 3; ++i)
             out[i] = focus[i] + focus[3 + i] * dt + rel[i];
+        return {};
+    }
+
+    // The natural lunar apogee and perigee (docs/ORBIT-POINTS.md, "The natural
+    // apsides"): the published definition is an interpolation between the
+    // Moon's actual passages through apogee and perigee. A passage is a zero of
+    // r.v, the geometric Earth-Moon distance at a maximum (apogee) or minimum
+    // (perigee); the Moon's geocentric place there, in the mean ecliptic of
+    // J2000, is a node. Longitude is the mean apse plus the deviation model
+    // (natural_apsides.hpp: a function of the Sun's elongation from the mean
+    // apse, fitted to every passage in DE440) plus the residual at the nodes,
+    // interpolated; latitude and distance are interpolated directly. The
+    // interpolation is a cubic Hermite whose slopes at each node are those of
+    // the quartic through it and its two neighbours on each side, so the curve
+    // and its rate are continuous.
+    struct ApsisPassage {
+        double t;   // TDB
+        double res; // rad: longitude less mean apse and model
+        double lat; // rad
+        double r;   // km
+    };
+    std::vector<ApsisPassage> apsis_passages[2]; // [0] perigees, [1] apogees
+    double apsis_lo = NAN, apsis_hi = NAN;       // the TDB span scanned
+
+    // The Moon relative to the Earth, geometric: ICRF km, km/day.
+    Result<void> moon_geocentric(double t, double s[6]) {
+        double m[6], e[6];
+        auto r = source->barycentric(body::kMoon, t, m);
+        if (!r)
+            return r;
+        r = source->barycentric(body::kEarth, t, e);
+        if (!r)
+            return r;
+        for (int i = 0; i < 6; ++i)
+            s[i] = m[i] - e[i];
+        return {};
+    }
+
+    Result<double> moon_radial(double t) {
+        double s[6];
+        auto r = moon_geocentric(t, s);
+        if (!r)
+            return r.error();
+        return s[0] * s[3] + s[1] * s[4] + s[2] * s[5];
+    }
+
+    // Every apsis passage in [a, b] (TDB): r.v sampled daily (the passages are
+    // ~14 days apart), each sign change refined by the Illinois method to
+    // 1e-9 day.
+    Result<void> scan_apsides(double a, double b) {
+        auto fa = moon_radial(a);
+        if (!fa)
+            return fa.error();
+        double ta = a, ya = fa.value();
+        while (ta < b) {
+            const double tb = std::min(ta + 1.0, b);
+            auto fb = moon_radial(tb);
+            if (!fb)
+                return fb.error();
+            const double yb = fb.value();
+            if ((ya > 0.0) != (yb > 0.0)) {
+                double lo = ta, hi = tb, flo = ya, fhi = yb;
+                int side = 0;
+                for (int it = 0; it < 200 && hi - lo > 1e-9; ++it) {
+                    const double t = (lo * fhi - hi * flo) / (fhi - flo);
+                    auto ft = moon_radial(t);
+                    if (!ft)
+                        return ft.error();
+                    if ((ft.value() > 0.0) == (flo > 0.0)) {
+                        lo = t;
+                        flo = ft.value();
+                        if (side == -1)
+                            fhi /= 2.0;
+                        side = -1;
+                    } else {
+                        hi = t;
+                        fhi = ft.value();
+                        if (side == 1)
+                            flo /= 2.0;
+                        side = 1;
+                    }
+                }
+                const double t = 0.5 * (lo + hi);
+                double s[6];
+                auto r = moon_geocentric(t, s);
+                if (!r)
+                    return r;
+                double m[9], e1[9], v[3];
+                rot1(eps_j2000, e1);
+                matmul(e1, bias, m);
+                apply(m, s, v);
+                const double rr = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                // r.v falling through zero is a maximum of the distance.
+                const bool apogee = ya > 0.0;
+                double lon_model = 0.0;
+                r = apsis_model(t, apogee, lon_model);
+                if (!r)
+                    return r;
+                apsis_passages[apogee].push_back(
+                    {t, std::remainder(std::atan2(v[1], v[0]) - lon_model, 2.0 * M_PI),
+                     std::asin(v[2] / rr), rr});
+            }
+            ta = tb;
+            ya = yb;
+        }
+        return {};
+    }
+
+    // Mean apse plus the deviation model at t (TDB), mean ecliptic of J2000.
+    Result<void> apsis_model(double t, bool apogee, double& lon) {
+        double sun[6], earth[6];
+        auto r = sun_at(t, sun);
+        if (!r)
+            return r;
+        r = source->barycentric(body::kEarth, t, earth);
+        if (!r)
+            return r;
+        double g[3], m[9], e1[9], v[3];
+        for (int i = 0; i < 3; ++i)
+            g[i] = sun[i] - earth[i];
+        rot1(eps_j2000, e1);
+        matmul(e1, bias, m);
+        apply(m, g, v);
+        const double ref = natural_apsides::mean_apse(t, apogee);
+        lon = ref + natural_apsides::model(
+                        apogee ? natural_apsides::kApogeeModel : natural_apsides::kPerigeeModel,
+                        std::remainder(std::atan2(v[1], v[0]) - ref, 2.0 * M_PI));
+        return {};
+    }
+
+    // Passages covering [t - 100 d, t + 100 d]: at least three of each kind on
+    // each side of t. A nearby request extends the span scanned; a far one
+    // starts it again.
+    Result<void> ensure_apsides(double t) {
+        const double lo = t - 100.0, hi = t + 100.0;
+        if (std::isfinite(apsis_lo) && lo >= apsis_lo && hi <= apsis_hi)
+            return {};
+        const bool near = std::isfinite(apsis_lo) && lo < apsis_hi + 365.0 &&
+                          hi > apsis_lo - 365.0 && apsis_hi - apsis_lo < 50.0 * 365.25;
+        if (!near) {
+            apsis_passages[0].clear();
+            apsis_passages[1].clear();
+            apsis_lo = apsis_hi = NAN;
+            auto r = scan_apsides(lo, hi);
+            if (!r)
+                return r;
+            apsis_lo = lo;
+            apsis_hi = hi;
+        } else {
+            if (lo < apsis_lo) {
+                auto r = scan_apsides(lo, apsis_lo);
+                if (!r)
+                    return r;
+                apsis_lo = lo;
+            }
+            if (hi > apsis_hi) {
+                auto r = scan_apsides(apsis_hi, hi);
+                if (!r)
+                    return r;
+                apsis_hi = hi;
+            }
+        }
+        for (auto& v : apsis_passages) {
+            std::sort(v.begin(), v.end(),
+                      [](const ApsisPassage& x, const ApsisPassage& y) { return x.t < y.t; });
+            // A passage on a seam between two scans is found twice.
+            v.erase(std::unique(v.begin(), v.end(),
+                                [](const ApsisPassage& x, const ApsisPassage& y) {
+                                    return std::fabs(x.t - y.t) < 1e-6;
+                                }),
+                    v.end());
+        }
+        return {};
+    }
+
+    Result<void> natural_apsis(int id, OrbitPoint point, double jd_tdb, double out[3], double dt) {
+        if (id != body::kMoon || (point != OrbitPoint::Perihelion && point != OrbitPoint::Aphelion))
+            return make_error(ErrorCode::ArgumentError,
+                              "the interpolated method is defined for the Moon's apogee and "
+                              "perigee only");
+        auto r = ensure_apsides(jd_tdb);
+        if (!r)
+            return r;
+        const std::vector<ApsisPassage>& v = apsis_passages[point == OrbitPoint::Aphelion];
+        const auto it = std::upper_bound(v.begin(), v.end(), jd_tdb,
+                                         [](double t, const ApsisPassage& p) { return t < p.t; });
+        const long k = long(it - v.begin()) - 1; // v[k].t <= jd_tdb < v[k+1].t
+        if (k < 2 || k + 3 >= long(v.size()))
+            return make_error(ErrorCode::ArgumentError,
+                              "too near the ephemeris's coverage limits: the interpolation "
+                              "needs three apsis passages on each side");
+        // Nodes k-2 .. k+3.
+        double x[6], y[3][6];
+        for (int j = 0; j < 6; ++j) {
+            const ApsisPassage& p = v[size_t(k - 2 + j)];
+            x[j] = p.t;
+            y[0][j] = p.res;
+            y[1][j] = p.lat;
+            y[2][j] = p.r;
+        }
+        // The slope at x[m] of the quartic through x[m-2] .. x[m+2].
+        const auto slope = [&](const double* yy, int m) {
+            double d = 0.0;
+            for (int j = m - 2; j <= m + 2; ++j) {
+                double lj = 0.0;
+                if (j == m) {
+                    for (int i = m - 2; i <= m + 2; ++i)
+                        if (i != m)
+                            lj += 1.0 / (x[m] - x[i]);
+                } else {
+                    double num = 1.0, den = 1.0;
+                    for (int i = m - 2; i <= m + 2; ++i) {
+                        if (i != j && i != m)
+                            num *= x[m] - x[i];
+                        if (i != j)
+                            den *= x[j] - x[i];
+                    }
+                    lj = num / den;
+                }
+                d += yy[j] * lj;
+            }
+            return d;
+        };
+        const double h = x[3] - x[2], s = (jd_tdb - x[2]) / h;
+        const double h00 = (2.0 * s - 3.0) * s * s + 1.0, h10 = ((s - 2.0) * s + 1.0) * s;
+        const double h01 = (3.0 - 2.0 * s) * s * s, h11 = (s - 1.0) * s * s;
+        double q[3];
+        for (int c = 0; c < 3; ++c)
+            q[c] =
+                h00 * y[c][2] + h10 * h * slope(y[c], 2) + h01 * y[c][3] + h11 * h * slope(y[c], 3);
+        double lon_model = 0.0;
+        r = apsis_model(jd_tdb, point == OrbitPoint::Aphelion, lon_model);
+        if (!r)
+            return r;
+        const double lon = lon_model + q[0];
+        const double ecl[3] = {q[2] * std::cos(q[1]) * std::cos(lon),
+                               q[2] * std::cos(q[1]) * std::sin(lon), q[2] * std::sin(q[1])};
+        double m[9], e1[9], rel[3], earth[6];
+        rot1(eps_j2000, e1);
+        matmul(e1, bias, m);
+        apply_transpose(m, ecl, rel);
+        r = source->barycentric(body::kEarth, jd_tdb, earth);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = earth[i] + earth[3 + i] * dt + rel[i];
         return {};
     }
 
@@ -2704,7 +2958,7 @@ Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitEleme
     if (!std::isfinite(jd_tt))
         return make_error(ErrorCode::ArgumentError, "non-finite time");
     if (int(point) < 0 || int(point) > int(OrbitPoint::Aphelion) || int(elements) < 0 ||
-        int(elements) > int(OrbitElements::Osculating))
+        int(elements) > int(OrbitElements::Interpolated))
         return make_error(ErrorCode::ArgumentError, "unknown orbit point or elements");
     CalcResult res;
     double tau = 0.0;

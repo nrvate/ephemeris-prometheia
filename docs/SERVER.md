@@ -272,7 +272,9 @@ does with them:
   directions of arrival); hypothetical bodies and bodies from elements
   carry what a body carries.
 - **Orbit points** (kind 1) answer by the engine's `calc_orbit_point`
-  (docs/ENGINE.md), points 0-3 by methods mean and osculating. The Sun and
+  (docs/ENGINE.md), points 0-3 by methods mean and osculating, and the
+  Moon's apogee and perigee by method 2, interpolated (the natural apsides;
+  WELCOME lists methods 0-2; any other point by method 2 is error 2). The Sun and
   the barycentre have no orbit (per-object error 2); an undefined point
   (a node of an orbit in the ecliptic, an apsis of a circle) is error 5.
 - **Fixed stars** (kind 2) resolve through the compiled-in catalog by

@@ -212,6 +212,11 @@ target_link_libraries(prometheia-info PRIVATE prometheia)
 add_executable(prometheia-gen-mean-elements tools/gen/gen_mean_elements.cpp)
 target_link_libraries(prometheia-gen-mean-elements PRIVATE prometheia)
 
+# Regenerates src/natural_apsides.inc from a DE file (docs/ORBIT-POINTS.md).
+add_executable(prometheia-gen-natural-apsides tools/gen/gen_natural_apsides.cpp)
+target_link_libraries(prometheia-gen-natural-apsides PRIVATE prometheia)
+target_include_directories(prometheia-gen-natural-apsides PRIVATE src)
+
 # Delta T from a published sidereal time, for tools/check/crosstest.py.
 add_executable(prometheia-ut1 tools/check/ut1_main.cpp)
 target_link_libraries(prometheia-ut1 PRIVATE prometheia)

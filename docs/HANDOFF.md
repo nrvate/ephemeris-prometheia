@@ -56,9 +56,8 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    - The vocabulary ("Words") follows the v4 registries, as amended by the
      Astrolog session. Astrolog exposes no chart tools: it is to be a
      display endpoint that draws what an agent got from here.
-   - Open: the interpolated ("natural") lunar apogee, A.14 method 2. It is
-     named and refused as `unsupported`. Computing it is an engine feature
-     not yet begun.
+   - The natural (interpolated) lunar apogee and perigee are served
+     (ORBIT-POINTS.md, "The natural apsides").
 
 ## The cross-test
 

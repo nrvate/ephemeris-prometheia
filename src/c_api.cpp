@@ -239,7 +239,8 @@ bool orbit_selectors(int point, int elements, prometheia_result* result, prometh
         status = argument(err, "orbit point out of range");
         return false;
     }
-    if (elements != PROMETHEIA_ELEMENTS_MEAN && elements != PROMETHEIA_ELEMENTS_OSCULATING) {
+    if (elements != PROMETHEIA_ELEMENTS_MEAN && elements != PROMETHEIA_ELEMENTS_OSCULATING &&
+        elements != PROMETHEIA_ELEMENTS_INTERPOLATED) {
         if (result)
             std::memset(result, 0, sizeof *result);
         status = argument(err, "orbit elements out of range");

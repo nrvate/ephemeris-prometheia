@@ -106,7 +106,8 @@ releases 0.2.0 to 0.5.0 (2026-09-18), the work below the list:
   Constellation of any position. [docs/STARS.md](docs/STARS.md).
 - **Nodes and apsides** — osculating and mean ascending/descending nodes,
   perihelia and aphelia (perigee/apogee for the Moon) as points seen from any
-  observer; mean planetary elements fitted to DE440 itself. Planet-centred
+  observer; mean planetary elements fitted to DE440 itself; the Moon's
+  natural (interpolated) apogee and perigee, exact at its actual passages. Planet-centred
   observers. [docs/ENGINE.md](docs/ENGINE.md).
 - **`prometheiad` and protocol version 4** — the WebSocket daemon speaks
   the ephemeris protocol co-designed (and locked from both sides) with the

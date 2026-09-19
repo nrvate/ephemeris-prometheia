@@ -48,15 +48,17 @@ std::optional<int> planet_naif(std::string_view name) {
 struct LunarPoint {
     const char* name;
     uint8_t point;  // A.13
-    uint8_t method; // A.14: 0 mean, 1 osculating
+    uint8_t method; // A.14: 0 mean, 1 osculating, 2 interpolated ("natural")
 };
 constexpr LunarPoint kLunarPoints[] = {
-    {"mean node", 0, 0},         {"north node", 0, 0},        {"mean north node", 0, 0},
-    {"true node", 0, 1},         {"true north node", 0, 1},   {"south node", 1, 0},
-    {"mean south node", 1, 0},   {"true south node", 1, 1},   {"lilith", 3, 0},
-    {"black moon lilith", 3, 0}, {"mean lilith", 3, 0},       {"mean apogee", 3, 0},
-    {"true lilith", 3, 1},       {"osculating lilith", 3, 1}, {"osculating apogee", 3, 1},
-    {"mean perigee", 2, 0},      {"osculating perigee", 2, 1}};
+    {"mean node", 0, 0},         {"north node", 0, 0},          {"mean north node", 0, 0},
+    {"true node", 0, 1},         {"true north node", 0, 1},     {"south node", 1, 0},
+    {"mean south node", 1, 0},   {"true south node", 1, 1},     {"lilith", 3, 0},
+    {"black moon lilith", 3, 0}, {"mean lilith", 3, 0},         {"mean apogee", 3, 0},
+    {"true lilith", 3, 1},       {"osculating lilith", 3, 1},   {"osculating apogee", 3, 1},
+    {"mean perigee", 2, 0},      {"osculating perigee", 2, 1},  {"natural apogee", 3, 2},
+    {"natural lilith", 3, 2},    {"interpolated apogee", 3, 2}, {"natural perigee", 2, 2},
+    {"priapus", 2, 2},           {"interpolated perigee", 2, 2}};
 
 struct PointName {
     const char* name;
@@ -344,14 +346,18 @@ Asked parse_object(Engine& engine, const Json& o) {
         const std::string m = o.contains("method") && o["method"].is_string()
                                   ? lower(o["method"].get<std::string>())
                                   : std::string("mean");
-        if (m == "interpolated" || m == "osculating-barycentric" || m == "focal-point") {
+        if (m == "osculating-barycentric" || m == "focal-point" ||
+            (m == "interpolated" && (*of != 301 || pn->point < 2))) {
             // A.14 names them; this engine computes mean and osculating
-            // orbits only, and says so rather than answer with another.
-            a.why = "the " + m + " method is not served; this engine serves mean and osculating";
+            // orbits, and the interpolated one for the Moon's apsides only,
+            // and says so rather than answer with another.
+            a.why = "the " + m +
+                    " method is not served for this point; this engine serves mean and "
+                    "osculating, and interpolated for the Moon's apogee and perigee";
             a.code = "unsupported";
             return a;
         }
-        if (m != "mean" && m != "osculating") {
+        if (m != "mean" && m != "osculating" && m != "interpolated") {
             a.why = "a point's method is mean, osculating, interpolated, osculating-barycentric "
                     "or focal-point";
             a.code = "invalid-arguments";
@@ -360,7 +366,7 @@ Asked parse_object(Engine& engine, const Json& o) {
         spec.kind = eph::kObjOrbitPoint;
         spec.naif = *of;
         spec.point = pn->point;
-        spec.method = m == "mean" ? 0 : 1;
+        spec.method = m == "mean" ? 0 : m == "osculating" ? 1 : 2;
     } else {
         a.why = "an object is a name, or {\"body\"|\"star\"|\"asteroid\"|\"hypothetical\"|"
                 "\"naif\"|\"point\": ...}";
@@ -812,8 +818,8 @@ Result<Json> capabilities(Engine& engine, const Context& ctx) {
          {"apparent", "astrometric", "geometric", "light-time", "gravitational-deflection",
           "aberration"}},
         {"orbit_methods",
-         {{"served", {"mean", "osculating"}},
-          {"not_served", {"interpolated", "osculating-barycentric", "focal-point"}}}},
+         {{"served", {"mean", "osculating", "interpolated (the Moon's apogee and perigee)"}},
+          {"not_served", {"osculating-barycentric", "focal-point"}}}},
         {"precession", {"iau2006", "vondrak2011"}},
         {"limits", {{"max_objects", ctx.limits.max_objects}, {"max_times", ctx.limits.max_times}}}};
     if (!ctx.dataset.empty())
@@ -868,8 +874,8 @@ Json schema_positions() {
                             "\"Ceres\", \"cupido\") or {\"body\"|\"star\"|\"asteroid\"|"
                             "\"hypothetical\"|\"naif\": ...} or {\"point\": \"ascending-node\"|"
                             "\"descending-node\"|\"perihelion\"|\"aphelion\", \"of\": body, "
-                            "\"method\": \"mean\"|\"osculating\"} (interpolated, "
-                            "osculating-barycentric and focal-point are named but not served)"},
+                            "\"method\": \"mean\"|\"osculating\"|\"interpolated\"} (the "
+                            "last for the Moon's apogee and perigee: the natural apsides)"},
             {"minItems", 1}}},
           {"observer",
            {{"type", "string"},
@@ -1016,9 +1022,10 @@ guess.
 - Longitudes in degrees [0, 360); rates per day; distances in AU.
 - Mars to Pluto are their system barycentres (JPL's planetary files).
 - "true node" is the osculating lunar node, "mean node" the mean one; "Lilith"
-  is the mean lunar apogee, "true Lilith" the osculating one. The interpolated
-  ("natural") apogee is not served: asking for it is an "unsupported" error,
-  never the osculating one in its place.
+  is the mean lunar apogee, "true Lilith" the osculating one, "natural apogee"
+  (or "natural Lilith") the interpolated one: between the Moon's actual
+  apogee passages, within ~6 degrees of the mean. "natural perigee" (or
+  "Priapus") likewise, within ~27 degrees. They are not opposite each other.
 - A zodiac defined at the instant (true-citra, the galactic ones) has no
   anchor plane; capabilities lists each zodiac's planes.
 - Times before 1657 or in the future carry delta T from a model (convert_time).

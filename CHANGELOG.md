@@ -29,6 +29,15 @@ documented, not that it is frozen.
   and 0.97. α Cen A moves by up to 185 mas at 1900. The Astrolog session
   caught the mismatch.
 
+- **The Moon's natural apogee and perigee** (A.14 method 2, "interpolated";
+  ORBIT-POINTS.md). They follow the published definition, an interpolation
+  between the Moon's actual passages. They are exact at every passage, and
+  shaped between passages by a deviation model fitted to all 29,149 passages
+  in DE440. Served by the engine (`OrbitElements::Interpolated`), the C API
+  (`PROMETHEIA_ELEMENTS_INTERPOLATED`; ABI unchanged), prometheiad (method 2)
+  and the JSON tools ("natural apogee", "Priapus"). Against Swiss's analytic
+  curve: apogee within 0.10°, perigee within 2.8°.
+
 ## 0.5.0 — 2026-09-18
 
 The library and tools are 0.5.0; the C ABI is unchanged (6). `prometheiad` is

@@ -197,6 +197,9 @@ central differences as `calc`.
   - For planets (system barycentres for Mars–Pluto), the Earth, the
     Earth–Moon barycentre and catalog bodies: heliocentric.
   - For the Moon: geocentric.
+  - `OrbitElements::Interpolated` is the Moon's natural apogee and perigee,
+    interpolated between its actual passages
+    ([ORBIT-POINTS.md](ORBIT-POINTS.md), "The natural apsides").
   - The Sun and the barycentre have none (ArgumentError).
 - **The reference plane:** the mean ecliptic of date, in every frame. A
   node is where the orbit crosses it; the output frame gives only the

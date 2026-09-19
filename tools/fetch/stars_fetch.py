@@ -126,6 +126,10 @@ SOURCES = [
     ("arxiv-alcen-2021", "arxiv-alcen-2021.html",
      "https://arxiv.org/search/?" + urllib.parse.urlencode({"query": "millimeter astrometry Centauri AB", "searchtype": "title"}),
      "f94b2a9749f74df8e7723bfa99432dd0833d14288bd0d25d9dcc9a4b1bf20ba6", "as arxiv-sirius: Akeson et al. 2021 (arXiv:2104.10086), the alpha Cen AB orbit ORB6 lists as Ake2021"),
+    ("swisseph-doc", "swisseph-doc.htm", "https://www.astro.com/swisseph/swisseph.htm",
+     "7ca3f8863d31001f3a1411139d4759813cc8c3d3c51312fbc45aa84382f05aa2",
+     "Swiss Ephemeris general documentation (Astrodienst), read for its published definitions "
+     "only (the interpolated lunar apogee and perigee); no code, no data"),
     ("akeson-2021-pdf", "akeson-2021.pdf", "https://arxiv.org/pdf/2104.10086", "81787ec85c25e0c45c8ad10a0abca1c7f42c745ee77f9964aeda3274b59275cd",
      "as liu-2011-pdf: the paper, for the masses fitted with the orbit"),
     ("simbad-rv", "simbad-rv.csv",

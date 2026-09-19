@@ -872,6 +872,74 @@ TEST_CASE("de440_vondrak_precession_matches_swetest") {
     CHECK(worst_ayan < 0.005);
 }
 
+TEST_CASE("de440_natural_apsides") {
+    // The natural apogee and perigee (ORBIT-POINTS.md, "The natural apsides")
+    // pass through the Moon at its actual passages, stay within the published
+    // deviation from the mean apse (~5 and ~25 degrees; measured 5.7 and 25.8
+    // over 1900-2100), and are continuous.
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    if (!opened)
+        return;
+    Engine e = std::move(opened).value();
+    CalcOptions g = CalcOptions::geometric();
+    g.frame = Frame::J2000;
+    const auto rate = [&](double t) { return e.calc(body::kMoon, t, g).value().pos.dist_speed; };
+    // Passages over two years, found independently here by bisection.
+    int passages = 0;
+    double t = 2451545.0, f = rate(t);
+    while (t < 2451545.0 + 730.0) {
+        const double t2 = t + 1.0, f2 = rate(t2);
+        if ((f > 0.0) != (f2 > 0.0)) {
+            double a = t, b = t2, fa = f;
+            for (int i = 0; i < 45; ++i) {
+                const double mid = 0.5 * (a + b), fm = rate(mid);
+                if ((fm > 0.0) == (fa > 0.0)) {
+                    a = mid;
+                    fa = fm;
+                } else {
+                    b = mid;
+                }
+            }
+            const double tp = 0.5 * (a + b);
+            const OrbitPoint pt = f > 0.0 ? OrbitPoint::Aphelion : OrbitPoint::Perihelion;
+            auto moon = e.calc(body::kMoon, tp, g);
+            auto nat = e.calc_orbit_point(body::kMoon, pt, OrbitElements::Interpolated, tp, g);
+            REQUIRE(moon.ok());
+            REQUIRE_MESSAGE(nat.ok(), nat.error().message);
+            CHECK(std::fabs(std::remainder(nat.value().pos.lon_deg - moon.value().pos.lon_deg,
+                                           360.0)) < 1e-5);
+            CHECK(std::fabs(nat.value().pos.lat_deg - moon.value().pos.lat_deg) < 1e-5);
+            ++passages;
+        }
+        t = t2;
+        f = f2;
+    }
+    CHECK(passages > 50);
+    double worst[2] = {0.0, 0.0};
+    for (double jd = 2451545.0; jd < 2451545.0 + 730.0; jd += 0.25)
+        for (int k = 0; k < 2; ++k) {
+            const OrbitPoint pt = k ? OrbitPoint::Aphelion : OrbitPoint::Perihelion;
+            auto nat = e.calc_orbit_point(body::kMoon, pt, OrbitElements::Interpolated, jd, g);
+            auto mean = e.calc_orbit_point(body::kMoon, pt, OrbitElements::Mean, jd, g);
+            REQUIRE(nat.ok());
+            worst[k] =
+                std::max(worst[k], std::fabs(std::remainder(
+                                       nat.value().pos.lon_deg - mean.value().pos.lon_deg, 360.0)));
+        }
+    INFO("deviation from the mean apse: perigee ", worst[0], ", apogee ", worst[1]);
+    CHECK(worst[0] < 27.0);
+    CHECK(worst[1] < 6.0);
+    // Only the Moon's apsides have a natural orbit.
+    CHECK_FALSE(e.calc_orbit_point(body::kMoon, OrbitPoint::AscendingNode,
+                                   OrbitElements::Interpolated, 2451545.0, g)
+                    .ok());
+    CHECK_FALSE(
+        e.calc_orbit_point(4, OrbitPoint::Aphelion, OrbitElements::Interpolated, 2451545.0, g)
+            .ok());
+}
+
 TEST_CASE("de440_engine_rates_match_differenced_swetest") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;

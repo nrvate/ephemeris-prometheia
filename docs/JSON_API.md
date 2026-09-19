@@ -203,9 +203,11 @@ from here when it asks Astrolog to draw it.
   `aphelion` of a body. For the Moon they read as perigee and apogee.
 - **Orbit methods (A.14):** `mean`, `osculating`, `interpolated`,
   `osculating-barycentric`, `focal-point`.
-  - This engine computes the first two.
-  - The other three are refused as `unsupported`, never answered with
-    another method.
+  - This engine computes the first two, and `interpolated` for the Moon's
+    apogee and perigee (the natural apsides; by name, "natural apogee" or
+    "natural Lilith", and "natural perigee" or "Priapus").
+  - The others are refused as `unsupported`, never answered with another
+    method.
 - **Frames:** `true-of-date`, `mean-of-date`, `j2000`, `icrf`.
 - **Sidereal planes (A.8):** `date`, `anchor`, `invariable`.
 - **Corrections (A.7):** `light-time`, `gravitational-deflection`,
