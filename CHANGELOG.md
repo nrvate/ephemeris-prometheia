@@ -11,7 +11,11 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.6.0 — 2026-09-18
+
+The library and tools are 0.6.0; the C ABI is unchanged (6), with one new
+accepted selector, `PROMETHEIA_ELEMENTS_INTERPOLATED`. `prometheiad` is 0.7.0:
+it serves orbit method 2, and its rates and the Moon's points changed.
 
 - **Rates, checked by a new oracle.** The cross-test's `rates` leg checks
   each server's rates against a five-point difference of its own positions.

@@ -8,6 +8,12 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Released
 
+- **v0.6.0**, published 2026-09-18
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.6.0).
+  - The library and tools are 0.6.0 (C ABI 6); `prometheiad` is 0.7.0.
+  - New: the Moon's natural apogee and perigee; the `rates` leg and the two
+    defects it found (topocentric point jitter, the rate step); range graded
+    against Horizons; α Cen's masses from Akeson et al. 2021.
 - **v0.5.0**, published 2026-09-18
   (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.5.0).
   - The library and tools are 0.5.0 (C ABI 6, unchanged); `prometheiad` is
@@ -25,7 +31,7 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 ## Next
 
 1. ~~Binary-star orbits~~: done (`53d5f58`, STARS.md "Binary stars").
-2. ~~Release v0.4.0~~ and ~~v0.5.0~~: done.
+2. ~~Releases v0.4.0, v0.5.0 and v0.6.0~~: done.
 3. **Astrolog's side of 2026-09-18**, settled (their commits, read from
    their log):
    - **§3.5a:** closed at `b5c67d2`. A zodiac with no anchor epoch gets

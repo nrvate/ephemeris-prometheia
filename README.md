@@ -22,7 +22,7 @@ version and a plain statement of what is *not* in it:
 ## Status
 
 All six milestones complete, plus protocol version 4 (2026-09-17) and, in
-releases 0.2.0 to 0.5.0 (2026-09-18), the work below the list:
+releases 0.2.0 to 0.6.0 (2026-09-18), the work below the list:
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body

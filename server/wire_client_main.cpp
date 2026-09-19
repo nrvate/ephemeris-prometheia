@@ -345,7 +345,7 @@ int main(int argc, char** argv) {
     eph::Hello hello;
     hello.protoMax = eph::kProtoVersion;
     hello.protoMin = eph::kProtoMin;
-    hello.clientName = "prometheia-wire-client/0.5.0";
+    hello.clientName = "prometheia-wire-client/0.6.0";
     hello.token = token;
     std::vector<uint8_t> hello_payload;
     eph::EncodeHello(&hello_payload, hello);

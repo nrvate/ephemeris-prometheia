@@ -146,8 +146,8 @@ digits cut):
 
 ```json
 {
-  "engine": "Prometheia 0.5.0, JPL DE440 binary",
-  "dataset": "Prometheia 0.5.0, JPL DE440 binary/linux_p1550p2650.440/-#88bb0804",
+  "engine": "Prometheia 0.6.0, JPL DE440 binary",
+  "dataset": "Prometheia 0.6.0, JPL DE440 binary/linux_p1550p2650.440/-#70cddb41",
   "results": [
     {
       "object": {"asked": "Mars", "kind": "body", "naif": 4, "resolved": "Mars"},
