@@ -170,11 +170,19 @@ passages is smaller.)
   - Both curves pass the actual passages; Swiss's within 0.016°.
   - The cross-test's `points` leg grades this difference at 1.5× these
     maxima, as two published readings.
-- **Cost:** about 8 µs a call. The passages are found once per 200-day
-  window and kept.
+- **Cost:** about 8 µs a call for nearby instants, and 33 µs for instants
+  scattered over two centuries (`prometheia-engine-bench`). The passages
+  are scanned in fixed 50-day blocks of TDB, each once per engine, and kept:
+  the file's whole span is about a megabyte. A first call in new territory
+  pays for its blocks, about 340 µs. Because the blocks are fixed, a
+  passage's time does not depend on which instant was asked first. Until
+  2026-09-19 the scan started 100 days before the first instant asked, which
+  moved answers by up to 0.03 mas, and rescanned whenever an instant fell
+  more than a year away.
 - **Coverage:** only the Moon's apogee and perigee. The nodes and other
   bodies are refused. It needs three passages on each side, so it is
-  refused within about 100 days of the ephemeris's ends.
+  refused within about 100 days of the ephemeris's ends, as "too near the
+  ephemeris's coverage limits".
 
 ## What this does not decide
 

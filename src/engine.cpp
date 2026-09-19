@@ -6,6 +6,7 @@
 #include "prometheia/stars.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -2077,7 +2078,16 @@ struct Engine::Impl {
         double r;   // km
     };
     std::vector<ApsisPassage> apsis_passages[2]; // [0] perigees, [1] apogees
-    double apsis_lo = NAN, apsis_hi = NAN;       // the TDB span scanned
+    // Passages are scanned in fixed blocks of kApsisBlockDays on a grid of
+    // TDB, and every block scanned is kept (the ephemeris's whole span is a
+    // few thousand blocks, about a megabyte). So each block is scanned once
+    // per engine, and a passage's time does not depend on which instant was
+    // asked first: until 2026-09-19 the scan started 100 days before
+    // whatever instant came first, which moved the passages' last bits, and
+    // was rescanned whenever an instant fell more than a year away.
+    static constexpr double kApsisBlockDays = 50.0;
+    std::unordered_map<long, std::array<std::vector<ApsisPassage>, 2>> apsis_blocks;
+    long apsis_k_lo = 1, apsis_k_hi = 0; // the blocks apsis_passages holds
 
     // The Moon relative to the Earth, geometric: ICRF km, km/day.
     Result<void> moon_geocentric(double t, double s[6]) {
@@ -2104,16 +2114,19 @@ struct Engine::Impl {
     // Every apsis passage in [a, b] (TDB): r.v sampled daily (the passages are
     // ~14 days apart), each sign change refined by the Illinois method to
     // 1e-9 day.
-    Result<void> scan_apsides(double a, double b) {
+    // The passages in [a, b], in time order, into out. A sample outside the
+    // ephemeris ends the scan: the block keeps what lies inside, and the
+    // interpolation's own check refuses an instant without enough of them.
+    Result<void> scan_apsides(double a, double b, std::array<std::vector<ApsisPassage>, 2>& out) {
         auto fa = moon_radial(a);
         if (!fa)
-            return fa.error();
+            return {};
         double ta = a, ya = fa.value();
         while (ta < b) {
             const double tb = std::min(ta + 1.0, b);
             auto fb = moon_radial(tb);
             if (!fb)
-                return fb.error();
+                return {};
             const double yb = fb.value();
             if ((ya > 0.0) != (yb > 0.0)) {
                 double lo = ta, hi = tb, flo = ya, fhi = yb;
@@ -2153,7 +2166,7 @@ struct Engine::Impl {
                 r = apsis_model(t, apogee, lon_model);
                 if (!r)
                     return r;
-                apsis_passages[apogee].push_back(
+                out[apogee].push_back(
                     {t, std::remainder(std::atan2(v[1], v[0]) - lon_model, 2.0 * M_PI),
                      std::asin(v[2] / rr), rr});
             }
@@ -2189,44 +2202,37 @@ struct Engine::Impl {
     // each side of t. A nearby request extends the span scanned; a far one
     // starts it again.
     Result<void> ensure_apsides(double t) {
-        const double lo = t - 100.0, hi = t + 100.0;
-        if (std::isfinite(apsis_lo) && lo >= apsis_lo && hi <= apsis_hi)
+        const long k_lo = long(std::floor((t - 100.0) / kApsisBlockDays));
+        const long k_hi = long(std::floor((t + 100.0) / kApsisBlockDays));
+        if (k_lo == apsis_k_lo && k_hi == apsis_k_hi)
             return {};
-        const bool near = std::isfinite(apsis_lo) && lo < apsis_hi + 365.0 &&
-                          hi > apsis_lo - 365.0 && apsis_hi - apsis_lo < 50.0 * 365.25;
-        if (!near) {
-            apsis_passages[0].clear();
-            apsis_passages[1].clear();
-            apsis_lo = apsis_hi = NAN;
-            auto r = scan_apsides(lo, hi);
-            if (!r)
-                return r;
-            apsis_lo = lo;
-            apsis_hi = hi;
-        } else {
-            if (lo < apsis_lo) {
-                auto r = scan_apsides(lo, apsis_lo);
+        apsis_passages[0].clear();
+        apsis_passages[1].clear();
+        apsis_k_lo = 1;
+        apsis_k_hi = 0;
+        for (long k = k_lo; k <= k_hi; ++k) {
+            auto it = apsis_blocks.find(k);
+            if (it == apsis_blocks.end()) {
+                std::array<std::vector<ApsisPassage>, 2> found;
+                const double a = double(k) * kApsisBlockDays;
+                auto r = scan_apsides(a, a + kApsisBlockDays, found);
                 if (!r)
                     return r;
-                apsis_lo = lo;
+                it = apsis_blocks.emplace(k, std::move(found)).first;
             }
-            if (hi > apsis_hi) {
-                auto r = scan_apsides(apsis_hi, hi);
-                if (!r)
-                    return r;
-                apsis_hi = hi;
-            }
+            for (int i = 0; i < 2; ++i)
+                apsis_passages[i].insert(apsis_passages[i].end(), it->second[size_t(i)].begin(),
+                                         it->second[size_t(i)].end());
         }
-        for (auto& v : apsis_passages) {
-            std::sort(v.begin(), v.end(),
-                      [](const ApsisPassage& x, const ApsisPassage& y) { return x.t < y.t; });
-            // A passage on a seam between two scans is found twice.
+        // A passage on a seam between two blocks is found by both.
+        for (auto& v : apsis_passages)
             v.erase(std::unique(v.begin(), v.end(),
                                 [](const ApsisPassage& x, const ApsisPassage& y) {
                                     return std::fabs(x.t - y.t) < 1e-6;
                                 }),
                     v.end());
-        }
+        apsis_k_lo = k_lo;
+        apsis_k_hi = k_hi;
         return {};
     }
 

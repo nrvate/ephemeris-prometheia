@@ -168,6 +168,7 @@ struct CompactTerm {
     uint8_t n = 0;
     uint8_t arg[kMaxFactors] = {};
     int8_t mul[kMaxFactors] = {};
+    double fmul[kMaxFactors] = {}; // mul, as the double the sums use
     double c[6] = {};
 };
 
@@ -190,6 +191,7 @@ const CompactTable& compact_table() {
                     std::abort(); // the table outgrew the compact form
                 c.arg[c.n] = uint8_t(j);
                 c.mul[c.n] = int8_t(src.m[j]);
+                c.fmul[c.n] = double(src.m[j]);
                 ++c.n;
                 t.max_multiple[j] = std::max(t.max_multiple[j], std::abs(src.m[j]));
             }
@@ -205,23 +207,33 @@ const CompactTable& compact_table() {
 // addition from m = 1. Twelve additions carry at most 1e-15 of relative
 // error, which the agreement figure above accounts for.
 struct MultipleTables {
-    double sn[14][kMaxMultiple + 1];
-    double cs[14][kMaxMultiple + 1];
+    // Index kMaxMultiple + m for the multiple m, negative ones included
+    // (sin(-x) = -sin x, cos(-x) = cos x, exactly), so no term branches on
+    // its multiplier's sign.
+    double sn[14][2 * kMaxMultiple + 1];
+    double cs[14][2 * kMaxMultiple + 1];
 };
 
 void build_multiples(const double phi[14], const CompactTable& t, MultipleTables& m) {
+    constexpr int z = kMaxMultiple;
     for (int j = 0; j < 14; ++j) {
-        m.sn[j][0] = 0.0;
-        m.cs[j][0] = 1.0;
+        double* sn = m.sn[j] + z;
+        double* cs = m.cs[j] + z;
+        sn[0] = 0.0;
+        cs[0] = 1.0;
         const int top = t.max_multiple[j];
         if (top == 0)
             continue;
         const double s1 = std::sin(phi[j]), c1 = std::cos(phi[j]);
-        m.sn[j][1] = s1;
-        m.cs[j][1] = c1;
+        sn[1] = s1;
+        cs[1] = c1;
         for (int k = 2; k <= top; ++k) {
-            m.sn[j][k] = m.sn[j][k - 1] * c1 + m.cs[j][k - 1] * s1;
-            m.cs[j][k] = m.cs[j][k - 1] * c1 - m.sn[j][k - 1] * s1;
+            sn[k] = sn[k - 1] * c1 + cs[k - 1] * s1;
+            cs[k] = cs[k - 1] * c1 - sn[k - 1] * s1;
+        }
+        for (int k = 1; k <= top; ++k) {
+            sn[-k] = -sn[k];
+            cs[-k] = cs[k];
         }
     }
 }
@@ -231,10 +243,9 @@ inline void term_sin_cos(const CompactTerm& t, const MultipleTables& m, double& 
     sa = 0.0;
     ca = 1.0;
     for (int k = 0; k < t.n; ++k) {
-        const int j = t.arg[k], mul = t.mul[k];
-        const int a = mul < 0 ? -mul : mul;
-        const double s2 = mul < 0 ? -m.sn[j][a] : m.sn[j][a];
-        const double c2 = m.cs[j][a];
+        const int j = t.arg[k], at = kMaxMultiple + t.mul[k];
+        const double s2 = m.sn[j][at];
+        const double c2 = m.cs[j][at];
         const double s = sa * c2 + ca * s2;
         ca = ca * c2 - sa * s2;
         sa = s;
@@ -301,20 +312,24 @@ void nutation_with_rates(double jd_tt, double out[6]) {
     for (const CompactTerm& t : table.terms) {
         double w = 0.0, w2 = 0.0; // the argument's rates (rad/cy, rad/cy^2)
         for (int k = 0; k < t.n; ++k) {
-            w += double(t.mul[k]) * d1[t.arg[k]];
-            w2 += double(t.mul[k]) * d2[t.arg[k]];
+            w += t.fmul[k] * d1[t.arg[k]];
+            w2 += t.fmul[k] * d2[t.arg[k]];
         }
         double sa, ca;
         term_sin_cos(t, mult, sa, ca);
+        // The term p (psi) and its quadrature q = dp/d(argument); the same
+        // for eps. Then p' = c1 sin + q w and p'' = 2 c1 cos w - p w^2 + q w2,
+        // which reuses p and q instead of expanding them per derivative.
         const double a_psi = t.c[0] + t.c[1] * T, a_eps = t.c[3] + t.c[4] * T;
-        psi += a_psi * sa + t.c[2] * ca;
-        eps += a_eps * ca + t.c[5] * sa;
-        psi1 += t.c[1] * sa + (a_psi * ca - t.c[2] * sa) * w;
-        eps1 += t.c[4] * ca + (-a_eps * sa + t.c[5] * ca) * w;
-        psi2 += 2.0 * t.c[1] * ca * w + a_psi * (-sa * w * w + ca * w2) -
-                t.c[2] * (ca * w * w + sa * w2);
-        eps2 += -2.0 * t.c[4] * sa * w + a_eps * (-ca * w * w - sa * w2) +
-                t.c[5] * (-sa * w * w + ca * w2);
+        const double p = a_psi * sa + t.c[2] * ca, q = a_psi * ca - t.c[2] * sa;
+        const double e = a_eps * ca + t.c[5] * sa, r = t.c[5] * ca - a_eps * sa;
+        const double ww = w * w;
+        psi += p;
+        eps += e;
+        psi1 += t.c[1] * sa + q * w;
+        eps1 += t.c[4] * ca + r * w;
+        psi2 += 2.0 * t.c[1] * ca * w - p * ww + q * w2;
+        eps2 += -2.0 * t.c[4] * sa * w - e * ww + r * w2;
     }
     constexpr double kCy = 36525.0;
     out[0] = psi * kAs2Rad;

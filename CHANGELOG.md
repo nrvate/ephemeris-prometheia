@@ -31,6 +31,11 @@ documented, not that it is frozen.
     digest changes once as a result.
   - A JSON call for three distant small bodies at 1,000 instants: 19.2 →
     4.4 s.
+  - the Moon's natural apsides scan their passages in fixed 50-day blocks,
+    kept per engine: 266 → 33 µs a call at scattered instants, and a
+    passage no longer depends on which instant was asked first (answers
+    moved by up to 0.03 mas);
+  - the nutation series with rates: 22.6 → 18.4 µs a node.
 - **`prometheia-json` reads a clock time before 1972 as UT1** (maintainer,
   2026-09-19). It refused any date before 1972, so an agent could not ask
   for most birth charts by clock time. UTC with integer leap seconds begins

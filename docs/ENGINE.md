@@ -403,14 +403,19 @@ Runs vary by about 20% with the CPU's clock, so compare within one sitting.
 
 | scenario | µs per call |
 |---|---|
-| planets, apparent (rates on) | 4.2 |
-| planets, rates off | 2.9 |
-| planets, topocentric / Lahiri / true Citra | 4.5 / 4.4 / 5.4 |
-| ten stars, apparent | 3.4 |
-| the Moon's mean or osculating node and apogee | 19–20 |
-| the Moon's natural apogee | 266 |
-| the eight Hamburg points | 8.1 |
-| Ceres, Eris, Sedna (after their first integration) | 11 |
+| planets, apparent (rates on) | 3.9 |
+| planets, rates off | 2.5 |
+| planets, topocentric / Lahiri / true Citra | 4.1 / 4.0 / 5.4 |
+| ten stars, apparent | 3.2 |
+| the Moon's mean or osculating node and apogee | 18–21 |
+| the Moon's natural apogee | 33 |
+| the eight Hamburg points | 7.4 |
+| Ceres, Eris, Sedna (after their first integration) | 9.4 |
+
+At a fresh instant most of a chart's cost is nutation. The interpolator
+evaluates the full 1365-term series, with rates, at the two half-day nodes
+around the instant: 18.4 µs each. Under `prometheia-load` it was 43% of the
+server's CPU (2026-09-19).
 
 `add_catalog` of the full catalogue (137 MB) takes 315 ms: it decompresses
 and CRC-checks every chunk, so a corrupt file fails there.
@@ -428,6 +433,12 @@ and CRC-checks every chunk, so a corrupt file fails there.
   (634 → 315 ms).
 - Together: one JSON call for three distant small bodies at 1,000 instants
   over 1,000 years went from 19.2 s to 4.4 s, with the same 2.2 MB answer.
+- **The natural apsides' passages** are scanned in fixed blocks and kept
+  (ORBIT-POINTS.md): 266 → 33 µs at scattered instants.
+- **The nutation series with rates** reuses each term's value and
+  quadrature for its derivatives, and reads signed multiples without a
+  branch: 22.6 → 18.4 µs a node. The values and first derivatives are
+  bit-identical, and the second derivatives agree to 2e-22 rad/day².
 
 ## Validation
 
