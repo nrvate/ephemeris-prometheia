@@ -1,9 +1,27 @@
-# JSON API (draft, under negotiation)
+# JSON and MCP interfaces (draft, under negotiation)
 
-**Status: a proposal, 2026-09-18.** Nothing here is implemented. It is the
-Prometheia side of the joint AI-forward plan agreed with the Astrolog project
-over the agent channel (docs/HANDOFF.md). The shared vocabulary in "Words" is
-the part the two projects must agree on; the rest is Prometheia's.
+**Status: a proposal, 2026-09-18.** Nothing here is implemented.
+
+**What Prometheia is:** a high-speed ephemeris. Its interfaces, fastest first:
+1. **The C++ library**, in process (`prometheia::Engine`, ENGINE.md). This is
+   the primary interface.
+2. **The C API** over the same engine (C_API.md).
+3. **`prometheiad`'s binary protocol** (SERVER.md), for high-speed data over
+   the network.
+4. **The `ephem` CLI** (EPHEM.md).
+5. **JSON and MCP**, this document: convenience surfaces, mainly for AI
+   agents.
+   - One separate program, `prometheia-json`, serves both.
+   - Plain JSON over HTTP (`/v1/…`).
+   - MCP (the Model Context Protocol) over stdio, or streamable HTTP at
+     `/mcp`.
+   - It never runs inside `prometheiad`, so nothing here touches the fast
+     paths above. It is sized for the questions an agent asks, not for bulk
+     data.
+
+This is the Prometheia side of the joint AI-forward plan with the Astrolog
+project (docs/HANDOFF.md). The shared vocabulary in "Words" is the part the
+two projects must agree on; the rest is Prometheia's.
 
 ## Why
 
@@ -20,21 +38,28 @@ registry numbers. This API says the same things in JSON, in words.
 
 ## Principle: one meaning, two encodings
 
-A JSON request is translated into protocol v4's `eph::Request` and answered
-by the same session machinery: the same limits, cache, compute budget,
-per-object errors and logging rules. The answer is the same `Answer`, written
-as JSON. The two surfaces cannot disagree about what a question means, and
-the cross-test can check that they do not.
+The MCP tools resolve objects with the server's own code
+(`server/objects.cpp`: names, stars, designations, hypotheticals, orbit
+points), map options onto the same `CalcOptions`, and ask the same engine. The
+binary protocol and the agent tools cannot disagree about what a question
+means, and the cross-test can check that they do not. The tools are sized
+for questions an agent asks, one chart or a short series. Bulk data belongs
+on the binary protocol.
 
-## Endpoints (on prometheiad's existing port)
+## Tools (`prometheia-json`)
 
-| method | path | what |
-|---|---|---|
-| `POST` | `/v1/positions` | positions of objects at instants |
-| `GET` | `/v1/capabilities` | what this server answers: WELCOME, in words |
-| `POST` | `/v1/lookup` | resolve names to objects (LOOKUP, in words) |
-| `GET` | `/v1/openapi.json` | the schema |
-| `GET` | `/llms.txt` | an agent-facing summary: what to ask, and how |
+Each tool is one call, whether it arrives as an MCP `tools/call` or as a JSON
+`POST /v1/<tool>`. The request and answer are the same JSON either way.
+
+| tool | what |
+|---|---|
+| `positions` | positions of objects at an instant or a short series |
+| `lookup` | resolve a name to the objects it could mean |
+| `capabilities` | what this engine answers: bodies, zodiacs, frames, coverage, in words |
+| `convert_time` | UTC, TT, UT1 and Julian dates, with ΔT and leap seconds |
+
+The agent-facing summary of what to ask, and how, is the MCP resource
+`prometheia://llms.txt`, and `GET /llms.txt` over HTTP.
 
 ## A request
 

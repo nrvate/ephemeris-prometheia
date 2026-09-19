@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "session.hpp"
+#include "zodiacs.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -33,28 +34,6 @@ constexpr uint16_t kLookupMax = 1024;
 static_assert(std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN()) ==
               0x7FF8000000000000ull);
 
-// The A.11 zodiac tokens this server serves, and the engine's mode for each:
-// WELCOME lists exactly these (A.3 0x0007), and a profile maps through them.
-// `user` is served too, anchored by the profile's own fields.
-struct ZodiacToken {
-    const char* token;
-    SiderealMode mode;
-};
-constexpr ZodiacToken kZodiacTokens[] = {
-    {"fagan-bradley", SiderealMode::FaganBradley},
-    {"lahiri", SiderealMode::Lahiri},
-    {"galcent-0sag", SiderealMode::GalacticCentre0Sag},
-    {"true-citra", SiderealMode::TrueCitra},
-    {"true-revati", SiderealMode::TrueRevati},
-    {"true-pushya", SiderealMode::TruePushya},
-    {"galcent-rgilbrand", SiderealMode::GalacticCentreGilBrand},
-    {"galequ-iau1958", SiderealMode::GalacticEquatorIau1958},
-    {"galequ-true", SiderealMode::GalacticEquatorTrue},
-    {"galequ-mula", SiderealMode::GalacticEquatorMula},
-    {"true-mula", SiderealMode::TrueMula},
-    {"galcent-mula-wilhelm", SiderealMode::GalacticCentreMulaWilhelm},
-    {"galcent-cochrane", SiderealMode::GalacticCentreCochrane},
-};
 // The star source the LOOKUP answer names; the compiled-in catalog.
 constexpr const char* kStarSource = "prometheia stars (BSC5, Hipparcos 1991.25, Messier)";
 constexpr const char* kCatalogSource = "prometheia small-body catalogs";

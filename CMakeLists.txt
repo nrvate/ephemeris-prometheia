@@ -118,6 +118,16 @@ if(PROMETHEIA_FUZZ)
   endforeach()
 endif()
 
+# The JSON tools (docs/JSON_API.md): JSON and MCP for agents and scripts, over
+# the binary server's own object resolution. Its own library, so nlohmann/json
+# (third_party/nlohmann, MIT) never enters prometheiad.
+add_library(prometheia_json STATIC server/json_tools.cpp)
+target_include_directories(prometheia_json SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+target_link_libraries(prometheia_json PUBLIC prometheia_server)
+target_compile_options(prometheia_json PRIVATE -Wall -Wextra -Werror)
+prometheia_test(json_tools tests/test_json_tools.cpp)
+target_link_libraries(test_json_tools PRIVATE prometheia_json)
+
 prometheia_test(server tests/test_server.cpp)
 target_link_libraries(test_server PRIVATE prometheia_server)
 prometheia_test(segcache tests/test_segcache.cpp)
