@@ -37,7 +37,8 @@ documented, not that it is frozen.
     moved by up to 0.03 mas);
   - the nutation series with rates: 22.6 → 18.4 µs a node, and a fresh
     instant's two nodes are computed together, a lane each of a two-double
-    vector, bit-identical to the scalar path: 36–42 → 19.8 µs. The library
+    vector, bit-identical to the scalar path: 36–42 → 19.8 µs (a walk
+    through time gets its next node with each one for free). The library
     is built with `-ffp-contract=off`, so no result depends on whether a
     compiler fused a multiply and an add;
   - `prometheiad` under `prometheia-load` (64 connections, fresh instants):

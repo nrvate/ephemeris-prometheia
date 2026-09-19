@@ -436,7 +436,9 @@ TEST_CASE("nutation_interpolator") {
             sweep.at(2461300.5 + r / 24.0, p, e);
         }
     }
-    CHECK(sweep.evaluations() == 21); // nodes 0 .. 20 over ten days
+    // Nodes 0 .. 20 over ten days, computed in pairs a lane each: the last
+    // pair also computes node 21. Once per node, and never again.
+    CHECK(sweep.evaluations() == 22);
 }
 
 // nutation() composes each term's sine and cosine from per-argument

@@ -855,13 +855,24 @@ void NutationInterpolator::at(double jd_tt, double& dpsi, double& deps) {
     // each, for about the cost of one (the same values; 2026-09-19).
     Node& na = nodes_[size_t(index) & (kNutationCacheSize - 1)];
     Node& nb = nodes_[size_t(index + 1) & (kNutationCacheSize - 1)];
-    if (na.index != index && nb.index != index + 1) {
-        nutation_with_rates_pair(double(index) * kNodeSpacingDays,
-                                 double(index + 1) * kNodeSpacingDays, na.n, nb.n);
-        na.index = index;
-        nb.index = index + 1;
+    // A walk through time needs one new node a step: it is computed with
+    // the next one in the walk's direction, which the pair gives for free.
+    const auto pair = [&](long long i) {
+        Node& x = nodes_[size_t(i) & (kNutationCacheSize - 1)];
+        Node& y = nodes_[size_t(i + 1) & (kNutationCacheSize - 1)];
+        nutation_with_rates_pair(double(i) * kNodeSpacingDays, double(i + 1) * kNodeSpacingDays,
+                                 x.n, y.n);
+        x.index = i;
+        y.index = i + 1;
         evaluations_ += 2;
-    }
+    };
+    const bool miss_a = na.index != index, miss_b = nb.index != index + 1;
+    if (miss_a && miss_b)
+        pair(index);
+    else if (miss_b)
+        pair(index + 1); // walking forward
+    else if (miss_a)
+        pair(index - 1); // walking backward
     double a[6], b[6];
     std::copy(node(index).n, node(index).n + 6, a);
     std::copy(node(index + 1).n, node(index + 1).n + 6, b);

@@ -112,7 +112,10 @@ Nodes are cached, direct-mapped, 4,096 of them. The engine uses it for
 every nutation (docs/ENGINE.md). An instant whose two nodes are both
 missing, which is every fresh instant a server is asked for, has them
 computed together by `nutation_with_rates_pair`, a lane each of a
-two-double vector (below).
+two-double vector (below). A walk through time needs one new node a step;
+it is computed with the next one in the walk's direction, which the pair
+gives for nothing. A segments request for ten bodies over 1,000 days fell
+from 0.20–0.22 s to 0.16–0.19 s with it.
 
 ## How the series is summed
 
