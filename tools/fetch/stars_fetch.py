@@ -123,9 +123,11 @@ SOURCES = [
     ("arxiv-procyon", "arxiv-procyon.html",
      "https://arxiv.org/search/?" + urllib.parse.urlencode({"query": "Astrometry of the Procyon System", "searchtype": "title"}),
      "d068961685075d79ec3b43845eb4b2e9de7e06bfa8feb82fa85510b859049bde", "as arxiv-sirius: Bond et al. 2015, the masses of Procyon A and B"),
-    ("arxiv-alcen", "arxiv-alcen.html",
-     "https://arxiv.org/search/?" + urllib.parse.urlencode({"query": "Parallax and masses of alpha Centauri revisited", "searchtype": "title"}),
-     "7ecb33918065a636e632f2c7170213e90cf290aa504b3ed7c61802f24aecf9cf", "as arxiv-sirius: Pourbaix & Boffin 2016, the masses of alpha Cen A and B"),
+    ("arxiv-alcen-2021", "arxiv-alcen-2021.html",
+     "https://arxiv.org/search/?" + urllib.parse.urlencode({"query": "millimeter astrometry Centauri AB", "searchtype": "title"}),
+     "f94b2a9749f74df8e7723bfa99432dd0833d14288bd0d25d9dcc9a4b1bf20ba6", "as arxiv-sirius: Akeson et al. 2021 (arXiv:2104.10086), the alpha Cen AB orbit ORB6 lists as Ake2021"),
+    ("akeson-2021-pdf", "akeson-2021.pdf", "https://arxiv.org/pdf/2104.10086", "81787ec85c25e0c45c8ad10a0abca1c7f42c745ee77f9964aeda3274b59275cd",
+     "as liu-2011-pdf: the paper, for the masses fitted with the orbit"),
     ("simbad-rv", "simbad-rv.csv",
      tap("SELECT i.id AS hip, b.rvz_radvel, b.rvz_err, b.rvz_qual FROM ident AS i "
          "JOIN basic AS b ON i.oidref = b.oid WHERE i.id LIKE 'HIP %' "

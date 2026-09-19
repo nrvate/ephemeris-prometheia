@@ -24,6 +24,11 @@ documented, not that it is frozen.
     geocentric rates 3.4e-8 °/day or better (ENGINE.md, "Rates"). No
     extra cost.
 
+- α Cen's mass split is now Akeson et al. 2021's (mass fraction 0.54266),
+  from the paper whose orbit we use. It was Pourbaix & Boffin 2016's 1.13
+  and 0.97. α Cen A moves by up to 185 mas at 1900. The Astrolog session
+  caught the mismatch.
+
 ## 0.5.0 — 2026-09-18
 
 The library and tools are 0.5.0; the C ABI is unchanged (6). `prometheiad` is

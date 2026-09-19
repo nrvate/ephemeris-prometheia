@@ -22,8 +22,9 @@ import os
 BINARIES = {
     32349: ("06451-1643", "AGC   1AB", -1.018 / (2.063 + 1.018), "barycentre"),  # Sirius A
     37279: ("07393+0514", "SHB   1AB", -0.592 / (1.478 + 0.592), "barycentre"),  # Procyon A
-    71683: ("14396-6050", "RHD   1AB", -0.97 / (1.13 + 0.97), "component"),  # alpha Cen A
-    71681: ("14396-6050", "RHD   1AB", 1.13 / (1.13 + 0.97), "secondary", 71683),  # alpha Cen B
+    # alpha Cen: Akeson et al. 2021's mass fraction, fitted with its orbit
+    71683: ("14396-6050", "RHD   1AB", -(1.0 - 0.54266), "component"),  # alpha Cen A
+    71681: ("14396-6050", "RHD   1AB", 0.54266, "secondary", 71683),  # alpha Cen B
 }
 
 

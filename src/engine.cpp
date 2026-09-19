@@ -158,12 +158,12 @@ constexpr BinaryOrbit kBinaryOrbits[] = {
     // Procyon A (Bond et al. 2015: 1.478 and 0.592 Msun).
     {37279, BinaryLine::Barycentre, 0, -0.592 / (1.478 + 0.592), 40.840, 4.3075, 31.408, 100.683,
      89.23, 0.39785, 1968.076},
-    // alpha Cen A and B (orbit: Akeson et al. 2021; masses: Pourbaix & Boffin
-    // 2016, 1.13 and 0.97 Msun).
-    {71683, BinaryLine::Component, 0, -0.97 / (1.13 + 0.97), 79.762, 17.4930, 79.2430, 205.073,
-     231.519, 0.51947, 1955.564},
-    {71681, BinaryLine::Secondary, 71683, 1.13 / (1.13 + 0.97), 79.762, 17.4930, 79.2430, 205.073,
-     231.519, 0.51947, 1955.564},
+    // alpha Cen A and B (Akeson et al. 2021, Table 8: the orbit, and the mass
+    // fraction m_A / (m_A + m_B) = 0.54266 fitted with it).
+    {71683, BinaryLine::Component, 0, -(1.0 - 0.54266), 79.762, 17.4930, 79.2430, 205.073, 231.519,
+     0.51947, 1955.564},
+    {71681, BinaryLine::Secondary, 71683, 0.54266, 79.762, 17.4930, 79.2430, 205.073, 231.519,
+     0.51947, 1955.564},
 };
 
 const BinaryOrbit* binary_orbit(int hip) {

@@ -40,7 +40,7 @@ non-commercial terms.
 | Reid & Brunthaler 2020 (ApJ 892, 39), arXiv abstract | Sgr A*'s apparent proper motion | facts from a public abstract |
 | Liu, Zhu & Zhang 2011 (A&A 526, A16), arXiv abstract and paper | the IAU 1958 galactic pole in the ICRS and the modern pole, for the galactic-node zodiacs | facts from a public preprint |
 | Sixth Catalog of Orbits of Visual Binary Stars (USNO/GSU), orbits, format and ephemeris | the relative orbits of Sirius, Procyon and α Cen AB ("Binary stars"), and the published ephemeris that checks them | US Government work, public |
-| Bond et al. 2017, Bond et al. 2015, Pourbaix & Boffin 2016: arXiv title searches | the component masses of Sirius, Procyon and α Cen, which split each orbit between its stars | facts from public abstracts |
+| Bond et al. 2017, Bond et al. 2015: arXiv title searches; Akeson et al. 2021 (arXiv:2104.10086), its title search and the paper | the component masses of Sirius, Procyon and α Cen, which split each orbit between its stars; each from the paper whose orbit ORB6 lists | facts from public abstracts and a public paper |
 
 Acknowledgements the terms ask for:
 - This research has made use of the SIMBAD database and the VizieR catalogue
@@ -273,7 +273,8 @@ Measured 2026-09-18 on `prometheiad`:
   stars that carry their orbit ("Binary stars" below), what is compared is
   ours: the server's star less its orbit offset, which `binary_orbits.py`
   computes independently.
-  - **α Cen A:** 0.73/0.32/0.73″ at 1900/2000/2100. The straight line had
+  - **α Cen A:** 0.75/0.26/0.82″ at 1900/2000/2100 (0.73/0.32/0.73″ with
+    the earlier masses). The straight line had
     been 28.6/6.8/17.4″ off: Hipparcos's α Cen A carries the orbit's
     velocity of 1991.
   - **Sirius and Procyon:** 1.76/0.69/2.33″ and 1.35/0.17/1.55″. These are
@@ -338,19 +339,23 @@ new and old reductions):
     and asked that it be checked.
 - **The split between the two stars** is by mass: Sirius 2.063 and 1.018
   M☉ (Bond et al. 2017), Procyon 1.478 and 0.592 M☉ (Bond et al. 2015),
-  α Cen 1.13 and 0.97 M☉ (Pourbaix & Boffin 2016). A primary is offset by
-  −M_B/M of the relative orbit; the other star is the relative orbit away
-  from it.
+  α Cen 1.0788 and 0.9092 M☉ (Akeson et al. 2021, mass fraction 0.54266).
+  A primary is offset by −M_B/M of the relative orbit; the other star is
+  the relative orbit away from it.
+  - **Each split comes from the paper that fitted the orbit.** Until
+    2026-09-18, α Cen used Pourbaix & Boffin 2016's masses (1.13 and 0.97)
+    with Akeson's orbit. The Astrolog session caught the mismatch. It moved
+    α Cen A by 185 mas at 1900 and 142 mas at 2100.
 - **What it changes:**
   - Sirius A moves about its barycentre by up to 3.9″ and Procyon A by up
     to 1.7″, which the straight line never showed.
   - α Cen A no longer drifts away: 28.6″ from the FK5 at 1900 before, and
-    0.73″ for its barycentre now.
+    0.75″ for its barycentre now.
   - α Cen B − A is the orbit's separation exactly (14.11″ at J2000, against
     the orbit's 14.13″), where the two straight lines gave 16.47″.
 - **Why α Cen B is placed from A:** its own solution is poor. A barycentre
   shared by both lines, weighted by mass, took B's proper motion with it,
-  and the FK5 then put that barycentre 6.4″ off at 1900, against 0.73″
+  and the FK5 then put that barycentre 6.4″ off at 1900, against 0.75″
   from A's solution alone.
 - **Tested** (`tests/test_stars.cpp`, "stars_binary_orbits"):
   - α Cen A sits exactly at its catalog place at the catalog epoch.
