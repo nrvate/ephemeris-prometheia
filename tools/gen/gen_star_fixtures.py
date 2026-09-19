@@ -4,7 +4,7 @@
 catalog stars computed independently with ERFA (docs/STARS.md, "Validation").
 
 ERFA is the BSD-licensed implementation of the IAU SOFA algorithms, used here
-as an output oracle only (pip install pyerfa). For each object and epoch:
+as an output oracle only (pyerfa: tools/requirements-oracle.txt). For each object and epoch:
 - space motion: pmsafe from the catalog epoch to J2000 (its rigorous model,
   including the light-time term), then
 - geocentric apparent place: apci13 (IAU 2006/2000A, ERFA's own Earth
@@ -17,7 +17,7 @@ as an output oracle only (pip install pyerfa). For each object and epoch:
 The objects' catalog values are read from src/star_catalog.inc, so the
 fixtures follow the generated catalog.
 
-Usage: gen_star_fixtures.py [--check]    (needs pyerfa)
+Usage: gen_star_fixtures.py [--check]    (needs pyerfa: tools/requirements-oracle.txt)
 """
 import math
 import os

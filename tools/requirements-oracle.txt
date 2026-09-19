@@ -1,0 +1,5 @@
+# Output oracles for the fixture generators and outside checks (not needed to
+# build or run the gate): tools/gen/gen_star_fixtures.py,
+# tools/gen/gen_zodiac_fixtures.py, tools/check/stars_fk5.py.
+#   python3 -m venv .venv-oracle && .venv-oracle/bin/pip install -r tools/requirements-oracle.txt
+pyerfa==2.0.1.5

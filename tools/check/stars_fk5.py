@@ -25,7 +25,7 @@ meant to catch a wrong star, a wrong proper motion or a wrong epoch, which are
 arcseconds to arcminutes; it cannot referee milliarcseconds.
 
 Needs: stars-raw/ with the fk5 and bsc5 sources (tools/fetch/stars_fetch.py
---only fk5 --only bsc5), pyerfa, build/prometheia-wire-client and one or
+--only fk5 --only bsc5), pyerfa (tools/requirements-oracle.txt: .venv-oracle), build/prometheia-wire-client and one or
 more servers.
 
 Usage:

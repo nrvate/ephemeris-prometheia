@@ -4,7 +4,7 @@
 at the instant, computed independently with ERFA (docs/FRAMES.md, "Zodiacs
 defined at the instant").
 
-ERFA (the IAU SOFA algorithms, pip install pyerfa) is an output oracle only,
+ERFA (the IAU SOFA algorithms; pyerfa, pinned in tools/requirements-oracle.txt) is an output oracle only,
 and every route here differs from the engine's:
 - a star: pmsafe (rigorous space motion) from its catalog epoch to the date,
   where the engine moves it linearly;
@@ -20,7 +20,7 @@ The anchor's longitude on the true ecliptic of date less the longitude its
 zodiac gives it is the true ayanamsha. Star values come from
 src/star_catalog.inc, so the fixtures follow the generated catalog.
 
-Usage: gen_zodiac_fixtures.py [--check]    (needs pyerfa)
+Usage: gen_zodiac_fixtures.py [--check]    (needs pyerfa: tools/requirements-oracle.txt)
 """
 import math
 import os

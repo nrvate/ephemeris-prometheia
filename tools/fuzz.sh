@@ -56,6 +56,7 @@ for target in frame session; do
     # under this kernel's address-space randomisation (measured: 7 of 12
     # starts, 12 of 12 with it off).
     if ! setarch "$(uname -m)" -R build-fuzz/fuzz_$target fuzz-corpus/$target -max_total_time="$seconds" -timeout=10 \
+        -dict=fuzz/protocol.dict \
         -rss_limit_mb=2048 -artifact_prefix=fuzz-artifacts/$target- -print_final_stats=1 \
         2>fuzz-artifacts/$target.log; then
         status=1

@@ -791,7 +791,10 @@ It builds them with clang in `build-fuzz/` and runs each for SECONDS
     whatever the server was sent.
 
 Corpora start from the protocol's conformance set, read from the Astrolog
-tree (`$PROMETHEIA_ASTROLOG`). They grow in `fuzz-corpus/`, and failures land
+tree (`$PROMETHEIA_ASTROLOG`). Both targets also get `fuzz/protocol.dict`:
+the magic, the message types, canonical and non-canonical NaNs, the zodiac
+tokens and some names. Those are byte strings blind mutation rarely
+guesses, which the planted-fault run below shows is its weak spot. They grow in `fuzz-corpus/`, and failures land
 in `fuzz-artifacts/`; both are gitignored. The fuzzers run with address-space
 randomisation off (`setarch -R`). Under this kernel's randomisation, clang
 14's sanitizer runtime spun forever at start-up in 5 of 12 starts.
