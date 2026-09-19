@@ -67,6 +67,9 @@ constexpr const char* kUsage =
     "  --priority 0|1      0 interactive (default), 1 prefetch\n"
     "  --request-id N      the REQUEST's id (default: a fresh one per run, printed\n"
     "                      as '# request N', which prometheiad logs as req=N)\n"
+    "  --timeout SECONDS   wait this long for each message from the server\n"
+    "                      (default 10; 0 waits forever): a large request on a\n"
+    "                      busy server computes before its first byte\n"
     "  --cancel-after-ms N send CANCEL after N ms (shows ERROR 10 unless the\n"
     "                      answer already went out)\n"
     "  --token T           HELLO's access token\n"
@@ -102,6 +105,7 @@ int main(int argc, char** argv) {
     double step_seconds = 86400.0;
     double target_arcsec = 0.1;
     int cancel_after_ms = -1;
+    int timeout_ms = 10000;
     // A fresh id per run, so the server's log line for this request
     // (prometheiad: "req=<id>") finds this run and no other. Nonzero, 31 bits.
     uint32_t request_id =
@@ -284,6 +288,9 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "--request-id must be nonzero (3.3)\n");
                 return 2;
             }
+        } else if (arg == "--timeout") {
+            const double t = std::strtod(value(), nullptr);
+            timeout_ms = t > 0.0 ? int(std::min(t, 2e6) * 1000.0) : -1;
         } else if (arg == "--cancel-after-ms") {
             cancel_after_ms = std::atoi(value());
         } else if (arg == "--token") {
@@ -368,7 +375,7 @@ int main(int argc, char** argv) {
     uint32_t rows_seen = 0, chunk_expected = 0;
     int n_cols = 6;
     for (;;) {
-        auto msg = ws.receive();
+        auto msg = ws.receive(timeout_ms);
         if (!msg) {
             return fail(msg.error());
         }

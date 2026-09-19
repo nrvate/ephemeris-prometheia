@@ -201,12 +201,19 @@ counted along. The engine, `prometheiad` and the C ABI (version 6,
   report A0 as the ayanamsa. Rates rotate with the positions: the planes
   do not move.
 
-**Against `astrolog-ephd`** (Swiss's plane options), 2026-09-18, Sun, Moon,
-Mars, Jupiter and Saturn at 1900, 2000 and 2026, Fagan-Bradley and Lahiri:
-- plane 0 and plane 1 agree to ≤ 0.003″;
-- plane 2 agrees in latitude to ≤ 0.03″, so the two planes' orientations
-  agree, but every longitude differs by a constant −31.51″ (Fagan-Bradley)
-  or −30.42″ (Lahiri).
+**Against `astrolog-ephd`**, 2026-09-18: Sun, Moon, Mars, Jupiter and
+Saturn at 1900, 2000 and 2026, for Fagan-Bradley and Lahiri.
+- **Now** (Astrolog `284b321` onward, record `2026-09-18j`): all three
+  planes agree.
+  - Plane 0 and plane 1 agree to ≤ 0.003″.
+  - Plane 2's longitude origin agrees to −0.005 … +0.003″.
+- **Before**, while their planes 1 and 2 were Swiss's own plane options:
+  - Plane 2 agreed in latitude to ≤ 0.03″, so the planes' orientations
+    agreed.
+  - But every longitude differed by a constant −31.51″ (Fagan-Bradley) or
+    −30.42″ (Lahiri). The paragraph below is why.
+  - Their first in-house version put the true ayanamsha of t0 on the mean
+    ecliptic of t0, which was off by the nutation at t0 (record i).
 
 The protocol said the zero point is "carried onto" the plane and did not
 say how. The Astrolog side settled it by measurement on its own server
@@ -217,8 +224,8 @@ asked for, so an origin tied to the sky must be the same direction for
 every zodiac, which is what projection gives (0 by construction). The
 proposed §3.5a sentence adopts Prometheia's reading: "the zodiac's own
 zero-point direction … projected onto the plane". Both maintainers approved
-it on 2026-09-18. The Astrolog side changes its answers by ~31″; nothing
-changes here.
+it on 2026-09-18. The Astrolog side changed its answers by ~31″; nothing
+changed here.
 
 ## Zodiacs defined at the instant
 

@@ -58,8 +58,10 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
   `--token`, `--tls`, `--ca`, `--sni` and `--insecure` cover the options
   below; `--segments --target ARCSEC` asks for SEGDATA instead of samples
   (rectangular form; the ayanamsa series rides a `--sid` profile),
-  `--priority 0|1` marks a prefetch, and `--cancel-after-ms N` cancels the
-  request N ms in to show CANCEL at work; `--help` lists the rest.
+  `--priority 0|1` marks a prefetch, `--cancel-after-ms N` cancels the
+  request N ms in to show CANCEL at work, and `--timeout S` waits longer
+  than the default 10 s for each message (a large request on a busy server
+  computes before its first byte); `--help` lists the rest.
 
 ## Operations
 

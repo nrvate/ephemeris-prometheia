@@ -811,7 +811,9 @@ Moon), unanswered 9, **no findings.**
     NaN separation, which is neither equal nor small, as movement.
   - The harness now treats NaN rows as no answer. An explicit refusal
     grades `refused`, which is protocol-correct, not a finding.
-  - The corrected count waits on a re-run.
+  - The corrected count is in record k.
+  - Records i and j are left as they were written. Their TSVs still grade
+    those refused rows `agree`; this note is the correction.
 - Their own gate now reproduces Swiss's anchor-ecliptic answer with their
   in-house arithmetic (54 comparisons, 0.01″). Without the flag, all 54 fail
   by Δψ(t0).

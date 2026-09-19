@@ -20,59 +20,30 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Next
 
-1. **The two-part protocol drop** ("the §3.5a sentences",
-   `/nvm/work/ephv4-drop-planes/DROP.md`, ephv4 `9e9e5c4`). The Astrolog
-   maintainer approved both parts. **Part B is approved here and done**:
-   nodes lie on the ecliptic of date in every frame. The `points-frame`
-   rows then showed `astrolog-ephd`'s J2000-frame node is not the node of
-   date rotated either (J2000 latitude 0.9″ at 1900 where ours reaches the
-   ~47″ tilt). They confirmed it (their `eacaadb`, registry §4.2);
-   their fix is not in yet. **Part A is approved here too** (2026-09-18)
-   and relayed; nothing changes here, and the `sidereal` leg's plane-2
-   rows can be graded once their fix lands.
-   - **Part A, the invariable plane's zero point (approved):** the zodiac's zero-point
-     direction projected onto the plane. This is what Prometheia already
-     does, so nothing changes here. The Astrolog side settled it by
-     measurement on their own server: their origin moves with the zodiac,
-     which a plane cannot. They change.
-   - **Part B, what a frame changes about a node:** "A node lies on the
-     mean ecliptic of date; the profile's frame gives the coordinates it is
-     expressed in." Done here: `orbit_ecliptic` in `src/engine.cpp`, with a
-     test that the ICRF node rotated by the public frame matrices is the
-     date-frame node. The `points` leg's J2000 check now compares the two
-     servers' node of date.
-2. **Star positions against an outside source: done** (STARS.md, "Checked
-   against FK5"). `tools/check/stars_fk5.py` compares a server with the FK5,
-   which is ground-based and pre-Hipparcos. Both servers pass:
-   - the 24 ordinary stars within 0.56″ over 1900–2100;
-   - the four astrometric binaries up to 2.3″ (Sirius), a straight-line-motion
-     limit the servers share;
-   - the two servers within 0.007″ of each other against FK5.
-3. **Re-verified 2026-09-18 (record g):**
-   - their `9bb48a5`: the 1800 descending node answers errCode 3;
-   - their `9e9e5c4`: Toliman agrees (0.04″).
-
-   - their `b89f510`: the J2000-frame node agrees (record h);
-   - their `554288b`: α Cen A agrees to 0.007″ (record h).
-
-   - their `4f9c2a1` + `284b321` (§4.1): both fixed planes agree to the
-     floor (record j). The sweep's 288/288 for them was a harness bug: it
-     counted refusals (NaN rows) as movement. Corrected in record k: 240
-     agree, 48 refused.
-   - **Open on their side:** Astrolog's local Swiss path still delegates
-     planes 1 and 2, so the app's own charts keep the old plane-2 origin.
-     This is a shared-core change, measured by their suite.
-
-4. **Fuzzing (started 2026-09-18).** `tools/fuzz.sh [SECONDS]` (SERVER.md,
-   "Fuzzing").
-   - The session is clean over 2.36 million inputs.
-   - The codec finding (DATA accepts non-finite values, and there is no
-     canonical f32 NaN) is with the Astrolog side.
-   - Load and soak are done too (`prometheia-load`, SERVER.md "Load and
-     soak"): 64 connections for 5 minutes, flat memory, no leak, and the
-     limits hold.
-   - Next, if wanted: longer fuzz runs, and pointing the load tool at
-     `astrolog-ephd`.
+1. **Binary-star orbits** (maintainer's go-ahead, 2026-09-18). Replace the
+   straight line from the Hipparcos epoch for the stars it fails worst:
+   α Cen A reaches 28.6″ from the FK5 at 1900, Sirius 2.3″, Procyon 1.5″
+   (STARS.md, "Checked against FK5").
+2. **Release v0.4.0** (approved). The library and tools will be 0.4.0, since
+   the C API already says "library 0.4", and `prometheiad` 0.5.0.
+3. **Waiting on the Astrolog side**, with every decision already made by
+   the maintainer on 2026-09-18:
+   - **Anchor at its true position** for the eleven zodiacs defined at the
+     instant, on plane 0. This closes the 135 `sidinstant` findings.
+   - **The §3.5a text drop:** a zodiac with no anchor epoch has the
+     instant's zero point on plane 2 and no plane 1, with its anchor at its
+     true position. The class is "no anchor epoch", not a list.
+   - **Their IAU 1958 pole:** they adopt Liu et al.'s ICRS transfer (0.18″
+     on `galequ-iau1958`).
+   - **Sheoran's zodiac:** epoch-anchored per its published definition.
+   - **Their app's local Swiss path:** still carries the old plane-2 origin
+     (a shared-core change, measured by their suite).
+4. **Done on 2026-09-18, for the record:**
+   - both §3.5a parts, and every fix they named, verified (records g–k);
+   - the FK5 star check;
+   - the zodiacs defined at the instant (engine, C API, server, `ephem`);
+   - fuzzing and the load tool, with the codec's float finding fixed and
+     re-pinned (`114f2a5`).
 
 ## The cross-test
 
