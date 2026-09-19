@@ -889,6 +889,27 @@ unanswered 9, and 15 findings (theirs).
 - **Wilhelm's zodiac** agrees with the rest since ours moved to the mean pole
   of date (FRAMES.md).
 
+### Binary orbits, and the clause on both sides, 2026-09-18 (`docs/crosstest/2026-09-18n.tsv`)
+
+Against the Astrolog daemon from their clean `9fbdc21`. The header reads
+`+dirty` because their working tree had changed since; the harness names the
+tree, not the running binary.
+
+Totals: agree 2,041, expected-difference 257, refused 46, unadjudicated 1,
+unanswered 9, and 15 findings (theirs).
+- **The §3.5a clause is on both sides** (their `031f3c9`). Each server
+  refuses plane 1 for the zodiacs defined at the instant and answers plane
+  2 from the instant's zero point: 24 refusals theirs, 22 ours.
+- **Binary stars** ([STARS.md](STARS.md), "Binary stars"). Sirius, Procyon,
+  and α Cen A and B now carry their orbits here. Their server keeps the
+  straight line.
+  - The `stars` and `stars-alcen` rows for these four are
+    expected-difference only when the servers differ by exactly our bend,
+    computed independently by `binary_orbits.py`. They do, to 3 mas.
+  - α Cen B − A is the orbit's 14.11″ here, and 16.47″ on theirs.
+- **The 15 findings** are `galequ-iau1958`'s pole transfer, which is with
+  their maintainer.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

@@ -20,10 +20,7 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Next
 
-1. **Binary-star orbits** (maintainer's go-ahead, 2026-09-18). Replace the
-   straight line from the Hipparcos epoch for the stars it fails worst:
-   α Cen A reaches 28.6″ from the FK5 at 1900, Sirius 2.3″, Procyon 1.5″
-   (STARS.md, "Checked against FK5").
+1. ~~Binary-star orbits~~: done (`53d5f58`, STARS.md "Binary stars").
 2. **Release v0.4.0** (approved). The library and tools will be 0.4.0, since
    the C API already says "library 0.4", and `prometheiad` 0.5.0.
 3. **Waiting on the Astrolog side**, with every decision already made by
@@ -65,10 +62,10 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `bary`, `deflection` (textbook formula);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18m.tsv`. The only findings are
-  the 15 `galequ-iau1958` rows (their pole transfer, before their
-  maintainer); the zodiacs defined at the instant otherwise agree (CROSS-TEST.md,
-  "The true anchor").
+- **Latest record:** `docs/crosstest/2026-09-18n.tsv`. The only findings are
+  the 15 `galequ-iau1958` rows (their pole transfer, with their
+  maintainer). The binary-star rows are expected to differ by our orbit's
+  bend, and do (CROSS-TEST.md, "Binary orbits").
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;
