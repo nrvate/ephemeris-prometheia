@@ -11,7 +11,25 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.4.0 — 2026-09-18
+
+The same day as 0.3.0.
+- **New:** eleven zodiacs defined at the instant; binary stars on their
+  orbits.
+- **Faster:** sidereal positions four times faster.
+- **Hardening:**
+  - a fuzzer and a load tool;
+  - two fuzz findings fixed, one in each project's code;
+  - the protocol re-pinned to the Astrolog side's floats drop.
+
+Versions:
+- the library and tools are 0.4.0, and the C ABI is still 6 (the new
+  sidereal modes are appended values);
+- `prometheiad` is 0.5.0.
+
+The cross-test's current record is `docs/crosstest/2026-09-18n.tsv`. Its
+only findings are the Astrolog side's IAU 1958 pole transfer, which is with
+their maintainer.
 
 - **Binary stars move on their orbits** (docs/STARS.md, "Binary stars"):
   Sirius A, Procyon A, and α Cen A and B.

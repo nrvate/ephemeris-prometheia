@@ -510,7 +510,7 @@ TEST_CASE("ephem_errors_and_status") {
     CHECK(r.out.find("Usage: ephem") == 0);
     r = ephem("-V");
     CHECK(r.status == 0);
-    CHECK(r.out.find("ephem (Ephemeris Prometheia) 0.3.0") == 0);
+    CHECK(r.out.find("ephem (Ephemeris Prometheia) 0.4.0") == 0);
     r = ephem("-j 2451545 -f csv sun", "PROMETHEIA_EPHEMERIS=" + k.file.path.string());
     CHECK(r.status == 0);
     CHECK(parse_csv(r.out).size() == 1);

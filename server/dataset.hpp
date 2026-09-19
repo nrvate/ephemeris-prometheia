@@ -15,7 +15,7 @@
 namespace prometheia::server {
 
 struct Dataset {
-    std::string engine;    // WELCOME's engine string, e.g. "Prometheia 0.3.0, JPL DE440"
+    std::string engine;    // WELCOME's engine string, e.g. "Prometheia 0.4.0, JPL DE440"
     std::string ephemeris; // the ephemeris file's display name
     std::vector<std::string> catalogs;      // display names, in the order they were added
     std::vector<std::string> hypotheticals; // element files' display names, in load order

@@ -8,21 +8,17 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Released
 
-- **v0.3.0**, published 2026-09-18
-  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.3.0).
-  - The library and tools are 0.3.0, with C ABI 6
-    (`prometheia_options.sidereal_plane`). The Astrolog plugin consumes it
-    (ephv4 `1be4518`).
-  - `prometheiad` is 0.4.0: a node asked for in a fixed frame is now the node
-    of date (§3.5a Part B).
-  - Two new outside checks: the FK5 stars, and the `sidsweep` leg.
-- **v0.2.0**, the same day (tag on `33c697a`).
+- **v0.4.0**, published 2026-09-18
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.4.0).
+  - The library and tools are 0.4.0 (C ABI 6); `prometheiad` is 0.5.0.
+  - New: the zodiacs defined at the instant, binary-star orbits, sidereal
+    positions four times faster, fuzzing and load tools.
+- **v0.3.0** and **v0.2.0**, the same day.
 
 ## Next
 
 1. ~~Binary-star orbits~~: done (`53d5f58`, STARS.md "Binary stars").
-2. **Release v0.4.0** (approved). The library and tools will be 0.4.0, since
-   the C API already says "library 0.4", and `prometheiad` 0.5.0.
+2. ~~Release v0.4.0~~: done.
 3. **Waiting on the Astrolog side**, with every decision already made by
    the maintainer on 2026-09-18:
    - ~~Anchor at its true position~~: landed (their `789f3c2`), record m.
