@@ -505,6 +505,34 @@ TEST_CASE("engine_orbit_points_geometry") {
              .ok());
 }
 
+TEST_CASE("engine_orbit_points_are_smooth_topocentrically") {
+    // A Moon point's retarded epoch, jd - tau, is rounded to a JD double
+    // (~40 us); its focus, the Earth, moves at 30 km/s, and topocentrically
+    // tau changes with the site, so without the rounding error recovered the
+    // point jittered by ~1 m (1.2 mas at the Moon). Third differences on a
+    // 1/4096-day grid expose it: smooth motion leaves ~1e-11 deg.
+    TempFile tf("engine-orbit-smooth");
+    Engine e = open_synthetic(tf);
+    CalcOptions o;
+    o.center = Center::Topocentric;
+    const double deg = 3.14159265358979323846 / 180.0;
+    o.site = {8.55 * deg, 47.37 * deg, 500.0};
+    o.speed = false;
+    const double h = 1.0 / 4096.0;
+    double lon[40];
+    for (int k = 0; k < 40; ++k) {
+        auto r = e.calc_orbit_point(body::kMoon, OrbitPoint::AscendingNode, OrbitElements::Mean,
+                                    2451545.0 + k * h, o);
+        REQUIRE_MESSAGE(r.ok(), r.error().message);
+        lon[k] = r.value().pos.lon_deg;
+    }
+    double worst = 0.0;
+    for (int k = 0; k + 3 < 40; ++k)
+        worst = std::max(worst, std::fabs(lon[k + 3] - 3 * lon[k + 2] + 3 * lon[k + 1] - lon[k]));
+    INFO("worst third difference ", worst * 3.6e9, " uas");
+    CHECK(worst < 1e-8);
+}
+
 TEST_CASE("engine_calc_ut_uses_delta_t") {
     TempFile tf("engine-ut");
     Engine e = open_synthetic(tf);
