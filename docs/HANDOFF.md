@@ -57,7 +57,8 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
    - their `4f9c2a1` + `284b321` (§4.1): both fixed planes agree to the
      floor (record j). The sweep's 288/288 for them was a harness bug: it
-     counted refusals (NaN rows) as movement. Fixed; re-run pending.
+     counted refusals (NaN rows) as movement. Corrected in record k: 240
+     agree, 48 refused.
    - **Open on their side:** Astrolog's local Swiss path still delegates
      planes 1 and 2, so the app's own charts keep the old plane-2 origin.
      This is a shared-core change, measured by their suite.
@@ -94,9 +95,9 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `bary`, `deflection` (textbook formula);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18j.tsv`, against Astrolog `qt`
-  `284b321`: **no findings** (CROSS-TEST.md, "No findings"). Every §3.5a
-  amendment is implemented on both sides.
+- **Latest record:** `docs/crosstest/2026-09-18k.tsv`, against Astrolog `qt`
+  `114f2a5`: **no findings**. Their sweep is corrected to 240 agree and 48
+  refused (CROSS-TEST.md, "The sweep corrected").
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;

@@ -819,6 +819,22 @@ Moon), unanswered 9, **no findings.**
   daemon started, most likely by their `make check`. The numbers show the
   fix in effect.
 
+### The sweep corrected, 2026-09-18 (`docs/crosstest/2026-09-18k.tsv`)
+
+Against Astrolog `qt` at `114f2a5`, marked `+dirty` by the harness because
+their tree had uncommitted changes at build time. The sweep leg treats a
+refusal's NaN rows as no answer:
+agree 1,903, expected-difference 243, **refused 48**, unadjudicated 1,
+unanswered 9, **no findings**.
+- **`astrolog-ephd` refuses twelve tokens on both fixed planes** (errCode
+  2): the eleven zodiacs defined at the instant, and `true-sheoran`. Their
+  other 36 tokens move on both planes.
+- Sheoran's zodiac is anchored at an epoch per its published definition
+  (−60° at the winter solstice of 4174 BCE), so its refusal is their
+  choice, not the proposed §3.5a clause. The protocol allows it.
+- `prometheiad` lists three tokens here (it did not yet list the new ones):
+  288/288.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
