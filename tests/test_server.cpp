@@ -649,6 +649,33 @@ TEST_CASE("server_profiles") {
         CHECK(s.on_message(request(seg, 213), true));
         CHECK(error_of(drain(s)[0]).code == eph::kErrUnsupported);
     }
+    SUBCASE("zodiacs defined at the instant: served, and plane 1 refused per object") {
+        const eph::Welcome w = f.welcome();
+        eph::Capabilities caps;
+        std::string why;
+        REQUIRE(eph::ParseCapabilities(w.caps_, &caps, &why) == eph::kOk);
+        for (const char* t : {"true-citra", "galcent-0sag", "galequ-true", "galcent-mula-wilhelm"})
+            CHECK(std::find(caps.zodiacs.begin(), caps.zodiacs.end(), t) != caps.zodiacs.end());
+        CalcOptions o;
+        o.sidereal = SiderealMode::TrueCitra;
+        const CalcResult want = engine(o);
+        eph::Profile pf;
+        pf.zodiac = "true-citra";
+        const Data d = one(pf, eph::kColAyanamsa);
+        REQUIRE(d.cols.size() >= 7);
+        CHECK(d.cols[0] == want.pos.lon_deg);
+        CHECK(d.cols[6] == *want.ayanamsa_deg);
+        // No anchor epoch, so no ecliptic of the anchor epoch (3.5a).
+        pf.siderealPlane = eph::kSidPlaneAnchor;
+        const Data refused = one(pf);
+        REQUIRE(refused.meta.size() == 1);
+        CHECK(refused.meta[0].rowsOk == 0);
+        CHECK(refused.meta[0].errCode == eph::kOErrUnsupported);
+        // The invariable plane is served, at the instant's zero point.
+        o.sidereal_plane = SiderealPlane::Invariable;
+        pf.siderealPlane = eph::kSidPlaneInvariable;
+        CHECK(one(pf).cols[0] == engine(o).pos.lon_deg);
+    }
     SUBCASE("an observer equal to the object is a per-object error") {
         eph::Profile pf;
         pf.observer = eph::kObsBody;

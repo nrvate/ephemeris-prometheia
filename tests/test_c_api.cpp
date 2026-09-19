@@ -103,6 +103,8 @@ TEST_CASE("c_api_library_and_defaults") {
     CHECK(PROMETHEIA_SIDEREAL_FAGAN_BRADLEY == int(SiderealMode::FaganBradley));
     CHECK(PROMETHEIA_SIDEREAL_LAHIRI == int(SiderealMode::Lahiri));
     CHECK(PROMETHEIA_SIDEREAL_USER == int(SiderealMode::User));
+    CHECK(PROMETHEIA_SIDEREAL_TRUE_CITRA == int(SiderealMode::TrueCitra));
+    CHECK(PROMETHEIA_SIDEREAL_GALEQU_MULA == int(SiderealMode::GalacticEquatorMula));
     CHECK(PROMETHEIA_SIDEREAL_PLANE_ANCHOR == int(SiderealPlane::EclipticOfAnchor));
     CHECK(PROMETHEIA_SIDEREAL_PLANE_INVARIABLE == int(SiderealPlane::Invariable));
     CHECK(PROMETHEIA_ABI_VERSION == 6);
@@ -316,6 +318,11 @@ TEST_CASE("c_api_calc_errors") {
     bad([](prometheia_options& x) { x.coords = 2; });
     bad([](prometheia_options& x) { x.sidereal = 2; });
     bad([](prometheia_options& x) { x.sidereal = -2; });
+    bad([](prometheia_options& x) { x.sidereal = 34; }); // an A.11 token not served
+    bad([](prometheia_options& x) {                      // no anchor epoch, so no ecliptic of it
+        x.sidereal = PROMETHEIA_SIDEREAL_TRUE_CITRA;
+        x.sidereal_plane = PROMETHEIA_SIDEREAL_PLANE_ANCHOR;
+    });
     bad([](prometheia_options& x) { x.precession = 2; });
     bad([](prometheia_options& x) { x.sidereal_plane = 3; });
     bad([](prometheia_options& x) { x.sidereal_plane = -1; });

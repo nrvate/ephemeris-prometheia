@@ -124,7 +124,29 @@ printf("%s\n", r.source);    /* the element set's name */
   epoch, or the invariable plane. The two fixed planes apply only with a
   sidereal zodiac, need ecliptic coordinates (`PROMETHEIA_ERROR_ARGUMENT`
   otherwise), ignore `frame`, and report A0 as `ayanamsa_deg`
-  ([FRAMES.md](FRAMES.md), "Sidereal planes"). Selector fields are plain `int`s,
+  ([FRAMES.md](FRAMES.md), "Sidereal planes").
+- **Zodiacs defined at the instant** (library 0.4, ABI still 6: enumerated
+  values are only appended).
+  - The modes are `PROMETHEIA_SIDEREAL_TRUE_CITRA`, `_TRUE_REVATI`,
+    `_TRUE_PUSHYA`, `_TRUE_MULA`, `_GALCENT_0SAG`, `_GALCENT_COCHRANE`,
+    `_GALCENT_RGILBRAND`, `_GALCENT_MULA_WILHELM`, `_GALEQU_IAU1958`,
+    `_GALEQU_TRUE` and `_GALEQU_MULA`, numbered as the protocol's A.11
+    tokens.
+  - They have no anchor epoch, so `PROMETHEIA_SIDEREAL_PLANE_ANCHOR` is
+    refused for them (`PROMETHEIA_ERROR_ARGUMENT`). On the invariable
+    plane their zero point is the instant's
+    ([FRAMES.md](FRAMES.md), "Zodiacs defined at the instant").
+  - A library older than 0.4 refuses these values with
+    `PROMETHEIA_ERROR_ARGUMENT`.
+- **`ayanamsa_deg` depends on the frame**, for every zodiac, as the
+  protocol's does (§3.5a).
+  - The true ayanamsha in the true frame, the mean one in the mean frame,
+    and the constant mean value at J2000.0 in the J2000 and ICRF frames.
+  - On a fixed plane it is the anchor's A0, or the instant's mean ayanamsha
+    for a zodiac defined at the instant.
+  - The same zodiac at the same instant therefore reports different values
+    in different frames. Compare the column only within one frame.
+- Selector fields are plain `int`s,
   range-checked on every call. Boolean switches treat any nonzero value as
   true. `NULL` options mean the defaults.
 - **Units.** The C struct takes the topocentric site in **degrees**

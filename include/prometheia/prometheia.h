@@ -101,6 +101,22 @@ PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION *
 #define PROMETHEIA_SIDEREAL_TROPICAL (-1)
 #define PROMETHEIA_SIDEREAL_FAGAN_BRADLEY 0
 #define PROMETHEIA_SIDEREAL_LAHIRI 1
+/* Zodiacs defined at the instant (library 0.4): the anchor's true position
+ * held at a fixed longitude on the true ecliptic of date. Numbered as the
+ * ephemeris protocol's A.11 tokens. They have no anchor epoch, so
+ * PROMETHEIA_SIDEREAL_PLANE_ANCHOR is refused for them (docs/FRAMES.md,
+ * "Zodiacs defined at the instant"). */
+#define PROMETHEIA_SIDEREAL_GALCENT_0SAG 17         /* Sgr A* at 240 deg */
+#define PROMETHEIA_SIDEREAL_TRUE_CITRA 27           /* Spica at 180 deg */
+#define PROMETHEIA_SIDEREAL_TRUE_REVATI 28          /* zeta Psc at 359d50' */
+#define PROMETHEIA_SIDEREAL_TRUE_PUSHYA 29          /* delta Cnc at 106 deg */
+#define PROMETHEIA_SIDEREAL_GALCENT_RGILBRAND 30    /* Sgr A* at the golden section */
+#define PROMETHEIA_SIDEREAL_GALEQU_IAU1958 31       /* galactic node, IAU 1958 pole */
+#define PROMETHEIA_SIDEREAL_GALEQU_TRUE 32          /* galactic node, modern pole */
+#define PROMETHEIA_SIDEREAL_GALEQU_MULA 33          /* galactic node at 246d40' */
+#define PROMETHEIA_SIDEREAL_TRUE_MULA 35            /* lambda Sco at 240 deg */
+#define PROMETHEIA_SIDEREAL_GALCENT_MULA_WILHELM 36 /* Sgr A*, polar, at 246d40' */
+#define PROMETHEIA_SIDEREAL_GALCENT_COCHRANE 40     /* Sgr A* at 270 deg */
 #define PROMETHEIA_SIDEREAL_USER 255
 
 /* The plane a sidereal longitude is counted along (ABI version 6): the

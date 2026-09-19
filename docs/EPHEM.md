@@ -61,6 +61,12 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 - `--frame true|mean|j2000|icrf`, `--equatorial`.
 - `--precession iau2006|vondrak2011`: the long-term model for epochs centuries or more from J2000.
 - `--sidereal fagan-bradley|fb|lahiri|user:JD:DEG|tropical`. For `user`, DEG is the mean ayanamsha at the TT Julian date JD.
+  It also takes the zodiacs defined at the instant, by their protocol tokens:
+  `true-citra`, `true-revati`, `true-pushya`, `true-mula`, `galcent-0sag`,
+  `galcent-cochrane`, `galcent-rgilbrand`, `galcent-mula-wilhelm`,
+  `galequ-iau1958`, `galequ-true` and `galequ-mula`
+  ([FRAMES.md](FRAMES.md), "Zodiacs defined at the instant"). They have no
+  anchor epoch, so `--sid-plane anchor` is an error with them.
 - `--sid-plane date|anchor|invariable`: the plane a sidereal longitude is counted along ([FRAMES.md](FRAMES.md), "Sidereal planes"). The two fixed planes are frames of their own: the header names the plane in place of the frame, and `--equatorial` is refused with them.
 - Apparent place is the default. `--astrometric` applies light time only and `--geometric` applies no corrections. `--no-light-time`, `--no-deflection`, `--no-aberration` and `--no-speed` switch off one correction each. `--no-sigma` skips catalog uncertainties, which cost twelve extra integrations per small body.
 

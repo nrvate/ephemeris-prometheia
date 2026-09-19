@@ -232,8 +232,33 @@ static int parse_site(const char* s, prometheia_options* o) {
     return 1;
 }
 
-/* "fagan-bradley" | "fb" | "lahiri" | "user:JD:DEG" | "tropical" */
+/* The zodiacs defined at the instant, by the ephemeris protocol's tokens. */
+static const struct {
+    const char* token;
+    int mode;
+} kInstantZodiacs[] = {
+    {"true-citra", PROMETHEIA_SIDEREAL_TRUE_CITRA},
+    {"true-revati", PROMETHEIA_SIDEREAL_TRUE_REVATI},
+    {"true-pushya", PROMETHEIA_SIDEREAL_TRUE_PUSHYA},
+    {"true-mula", PROMETHEIA_SIDEREAL_TRUE_MULA},
+    {"galcent-0sag", PROMETHEIA_SIDEREAL_GALCENT_0SAG},
+    {"galcent-cochrane", PROMETHEIA_SIDEREAL_GALCENT_COCHRANE},
+    {"galcent-rgilbrand", PROMETHEIA_SIDEREAL_GALCENT_RGILBRAND},
+    {"galcent-mula-wilhelm", PROMETHEIA_SIDEREAL_GALCENT_MULA_WILHELM},
+    {"galequ-iau1958", PROMETHEIA_SIDEREAL_GALEQU_IAU1958},
+    {"galequ-true", PROMETHEIA_SIDEREAL_GALEQU_TRUE},
+    {"galequ-mula", PROMETHEIA_SIDEREAL_GALEQU_MULA},
+};
+
+/* "fagan-bradley" | "fb" | "lahiri" | "user:JD:DEG" | "tropical" | a token above */
 static int parse_sidereal(const char* s, prometheia_options* o) {
+    size_t i;
+    for (i = 0; i < sizeof kInstantZodiacs / sizeof kInstantZodiacs[0]; ++i) {
+        if (equals_nocase(s, kInstantZodiacs[i].token)) {
+            o->sidereal = kInstantZodiacs[i].mode;
+            return 1;
+        }
+    }
     if (equals_nocase(s, "tropical")) {
         o->sidereal = PROMETHEIA_SIDEREAL_TROPICAL;
         return 1;
@@ -323,7 +348,11 @@ static void print_help(void) {
            "      --site LON,LAT[,H] geodetic degrees east/north, metres; implies topo\n"
            "      --frame true|mean|j2000|icrf   equinox of date (default true)\n"
            "      --equatorial       right ascension/declination instead of ecliptic\n"
-           "      --sidereal MODE    fagan-bradley (fb), lahiri, user:JD:DEG, tropical\n"
+           "      --sidereal MODE    fagan-bradley (fb), lahiri, user:JD:DEG, tropical, or a\n"
+           "                         zodiac defined at the instant: true-citra, true-revati,\n"
+           "                         true-pushya, true-mula, galcent-0sag, galcent-cochrane,\n"
+           "                         galcent-rgilbrand, galcent-mula-wilhelm, galequ-iau1958,\n"
+           "                         galequ-true, galequ-mula (no --sid-plane anchor)\n"
            "      --sid-plane P      the sidereal plane: date (default), anchor (the\n"
            "                         ecliptic of the zodiac's anchor epoch) or invariable\n"
            "      --precession MODEL iau2006 (default) or vondrak2011 (long-term)\n"

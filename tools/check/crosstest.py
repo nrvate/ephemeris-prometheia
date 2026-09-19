@@ -859,6 +859,65 @@ def leg_sidereal(client, ours, theirs, table, verbose):
                 print(f"  {zodiac:13s} {plane:10s} worst beyond the tropical gap {worst:+.4f}\"")
 
 
+# Zodiacs defined at the instant (docs/FRAMES.md): plane 0, both servers, for
+# the tokens both list. astrolog-ephd took the anchor's apparent position
+# (aberration included) where the published definition, and the proposed
+# 3.5a sentence, take its true position: its rows differ by the anchor's
+# aberration, up to ~20", until it adopts the true anchor (2026-09-18).
+INSTANT_TOKENS = ["true-citra", "true-revati", "true-pushya", "true-mula", "galcent-0sag",
+                  "galcent-cochrane", "galcent-rgilbrand", "galcent-mula-wilhelm",
+                  "galequ-iau1958", "galequ-true", "galequ-mula"]
+INSTANT_EPOCHS = [2415020.5, 2451545.0, 2488069.5]
+
+
+def leg_sidinstant(client, ours, theirs, table, verbose):
+    print("\n== sidinstant: zodiacs defined at the instant, plane 0, apparent, true of date")
+    wel_a = ask(client, ours, ["--obj", "10", "--corrections", "0"], verbose)
+    wel_b = ask(client, theirs, ["--obj", "10", "--corrections", "0"], verbose)
+    both = [t for t in INSTANT_TOKENS
+            if t in wel_a.caps.get("zodiacs", []) and t in wel_b.caps.get("zodiacs", [])]
+    if not both:
+        print("  no token listed by both servers")
+        return
+    tropical = {}
+    for jd in INSTANT_EPOCHS:
+        args = ["--jd", repr(jd), "--corrections", "7", "--deltat", str(DELTA_T)]
+        for b in SIDEREAL_BODIES:
+            args += ["--obj", str(b)]
+        ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+        for k, b in enumerate(SIDEREAL_BODIES):
+            va, vb = ra.row(k), rb.row(k)
+            if va is not None and vb is not None and not math.isnan(va[0] + vb[0]):
+                tropical[(jd, b)] = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+    for token in both:
+        offsets = []
+        for jd in INSTANT_EPOCHS:
+            args = ["--jd", repr(jd), "--corrections", "7", "--deltat", str(DELTA_T), "--sid", token]
+            for b in SIDEREAL_BODIES:
+                args += ["--obj", str(b)]
+            ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+            table.asked(ra, rb)
+            for k, b in enumerate(SIDEREAL_BODIES):
+                va, vb = ra.row(k), rb.row(k)
+                base = dict(leg="sidinstant", epoch_tt=jd, object=b, observer="geo",
+                            frame=f"{token} date", plane="ecliptic", mask=7, deltat=DELTA_T,
+                            tier=2)
+                if va is None or vb is None or any(math.isnan(v) for v in va[:2] + vb[:2]):
+                    table.add(**base, verdict="unanswered", note="no row from one side")
+                    continue
+                s = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+                trop = tropical.get((jd, b), 0.0)
+                band = trop + SIDEREAL_EXTRA
+                dl = ((va[0] - vb[0] + 180.0) % 360.0 - 180.0) * 3600.0
+                offsets.append(dl)
+                table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,
+                          band=band, verdict="agree" if s <= band else "finding (theirs)",
+                          note=f"longitude offset {dl:+.4f}\"; the anchor at its true position "
+                               "(published definition, 3.5a as proposed); theirs apparent "
+                               "until they adopt it")
+        print(f"  {token:22s} longitude offset {min(offsets):+.4f}..{max(offsets):+.4f}\"")
+
+
 SWEEP_BODIES = [10, 301, 4, 5]
 SWEEP_EPOCHS = [2433463.5, 2478938.5]  # 1950-07-01, 2075-01-01: off every token's anchor
 SWEEP_USER_ANCHOR = "2415020.5,22.46"  # any anchor will do: the leg asks whether a plane moves
@@ -1207,7 +1266,7 @@ def main():
     ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,sidereal,sidsweep,stars")
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,sidereal,sidsweep,sidinstant,stars")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvmraid/shares/Astrolog", help="the Astrolog tree, for its commit")
     ap.add_argument("--astrolog-bin", default="/nvmraid/shares/Astrolog/astrolog-ephd",
@@ -1253,6 +1312,8 @@ def main():
         leg_sidereal(client, ours, theirs, table, args.verbose)
     if "sidsweep" in legs:
         leg_sidsweep(client, ours, theirs, table, args.verbose)
+    if "sidinstant" in legs:
+        leg_sidinstant(client, ours, theirs, table, args.verbose)
     if "deflection" in legs:
         leg_deflection(client, ours, theirs, a, b, table, args.verbose)
     if "bary" in legs:

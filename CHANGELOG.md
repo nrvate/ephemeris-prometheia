@@ -25,7 +25,12 @@ documented, not that it is frozen.
   - They have no anchor epoch, so the ecliptic of the anchor epoch is
     refused for them. On the invariable plane their zero point is the
     instant's.
-  - Engine only so far: the C API and `prometheiad` follow.
+  - In the C API as `PROMETHEIA_SIDEREAL_TRUE_CITRA` … `_GALEQU_MULA`,
+    numbered as the protocol's A.11 tokens. ABI 6 is unchanged, since
+    enumerated values are only appended. The Astrolog side reviewed them
+    before they landed.
+  - `prometheiad` advertises the eleven tokens.
+  - `ephem --sidereal` takes the same tokens.
 - **Fuzzing** (docs/SERVER.md, "Fuzzing"): `tools/fuzz.sh` runs libFuzzer
   targets over the protocol codec and over `prometheiad`'s session, under
   ASan and UBSan. The check is the protocol's own: every reply must parse

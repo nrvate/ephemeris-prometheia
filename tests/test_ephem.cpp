@@ -240,6 +240,11 @@ TEST_CASE("ephem_options_map_to_engine") {
     lahiri_inv.sidereal_plane = SiderealPlane::Invariable;
     CalcOptions user_anchor = user;
     user_anchor.sidereal_plane = SiderealPlane::EclipticOfAnchor;
+    CalcOptions citra;
+    citra.sidereal = SiderealMode::TrueCitra;
+    CalcOptions wilhelm_inv;
+    wilhelm_inv.sidereal = SiderealMode::GalacticCentreMulaWilhelm;
+    wilhelm_inv.sidereal_plane = SiderealPlane::Invariable;
     const Case cases[] = {
         {"--geometric --frame j2000 --equatorial", geo_j2000_eq},
         {"--astrometric --frame=mean", astro_mean},
@@ -253,6 +258,8 @@ TEST_CASE("ephem_options_map_to_engine") {
         {"--center barycentric", bary},
         {"--sidereal lahiri --sid-plane invariable", lahiri_inv},
         {"--sidereal user:2440000.5:22.25 --sid-plane anchor", user_anchor},
+        {"--sidereal true-citra", citra},
+        {"--sidereal galcent-mula-wilhelm --sid-plane invariable", wilhelm_inv},
     };
     for (const Case& c : cases) {
         const Run r = ephem(k.arg + " -j 2455000.5 -f csv jupiter " + c.args);

@@ -93,6 +93,22 @@ prometheia_status guarded(prometheia_error* err, F&& f) {
     }
 }
 
+// The C sidereal values are the engine's (a static_cast passes them through).
+static_assert(PROMETHEIA_SIDEREAL_FAGAN_BRADLEY == int(SiderealMode::FaganBradley));
+static_assert(PROMETHEIA_SIDEREAL_LAHIRI == int(SiderealMode::Lahiri));
+static_assert(PROMETHEIA_SIDEREAL_GALCENT_0SAG == int(SiderealMode::GalacticCentre0Sag));
+static_assert(PROMETHEIA_SIDEREAL_TRUE_CITRA == int(SiderealMode::TrueCitra));
+static_assert(PROMETHEIA_SIDEREAL_TRUE_REVATI == int(SiderealMode::TrueRevati));
+static_assert(PROMETHEIA_SIDEREAL_TRUE_PUSHYA == int(SiderealMode::TruePushya));
+static_assert(PROMETHEIA_SIDEREAL_GALCENT_RGILBRAND == int(SiderealMode::GalacticCentreGilBrand));
+static_assert(PROMETHEIA_SIDEREAL_GALEQU_IAU1958 == int(SiderealMode::GalacticEquatorIau1958));
+static_assert(PROMETHEIA_SIDEREAL_GALEQU_TRUE == int(SiderealMode::GalacticEquatorTrue));
+static_assert(PROMETHEIA_SIDEREAL_GALEQU_MULA == int(SiderealMode::GalacticEquatorMula));
+static_assert(PROMETHEIA_SIDEREAL_TRUE_MULA == int(SiderealMode::TrueMula));
+static_assert(PROMETHEIA_SIDEREAL_GALCENT_MULA_WILHELM ==
+              int(SiderealMode::GalacticCentreMulaWilhelm));
+static_assert(PROMETHEIA_SIDEREAL_GALCENT_COCHRANE == int(SiderealMode::GalacticCentreCochrane));
+static_assert(PROMETHEIA_SIDEREAL_USER == int(SiderealMode::User));
 static_assert(PROMETHEIA_SIDEREAL_PLANE_DATE == int(SiderealPlane::EclipticOfDate));
 static_assert(PROMETHEIA_SIDEREAL_PLANE_ANCHOR == int(SiderealPlane::EclipticOfAnchor));
 static_assert(PROMETHEIA_SIDEREAL_PLANE_INVARIABLE == int(SiderealPlane::Invariable));
@@ -115,6 +131,17 @@ prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometh
     case PROMETHEIA_SIDEREAL_TROPICAL:
     case PROMETHEIA_SIDEREAL_FAGAN_BRADLEY:
     case PROMETHEIA_SIDEREAL_LAHIRI:
+    case PROMETHEIA_SIDEREAL_GALCENT_0SAG:
+    case PROMETHEIA_SIDEREAL_TRUE_CITRA:
+    case PROMETHEIA_SIDEREAL_TRUE_REVATI:
+    case PROMETHEIA_SIDEREAL_TRUE_PUSHYA:
+    case PROMETHEIA_SIDEREAL_GALCENT_RGILBRAND:
+    case PROMETHEIA_SIDEREAL_GALEQU_IAU1958:
+    case PROMETHEIA_SIDEREAL_GALEQU_TRUE:
+    case PROMETHEIA_SIDEREAL_GALEQU_MULA:
+    case PROMETHEIA_SIDEREAL_TRUE_MULA:
+    case PROMETHEIA_SIDEREAL_GALCENT_MULA_WILHELM:
+    case PROMETHEIA_SIDEREAL_GALCENT_COCHRANE:
     case PROMETHEIA_SIDEREAL_USER:
         break;
     default:

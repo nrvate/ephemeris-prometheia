@@ -28,6 +28,29 @@ using Clock = std::chrono::steady_clock;
 constexpr int kComputeSliceMs = 2;
 // The lookup budget this server offers (WELCOME's A.3 0x0010).
 constexpr uint16_t kLookupMax = 1024;
+
+// The A.11 zodiac tokens this server serves, and the engine's mode for each:
+// WELCOME lists exactly these (A.3 0x0007), and a profile maps through them.
+// `user` is served too, anchored by the profile's own fields.
+struct ZodiacToken {
+    const char* token;
+    SiderealMode mode;
+};
+constexpr ZodiacToken kZodiacTokens[] = {
+    {"fagan-bradley", SiderealMode::FaganBradley},
+    {"lahiri", SiderealMode::Lahiri},
+    {"galcent-0sag", SiderealMode::GalacticCentre0Sag},
+    {"true-citra", SiderealMode::TrueCitra},
+    {"true-revati", SiderealMode::TrueRevati},
+    {"true-pushya", SiderealMode::TruePushya},
+    {"galcent-rgilbrand", SiderealMode::GalacticCentreGilBrand},
+    {"galequ-iau1958", SiderealMode::GalacticEquatorIau1958},
+    {"galequ-true", SiderealMode::GalacticEquatorTrue},
+    {"galequ-mula", SiderealMode::GalacticEquatorMula},
+    {"true-mula", SiderealMode::TrueMula},
+    {"galcent-mula-wilhelm", SiderealMode::GalacticCentreMulaWilhelm},
+    {"galcent-cochrane", SiderealMode::GalacticCentreCochrane},
+};
 // The star source the LOOKUP answer names; the compiled-in catalog.
 constexpr const char* kStarSource = "prometheia stars (BSC5, Hipparcos 1991.25, Messier)";
 constexpr const char* kCatalogSource = "prometheia small-body catalogs";
@@ -177,12 +200,15 @@ std::optional<std::string> plan_profiles(const eph::Request& q, std::vector<Prof
             p.opts.sidereal_plane = SiderealPlane::EclipticOfDate;
             break;
         }
+        const auto served =
+            std::find_if(std::begin(kZodiacTokens), std::end(kZodiacTokens),
+                         [&](const ZodiacToken& z) { return pf.zodiac == z.token; });
         if (pf.zodiac.empty()) {
             p.opts.sidereal = SiderealMode::Tropical;
-        } else if (pf.zodiac == "fagan-bradley") {
-            p.opts.sidereal = SiderealMode::FaganBradley;
-        } else if (pf.zodiac == "lahiri") {
-            p.opts.sidereal = SiderealMode::Lahiri;
+        } else if (served != std::end(kZodiacTokens)) {
+            // A zodiac defined at the instant refuses plane 1 in the engine,
+            // per object (errCode 2): it has no anchor epoch (3.5a).
+            p.opts.sidereal = served->mode;
         } else if (pf.zodiac == "user") {
             p.opts.sidereal = SiderealMode::User;
             p.opts.sidereal_epoch_jtdb = pf.anchorEpoch.Sum();
@@ -525,7 +551,10 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
                     (1u << eph::kPtApo);
     c.orbitMethods = (1u << eph::kMethMean) | (1u << eph::kMethOsculating);
     c.columns = eph::kColMask;
-    c.zodiacs = {"fagan-bradley", "lahiri", "user"};
+    for (const ZodiacToken& z : kZodiacTokens) {
+        c.zodiacs.emplace_back(z.token);
+    }
+    c.zodiacs.emplace_back("user");
     c.siderealPlanes = (1u << eph::kSidPlaneDate) | (1u << eph::kSidPlaneAnchor) |
                        (1u << eph::kSidPlaneInvariable);
     c.timeScales = (1u << eph::kTimeUT1) | (1u << eph::kTimeTT) | (1u << eph::kTimeTDB);

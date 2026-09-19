@@ -221,7 +221,9 @@ there is no wire map. The full spec is Astrolog's §3; the shape:
 
 The wire map is gone with version 3: bodies are NAIF/SPK-IDs the ephemeris
 and catalogs answer directly, zodiacs are tokens this engine implements
-(`fagan-bradley`, `lahiri`, `user`), and the observers, planes, forms,
+(`fagan-bradley`, `lahiri`, `user`, and the eleven zodiacs defined at the
+instant: [FRAMES.md](FRAMES.md), "Zodiacs defined at the instant"; they
+refuse plane 1 per object, errCode 2), and the observers, planes, forms,
 frames and corrections are typed profile fields. What the cleanroom server
 does with them:
 
