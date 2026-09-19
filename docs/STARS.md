@@ -371,9 +371,11 @@ new and old reductions):
     separations still pass. Suggested by the Astrolog session.
   - The ERFA fixtures (`gen_star_fixtures.py`) apply the orbit
     independently, from ORB6's own file.
-- **Against `astrolog-ephd`,** which moves stars in straight lines, the
-  cross-test's `stars` leg expects each of these stars to differ by exactly
-  our orbit's bend, and it does, to 3 mas.
+- **Against `astrolog-ephd`,** which applies the same orbits since
+  Astrolog `13d3e5e`, these stars agree like any other star: within 8 mas
+  in the cross-test's `stars` leg (record r), and α Cen B − A is 14.11″
+  against 14.13″. Before that, the leg expected them to differ by exactly
+  our orbit's bend, and they did, to 3 mas.
 
 ## Known limits
 

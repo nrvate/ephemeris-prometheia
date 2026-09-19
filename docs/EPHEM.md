@@ -55,7 +55,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 **Observer, frame, corrections**
 - `star:NAME` as a body: a fixed star or Messier object by any name or designation (docs/STARS.md).
 - `hyp:TOKEN` as a body: a named hypothetical body (`hyp:cupido`), from the element set the library ships or a `--hypotheticals` file, matched case-insensitively; `hyp:all` is every body defined, in definition order. Corrections, observers and frames apply as to any body ([HYPOTHETICALS.md](HYPOTHETICALS.md)).
-- `--orbit-point asc|desc|peri|apo[:mean|:osc]`: a node or apsis of each body's orbit instead of the body (osculating unless `:mean`; docs/ENGINE.md, "Nodes and apsides").
+- `--orbit-point asc|desc|peri|apo[:mean|:osc|:natural]`: a node or apsis of each body's orbit instead of the body (osculating unless `:mean`; docs/ENGINE.md, "Nodes and apsides"). `:natural` is the Moon's natural apogee or perigee, interpolated between its actual passages (docs/ORBIT-POINTS.md, "The natural apsides"); other bodies and points are refused.
 - `--center geo|topo|helio|bary|BODY`: BODY is a built-in name (`mars`) or a NAIF ID, and positions are seen from that body's centre with light time, deflection and aberration for an observer moving with it.
 - `--site LON,LAT[,H]`: geodetic degrees east and north, metres above WGS84. It implies `topo`.
 - `--frame true|mean|j2000|icrf`, `--equatorial`.

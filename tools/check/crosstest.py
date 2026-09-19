@@ -668,6 +668,74 @@ def point_class(spec):
     return "mean" if naif in ("199", "299", "4") else "model"
 
 
+# At the Moon's actual passages the natural apsides are the Moon itself (the
+# published definition). Graded per server: ours is exact by construction, so
+# the band is the passage finder's 1e-7-day timing (~5 mas); Swiss's measured
+# worst is 0.016 deg over 1990-2010, so 72" is an estimate.
+PASSAGE_BAND = {"ours": 0.05, "theirs": 72.0}
+
+
+def natural_at_passages(client, ours, theirs, table, verbose, epochs):
+    """The next apogee and perigee passage after each epoch, found from our
+    server's geometric distance rate by bisection; there, each server's
+    natural point against its own Moon."""
+    print("  natural apsides at the Moon's actual passages (each server against its own Moon)")
+    base_args = ["--corrections", "0", "--j2000", "--deltat", str(DELTA_T)]
+
+    def rate(jd):
+        r = ask(client, ours, ["--jd", repr(jd), "--obj", "301"] + base_args, verbose)
+        return r.row(0)[5]
+
+    worst = {"ours": 0.0, "theirs": 0.0}
+    for jd0 in epochs:
+        scan = ask(client, ours, ["--jd", repr(jd0), "--step", "86400", "--count", "32",
+                                  "--obj", "301"] + base_args, verbose)
+        found = {}
+        for i in range(31):
+            a, b = scan.row(0, i), scan.row(0, i + 1)
+            if a is None or b is None or (a[5] > 0) == (b[5] > 0):
+                continue
+            kind = "A" if a[5] > 0 else "p"
+            if kind in found:
+                continue
+            lo, hi, flo = jd0 + i, jd0 + i + 1, a[5]
+            while hi - lo > 1e-7:
+                mid = 0.5 * (lo + hi)
+                fm = rate(mid)
+                if (fm > 0) == (flo > 0):
+                    lo, flo = mid, fm
+                else:
+                    hi = mid
+            found[kind] = 0.5 * (lo + hi)
+        for kind, tp in sorted(found.items()):
+            args = ["--jd", repr(tp), "--node", f"301.{kind}.2", "--obj", "301"] + base_args
+            ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+            table.asked(ra, rb)
+            seps = {}
+            for who, r in (("ours", ra), ("theirs", rb)):
+                n, m = r.row(0), r.row(1)
+                if n is None or m is None or math.isnan(n[0]) or math.isnan(m[0]):
+                    seps[who] = None
+                    continue
+                seps[who] = sep_arcsec((n[0], n[1]), (m[0], m[1]))
+                worst[who] = max(worst[who], seps[who])
+            base = dict(leg="points", epoch_tt=tp, object=f"301.{kind}.2 at passage",
+                        observer="geo", frame="J2000", plane="ecliptic", mask=0,
+                        deltat=DELTA_T, tier=2)
+            if seps["ours"] is None or seps["theirs"] is None:
+                table.add(**base, verdict="unanswered")
+                continue
+            ok_o = seps["ours"] <= PASSAGE_BAND["ours"]
+            ok_t = seps["theirs"] <= PASSAGE_BAND["theirs"]
+            table.add(**base, sep_ours_anchor=seps["ours"], sep_theirs_anchor=seps["theirs"],
+                      anchor_source="the Moon at its actual passage",
+                      band=f"ours {PASSAGE_BAND['ours']}\" theirs {PASSAGE_BAND['theirs']}\"",
+                      verdict="agree" if ok_o and ok_t else
+                      "finding (ours)" if not ok_o else "finding (theirs)",
+                      note="natural point against the Moon at the passage, each server its own")
+    print(f"    worst: ours {worst['ours']:.4f}\"  theirs {worst['theirs']:.2f}\"")
+
+
 def leg_points(client, ours, theirs, table, verbose):
     """Orbit points by direction AND distance, mask 0, true ecliptic of date;
     then 3.5a's rule, as amended on 2026-09-18, that a node lies on the mean
@@ -716,6 +784,8 @@ def leg_points(client, ours, theirs, table, verbose):
     for spec, (s, d) in worst.items():
         print(f"  {spec:8s} worst {s:9.3f}\"  {d:11.1f} km  ({point_class(spec)})")
 
+    natural_at_passages(client, ours, theirs, table, verbose, epochs)
+
     print("  node of date in the J2000 frame (3.5a as amended: the frame gives the coordinates)")
     band_s, _ = POINT_BANDS["moon"]
     for jd in epochs:
@@ -745,9 +815,6 @@ STARS = ["Aldebaran", "Regulus", "Spica", "Antares", "Fomalhaut", "Sirius", "Alg
          "Pollux", "Castor", "Procyon", "Capella", "Alcyone", "Zubenelgenubi", "Zubeneschamali",
          "Bellatrix", "Acrux", "Hadar", "Mirach", "Alphecca", "Scheat"]
 STAR_BAND = 0.02
-# A binary star's servers differ by our orbit's bend; this allows the two
-# catalogues' straight lines and the bend's projection (an estimate).
-BINARY_EXTRA = 0.05
 
 
 def _star_records():
@@ -830,16 +897,16 @@ def leg_stars(client, ours, theirs, table, verbose):
                 sep = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
                 bent = orbit_bend(name, jd)
                 if bent is not None:
-                    # Our model adds the star's orbit to the catalog's straight
-                    # line (STARS.md, "Binary stars"); theirs is the line. The
-                    # servers then differ by the bend, computed here
-                    # independently (binary_orbits.py).
-                    ok = abs(sep - bent) <= STAR_BAND + BINARY_EXTRA
+                    # Both sides move these on their orbits (ours STARS.md,
+                    # "Binary stars"; theirs astrolog 13d3e5e), so they agree
+                    # like any star, and the separation is a direction check.
+                    # Before that, the servers differed by the bend: a row at
+                    # the bend's size now means one side lost its orbit.
                     table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=sep,
-                              band=f"bend {bent:.3f} +- {STAR_BAND + BINARY_EXTRA}",
-                              verdict="expected-difference" if ok else "finding",
-                              note=f"our orbit model bends the straight line by {bent:.3f}\" "
-                                   "here; theirs is the line")
+                              band=STAR_BAND, verdict="agree" if sep <= STAR_BAND else "finding",
+                              note=f"a binary on its orbit on both sides; the orbit bends the "
+                                   f"straight line by {bent:.3f}\" here")
+                    worst = max(worst, sep)
                     continue
                 worst = max(worst, sep)
                 table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=sep,
@@ -861,18 +928,16 @@ def leg_stars(client, ours, theirs, table, verbose):
     table.add(leg="stars-alcen", epoch_tt=2451545.0, object="Rigil Kentaurus", frame="ICRF",
               plane="equator", mask=0, ours=(a_o[0], a_o[1]), theirs=(a_t[0], a_t[1]),
               sep_servers=sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])), tier=3,
-              verdict="expected-difference"
-              if abs(sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])) -
-                     orbit_bend("Rigil Kentaurus", 2451545.0)) <= ALCEN_BAND
-              else "finding (theirs)",
-              note="the IAU's Rigil Kentaurus is alpha Cen A itself (astrolog 554288b); ours adds "
-                   f"the AB orbit's bend, {orbit_bend('Rigil Kentaurus', 2451545.0):.3f}\" here")
+              verdict="agree" if sep_arcsec((a_o[0], a_o[1]), (a_t[0], a_t[1])) <= ALCEN_BAND
+              else "finding",
+              note="the IAU's Rigil Kentaurus is alpha Cen A itself (astrolog 554288b); both "
+                   f"sides add the AB orbit's bend, {orbit_bend('Rigil Kentaurus', 2451545.0):.3f}\" "
+                   "here")
     table.add(leg="stars-alcen", epoch_tt=2451545.0, object="Toliman", frame="ICRF",
               plane="equator", mask=0, ours=(b_o[0], b_o[1]), theirs=(b_t[0], b_t[1]),
               sep_servers=sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1])), tier=3,
-              verdict="expected-difference" if theirs_split > 1.0 and abs(
-                  sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1])) -
-                  orbit_bend("Toliman", 2451545.0)) <= ALCEN_BAND else "finding (theirs)",
+              verdict="agree" if theirs_split > 1.0 and
+              sep_arcsec((b_o[0], b_o[1]), (b_t[0], b_t[1])) <= ALCEN_BAND else "finding",
               note=f"the IAU's Toliman is alpha Cen B; A to B is {ours_split:.2f}\" here "
                    f"and {theirs_split:.2f}\" on theirs (0 = both names answer one star)")
     print(f"  alpha Cen: A-B {ours_split:.2f}\" ours, {theirs_split:.2f}\" theirs")

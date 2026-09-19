@@ -82,13 +82,15 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
     graded on whether a plane moves the answer), `stars`;
   - `rates`: each server's rates against a five-point difference of its own
     positions (CROSS-TEST.md, "Rates, a new leg").
-- **Latest record:** `docs/crosstest/2026-09-18q.tsv`, with the `rates`
-  leg (all of ours pass; 95 of theirs miss, reported to them) and range
-  graded against Horizons (ours within 1.1 m). Elsewhere the verdicts are
-  identical to records n and o. The only other findings are
-  the 15 `galequ-iau1958` rows (their pole transfer, with their
-  maintainer). The binary-star rows are expected to differ by our orbit's
-  bend, and do (CROSS-TEST.md, "Binary orbits").
+- **Latest record:** `docs/crosstest/2026-09-18r.tsv`, against Astrolog's
+  build with the binary orbits (`13d3e5e`) and the plane-2 star fix
+  (`1ecb8b9`), run on a spare port (47392). Results:
+  - The four binaries now agree like any star (8 mas), direction included.
+  - The natural apsides pass the Moon at its actual passages on both sides
+    (ours 0.002″, theirs 44″).
+  - Their `true-citra` rate misses match `lahiri`'s now.
+  - The findings left are theirs: 91 `rates` rows (their library's speeds,
+    with them) and the 15 `galequ-iau1958` rows (their pole transfer).
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;

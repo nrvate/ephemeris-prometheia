@@ -970,6 +970,27 @@ already in the corpus.
   nothing published gives a band for their compressed files.
 - **Verdicts otherwise identical to record p.**
 
+### Both sides on their orbits, 2026-09-18 (`docs/crosstest/2026-09-18r.tsv`)
+
+Run against Astrolog's build at their `13d3e5e` (the binary orbits applied)
+and `1ecb8b9` (the plane-2 star origin), on a spare port.
+
+- **Binaries:** Sirius and Procyon agree to 2–8 mas at every epoch and in
+  both zodiacs, where they used to differ by the 1.3–1.5″ bend. The `stars`
+  leg now grades them as ordinary stars, so the separation checks
+  direction. A row at the bend's size would mean one side lost its orbit.
+  α Cen A agrees to 7 mas; B − A is 14.11″ against 14.13″.
+- **Natural apsides at the actual passages** (a new check in `points`):
+  each server's natural point against its own Moon, at passages found by
+  bisection.
+  - Ours is within 0.002″; theirs within 44″ (band 72″, an estimate from
+    their 0.016° measured over 1990–2010).
+  - Unlike the between-passage bands, this sees direction.
+- **Rates:** their `true-citra` misses fell to `lahiri`'s level after their
+  `46cf57d`. The rest (91 rows, 1e-6 to 8e-4 °/day) are their library's
+  speeds, reported to them.
+- **Everything else is unchanged from record q.**
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

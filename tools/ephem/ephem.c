@@ -356,8 +356,10 @@ static void print_help(void) {
            "      --sid-plane P      the sidereal plane: date (default), anchor (the\n"
            "                         ecliptic of the zodiac's anchor epoch) or invariable\n"
            "      --precession MODEL iau2006 (default) or vondrak2011 (long-term)\n"
-           "      --orbit-point P[:mean|:osc]  asc, desc, peri or apo of each body's\n"
-           "                         orbit instead of the body (osculating by default)\n"
+           "      --orbit-point P[:mean|:osc|:natural]  asc, desc, peri or apo of each\n"
+           "                         body's orbit instead of the body (osculating by\n"
+           "                         default; natural: the Moon's apogee and perigee\n"
+           "                         between its actual passages)\n"
            "\n"
            "Corrections (default: apparent place, with rates):\n"
            "      --astrometric      light time only\n"
@@ -599,8 +601,11 @@ static int parse_args(int argc, char** argv, config* c) {
                 *colon = '\0';
                 if (equals_nocase(colon + 1, "mean"))
                     c->orbit_elements = PROMETHEIA_ELEMENTS_MEAN;
+                else if (equals_nocase(colon + 1, "natural"))
+                    c->orbit_elements = PROMETHEIA_ELEMENTS_INTERPOLATED;
                 else if (!equals_nocase(colon + 1, "osc"))
-                    return usage_error("unknown orbit elements '%s' (mean, osc)", colon + 1);
+                    return usage_error("unknown orbit elements '%s' (mean, osc, natural)",
+                                       colon + 1);
             }
             if (!parse_keyword(buf, point_names, point_values, 4, &c->orbit_point))
                 return usage_error("unknown orbit point '%s' (asc, desc, peri, apo)", buf);
