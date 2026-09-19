@@ -393,6 +393,42 @@ not indexed (address those by their NAIF IDs).
 - Costs of the query epoch outside the planetary ephemeris's coverage,
   or a body absent everywhere, are errors — never extrapolations.
 
+## Performance
+
+`prometheia-engine-bench DE_FILE [CATALOG.epm] [--only NAME]` times the
+public calls, per call, over 200 instants scrambled across 1900–2100, as the
+median of five runs. The small-body scenario is 20 instants. Measured on
+this machine (i7-8700K) with DE440 and the full SBDB catalogue, 2026-09-19.
+Runs vary by about 20% with the CPU's clock, so compare within one sitting.
+
+| scenario | µs per call |
+|---|---|
+| planets, apparent (rates on) | 4.2 |
+| planets, rates off | 2.9 |
+| planets, topocentric / Lahiri / true Citra | 4.5 / 4.4 / 5.4 |
+| ten stars, apparent | 3.4 |
+| the Moon's mean or osculating node and apogee | 19–20 |
+| the Moon's natural apogee | 266 |
+| the eight Hamburg points | 8.1 |
+| Ceres, Eris, Sedna (after their first integration) | 11 |
+
+`add_catalog` of the full catalogue (137 MB) takes 315 ms: it decompresses
+and CRC-checks every chunk, so a corrupt file fails there.
+
+**Found and fixed, 2026-09-19** (the same outputs, byte for byte):
+- **A small body's record was decoded on every call.** The record cache
+  hit looked the record up again to learn its catalogue. Ceres, Eris and
+  Sedna went from 2,712 µs a call to 14.
+- **Walking backward in time was quadratic.** The trajectory memo and the
+  perturbers' table both kept one ascending array and inserted each
+  earlier window at its front, moving everything already built. A memo now
+  keeps two runs that meet at its seed, and the table keeps headroom at
+  its front.
+- **CRC-32 went a byte at a time.** Slicing-by-8 halves `add_catalog`
+  (634 → 315 ms).
+- Together: one JSON call for three distant small bodies at 1,000 instants
+  over 1,000 years went from 19.2 s to 4.4 s, with the same 2.2 MB answer.
+
 ## Validation
 
 `tests/test_engine.cpp`.

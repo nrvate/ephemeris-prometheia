@@ -536,6 +536,7 @@ public:
         sources_.clear();
         mus_.clear();
         grid_.clear();
+        head_ = 0;
     }
 
     // PerturberStates. ensure() builds the table on first use and then
@@ -672,19 +673,32 @@ private:
                 p.vz = st[5] / kAuKm;
             }
         }
-        const int first = grid_.empty() ? 0 : 1; // skip the shared boundary
+        const int first = rows() == 0 ? 0 : 1; // skip the shared boundary
         if (days > 0.0) {
             for (int i = first; i <= n; ++i)
                 grid_.insert(grid_.end(), block.begin() + i * nb, block.begin() + (i + 1) * nb);
             hi_ = to;
         } else {
             // Backward samples run from the boundary down to `to`; the new
-            // rows go in front, ascending.
-            std::vector<TrajSample> rows_in;
-            rows_in.reserve(size_t(n + 1) * nb);
+            // rows go in front, ascending, into the headroom kept there. Only
+            // when that runs out is the grid moved, into twice the room, so a
+            // backward march costs what a forward one does. (Inserting at the
+            // front moved the whole grid every block: 46% of a 1,000-instant
+            // backward query, 2026-09-19.)
+            const size_t k = size_t(n + 1 - first) * nb;
+            if (head_ < k) {
+                const size_t used = grid_.size() - head_;
+                const size_t room = std::max(k, used);
+                std::vector<TrajSample> moved(room + used);
+                std::copy(grid_.begin() + std::ptrdiff_t(head_), grid_.end(),
+                          moved.begin() + std::ptrdiff_t(room));
+                grid_ = std::move(moved);
+                head_ = room;
+            }
+            head_ -= k;
+            auto dst = grid_.begin() + std::ptrdiff_t(head_);
             for (int i = n; i >= first; --i)
-                rows_in.insert(rows_in.end(), block.begin() + i * nb, block.begin() + (i + 1) * nb);
-            grid_.insert(grid_.begin(), rows_in.begin(), rows_in.end());
+                dst = std::copy(block.begin() + i * nb, block.begin() + (i + 1) * nb, dst);
             lo_ = to;
         }
     }
@@ -716,9 +730,11 @@ private:
         }
     };
 
-    size_t rows() const { return ids_.empty() ? 0 : grid_.size() / ids_.size(); }
-    const TrajSample& at(size_t row, size_t b) const { return grid_[row * ids_.size() + b]; }
-    double row_time(size_t row) const { return grid_[row * ids_.size()].t; }
+    size_t rows() const { return ids_.empty() ? 0 : (grid_.size() - head_) / ids_.size(); }
+    const TrajSample& at(size_t row, size_t b) const {
+        return grid_[head_ + row * ids_.size() + b];
+    }
+    double row_time(size_t row) const { return grid_[head_ + row * ids_.size()].t; }
 
     // Where t falls: a clamped row outside the coverage (the first or last
     // sample, as before), else the interval [lo, lo + 1] and its weights.
@@ -772,7 +788,10 @@ private:
     std::vector<Source*> sources_; // where each mass's states come from
     Source* asteroid_source_ = nullptr;
     std::vector<int> asteroid_ids_;
-    std::vector<TrajSample> grid_; // rows of ids_.size() samples, ascending epochs
+    // Rows of ids_.size() samples, ascending epochs, from grid_[head_]; the
+    // slots before head_ are headroom for backward blocks.
+    std::vector<TrajSample> grid_;
+    size_t head_ = 0;
     std::vector<double> mus_;
 
 public:
@@ -955,8 +974,10 @@ struct Engine::Impl {
     // asked for repeatedly — which is every body in a chart — would pay that
     // walk on every single position. The bodies in play are few; the whole
     // cache is dropped rather than evicted once it outgrows any working set a
-    // client plausibly has.
-    std::unordered_map<uint64_t, catalog::Record> record_cache;
+    // client plausibly has. Each entry keeps which catalog it came from, so a
+    // hit decodes nothing (until 2026-09-19 a hit looked the record up again
+    // to find its catalog: half of a small body's cost).
+    std::unordered_map<uint64_t, std::pair<catalog::Record, size_t>> record_cache;
     static constexpr size_t kRecordCacheMax = 4096;
     std::unordered_map<uint64_t, std::unique_ptr<SigmaTracks>> sigma_tracks;
     std::string overlay_source_; // provenance for catalog bodies
@@ -1225,21 +1246,14 @@ struct Engine::Impl {
     // The pair's second is the catalog the record came from (its name pool
     // goes with it).
     Result<std::optional<std::pair<catalog::Record, size_t>>> find_record_at(int id) {
-        if (auto hit = record_cache.find(uint64_t(id)); hit != record_cache.end()) {
-            // Which catalog carried it is not cached; names() is not a hot
-            // path, so find it again. Newest wins, as everywhere here.
-            for (size_t i = catalogs.size(); i-- > 0;) {
-                if (auto rr = catalogs[i]->lookup(uint64_t(id)); rr.ok())
-                    return std::optional<std::pair<catalog::Record, size_t>>({rr.value(), i});
-            }
-            return std::optional<std::pair<catalog::Record, size_t>>({hit->second, 0});
-        }
+        if (auto hit = record_cache.find(uint64_t(id)); hit != record_cache.end())
+            return std::optional<std::pair<catalog::Record, size_t>>(hit->second);
         for (size_t i = catalogs.size(); i-- > 0;) {
             auto rr = catalogs[i]->lookup(uint64_t(id));
             if (rr.ok()) {
                 if (record_cache.size() >= kRecordCacheMax)
                     record_cache.clear();
-                record_cache[uint64_t(id)] = rr.value();
+                record_cache[uint64_t(id)] = {rr.value(), i};
                 return std::optional<std::pair<catalog::Record, size_t>>({rr.value(), i});
             }
             if (rr.error().code != ErrorCode::NotFound)

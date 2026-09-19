@@ -18,6 +18,19 @@ documented, not that it is frozen.
   observer is the object". A point is a place in space, so only the body
   itself is refused now (docs/ORBIT-POINTS.md, "From any observer";
   docs/SERVER.md, per-object errors).
+- **Performance** (docs/ENGINE.md, "Performance"; the new
+  `prometheia-engine-bench`). Same outputs, byte for byte:
+  - a small body no longer decodes its catalogue record on every call:
+    2,712 → 14 µs;
+  - walking backward in time is no longer quadratic (the trajectory memo
+    and the perturbers' table);
+  - CRC-32 by slicing-by-8: loading the full catalogue 634 → 315 ms;
+  - the dataset id is digested in 8 MiB pieces on every core, and SHA-256
+    takes whole blocks: `prometheia-json` starts in 0.10 s with DE440
+    (was 0.66 s), 0.57 s with the full catalogue (was 2.19 s). The id's
+    digest changes once as a result.
+  - A JSON call for three distant small bodies at 1,000 instants: 19.2 →
+    4.4 s.
 - **`prometheia-json` reads a clock time before 1972 as UT1** (maintainer,
   2026-09-19). It refused any date before 1972, so an agent could not ask
   for most birth charts by clock time. UTC with integer leap seconds begins

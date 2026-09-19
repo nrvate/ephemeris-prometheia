@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// FIPS 180-4 SHA-256, for content digests: the datasetId (docs/SERVER.md)
-// and the fixture-set checksum in tests/test_ephproto4.cpp. Written from the
-// standard; the test pins it against published vectors.
+// FIPS 180-4 SHA-256, for content digests: the datasetId (docs/SERVER.md).
+// Written from the standard; tests/test_server.cpp (server_sha256_vectors)
+// pins it against the standard's published examples.
 #ifndef PROMETHEIA_SERVER_SHA256_HPP
 #define PROMETHEIA_SERVER_SHA256_HPP
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace prometheia::server {
@@ -15,24 +18,35 @@ namespace prometheia::server {
 class Sha256 {
 public:
     void update(const uint8_t* p, size_t n) {
-        for (size_t i = 0; i < n; ++i) {
-            buf_[len_++] = p[i];
-            if (len_ == 64) {
-                block(buf_);
-                len_ = 0;
-            }
+        // Top up a partial block, then whole blocks straight from the input
+        // (a byte-at-a-time copy was half the cost of hashing a file).
+        if (len_ != 0) {
+            const size_t take = std::min(n, size_t(64) - len_);
+            std::memcpy(buf_ + len_, p, take);
+            len_ += take;
+            p += take;
+            n -= take;
+            if (len_ < 64)
+                return;
+            block(buf_);
+            len_ = 0;
         }
+        for (; n >= 64; p += 64, n -= 64)
+            block(p);
+        std::memcpy(buf_, p, n);
+        len_ = n;
+    }
+    // The digest's 32 bytes; finishes the hash, like hex().
+    std::array<uint8_t, 32> bytes() {
+        finish();
+        std::array<uint8_t, 32> out{};
+        for (int i = 0; i < 8; ++i)
+            for (int k = 0; k < 4; ++k)
+                out[size_t(4 * i + k)] = uint8_t(h_[i] >> (24 - 8 * k));
+        return out;
     }
     std::string hex() {
-        const uint64_t bits = uint64_t(blocks_) * 512 + uint64_t(len_) * 8;
-        update(reinterpret_cast<const uint8_t*>("\x80"), 1);
-        while (len_ != 56) {
-            update(reinterpret_cast<const uint8_t*>("\0"), 1);
-        }
-        for (int i = 7; i >= 0; --i) {
-            const uint8_t b = uint8_t(bits >> (8 * i));
-            update(&b, 1);
-        }
+        finish();
         std::string out;
         char t[9];
         for (int i = 0; i < 8; ++i) {
@@ -43,6 +57,21 @@ public:
     }
 
 private:
+    void finish() {
+        if (finished_)
+            return;
+        finished_ = true;
+        const uint64_t bits = uint64_t(blocks_) * 512 + uint64_t(len_) * 8;
+        update(reinterpret_cast<const uint8_t*>("\x80"), 1);
+        while (len_ != 56) {
+            update(reinterpret_cast<const uint8_t*>("\0"), 1);
+        }
+        for (int i = 7; i >= 0; --i) {
+            const uint8_t b = uint8_t(bits >> (8 * i));
+            update(&b, 1);
+        }
+    }
+
     static uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
     void block(const uint8_t* p) {
         static constexpr uint32_t k[] = {
@@ -99,6 +128,7 @@ private:
     uint8_t buf_[64];
     size_t len_ = 0;
     uint64_t blocks_ = 0;
+    bool finished_ = false;
 };
 
 } // namespace prometheia::server

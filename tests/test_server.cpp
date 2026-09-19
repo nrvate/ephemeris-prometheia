@@ -22,6 +22,7 @@
 #include "prometheia/hypotheticals.hpp"
 #include "prometheia/stars.hpp"
 #include "session.hpp"
+#include "sha256.hpp"
 #include "synthetic_spk.hpp"
 
 #include <doctest/doctest.h>
@@ -992,6 +993,25 @@ TEST_CASE("server_dataset_id") {
     }
     const std::string c_id = make_dataset("engine", c.path.string(), {}, "").id;
     CHECK(c_id.substr(c_id.find('#')) == d1.id.substr(d1.id.find('#')));
+    // A file of several 8 MiB pieces, hashed in parallel: every byte counts,
+    // in any piece, and so does the length.
+    TempFile big{"dataset-big"};
+    std::string bytes(size_t(17) << 20, 'x');
+    const auto id_of = [&](const std::string& content) {
+        {
+            std::ofstream out(big.path, std::ios::binary | std::ios::trunc);
+            out.write(content.data(), std::streamsize(content.size()));
+        }
+        return make_dataset("engine", big.path.string(), {}, "").id;
+    };
+    const std::string base = id_of(bytes);
+    CHECK(id_of(bytes) == base);
+    for (size_t at : {size_t(0), (size_t(8) << 20) + 5, bytes.size() - 1}) {
+        std::string changed = bytes;
+        changed[at] = 'y';
+        CHECK(id_of(changed) != base);
+    }
+    CHECK(id_of(bytes + "x") != base);
 }
 
 TEST_CASE("server_ephproto_matches_astrolog") {
@@ -1861,4 +1881,39 @@ TEST_CASE("server_log_traces_a_request_without_its_contents") {
     CHECK(log_safe("a\"b\\c\n") == "a?b?c?");
     CHECK(parse_log_level("debug") == LogLevel::Debug);
     CHECK_FALSE(parse_log_level("loud"));
+}
+
+// server/sha256.hpp against FIPS 180-4's published examples, fed whole and
+// split at every point, since update() takes whole blocks straight from the
+// input and tops up partial ones.
+TEST_CASE("server_sha256_vectors") {
+    const auto digest = [](const std::string& m, size_t split) {
+        Sha256 h;
+        h.update(reinterpret_cast<const uint8_t*>(m.data()), split);
+        h.update(reinterpret_cast<const uint8_t*>(m.data()) + split, m.size() - split);
+        return h.hex();
+    };
+    const std::string two_blocks = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    const std::string four_blocks =
+        "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlm"
+        "nopqrsmnopqrstnopqrstu";
+    for (size_t i = 0; i <= 3; ++i)
+        CHECK(digest("abc", i) ==
+              "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    CHECK(digest("", 0) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    for (size_t i = 0; i <= two_blocks.size(); ++i)
+        CHECK(digest(two_blocks, i) ==
+              "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+    for (size_t i = 0; i <= four_blocks.size(); ++i)
+        CHECK(digest(four_blocks, i) ==
+              "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1");
+    // One million 'a', in uneven pieces.
+    Sha256 h;
+    const std::string a(1000, 'a');
+    for (size_t done = 0, piece = 1; done < 1000000; piece = piece % 997 + 1) {
+        const size_t n = std::min(piece, size_t(1000000) - done);
+        h.update(reinterpret_cast<const uint8_t*>(a.data()), n);
+        done += n;
+    }
+    CHECK(h.hex() == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
 }

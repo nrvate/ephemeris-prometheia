@@ -45,7 +45,12 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
 - **Dataset identity.** At startup the daemon digests every data file's
   contents and prints the dataset id it will serve
   (`<engine>/<ephemeris>/<catalogs>#<8 hex>`). The id changes whenever any
-  answer could change; clients key their caches on it and may pin it. The
+  answer could change; clients key their caches on it and may pin it.
+  Each file's digest is SHA-256 over its size and the SHA-256 of each 8 MiB
+  piece, computed on every core. `prometheia-json` with DE440 starts in
+  0.10 s, where one SHA-256 stream made it 0.66 s (2026-09-19). The id changed with this
+  once; it changes with every release anyway, since it carries the engine
+  version. The
   digest covers the element set this build ships and every
   `--hypotheticals` file too, because a redefined token changes its answers.
 - **Reference client.** `prometheia-wire-client --port 47190 --obj 599 --jd

@@ -164,6 +164,7 @@ else()
 endif()
 
 find_package(Threads REQUIRED)
+target_link_libraries(prometheia_server PUBLIC Threads::Threads)
 add_library(prometheia_ws STATIC server/ws_server.cpp server/ws_client.cpp server/tls.cpp)
 target_include_directories(prometheia_ws SYSTEM PRIVATE third_party/uWebSockets/src)
 target_compile_definitions(prometheia_ws PRIVATE UWS_NO_ZLIB)
@@ -200,6 +201,9 @@ target_link_libraries(test_prometheiad PRIVATE prometheia_ws)
 
 add_executable(prometheia-bench tools/bench/bench_main.cpp)
 target_link_libraries(prometheia-bench PRIVATE prometheia)
+
+add_executable(prometheia-engine-bench tools/bench/engine_bench_main.cpp)
+target_link_libraries(prometheia-engine-bench PRIVATE prometheia)
 
 add_executable(prometheia-catalog-bench tools/bench/catalog_bench_main.cpp)
 target_link_libraries(prometheia-catalog-bench PRIVATE prometheia Threads::Threads)

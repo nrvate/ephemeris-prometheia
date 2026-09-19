@@ -43,8 +43,10 @@ public:
         seed_ = s;
         seed_t_ = t;
         lo_ = hi_ = t;
-        samples_.clear();
-        samples_.push_back(make_sample(t, s));
+        fwd_.clear();
+        bwd_.clear();
+        fwd_.push_back(make_sample(t, s));
+        bwd_.push_back(make_sample(t, s));
     }
 
     // Position/velocity at time t; integrates only when coverage doesn't
@@ -97,22 +99,43 @@ private:
         return p;
     }
 
+    // Samples live in two runs that meet at the seed, each only ever
+    // appended to: fwd_ ascending from it, bwd_ descending from it. (One
+    // ascending vector had every backward window copy all of it, which made
+    // a backward walk quadratic: 36% of a 1,000-instant query, 2026-09-19.)
+    // The segment around t is the same pair of samples either way, so the
+    // values are too.
     State eval_from_samples(double t) const {
-        // Samples are in integration order (forward); a backward extension
-        // prepends, keeping ascending order. Binary search the segment.
-        size_t lo = 0, hi = samples_.size();
+        if (t >= seed_t_ || bwd_.size() < 2) {
+            size_t lo = 0, hi = fwd_.size();
+            while (lo + 1 < hi) {
+                const size_t mid = (lo + hi) / 2;
+                if (fwd_[mid].t <= t) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            if (lo + 1 >= fwd_.size())
+                return sample_to_state(fwd_.back());
+            return hermite(fwd_[lo], fwd_[lo + 1], t);
+        }
+        // bwd_[0] is the seed, later than t: the last sample later than t
+        // and the one after it bracket t.
+        size_t lo = 0, hi = bwd_.size() - 1;
         while (lo + 1 < hi) {
             const size_t mid = (lo + hi) / 2;
-            if (samples_[mid].t <= t) {
+            if (bwd_[mid].t > t) {
                 lo = mid;
             } else {
                 hi = mid;
             }
         }
-        if (lo + 1 >= samples_.size())
-            return sample_to_state(samples_.back());
-        const TrajSample& a = samples_[lo];
-        const TrajSample& b = samples_[lo + 1];
+        return hermite(bwd_[lo + 1], bwd_[lo], t);
+    }
+
+    // Cubic Hermite between samples a and b (a earlier).
+    static State hermite(const TrajSample& a, const TrajSample& b, double t) {
         const double dt = b.t - a.t;
         if (dt == 0.0)
             return sample_to_state(a);
@@ -197,24 +220,11 @@ private:
             fresh.push_back(p);
         }
 
-        if (forward) {
-            // fresh[0] duplicates the old tail sample's time; drop it and append
-            // the rest (already ascending).
-            for (size_t i = 1; i < fresh.size(); ++i)
-                samples_.push_back(fresh[i]);
-            hi_ = to;
-        } else {
-            // fresh runs descending in time (to -> lo_); drop its first (dups the
-            // old head) and prepend the rest reversed so storage stays ascending.
-            std::vector<TrajSample> merged;
-            merged.reserve(samples_.size() + fresh.size());
-            for (size_t i = fresh.size(); i-- > 1;)
-                merged.push_back(fresh[i]);
-            for (const TrajSample& p : samples_)
-                merged.push_back(p);
-            samples_ = std::move(merged);
-            lo_ = to;
-        }
+        // fresh[0] duplicates the run's last sample; the rest continue it
+        // (ascending forward, descending backward).
+        std::vector<TrajSample>& run = forward ? fwd_ : bwd_;
+        run.insert(run.end(), fresh.begin() + 1, fresh.end());
+        (forward ? hi_ : lo_) = to;
         ++stats_.windows_built;
         stats_.accel_evals += istats.accel_evals;
         return true;
@@ -238,7 +248,7 @@ private:
     State seed_{};
     double seed_t_ = 0.0;
     double lo_ = 0.0, hi_ = 0.0;
-    std::vector<TrajSample> samples_;
+    std::vector<TrajSample> fwd_, bwd_;
     Stats stats_;
 };
 

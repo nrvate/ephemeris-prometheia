@@ -7,6 +7,7 @@
 
 #include <prometheia/catalog.hpp>
 #include <prometheia/cbor.hpp>
+#include <prometheia/crc32.hpp>
 
 #include <doctest/doctest.h>
 
@@ -444,4 +445,29 @@ TEST_CASE("real_data_fixture") {
     }
     auto fe = reader.for_each([](const Record&, const Names&) {});
     CHECK(fe.ok());
+}
+
+// include/prometheia/crc32.hpp: the standard check value, and slicing-by-8
+// against the bit-at-a-time definition at every length and alignment.
+TEST_CASE("crc32_matches_its_definition") {
+    CHECK(prometheia::crc32("123456789", 9) == 0xCBF43926u);
+    CHECK(prometheia::crc32("", 0) == 0u);
+    const auto reference = [](const char* p, size_t n) {
+        uint32_t c = 0xFFFFFFFFu;
+        for (size_t i = 0; i < n; ++i) {
+            c ^= uint8_t(p[i]);
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+        }
+        return c ^ 0xFFFFFFFFu;
+    };
+    std::string buf(80, '\0');
+    uint32_t x = 12345;
+    for (char& ch : buf) {
+        x = x * 1103515245u + 12345u;
+        ch = char(x >> 24);
+    }
+    for (size_t off = 0; off < 8; ++off)
+        for (size_t n = 0; off + n <= buf.size(); ++n)
+            CHECK(prometheia::crc32(buf.data() + off, n) == reference(buf.data() + off, n));
 }
