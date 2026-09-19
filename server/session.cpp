@@ -2,6 +2,7 @@
 #include "session.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -28,6 +29,9 @@ using Clock = std::chrono::steady_clock;
 constexpr int kComputeSliceMs = 2;
 // The lookup budget this server offers (WELCOME's A.3 0x0010).
 constexpr uint16_t kLookupMax = 1024;
+// A failed row is filled with this, and 3.1 allows exactly that NaN.
+static_assert(std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN()) ==
+              0x7FF8000000000000ull);
 
 // The A.11 zodiac tokens this server serves, and the engine's mode for each:
 // WELCOME lists exactly these (A.3 0x0007), and a profile maps through them.
@@ -287,7 +291,8 @@ eph::ObjErr obj_err_of(const Error& e) {
         m.find("is undefined") != std::string::npos) {
         return eph::kOErrUndefinedPoint;
     }
-    if (m.find("integration failed") != std::string::npos) {
+    if (m.find("integration failed") != std::string::npos ||
+        m.find("numerical failure") != std::string::npos) {
         return eph::kOErrNumerical;
     }
     switch (e.code) {
@@ -800,6 +805,20 @@ public:
                         break;
                     default:
                         break;
+                    }
+                }
+                // 3.1: a row is all finite or a failed row, NaN in every
+                // column, and that NaN is the canonical one. A computed NaN
+                // (any sign or payload) never reaches the wire: the row
+                // fails whole instead. The engine refuses non-finite answers
+                // itself; this holds whatever path a value came by.
+                if (!std::all_of(row, row + n_cols_, [](double v) { return std::isfinite(v); })) {
+                    std::fill(row, row + n_cols_, std::numeric_limits<double>::quiet_NaN());
+                    --s.rows_ok;
+                    if (s.first_failed_row == eph::kRowNone) {
+                        s.first_failed_row = next_row_;
+                        s.first_err = "the computation failed numerically";
+                        s.code = eph::kOErrNumerical;
                     }
                 }
             }

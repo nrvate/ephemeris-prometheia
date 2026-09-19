@@ -77,7 +77,7 @@ std::vector<uint8_t> hello_frame() {
 
 [[noreturn]] void fail(const char* what, const std::vector<uint8_t>& msg, const std::string& why) {
     std::fprintf(stderr, "fuzz_session: %s (%s), %zu bytes:", what, why.c_str(), msg.size());
-    for (size_t i = 0; i < msg.size() && i < 64; ++i) {
+    for (size_t i = 0; i < msg.size() && i < 4096; ++i) {
         std::fprintf(stderr, " %02x", msg[i]);
     }
     std::fprintf(stderr, "\n");

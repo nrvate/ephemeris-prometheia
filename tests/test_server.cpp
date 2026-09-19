@@ -6,6 +6,7 @@
 // (tests/test_ephproto4.cpp); this file pins the server: the handshake, the
 // profiles, the answers' metadata and values, and the limits.
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -675,6 +676,21 @@ TEST_CASE("server_profiles") {
         o.sidereal_plane = SiderealPlane::Invariable;
         pf.siderealPlane = eph::kSidPlaneInvariable;
         CHECK(one(pf).cols[0] == engine(o).pos.lon_deg);
+    }
+    SUBCASE("a site no formula can place fails its rows, as canonical NaN") {
+        // The fuzzer's input: a legal REQUEST (the protocol bounds a site's
+        // latitude and longitude only) whose height puts the observer
+        // thousands of AU below the ground. It once came back as rowsOk 1
+        // with -NaN coordinates, which 3.1 forbids twice over.
+        eph::Profile pf;
+        pf.observer = eph::kObsTopo;
+        pf.siteHeightM = -563224831328256.0;
+        const Data d = one(pf);
+        REQUIRE(d.meta.size() == 1);
+        CHECK(d.meta[0].rowsOk == 0);
+        CHECK(d.meta[0].errCode != eph::kOErrNone);
+        for (double v : d.cols)
+            CHECK(std::bit_cast<uint64_t>(v) == 0x7FF8000000000000ull);
     }
     SUBCASE("an observer equal to the object is a per-object error") {
         eph::Profile pf;

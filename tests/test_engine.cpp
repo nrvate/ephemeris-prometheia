@@ -1114,6 +1114,24 @@ TEST_CASE("zodiacs_at_the_instant_on_the_fixed_planes") {
     }
 }
 
+// A site the geodetic formulas cannot place is an error, not NaN coordinates
+// reported as a success (found by fuzzing prometheiad: the protocol bounds a
+// site's latitude and longitude but not its height).
+TEST_CASE("engine_refuses_an_impossible_site") {
+    TempFile tf("engine-site");
+    Engine e = open_synthetic(tf);
+    CalcOptions o;
+    o.center = Center::Topocentric;
+    for (double h : {-563224831328256.0, -6356752.0, std::nan(""), HUGE_VAL}) {
+        o.site = {0.0, 0.0, h};
+        auto r = e.calc(body::kSun, kJ2000, o);
+        INFO("height ", h);
+        CHECK_FALSE(r.ok());
+    }
+    o.site = {0.0, 0.0, -6356751.0}; // just above the centre: placeable
+    CHECK(e.calc(body::kSun, kJ2000, o).ok());
+}
+
 TEST_CASE("invariable_plane_from_de440") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;

@@ -1067,6 +1067,14 @@ struct Engine::Impl {
         case Center::Body:
             return body_barycentric(o.center_body, jd_tdb, out, nullptr);
         case Center::Topocentric: {
+            // A site the geodetic formulas can place: finite, and above the
+            // Earth's centre along its vertical (the WGS84 polar radius). The
+            // protocol bounds a site's latitude and longitude but not its
+            // height, so this is the only check a height gets.
+            if (!std::isfinite(o.site.lon_rad) || !std::isfinite(o.site.lat_rad) ||
+                !std::isfinite(o.site.height_m) || o.site.height_m <= -6356752.0)
+                return make_error(ErrorCode::ArgumentError,
+                                  "a topocentric site must be finite and above the Earth's centre");
             auto r = source->barycentric(body::kEarth, jd_tdb, out);
             if (!r)
                 return r;
@@ -2193,6 +2201,18 @@ struct Engine::Impl {
                 (dx[2] * rho2 - x[2] * (x[0] * dx[0] + x[1] * dx[1])) / (r2 * rho) * kRad2Deg;
             pos.dist_speed = (x[0] * dx[0] + x[1] * dx[1] + x[2] * dx[2]) / rr;
         }
+        // Never a success with a non-finite answer, whatever produced it: an
+        // input the checks above missed arrives here as NaN or infinity, and a
+        // caller must see an error, not coordinates (the speeds block above
+        // skips on NaN, which would leave rates of 0 beside a NaN position).
+        bool finite =
+            std::isfinite(pos.lon_deg) && std::isfinite(pos.lat_deg) && std::isfinite(pos.dist_au);
+        for (int i = 0; i < 3; ++i)
+            finite = finite && std::isfinite(x[i]) && (!o.speed || std::isfinite(dx[i]));
+        if (!finite || (o.speed && !(std::isfinite(pos.lon_speed) && std::isfinite(pos.lat_speed) &&
+                                     std::isfinite(pos.dist_speed))))
+            return make_error(ErrorCode::ArgumentError,
+                              "numerical failure: the answer is not finite");
         return {};
     }
 

@@ -13,6 +13,15 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Fixed: a "successful" answer with NaN coordinates** (found by fuzzing
+  after the codec re-pin, docs/SERVER.md "Fuzzing").
+  - A topocentric site far below the ground gave rowsOk 1 with −NaN
+    coordinates. The engine now refuses such a site, and never reports a
+    non-finite answer as a success.
+  - `prometheiad` fails a row whole, as the canonical NaN, if any value in
+    it is not finite (§3.1).
+- **Protocol v4 re-pinned to Astrolog `114f2a5`** (the floats drop): DATA
+  values finite, or a whole failed row of the canonical NaN.
 - **Sidereal positions four times faster:** 85.6 → 20.3 µs for the Sun
   with Lahiri, the same as tropical, measured over 100,000 instants on
   DE440.

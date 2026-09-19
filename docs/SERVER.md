@@ -819,8 +819,26 @@ every field.
   as `0xFFE00000`. f64 NaNs survive a round trip bit for bit, so the same
   missing check there is invisible to this oracle. The spec also names no
   canonical NaN for f32 delivery; the codec's encoder writes `0x7FC00000`.
-  Reported to the Astrolog side, whose codec it is. This server only sends
-  through that encoder, so it sends nothing non-canonical.
+  Reported to the Astrolog side, whose codec it is, and fixed there (their
+  `114f2a5`, re-pinned here).
+- **The stricter codec then found one in this server** (2026-09-18, the
+  first session input after the re-pin, an unmutated seed).
+  - A topocentric site whose height put the observer thousands of AU below
+    the ground came back with rowsOk 1 and −NaN coordinates, with rates of
+    0 beside them. That is a non-canonical NaN and a half-failed row, and a
+    "success" nobody could use.
+  - The protocol bounds a site's latitude and longitude, not its height, so
+    the request is legal.
+  - The earlier claim that "it sends nothing non-canonical" was wrong: the
+    encoder writes whatever double it is given.
+  - Fixed in three places:
+    - the engine refuses a site that is not finite or not above the
+      Earth's centre;
+    - the engine never reports a non-finite answer as a success (errCode 7
+      on the wire);
+    - the server fails a row whole, as the canonical NaN, if any value in
+      it is not finite.
+  - Regression tests replay the fuzzer's request.
 
 ## Load and soak
 
