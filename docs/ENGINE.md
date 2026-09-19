@@ -401,16 +401,21 @@ median of five runs. The small-body scenario is 20 instants. Measured on
 this machine (i7-8700K) with DE440 and the full SBDB catalogue, 2026-09-19.
 Runs vary by about 20% with the CPU's clock, so compare within one sitting.
 
-| scenario | µs per call |
-|---|---|
-| planets, apparent (rates on) | 3.9 |
-| planets, rates off | 2.5 |
-| planets, topocentric / Lahiri / true Citra | 4.1 / 4.0 / 5.4 |
-| ten stars, apparent | 3.2 |
-| the Moon's mean or osculating node and apogee | 18–21 |
-| the Moon's natural apogee | 33 |
-| the eight Hamburg points | 7.4 |
-| Ceres, Eris, Sedna (after their first integration) | 9.4 |
+| scenario | µs per call, before | after |
+|---|---:|---:|
+| planets, apparent (rates on) | 5.3 | 3.0 |
+| planets, rates off | 3.4 | 1.9 |
+| planets, geometric / heliocentric | 3.8 / 4.2 | 2.1 / 2.6 |
+| planets, topocentric / Lahiri / true Citra | 5.7 / 5.4 / 6.8 | 3.3 / 3.2 / 4.0 |
+| ten stars, apparent | 4.2 | 2.4 |
+| the Moon's mean or osculating node and apogee | 24 | 13–14 |
+| the Moon's natural apogee | 306 | 26 |
+| the eight Hamburg points | 10 | 6.7 |
+| Ceres, Eris, Sedna (after their first integration) | 2,712 | 7.1 |
+
+"Before" is the first run of 2026-09-19, "after" the median of three runs
+pinned to one core (`taskset`) at the end of that day's work; unpinned runs
+vary by about 20%.
 
 At a fresh instant most of a chart's cost is nutation. The interpolator
 evaluates the full 1365-term series, with rates, at the two half-day nodes
@@ -453,6 +458,10 @@ asteroids integrated to 1600 took 3.8 s together, about 95 ms each.
   term). `PerturberStates::positions` interpolates a velocity only where
   asked: forty asteroids integrated to 1600 in 3.8 s (was 5.3 s), with the
   same values.
+- **A DE record was read into a string and decoded a double at a time.**
+  It is read straight into the cache and byte-swapped in place only for a
+  file whose byte order is not the machine's: the same doubles, bit for
+  bit.
 - **A DE state evaluated its Chebyshev recurrences three times,** once for
   each of x, y and z, which share tau. `chebyshev_eval3` computes them once:
   81 → 55 ns a state, bit-identical over 3.9 million states and all fifteen

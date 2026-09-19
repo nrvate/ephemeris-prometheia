@@ -287,16 +287,23 @@ Result<void> DeFile::load_record(uint64_t index) const {
         return {};
 
     const uint64_t rec_len = uint64_t(header_.record_doubles) * 8;
-    std::string buf;
-    if (!read_at(file_, (index + 2) * rec_len, buf, size_t(rec_len))) {
+    // Straight into the cache, then swapped in place only when the file's
+    // byte order is not the machine's: the same doubles the byte-by-byte
+    // reader assembles, without the copy (a fresh instant loads a record).
+    cache_.resize(size_t(header_.record_doubles));
+    file_.clear();
+    file_.seekg(std::streamoff((index + 2) * rec_len));
+    file_.read(reinterpret_cast<char*>(cache_.data()), std::streamsize(rec_len));
+    if (uint64_t(file_.gcount()) != rec_len) {
         cached_record_ = ~uint64_t{0};
         return make_error(ErrorCode::CorruptionError,
                           "truncated data record " + std::to_string(index) + " in '" + path_ + "'");
     }
-    const ByteReader r{buf, header_.byte_swapped};
-    cache_.resize(size_t(header_.record_doubles));
-    for (size_t i = 0; i < cache_.size(); ++i)
-        cache_[i] = r.f64(i * 8);
+    // The file is little-endian unless byte_swapped says it is big-endian.
+    if ((std::endian::native == std::endian::little) == header_.byte_swapped) {
+        for (double& d : cache_)
+            d = std::bit_cast<double>(bswap64(std::bit_cast<uint64_t>(d)));
+    }
     cached_record_ = index;
     return {};
 }
