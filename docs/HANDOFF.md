@@ -88,7 +88,11 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
     graded on whether a plane moves the answer), `stars`;
   - `rates`: each server's rates against a five-point difference of its own
     positions (CROSS-TEST.md, "Rates, a new leg").
-- **Latest record:** `docs/crosstest/2026-09-18s.tsv`, against Astrolog's
+- **Latest record:** `docs/crosstest/2026-09-19t.tsv`, record s
+  adjudicated (CROSS-TEST.md, "Record s adjudicated"): their Moon points
+  from Mars fixed; the points' missing light time graded as declared in
+  their corrApplied; the mean-perihelion rates with their maintainer.
+- **Record s:** `docs/crosstest/2026-09-18s.tsv`, against Astrolog's
   `429c764` on a spare port (47392). Orbit points are now asked from the
   Sun, the barycentre and Mars's centre too (CROSS-TEST.md, "Orbit points
   from elsewhere"). Results:

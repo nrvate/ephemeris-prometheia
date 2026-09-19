@@ -767,6 +767,12 @@ def _moon_anchor(v, earth, v0, earth0):
     return ""
 
 
+def within_but_lighttime(sep, dkm):
+    """The two servers differ by about one light time's worth of the Earth's
+    motion from the Sun (20.5", 15,000 km at 1 AU), and no more."""
+    return sep <= 25.0 and dkm <= 20000.0
+
+
 def points_from_elsewhere(client, ours, theirs, table, verbose, epochs):
     """The same points seen from the Sun, the barycentre and Mars's centre, at
     mask 0 and mask 1. A point is a place in space (ORBIT-POINTS.md), so from
@@ -825,6 +831,7 @@ def points_from_elsewhere(client, ours, theirs, table, verbose, epochs):
             within = s <= band_s and dkm <= band_km
             if cls == "moon":
                 why = {}
+                r_of = {"ours": ra, "theirs": rb}
                 for who, r, i in (("ours", ra, 0), ("theirs", rb, 1)):
                     n = len(specs)
                     v0 = e0 = None
@@ -834,9 +841,20 @@ def points_from_elsewhere(client, ours, theirs, table, verbose, epochs):
                             v0 = e0 = None
                     why[who] = _moon_anchor(r.row(k), r.row(n), v0, e0) if ok(r.row(n)) else ""
                 bad = [w for w in ("ours", "theirs") if why[w]]
+                # corrApplied states what applies to an object structurally
+                # (SERVER.md): a server that says light time does not apply
+                # to a point answers mask 1 as mask 0, and says so.
+                declared = [w for w in bad if why[w].startswith("light time") and
+                            not (r_of[w].objects[k].corr & 1)] if mask == 1 else []
+                note += "".join(f"; {w}: {why[w]}" for w in bad)
+                if bad and len(declared) == len(bad) and within_but_lighttime(s, dkm):
+                    table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
+                              sep_servers=s, verdict="expected-difference",
+                              note=note + f"; {declared[0]}'s corrApplied has no light time "
+                                          "for this point, so mask 1 is its mask 0")
+                    continue
                 verdict = "agree" if within and not bad else \
                     f"finding ({bad[0]})" if len(bad) == 1 else "finding"
-                note += "".join(f"; {w}: {why[w]}" for w in bad)
             else:
                 verdict = "agree" if within else "finding"
             table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s,

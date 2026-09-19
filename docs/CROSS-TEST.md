@@ -1052,6 +1052,28 @@ difference is. Run against Astrolog's `429c764` on the spare port.
 - **Everything else is unchanged from record r.** The `rates` leg has the
   same 91 rows of theirs, plus Mars's mean perihelion's 16.
 
+### Record s adjudicated, 2026-09-19 (`docs/crosstest/2026-09-19t.tsv`)
+
+The Astrolog session's answers to record s's three findings, and a rerun
+against their build with the fix (their tree at `02bb758`).
+
+- **The Moon's points from Mars were theirs, fixed at their `d3d8d76`.** All
+  are now refused (errCode 2), which conforms.
+- **No light time on the Moon's points from the Sun or barycentre** is how
+  their library computes points, and their `corrApplied` says so for those
+  objects. corrApplied states what applies to an object structurally
+  (SERVER.md), as ours says a star carries no light time. So the leg now
+  grades such a row as expected-difference: their `corrApplied` lacks light
+  time, and the two differ by about the Earth's light-time motion (≤ 25″,
+  20,000 km). Without that statement it stays a finding.
+- **The mean perihelia's latitude-rate column holding the latitude** is
+  their library's, confirmed by them calling it directly. The true rate,
+  differenced, is 2.8e-7 °/day. Their golden test pins those columns bit
+  for bit, so a fix goes to their maintainer. The 16 `rates` rows stay
+  findings (theirs) until then.
+- **Left unattributed:** six rows at 1650, where they refuse the Earth, so
+  a Moon point has nothing to be held to.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
