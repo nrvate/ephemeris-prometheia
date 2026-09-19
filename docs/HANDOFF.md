@@ -55,8 +55,9 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
    - their `b89f510`: the J2000-frame node agrees (record h);
    - their `554288b`: α Cen A agrees to 0.007″ (record h).
 
-   - their `4f9c2a1` + `284b321` (§4.1): the sweep passes 288/288, and both
-     fixed planes agree to the floor (record j).
+   - their `4f9c2a1` + `284b321` (§4.1): both fixed planes agree to the
+     floor (record j). The sweep's 288/288 for them was a harness bug: it
+     counted refusals (NaN rows) as movement. Fixed; re-run pending.
    - **Open on their side:** Astrolog's local Swiss path still delegates
      planes 1 and 2, so the app's own charts keep the old plane-2 origin.
      This is a shared-core change, measured by their suite.

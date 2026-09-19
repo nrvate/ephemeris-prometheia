@@ -931,7 +931,10 @@ def leg_sidsweep(client, ours, theirs, table, verbose):
                         moved, same = [], 0
                         for k in range(len(SWEEP_BODIES)):
                             v, v0 = r.row(k), p0.row(k)
-                            if v is None or v0 is None:
+                            # A refused object's rows are NaN: no answer, and
+                            # never counted as movement (a NaN separation is
+                            # neither equal nor small).
+                            if v is None or v0 is None or any(math.isnan(x) for x in v[:2] + v0[:2]):
                                 continue
                             if v[0] == v0[0] and v[1] == v0[1]:
                                 same += 1

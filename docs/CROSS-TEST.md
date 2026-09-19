@@ -781,8 +781,8 @@ finding (theirs) 64, unadjudicated 1 (the 1800 Moon) and unanswered 9.
 
 Against Astrolog `qt` at `4f9c2a1`, where planes 1 and 2 became their own
 arithmetic:
-- **`sidsweep`: all 288 of their rows agree.** Every listed token moves on
-  both fixed planes.
+- **`sidsweep`:** the record says all 288 of their rows agree. **That count
+  is wrong** (see the correction under record j).
 - **The fixed planes now disagree by a zodiac-dependent constant, identical
   on planes 1 and 2:** Fagan/Bradley 3.31″, Lahiri 16.78″. That is 140
   findings. Plane 1 had agreed to 0.003″ while Swiss computed it.
@@ -802,8 +802,16 @@ Against Astrolog `qt` at `284b321`, their one-flag fix for record i's
 anchor: agree 1,951, expected-difference 243, unadjudicated 1 (the 1800
 Moon), unanswered 9, **no findings.**
 - Plane 1 is back to ≤ 0.0013″.
-- Plane 2's origin offset closed to −0.005 … +0.003″ for both zodiacs, and
-  the sweep is 288/288 on both sides.
+- Plane 2's origin offset closed to −0.005 … +0.003″ for both zodiacs.
+- **Correction, found by the Astrolog side:** the sweep's 288/288 for
+  `astrolog-ephd` in records i and j is overstated.
+  - Their server refuses the zodiacs defined at the instant (`true-citra`,
+    `galcent-*` and others) on both fixed planes, with errCode 2.
+  - A refused object's rows are NaN. The leg's "did it move" test took a
+    NaN separation, which is neither equal nor small, as movement.
+  - The harness now treats NaN rows as no answer. An explicit refusal
+    grades `refused`, which is protocol-correct, not a finding.
+  - The corrected count waits on a re-run.
 - Their own gate now reproduces Swiss's anchor-ecliptic answer with their
   in-house arithmetic (54 comparisons, 0.01″). Without the flag, all 54 fail
   by Δψ(t0).
