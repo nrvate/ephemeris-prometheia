@@ -40,6 +40,10 @@ void nutation(double jd_tt, double& dpsi, double& deps);
 // terms (docs/FRAMES.md).
 void nutation_with_rates(double jd_tt, double out[6]);
 
+// The same at two instants at once, each result identical to
+// nutation_with_rates' (the interpolator's two nodes around a fresh instant).
+void nutation_with_rates_pair(double jd_a, double jd_b, double out_a[6], double out_b[6]);
+
 // The same series summed the way the circular prints it, one sine and one
 // cosine per term. nutation() rearranges that sum to build each term's pair
 // by angle addition instead, which is eight times faster; this exists so a

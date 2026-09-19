@@ -47,6 +47,12 @@ configure_file(src/hypotheticals_shipped.inc.in
   ${CMAKE_CURRENT_BINARY_DIR}/generated/hypotheticals_shipped.inc @ONLY)
 target_include_directories(prometheia PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_compile_options(prometheia PRIVATE -Wall -Wextra -Werror)
+# No fused multiply-adds: a result must not depend on whether a compiler fused
+# a*b+c, which differs between scalar and vector code and between targets.
+# The two-node nutation kernel (src/frames.cpp) relies on it to match the
+# scalar one bit for bit. x86-64's baseline has no FMA, so this changes
+# nothing there today.
+target_compile_options(prometheia PRIVATE -ffp-contract=off)
 
 option(PROMETHEIA_SANITIZE "Build with ASan+UBSan" OFF)
 if(PROMETHEIA_SANITIZE)

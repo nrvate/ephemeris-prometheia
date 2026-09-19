@@ -206,13 +206,28 @@ const CompactTable& compact_table() {
 // sin and cos of m * phi[j] for every multiple the table uses, by angle
 // addition from m = 1. Twelve additions carry at most 1e-15 of relative
 // error, which the agreement figure above accounts for.
-struct MultipleTables {
+template <typename V>
+struct MultipleTablesT {
     // Index kMaxMultiple + m for the multiple m, negative ones included
     // (sin(-x) = -sin x, cos(-x) = cos x, exactly), so no term branches on
     // its multiplier's sign.
-    double sn[14][2 * kMaxMultiple + 1];
-    double cs[14][2 * kMaxMultiple + 1];
+    V sn[14][2 * kMaxMultiple + 1];
+    V cs[14][2 * kMaxMultiple + 1];
 };
+using MultipleTables = MultipleTablesT<double>;
+
+// Two nodes at once, one in each lane of a vector of two doubles: every
+// lane does exactly the scalar operations in the scalar order (the build
+// never fuses a multiply and an add: -ffp-contract=off), so each node's
+// result is the scalar one to the bit, for about the cost of one.
+typedef double Pair __attribute__((vector_size(16)));
+
+inline double splat(double x, double) {
+    return x;
+}
+inline Pair splat(double x, Pair) {
+    return Pair{x, x};
+}
 
 void build_multiples(const double phi[14], const CompactTable& t, MultipleTables& m) {
     constexpr int z = kMaxMultiple;
@@ -239,14 +254,15 @@ void build_multiples(const double phi[14], const CompactTable& t, MultipleTables
 }
 
 // sin and cos of the term's whole argument, composed from its factors.
-inline void term_sin_cos(const CompactTerm& t, const MultipleTables& m, double& sa, double& ca) {
-    sa = 0.0;
-    ca = 1.0;
+template <typename V>
+inline void term_sin_cos(const CompactTerm& t, const MultipleTablesT<V>& m, V& sa, V& ca) {
+    sa = splat(0.0, V{});
+    ca = splat(1.0, V{});
     for (int k = 0; k < t.n; ++k) {
         const int j = t.arg[k], at = kMaxMultiple + t.mul[k];
-        const double s2 = m.sn[j][at];
-        const double c2 = m.cs[j][at];
-        const double s = sa * c2 + ca * s2;
+        const V s2 = m.sn[j][at];
+        const V c2 = m.cs[j][at];
+        const V s = sa * c2 + ca * s2;
         ca = ca * c2 - sa * s2;
         sa = s;
     }
@@ -274,23 +290,26 @@ void nutation(double jd_tt, double& dpsi, double& deps) {
     deps = sum_eps * kAs2Rad;
 }
 
-void nutation_with_rates(double jd_tt, double out[6]) {
-    const double T = centuries(jd_tt);
-    double phi[14];
-    fundamental_arguments(jd_tt, phi);
+namespace {
+
+// The series with first and second derivatives, for one node (V = double)
+// or two (V = Pair), from the nodes' T and multiple tables.
+template <typename V>
+void nutation_rates_kernel(const V& T, const MultipleTablesT<V>& mult, V out[6]) {
+    const V zero = splat(0.0, V{});
     // First and second derivatives of the fundamental arguments in
     // arcsec/century and arcsec/century^2 (the polynomials of
     // fundamental_arguments differentiated).
     static const double kPlanetRate[8] = {538101628.688982, 210664136.433548, 129597742.283429,
                                           68905077.493988,  10925660.377991,  4399609.855732,
                                           1542481.193933,   786550.320744};
-    double d1[14], d2[14];
+    V d1[14], d2[14];
     for (int j = 0; j < 8; ++j) {
-        d1[j] = kPlanetRate[j];
-        d2[j] = 0.0;
+        d1[j] = splat(kPlanetRate[j], V{});
+        d2[j] = zero;
     }
     d1[8] = 5028.8200 + 2.0 * 1.112022 * T;
-    d2[8] = 2.0 * 1.112022;
+    d2[8] = splat(2.0 * 1.112022, V{});
     auto quartic = [&](int j, double b1, double b2, double b3, double b4) {
         d1[j] = b1 + T * (2.0 * b2 + T * (3.0 * b3 + T * 4.0 * b4));
         d2[j] = 2.0 * b2 + T * (6.0 * b3 + T * 12.0 * b4);
@@ -305,25 +324,22 @@ void nutation_with_rates(double jd_tt, double out[6]) {
         d2[j] *= kAs2Rad;
     }
 
-    const CompactTable& table = compact_table();
-    MultipleTables mult;
-    build_multiples(phi, table, mult);
-    double psi = 0.0, eps = 0.0, psi1 = 0.0, eps1 = 0.0, psi2 = 0.0, eps2 = 0.0;
-    for (const CompactTerm& t : table.terms) {
-        double w = 0.0, w2 = 0.0; // the argument's rates (rad/cy, rad/cy^2)
+    V psi = zero, eps = zero, psi1 = zero, eps1 = zero, psi2 = zero, eps2 = zero;
+    for (const CompactTerm& t : compact_table().terms) {
+        V w = zero, w2 = zero; // the argument's rates (rad/cy, rad/cy^2)
         for (int k = 0; k < t.n; ++k) {
             w += t.fmul[k] * d1[t.arg[k]];
             w2 += t.fmul[k] * d2[t.arg[k]];
         }
-        double sa, ca;
+        V sa, ca;
         term_sin_cos(t, mult, sa, ca);
         // The term p (psi) and its quadrature q = dp/d(argument); the same
         // for eps. Then p' = c1 sin + q w and p'' = 2 c1 cos w - p w^2 + q w2,
         // which reuses p and q instead of expanding them per derivative.
-        const double a_psi = t.c[0] + t.c[1] * T, a_eps = t.c[3] + t.c[4] * T;
-        const double p = a_psi * sa + t.c[2] * ca, q = a_psi * ca - t.c[2] * sa;
-        const double e = a_eps * ca + t.c[5] * sa, r = t.c[5] * ca - a_eps * sa;
-        const double ww = w * w;
+        const V a_psi = t.c[0] + t.c[1] * T, a_eps = t.c[3] + t.c[4] * T;
+        const V p = a_psi * sa + t.c[2] * ca, q = a_psi * ca - t.c[2] * sa;
+        const V e = a_eps * ca + t.c[5] * sa, r = t.c[5] * ca - a_eps * sa;
+        const V ww = w * w;
         psi += p;
         eps += e;
         psi1 += t.c[1] * sa + q * w;
@@ -338,6 +354,39 @@ void nutation_with_rates(double jd_tt, double out[6]) {
     out[3] = eps1 * kAs2Rad / kCy;
     out[4] = psi2 * kAs2Rad / (kCy * kCy);
     out[5] = eps2 * kAs2Rad / (kCy * kCy);
+}
+
+} // namespace
+
+void nutation_with_rates(double jd_tt, double out[6]) {
+    double phi[14];
+    fundamental_arguments(jd_tt, phi);
+    MultipleTables mult;
+    build_multiples(phi, compact_table(), mult);
+    nutation_rates_kernel(centuries(jd_tt), mult, out);
+}
+
+void nutation_with_rates_pair(double jd_a, double jd_b, double out_a[6], double out_b[6]) {
+    const CompactTable& table = compact_table();
+    double phi_a[14], phi_b[14];
+    fundamental_arguments(jd_a, phi_a);
+    fundamental_arguments(jd_b, phi_b);
+    MultipleTables ma, mb;
+    build_multiples(phi_a, table, ma);
+    build_multiples(phi_b, table, mb);
+    MultipleTablesT<Pair> m;
+    for (int j = 0; j < 14; ++j)
+        for (int k = -table.max_multiple[j]; k <= table.max_multiple[j]; ++k) {
+            const int i = kMaxMultiple + k;
+            m.sn[j][i] = Pair{ma.sn[j][i], mb.sn[j][i]};
+            m.cs[j][i] = Pair{ma.cs[j][i], mb.cs[j][i]};
+        }
+    Pair out[6];
+    nutation_rates_kernel(Pair{centuries(jd_a), centuries(jd_b)}, m, out);
+    for (int c = 0; c < 6; ++c) {
+        out_a[c] = out[c][0];
+        out_b[c] = out[c][1];
+    }
 }
 
 namespace {
@@ -802,8 +851,17 @@ void NutationInterpolator::at(double jd_tt, double& dpsi, double& deps) {
     const double k = std::floor(jd_tt / kNodeSpacingDays);
     const auto index = static_cast<long long>(k);
     const double u = (jd_tt - k * kNodeSpacingDays) / kNodeSpacingDays;
-    // Both nodes are read before either reference could be invalidated by
-    // the other's lookup (they are different slots, or the same index).
+    // A fresh instant needs both nodes: they are computed together, a lane
+    // each, for about the cost of one (the same values; 2026-09-19).
+    Node& na = nodes_[size_t(index) & (kNutationCacheSize - 1)];
+    Node& nb = nodes_[size_t(index + 1) & (kNutationCacheSize - 1)];
+    if (na.index != index && nb.index != index + 1) {
+        nutation_with_rates_pair(double(index) * kNodeSpacingDays,
+                                 double(index + 1) * kNodeSpacingDays, na.n, nb.n);
+        na.index = index;
+        nb.index = index + 1;
+        evaluations_ += 2;
+    }
     double a[6], b[6];
     std::copy(node(index).n, node(index).n + 6, a);
     std::copy(node(index + 1).n, node(index + 1).n + 6, b);

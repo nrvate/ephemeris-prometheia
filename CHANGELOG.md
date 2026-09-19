@@ -35,7 +35,13 @@ documented, not that it is frozen.
     kept per engine: 266 → 33 µs a call at scattered instants, and a
     passage no longer depends on which instant was asked first (answers
     moved by up to 0.03 mas);
-  - the nutation series with rates: 22.6 → 18.4 µs a node.
+  - the nutation series with rates: 22.6 → 18.4 µs a node, and a fresh
+    instant's two nodes are computed together, a lane each of a two-double
+    vector, bit-identical to the scalar path: 36–42 → 19.8 µs. The library
+    is built with `-ffp-contract=off`, so no result depends on whether a
+    compiler fused a multiply and an add;
+  - `prometheiad` under `prometheia-load` (64 connections, fresh instants):
+    31,900 → 49,300 requests a second, p99 4.63 → 2.05 ms;
   - a small body's first integration is 2.3× faster: the perturbers' table
     reads each ephemeris record once, not once per body;
   - the force model interpolates a velocity only for the Sun, the one it

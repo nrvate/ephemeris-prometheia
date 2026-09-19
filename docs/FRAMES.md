@@ -109,7 +109,10 @@ spacing:
 | 0.25 d | 0.0001 µas | 0.24 µas |
 
 Nodes are cached, direct-mapped, 4,096 of them. The engine uses it for
-every nutation (docs/ENGINE.md).
+every nutation (docs/ENGINE.md). An instant whose two nodes are both
+missing, which is every fresh instant a server is asked for, has them
+computed together by `nutation_with_rates_pair`, a lane each of a
+two-double vector (below).
 
 ## How the series is summed
 
@@ -127,8 +130,19 @@ hold the two against each other: they agree to 3e-20 rad (6e-9 µas) over
 1600–2700, which is roundoff, and five orders below the 0.004 µas the
 half-day interpolator already costs.
 
-What it buys, per epoch: the series falls from 51 to 13 µs, and with rates
-from 64 to 21 µs. That is the cost of a node, and the first body asked for
+**Two nodes at once** (2026-09-19). With rates, the sum reuses each term's
+value and quadrature for both derivatives (22.6 → 18.4 µs). The kernel is a
+template over its number type: `double` for one node, and for two, a vector
+of two doubles with one node in each lane. Each lane performs the scalar
+operations in the scalar order, and the library is built with
+`-ffp-contract=off`, so no multiply and add is ever fused. So a node from
+the pair is the scalar node to the bit (checked over 100,000 nodes,
+1550–2650). A pair costs 19.8 µs, where two single nodes cost 36–42 µs.
+Under `prometheia-load`, where every request is a fresh instant, this took
+`prometheiad` from 36,900 to 49,300 requests a second.
+
+What it bought when first written, per epoch: the series fell from 51 to
+13 µs, and with rates from 64 to 21 µs. That is the cost of a node, and the first body asked for
 over a time window pays for every node in it while the rest ride free — so
 it shows up as Jupiter's apparent place falling from 36 to 14 µs when it is
 the body that pays, and a year-long segment fit of the Moon from 57 to

@@ -414,8 +414,9 @@ Runs vary by about 20% with the CPU's clock, so compare within one sitting.
 
 At a fresh instant most of a chart's cost is nutation. The interpolator
 evaluates the full 1365-term series, with rates, at the two half-day nodes
-around the instant: 18.4 µs each. Under `prometheia-load` it was 43% of the
-server's CPU (2026-09-19).
+around the instant, now both at once: 19.8 µs the pair (FRAMES.md, "How
+the series is summed"). Under `prometheia-load` it was 43% of the server's
+CPU before that (2026-09-19).
 
 `add_catalog` of the full catalogue (137 MB) takes 235 ms: it decompresses
 and CRC-checks every chunk, so a corrupt file fails there. The first lookup
@@ -463,6 +464,9 @@ asteroids integrated to 1600 took 3.8 s together, about 95 ms each.
   quadrature for its derivatives, and reads signed multiples without a
   branch: 22.6 → 18.4 µs a node. The values and first derivatives are
   bit-identical, and the second derivatives agree to 2e-22 rad/day².
+- **Both nutation nodes of a fresh instant in one pass,** a lane each of a
+  two-double vector, bit-identical to the scalar node: 36–42 → 19.8 µs for
+  the pair.
 
 ## Validation
 

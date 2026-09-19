@@ -905,6 +905,11 @@ and `--threads 4`. The client ran on the same host.
     as the result caches filled (64 MB per loop) and then recycled.
   - Open files peaked at 96 and went back to 31 after every connection
     closed. No growth and no leak over the run.
+- **After the performance work of 2026-09-19** (64 connections, 20 s,
+  `--threads 4`, `--cells-per-sec 0`, a fresh random instant a request):
+  49,300 requests a second, p50 1.27 ms, p99 2.05 ms. The same run gave
+  31,900, p50 1.91 ms and p99 4.63 ms before it. Nutation had been 43% of
+  the server's CPU (ENGINE.md, "Performance").
 - **Limits, at their defaults:** 100 connections from one address for 10 s.
   - 36 were refused at the upgrade with 503, which is the 64-per-address
     cap.
