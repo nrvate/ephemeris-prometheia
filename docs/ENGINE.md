@@ -129,7 +129,8 @@ For a TT epoch *t*:
    `jd − τ` is formed with its exact rounding error recovered (TwoSum) and
    applied through the body's velocity: a JD double near the present
    resolves only ~40 µs, which would otherwise put metre-class noise into
-   the differenced rates.
+   the differenced rates. Orbit points do the same through their focus
+   (ORBIT-POINTS.md, "How it is computed").
 3. **Gravitational deflection** by the Sun (skipped when the body is the
    Sun or the observer is the Sun or the barycentre): with unit vectors
    p (observer→body), q (Sun→body), e (Sun→observer) and E = |Sun→observer|,
@@ -148,11 +149,20 @@ For a TT epoch *t*:
    (~0.01″); barycentric has none.
 5. **Frame:** ICRF → B (frame bias) → P (IAU 2006) → N (IAU 2000A) as the
    frame requires, then R1(ε) for ecliptic coordinates.
-6. **Rates:** the whole pipeline at *t* ± 0.001 day; the vector
+6. **Rates:** the whole pipeline at *t* ± 1/4096 day (21 s); the vector
    difference over the actual rounded step gives the rectangular
    velocity, from which the spherical rates follow analytically. Rates
    therefore describe the *apparent* coordinates (aberration and nutation
    changes included) and are consistent with differencing positions.
+   - **Measured** against a five-point difference of the engine's own
+     positions (2026-09-18; Sun, Moon, Mercury, Mars, Jupiter; four epochs,
+     hourly over a day). Geocentric: 3.4e-8 °/day for the Moon, 2e-10 or
+     better for the others. Topocentric: 2.9e-6 °/day for the Moon, 1e-8
+     for the others.
+   - **Why this step:** a topocentric Moon's diurnal parallax sets the
+     three-point truncation. At 0.001 day it was 2.6e-5 °/day; smaller
+     steps than 1/4096 lose to roundoff. The cross-test's `rates` leg
+     checks this through the server.
 
 Cost (`-O2`, DE440, measured 2026-09-17 on ten bodies × 10,000 hourly
 instants):

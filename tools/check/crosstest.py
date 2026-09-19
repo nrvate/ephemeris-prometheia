@@ -851,6 +851,101 @@ INVARIABLE_LAT_BAND = 0.05  # arcsec: the two sides' plane orientations
 INVARIABLE_SPREAD_BAND = 0.02  # arcsec: a constant origin offset, across bodies
 
 
+# Rates: a different oracle from every other leg, which grade positions
+# only. Each server's reported rates are checked against central differences
+# of its own positions at t -/+ h, so a rate with the wrong sign, unit or
+# frame shows in either server alone. Graded per server, not against the
+# other server: the two agree on positions to milliarcseconds, and a rate
+# error is invisible to a position check.
+RATE_BAND_DEG = 1e-6  # deg/day: 3.6 mas/day
+# A topocentric Moon's diurnal parallax sets our three-point truncation:
+# measured 2.9e-6 deg/day (ENGINE.md, "Rates"), so an estimate of twice that.
+RATE_BAND_TOPO_DEG = 6e-6
+RATE_BAND_AU = 1e-9  # AU/day per AU of distance (150 m/day at 1 AU)
+# 1/1024 day (84.375 s): every row time is then exact in f64 (a JD near
+# 2.45e6 resolves only ~40 us, and at h = 0.001 d that jitter alone showed as
+# 7e-7 deg/day on the Moon). Truncation is ~1e-8 deg/day for the Moon.
+RATE_H_DAYS = 1.0 / 1024.0
+RATE_EPOCHS = [2451545.0, 2461300.5]
+RATE_OBJECTS = [["--obj", "10"], ["--obj", "301"], ["--obj", "199"], ["--obj", "4"],
+                ["--obj", "5"], ["--obj", "9"], ["--node", "301.a.m"], ["--star", "Sirius"]]
+RATE_LABELS = ["Sun", "Moon", "Mercury", "Mars", "Jupiter", "Pluto", "Moon mean node", "Sirius"]
+RATE_CONFIGS = [
+    ("geo apparent, true of date, ecliptic", ["--corrections", "7"]),
+    ("geo apparent, true of date, equatorial", ["--corrections", "7", "--eq"]),
+    ("geo astrometric, ICRF, equatorial", ["--corrections", "1", "--icrs", "--eq"]),
+    ("geo apparent, J2000, ecliptic", ["--corrections", "7", "--j2000"]),
+    # mask 1: astrolog-ephd refuses (ERROR 11) the default light time and
+    # aberration from the Sun for some kinds, and one refusal fails the request
+    ("helio astrometric, true of date, ecliptic", ["--helio", "--corrections", "1"]),
+    ("topo Zurich, apparent", ["--corrections", "7", "--topo", "8.55,47.37,500"]),
+    ("geo apparent, lahiri", ["--corrections", "7", "--sid", "lahiri"]),
+    ("geo apparent, true-citra", ["--corrections", "7", "--sid", "true-citra"]),
+]
+
+
+def _rate_error(v):
+    """Worst of |reported rate - central difference| for lon, lat (deg/day)
+    and dist (AU/day), from rows t-2h .. t+2h; None if any row is missing.
+    Five points (error ~h^4 f5/30): a topocentric Moon's diurnal parallax
+    makes the three-point difference's h^2 f3/6 about 4e-5 deg/day here."""
+    if any(r is None or any(math.isnan(x) for x in r) for r in v):
+        return None
+    mid = v[2]
+
+    def d(i, wrap=False):
+        f = [r[i] for r in v]
+        if wrap:
+            f = [f[2] + ((x - f[2] + 180.0) % 360.0 - 180.0) for x in f]
+        return (f[0] - 8.0 * f[1] + 8.0 * f[3] - f[4]) / (12.0 * RATE_H_DAYS)
+    # distance: relative to the distance, as a star's is f64 noise at ~5e5 AU
+    return (abs(mid[3] - d(0, True)), abs(mid[4] - d(1)),
+            abs(mid[5] - d(2)) / max(1.0, mid[2]))
+
+
+def leg_rates(client, ours, theirs, table, verbose):
+    print(f"\n== rates: each server's rates against its own positions at t -/+ {RATE_H_DAYS} d")
+    worst = {"ours": [0.0, 0.0, 0.0], "theirs": [0.0, 0.0, 0.0]}
+    for label, cfg in RATE_CONFIGS:
+        for jd in RATE_EPOCHS:
+            args = ["--jd", repr(jd - 2 * RATE_H_DAYS), "--step", repr(RATE_H_DAYS * 86400.0),
+                    "--count", "5", "--deltat", str(DELTA_T)] + cfg
+            # Seen from the Sun, the Sun is the observer: astrolog-ephd then
+            # refuses the whole request, so it is left out there.
+            objs = [(o, n) for o, n in zip(RATE_OBJECTS, RATE_LABELS)
+                    if not ("--helio" in cfg and n == "Sun")]
+            for o, _ in objs:
+                args += o
+            ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
+            table.asked(ra, rb)
+            for k, (_, name) in enumerate(objs):
+                ea = _rate_error([ra.row(k, r) for r in range(5)])
+                eb = _rate_error([rb.row(k, r) for r in range(5)])
+                base = dict(leg="rates", epoch_tt=jd, object=name, frame=label, deltat=DELTA_T,
+                            tier=2)
+                if ea is None or eb is None:
+                    table.add(**base, verdict="unanswered",
+                              note="rows missing: ours %s theirs %s" % (ea is None, eb is None))
+                    continue
+                for who, e in (("ours", ea), ("theirs", eb)):
+                    for i in range(3):
+                        worst[who][i] = max(worst[who][i], e[i])
+                bd = RATE_BAND_TOPO_DEG if "--topo" in cfg else RATE_BAND_DEG
+                ok_a = ea[0] <= bd and ea[1] <= bd and ea[2] <= RATE_BAND_AU
+                ok_b = eb[0] <= bd and eb[1] <= bd and eb[2] <= RATE_BAND_AU
+                table.add(**base, ours="%.2e/%.2e/%.2e" % ea, theirs="%.2e/%.2e/%.2e" % eb,
+                          band=f"{bd} deg/d, {RATE_BAND_AU} AU/d per AU",
+                          verdict="agree" if ok_a and ok_b else
+                          "finding" if not ok_a else "finding (theirs)",
+                          note="|rate - central difference| lon/lat deg/day, dist AU/day per AU")
+                if verbose or not (ok_a and ok_b):
+                    print(f"  {label:40s} {jd:.1f} {name:15s} ours {ea[0]:.1e} {ea[1]:.1e} "
+                          f"{ea[2]:.1e}  theirs {eb[0]:.1e} {eb[1]:.1e} {eb[2]:.1e}")
+    for who in ("ours", "theirs"):
+        w = worst[who]
+        print(f"  {who:6s} worst: lon {w[0]:.2e} lat {w[1]:.2e} deg/day, dist {w[2]:.2e} AU/day")
+
+
 def leg_sidereal(client, ours, theirs, table, verbose):
     """Planes 0 and 1 are judged by what the sidereal rotation adds: each row
     against the same body's tropical gap at that instant (the ephemerides'
@@ -1338,7 +1433,7 @@ def main():
     ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,sidereal,sidsweep,sidinstant,stars")
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,rates,sidereal,sidsweep,sidinstant,stars")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvmraid/shares/Astrolog", help="the Astrolog tree, for its commit")
     ap.add_argument("--astrolog-bin", default="/nvmraid/shares/Astrolog/astrolog-ephd",
@@ -1380,6 +1475,8 @@ def main():
         leg_points(client, ours, theirs, table, args.verbose)
     if "stars" in legs:
         leg_stars(client, ours, theirs, table, args.verbose)
+    if "rates" in legs:
+        leg_rates(client, ours, theirs, table, args.verbose)
     if "sidereal" in legs:
         leg_sidereal(client, ours, theirs, table, args.verbose)
     if "sidsweep" in legs:

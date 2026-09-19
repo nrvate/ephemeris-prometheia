@@ -95,7 +95,12 @@ is written down here rather than left to be rediscovered.
 path, with one difference. A body's light-time equation is solved by Newton's
 method because the body moves fast enough to matter; a node's contracts by
 v/c per pass, so a fixed-point iteration reaches roundoff in about three
-passes and no derivative is needed. Deflection and aberration are then the
+passes and no derivative is needed. The retarded epoch `jd − τ` is formed in
+TDB with its rounding error recovered, as for a body, and applied through the
+focus's velocity. Until 2026-09-18 it was not. A topocentric Moon point then
+jittered by 1.2 mas: a JD double resolves ~40 µs, the Earth focus moves at
+30 km/s, and τ varies with the site. Geocentrically τ barely moves, so the
+rounding stayed constant and hid it. The cross-test's `rates` leg found it. Deflection and aberration are then the
 same calls the body path makes, with the same guard: the deflection term is
 skipped for an observer at the Sun's centre, where it is not defined, and
 for the Sun itself as the point. It is applied at the barycentre, which

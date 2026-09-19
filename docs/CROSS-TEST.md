@@ -910,6 +910,51 @@ unanswered 9, and 15 findings (theirs).
 - **The 15 findings** are `galequ-iau1958`'s pole transfer, which is with
   their maintainer.
 
+### Rates, a new leg, 2026-09-18 (`docs/crosstest/2026-09-18p.tsv`)
+
+Every leg before this one grades positions. Each row carries six numbers,
+but no leg ever looked at the three rates. The retrograde flag depends on
+the sign of one, so this was a blind spot, not a detail.
+
+- **`rates`, a different oracle.** Each server's reported rates are checked
+  against a five-point central difference of its own positions, one request
+  of five rows at t − 2h … t + 2h. Grading each server against itself sees
+  a wrong sign, unit or frame in either one, with nothing to agree on.
+  - **The grid:** 8 objects (Sun, Moon, Mercury, Mars, Jupiter, Pluto, the
+    Moon's mean node, Sirius), 8 configurations (geocentric apparent in
+    three frames, astrometric ICRF, heliocentric, topocentric Zurich,
+    `lahiri`, `true-citra`), 2 epochs.
+  - **Bands:** 1e-6 °/day, and 6e-6 °/day topocentric (an estimate, twice
+    the measured 2.9e-6). Distance rates: 1e-9 AU/day per AU of distance.
+- **Two traps in the method,** both measured.
+  - **The step must be exact in binary:** h = 1/1024 day. At h = 0.001
+    day, the 40 µs quantization of a JD double alone showed as 7e-7 °/day
+    on the Moon.
+  - **Three points are not enough topocentrically.** The Moon's diurnal
+    parallax makes the three-point truncation about 4e-5 °/day. Five points
+    bring it to about 3e-10.
+- **It found two defects of ours, both fixed** (ENGINE.md, "Rates";
+  ORBIT-POINTS.md):
+  - The engine's own rate step, 0.001 day, is also a three-point difference.
+    Its truncation was 2.6e-5 °/day on a topocentric Moon. At 1/4096 day it
+    is 2.9e-6.
+  - The Moon's points jittered by 1.2 mas topocentrically: their retarded
+    epoch lacked the rounding recovery bodies have. Now 8 µas.
+- **Ours now:** all 126 rows pass. Worst 1.6e-6 °/day (the topocentric mean
+  node), 7e-7 geocentric, distance 6.5e-11 AU/day.
+- **Theirs:** 95 of 126 rows miss (reported to the Astrolog session as
+  numbers).
+  - Topocentric Moon: up to 8.2e-4 °/day.
+  - `true-citra`: every body 5e-5 to 1e-4 °/day in longitude, where
+    `lahiri` is within 1e-6. The instant-defined zodiac's own motion looks
+    to be missing from the rates.
+  - Distance rates up to 1.8e-6 AU/day; longitude and latitude rates
+    generally 1e-6 to 1e-5 °/day.
+- **Heliocentric runs at mask 1.** `astrolog-ephd` refuses (ERROR 11) the
+  default heliocentric light time and aberration for some object kinds, and
+  one refusal fails the whole request.
+- **The other legs are unchanged from record o.**
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

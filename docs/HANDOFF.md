@@ -80,10 +80,12 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `topo`: ΔT from Horizons' sidereal time, via `build/prometheia-ut1`;
   - `bary`, `deflection` (textbook formula);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
-    graded on whether a plane moves the answer), `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18o.tsv`, after the binary
-  orbits moved to the date's tangent plane (`618861f`): verdicts identical to
-  record n. The only findings are
+    graded on whether a plane moves the answer), `stars`;
+  - `rates`: each server's rates against a five-point difference of its own
+    positions (CROSS-TEST.md, "Rates, a new leg").
+- **Latest record:** `docs/crosstest/2026-09-18p.tsv`, with the `rates`
+  leg: all of ours pass; 95 of theirs miss (reported to them). Elsewhere the
+  verdicts are identical to records n and o. The only other findings are
   the 15 `galequ-iau1958` rows (their pole transfer, with their
   maintainer). The binary-star rows are expected to differ by our orbit's
   bend, and do (CROSS-TEST.md, "Binary orbits").

@@ -11,6 +11,19 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **Rates, checked by a new oracle.** The cross-test's `rates` leg checks
+  each server's rates against a five-point difference of its own positions.
+  Every other leg compares positions only. It found two defects of ours.
+  - The Moon's nodes and apsides jittered by 1.2 mas topocentrically. Their
+    retarded epoch was rounded to a JD double without the error recovery
+    bodies have. Now 8 µas (ORBIT-POINTS.md).
+  - The rate step was 0.001 day, and a topocentric Moon's diurnal parallax
+    made its truncation 2.6e-5 °/day. At 1/4096 day it is 2.9e-6, with
+    geocentric rates 3.4e-8 °/day or better (ENGINE.md, "Rates"). No
+    extra cost.
+
 ## 0.5.0 — 2026-09-18
 
 The library and tools are 0.5.0; the C ABI is unchanged (6). `prometheiad` is

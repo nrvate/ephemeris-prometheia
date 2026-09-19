@@ -44,8 +44,12 @@ constexpr double kEarthRotationRadPerDay = kTwoPi * 1.00273781191135448;
 // kernels (JPL's SB441-N16) use 2000000 + number.
 constexpr long kSpkidNumberedBase = 20000000;
 constexpr long kOldSpkidNumberedBase = 2000000;
-// Central-difference half step for rates (days).
-constexpr double kSpeedStepDays = 1e-3;
+// Central-difference half step for rates (days): 1/4096 (21 s), exact in
+// binary. Measured against a five-point difference of positions (ENGINE.md,
+// "Rates"): the three-point truncation, h^2 f'''/6, is set by a topocentric
+// Moon's diurnal parallax and was 2.6e-5 deg/day at 1e-3; here 2.9e-6.
+// Smaller steps lose to roundoff (4.7e-6 at 1/8192).
+constexpr double kSpeedStepDays = 1.0 / 4096.0;
 
 // ---------------------------------------------------------------------------
 // Zodiacs defined at the instant (docs/FRAMES.md, "Zodiacs defined at the
@@ -1849,11 +1853,14 @@ struct Engine::Impl {
         matmul(e, f.pb, m);
     }
 
-    // Barycentric position (km, ICRF) of a node or apsis of body `id`.
+    // Barycentric position (km, ICRF) of a node or apsis of body `id`. `dt`
+    // (days) is a correction to the instant, applied through the focus's
+    // velocity: the rounding error of a retarded time, which a JD double
+    // cannot hold (computed_point_vector_at).
     Result<void> orbit_point(int id, OrbitPoint point, OrbitElements elements, double jd_tt,
-                             double jd_tdb, const CalcOptions& o, double out[3]) {
+                             double jd_tdb, const CalcOptions& o, double out[3], double dt = 0.0) {
         if (elements == OrbitElements::Mean)
-            return mean_orbit_point(id, point, jd_tt, jd_tdb, o, out);
+            return mean_orbit_point(id, point, jd_tt, jd_tdb, o, out, dt);
         if (id == body::kSun || id == body::kSolarSystemBary)
             return make_error(ErrorCode::ArgumentError, "the Sun has no heliocentric orbit");
         const int center = id == body::kMoon ? body::kEarth : body::kSun;
@@ -1895,7 +1902,7 @@ struct Engine::Impl {
         if (!r)
             return r;
         for (int i = 0; i < 3; ++i)
-            out[i] = c[i] + rel_point[i];
+            out[i] = c[i] + c[3 + i] * dt + rel_point[i];
         return {};
     }
 
@@ -1965,7 +1972,7 @@ struct Engine::Impl {
     }
 
     Result<void> mean_orbit_point(int id, OrbitPoint point, double jd_tt, double jd_tdb,
-                                  const CalcOptions& o, double out[3]) {
+                                  const CalcOptions& o, double out[3], double dt = 0.0) {
         double m[9];
         orbit_ecliptic(jd_tt, o, m);
         double normal[3], ev[3], hi[3], ei[3], rel[3], focus[6];
@@ -2025,14 +2032,19 @@ struct Engine::Impl {
         if (!r)
             return r;
         for (int i = 0; i < 3; ++i)
-            out[i] = focus[i] + rel[i];
+            out[i] = focus[i] + focus[3 + i] * dt + rel[i];
         return {};
     }
 
     // Observer -> a point that is computed rather than read from the
     // ephemeris -- an orbit point, a body from elements -- in the output
-    // frame (km), with the corrections a body gets. `at(jd_tt, pt)` gives
-    // the point's barycentric ICRF position (km) at an instant.
+    // frame (km), with the corrections a body gets. `at(tt, tdb, dt, pt)`
+    // gives the point's barycentric ICRF position (km) at the instant tdb + dt
+    // (tt for what moves slowly: frames, mean elements). jd_tdb - tau is
+    // rounded to a JD double (~40 us near the present), and dt carries the
+    // exact rounding error back, as retarded() does for a body. Without it a Moon point, whose
+    // focus is the Earth at 30 km/s, jittered by ~1 m: 0.6 mas topocentric, where tau varies with
+    // the site.
     template <class PointFn>
     Result<void> computed_point_vector_at(double jd_tt, const CalcOptions& o, PointFn&& at,
                                           bool point_is_sun, double out[3], double& tau) {
@@ -2043,7 +2055,14 @@ struct Engine::Impl {
             return r;
         if (!o.light_time || !(tau >= 0.0 && tau < 1.0))
             tau = 0.0;
-        r = at(jd_tt - tau, pt);
+        // jd_tdb - tau, with its rounding error recovered (TwoSum).
+        const auto retarded_at = [&](double t_lt, double pt_out[3]) {
+            const double s = jd_tdb - t_lt;
+            const double bp = s - jd_tdb;
+            const double err = (jd_tdb - (s - bp)) + (-t_lt - bp);
+            return at(jd_tt - t_lt, s, err, pt_out);
+        };
+        r = retarded_at(tau, pt);
         if (!r)
             return r;
         double p[3];
@@ -2062,7 +2081,7 @@ struct Engine::Impl {
                 const double next = d / apparent::kLightKmPerDay;
                 const double step = next - tau;
                 tau = next;
-                r = at(jd_tt - tau, pt);
+                r = retarded_at(tau, pt);
                 if (!r)
                     return r;
                 for (int i = 0; i < 3; ++i)
@@ -2100,8 +2119,8 @@ struct Engine::Impl {
                                        double& tau) {
         return computed_point_vector_at(
             jd_tt, o,
-            [&](double t, double pt[3]) {
-                return orbit_point(id, point, elements, t, time::tdb_from_tt(t), o, pt);
+            [&](double t, double t_tdb, double dt, double pt[3]) {
+                return orbit_point(id, point, elements, t, t_tdb, o, pt, dt);
             },
             id == body::kSun, out, tau);
     }
@@ -2184,8 +2203,12 @@ struct Engine::Impl {
     Result<void> elements_vector_at(const PolynomialElements& el, double jd_tt,
                                     const CalcOptions& o, double out[3], double& tau) {
         return computed_point_vector_at(
-            jd_tt, o, [&](double t, double pt[3]) { return elements_point(el, t, o, pt); }, false,
-            out, tau);
+            jd_tt, o,
+            // The rounding error is dropped: an element body's focus is the
+            // Sun (~0.01 km/s), and its own motion over ~40 us is under a
+            // metre at planetary distances.
+            [&](double t, double, double, double pt[3]) { return elements_point(el, t, o, pt); },
+            false, out, tau);
     }
 
     // Observer -> catalog object vector in the output frame (km).
