@@ -948,8 +948,21 @@ the sign of one, so this was a blind spot, not a detail.
   - `true-citra`: every body 5e-5 to 1e-4 °/day in longitude, where
     `lahiri` is within 1e-6. The instant-defined zodiac's own motion looks
     to be missing from the rates.
-  - Distance rates up to 1.8e-6 AU/day; longitude and latitude rates
-    generally 1e-6 to 1e-5 °/day.
+  - Distance rates up to 1.8e-6 AU/day per AU of distance; longitude and
+    latitude rates generally 1e-6 to 1e-5 °/day.
+  - **Diagnosed by the Astrolog session** (their registry 2.6–2.8, measured
+    against the library directly): each miss is a correction whose own rate
+    of change is left out. The distance rate lacks the light time's change
+    (Pluto 4.7e-5 AU/day, 2.9e-11 geometric). The ecliptic-of-date latitude
+    rate lacks the obliquity nutation's motion; the miss is predicted as
+    |dε/dt · sin λ| for each body, to a ratio of 0.95–1.01. The longitude
+    rate lacks light time, and aberration for the Sun. The topocentric Moon
+    is Swiss's and is kept.
+  - **A spec gap, not a defect:** §3 does not say which quantity a rate
+    column is the rate of. The Astrolog session is taking a sentence to
+    their maintainer: each rate is the time derivative of the quantity
+    reported beside it, corrections and frame rotations included. Ours
+    already conforms (ENGINE.md, "Rates").
 - **Heliocentric runs at mask 1.** From the Sun the advertised masks
   (A.3 `0x0004`, `0x0014`) differ by object kind, and §3.5a makes any
   unlisted mask ERROR 11 for the whole request. Mask 1 is listed for every
