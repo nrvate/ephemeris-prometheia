@@ -38,6 +38,8 @@ documented, not that it is frozen.
   - the nutation series with rates: 22.6 → 18.4 µs a node.
   - a small body's first integration is 2.3× faster: the perturbers' table
     reads each ephemeris record once, not once per body;
+  - a DE (or SPK) state computes its Chebyshev recurrences once for x, y
+    and z: 81 → 55 ns, bit-identical;
   - `add_catalog` verifies chunks without decoding records (315 → 235 ms),
     and the name index reads only SPK-IDs and names (new
     `catalog::Reader::verify` and `for_each_name`).

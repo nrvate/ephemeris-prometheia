@@ -352,6 +352,16 @@ Result<void> DeFile::state(Body body, double jed, double out[6]) const {
     const int ncomp = component_count(body);
     const size_t base = size_t(layout.offset - 1) + size_t(sub) * size_t(ncomp * n);
     const double scale = 2.0 / width; // dtau/dt
+    if (ncomp == 3) {
+        // A position: one set of recurrences for x, y, z.
+        double value[3], deriv[3];
+        chebyshev_eval3(&cache_[base], n, tau, value, deriv);
+        for (int c = 0; c < 3; ++c) {
+            out[c] = value[c];
+            out[3 + c] = deriv[c] * scale;
+        }
+        return {};
+    }
     for (int c = 0; c < 3; ++c) {
         if (c >= ncomp) {
             out[c] = 0.0;

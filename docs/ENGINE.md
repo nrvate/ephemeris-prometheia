@@ -446,6 +446,11 @@ from a 2025 epoch took 227 ms.
   covers the raw chunk: `Reader::verify()` checks the chunks alone, 315 →
   235 ms. The name index reads only each record's SPK-ID and names
   (`for_each_name`).
+- **A DE state evaluated its Chebyshev recurrences three times,** once for
+  each of x, y and z, which share tau. `chebyshev_eval3` computes them once:
+  81 → 55 ns a state, bit-identical over 3.9 million states and all fifteen
+  columns (the SPK reader likewise). This dominated the segments path: a
+  DE state was 32% of `prometheiad`'s CPU while fitting segments.
 - **The natural apsides' passages** are scanned in fixed blocks and kept
   (ORBIT-POINTS.md): 266 → 33 µs at scattered instants.
 - **The nutation series with rates** reuses each term's value and

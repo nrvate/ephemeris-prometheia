@@ -270,17 +270,19 @@ Result<void> SpkFile::segment_state_et(size_t index, double et, double out[6]) c
     double tau = (et - mid) / radius;
     tau = std::max(-1.0, std::min(1.0, tau));
     const int n = seg.degree + 1;
+    // x, y, z share tau: one set of recurrences for the three.
+    double value[3], deriv[3];
+    chebyshev_eval3(&words[2], n, tau, value, deriv);
     for (int c = 0; c < 3; ++c) {
-        double value = 0.0, deriv = 0.0;
-        chebyshev_eval(&words[2 + size_t(c) * size_t(n)], n, tau, value, deriv);
-        out[c] = value;
-        if (seg.type == 2) {
-            out[3 + c] = deriv / radius * 86400.0; // km/s -> km/day
-        } else {
-            double v = 0.0, unused = 0.0;
-            chebyshev_eval(&words[2 + size_t(3 + c) * size_t(n)], n, tau, v, unused);
-            out[3 + c] = v * 86400.0;
-        }
+        out[c] = value[c];
+        if (seg.type == 2)
+            out[3 + c] = deriv[c] / radius * 86400.0; // km/s -> km/day
+    }
+    if (seg.type != 2) {
+        double v[3], unused[3];
+        chebyshev_eval3(&words[2 + 3 * size_t(n)], n, tau, v, unused);
+        for (int c = 0; c < 3; ++c)
+            out[3 + c] = v[c] * 86400.0;
     }
     return {};
 }
