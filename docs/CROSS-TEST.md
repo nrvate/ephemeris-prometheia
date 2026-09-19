@@ -835,6 +835,33 @@ unanswered 9, **no findings**.
 - `prometheiad` lists three tokens here (it did not yet list the new ones):
   288/288.
 
+### Zodiacs defined at the instant, 2026-09-18 (`docs/crosstest/2026-09-18l.tsv`)
+
+`prometheiad` now lists the eleven zodiacs defined at the instant
+([FRAMES.md](FRAMES.md)).
+
+The Astrolog daemon predates their `9df1a4e` binary, and the header says
+STALE. That commit only changes when they refuse on the fixed planes, which
+this record does not depend on.
+
+Totals: agree 1,911, expected-difference 243, refused 70, unadjudicated 1,
+unanswered 9, and 135 findings (theirs), all in the new leg:
+- **`sidinstant`, plane 0.** Their anchor is the apparent position, so every
+  row differs by the anchor's aberration. The published definition takes
+  the anchor's true position; the Astrolog side agrees and will adopt it as
+  a third §3.5a sentence.
+  - Spica −4.4 … −5.3″ and ζ Psc +3.0 … +3.8″, which are the stars'
+    aberration they measured independently.
+  - δ Cnc +18.1 … +18.6″ and λ Sco −20.6 … −20.8″.
+  - The Galactic Centre −20.4″ for every mode anchored on it.
+- **`galequ-iau1958` −0.18″:** a different ICRS realisation of the IAU 1958
+  pole. Ours matches both Liu et al.'s transfer and the Hipparcos
+  catalogue's (ERFA) to 12 mas, and the Astrolog side accepts ours.
+- **`galequ-true` and `galequ-mula`** agree to 4 mas: the anchor is a pole,
+  which has no aberration.
+- **`sidsweep`, ours:** 14 tokens, 266 rows agree, and 22 refused. The
+  refusals are the eleven on plane 1 at both epochs, as the clause says.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

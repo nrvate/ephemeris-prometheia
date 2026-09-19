@@ -95,9 +95,10 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `bary`, `deflection` (textbook formula);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`.
-- **Latest record:** `docs/crosstest/2026-09-18k.tsv`, against Astrolog `qt`
-  `114f2a5`: **no findings**. Their sweep is corrected to 240 agree and 48
-  refused (CROSS-TEST.md, "The sweep corrected").
+- **Latest record:** `docs/crosstest/2026-09-18l.tsv`. The only findings are
+  theirs, in the new `sidinstant` leg: their anchor is apparent, where the
+  published definition is the true position, so rows differ by the anchor's
+  aberration (CROSS-TEST.md, "Zodiacs defined at the instant").
 - **Anchors:**
   - JPL Horizons (geocentric, heliocentric, topocentric, barycentric Sun);
   - the textbook deflection formula;
