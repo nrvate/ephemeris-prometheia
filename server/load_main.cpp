@@ -88,7 +88,7 @@ void connection(int index, const std::string& host, int port, int rows, bool cac
         return;
     }
     eph::Hello hello;
-    hello.clientName = "prometheia-load/0.4.0";
+    hello.clientName = "prometheia-load/0.5.0";
     std::vector<uint8_t> payload;
     eph::EncodeHello(&payload, hello);
     if (auto r = ws.send(frame(eph::kMsgHello, 0, payload)); !r) {

@@ -11,7 +11,11 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.5.0 — 2026-09-18
+
+The library and tools are 0.5.0; the C ABI is unchanged (6). `prometheiad` is
+0.6.0: its binary stars and the Moon's apsis names changed. New program:
+`prometheia-json`.
 
 - **JSON and MCP for AI agents** (docs/JSON_API.md): `prometheia-json`
   serves four tools (`positions`, `lookup`, `capabilities`,
