@@ -239,6 +239,22 @@ def main():
     # case could be deleted from prometheia-load and nothing here would
     # notice. The list comes from the binary, so an assertion added there
     # and nowhere else stops this script instead of passing unseen.
+    # Two cases that red identically are one case, and the table does not
+    # say so: delete either and everything still passes. Checked on the
+    # real list rather than by reading the file, because a scan that misses
+    # a case reports exactly what a table with no duplicates reports -- I
+    # tried it the other way first and it silently saw seven of eight.
+    # (The Astrolog side measured the same property on their table and
+    # found it already held; this is the same question asked here.)
+    same = {}
+    for name, _, _, expect, want_exit in cases:
+        key = (frozenset(expect), want_exit)
+        if key in same:
+            raise SystemExit(f"'{name}' and '{same[key]}' assert the same thing "
+                             f"({sorted(expect) or 'nothing'}, exit {want_exit}): "
+                             "either is redundant, and deleting it would go unnoticed")
+        same[key] = name
+
     declared = all_assertions(args.load)
     covered = {a for c in cases for a in c[3]} | {"refused-no-pid", "refused-no-metrics"}
     unexercised = [a for a in declared if a not in covered]

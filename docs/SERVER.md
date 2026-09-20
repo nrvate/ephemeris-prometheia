@@ -1035,6 +1035,13 @@ and `--threads 4`. The client ran on the same host.
     everything goes green. (The Astrolog side raised that objection against
     their own message-grepping version the same afternoon, and moved to
     recording each assertion as it evaluates.)
+  - **Two cases that red identically are one case**, and the table does not
+    say so — delete either and everything still passes. The script refuses
+    a table where two cases assert the same set at the same exit status.
+    Measured, and the answer was that the eight already differed; the first
+    attempt read the file with a regex, silently saw seven of eight, and
+    would have reported the same "no duplicates" either way. The check is
+    on the real list for that reason.
   - **The exit status is now exactly "did any assertion fire".** It used to
     count `st.failures`, a differing canary, an ungraded canary and the
     memory verdict a second time, on its own — which is how deleting the

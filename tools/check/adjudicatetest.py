@@ -258,6 +258,16 @@ def main():
     # question first is the same rule the cases themselves follow: a run
     # that goes red on the right input for the wrong reason has told you
     # less than it appears to.
+    # Two cases with the same input are one case. Unlike a duplicated
+    # assertion this hides no false green -- coverage is traced, not
+    # counted -- but "29 cases" should mean 29 questions.
+    seen = {}
+    for name, which, rows, _, _ in CASES:
+        key = (which, repr(rows))
+        if key in seen:
+            raise SystemExit(f"'{name}' and '{seen[key]}' are the same case")
+        seen[key] = name
+
     dead = uncalled()
     if dead:
         raise SystemExit("crosstest.py defines and never calls: " + ", ".join(dead))
