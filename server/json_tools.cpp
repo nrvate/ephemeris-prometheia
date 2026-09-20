@@ -297,7 +297,7 @@ std::optional<int> body_naif(Engine& engine, const Json& v) {
     return std::nullopt;
 }
 
-Asked parse_object(Engine& engine, const Json& o) {
+Asked parse_object(Engine& engine, const Json& o, size_t catalogs) {
     Asked a;
     a.asked = o;
     eph::Object spec{};
@@ -327,7 +327,14 @@ Asked parse_object(Engine& engine, const Json& o) {
             spec.kind = eph::kObjDesignation;
             spec.name = n;
         } else {
-            a.why = "no planet, point, hypothetical body, star or catalog body has that name";
+            a.why = catalogs != 0
+                        ? "no planet, point, hypothetical body, star or catalog body has that name"
+                        // Without a catalog every asteroid name lands here, and
+                        // an agent told only "no ... catalog body has that name"
+                        // will try spellings forever.
+                        : "no planet, point, hypothetical body or star has that name, and this "
+                          "server has no small-body catalog loaded (capabilities says so under "
+                          "\"asteroids\")";
             a.code = "unknown-name";
             return a;
         }
@@ -709,7 +716,7 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
     Json results = Json::array();
     for (const Json& item : a["objects"]) {
         Json r;
-        Asked asked = parse_object(engine, item);
+        Asked asked = parse_object(engine, item, ctx.catalogs);
         r["object"] = {{"asked", item}};
         if (!asked.spec) {
             r["error"] = {{"code", asked.code}, {"message", asked.why}};
@@ -796,16 +803,40 @@ Result<Json> lookup(Engine& engine, const Json& a, ToolError* err) {
         return make_error(ErrorCode::ArgumentError, "no query");
     }
     const std::string q = a["query"].get<std::string>();
+    const bool prefix = a.contains("prefix") && a["prefix"].is_boolean() && a["prefix"].get<bool>();
+    const std::string lq = lower(q);
+    // `prefix` reached the star index and nothing else until 2026-09-20, so
+    // "node" and "Lili" found a star and never "true node" or "lilith": the
+    // half-remembered name the flag exists for was the one case it could not
+    // answer. Every name this server holds in a list is matched the same way
+    // now. A catalog body is not in a list -- the index resolves a name, it
+    // does not enumerate -- so it stays exact, and capabilities says so.
+    // A prefix hit is the start of the name or the start of any word in it.
+    // The star index anchors at the name's start, which suits a single token
+    // like "Aldebaran"; these names are phrases whose distinguishing word is
+    // usually last -- "mean node", "true node", "natural apogee" -- so an
+    // anchored match answers "true" and never "node", which is the word the
+    // agent remembers.
+    const auto hit = [&](std::string_view name) {
+        const std::string ln = lower(name);
+        if (!prefix)
+            return lq == ln;
+        for (size_t at = 0; at != std::string::npos; at = ln.find(' ', at + 1))
+            if (ln.compare(at == 0 ? 0 : at + 1, lq.size(), lq) == 0)
+                return true;
+        return false;
+    };
     Json matches = Json::array();
-    if (auto p = planet_naif(q))
-        matches.push_back({{"object", {{"body", q}}}, {"kind", "body"}, {"naif", *p}});
+    for (const Planet& p : kPlanets)
+        if (hit(p.name))
+            matches.push_back({{"object", {{"body", p.name}}}, {"kind", "body"}, {"naif", p.naif}});
     for (const LunarPoint& lp : kLunarPoints)
-        if (lower(q) == lp.name)
-            matches.push_back({{"object", q}, {"kind", "orbit-point"}, {"of", "Moon"}});
-    if (engine.hypothetical(lower(q)))
-        matches.push_back({{"object", {{"hypothetical", lower(q)}}}, {"kind", "hypothetical"}});
-    for (const stars::Match& m : stars::lookup(
-             q, 8, a.contains("prefix") && a["prefix"].is_boolean() && a["prefix"].get<bool>())) {
+        if (hit(lp.name))
+            matches.push_back({{"object", lp.name}, {"kind", "orbit-point"}, {"of", "Moon"}});
+    for (const std::string& h : engine.hypothetical_tokens())
+        if (hit(h))
+            matches.push_back({{"object", {{"hypothetical", h}}}, {"kind", "hypothetical"}});
+    for (const stars::Match& m : stars::lookup(q, 8, prefix)) {
         const stars::Object& s = stars::at(m.index);
         matches.push_back({{"object", {{"star", s.name()}}},
                            {"kind", "star"},
@@ -854,7 +885,17 @@ Result<Json> capabilities(Engine& engine, const Context& ctx) {
         {"hypotheticals", engine.hypothetical_tokens()},
         {"stars", "the naked-eye sky, about 9,100 stars and the Messier objects, by name, Bayer "
                   "or Flamsteed designation, or HR/HD/HIP number"},
-        {"asteroids", "catalog bodies by name, designation or number, when a catalog is loaded"},
+        // Whether a catalog is loaded is a property of this deployment, not
+        // of the engine, and it is the difference between "Chiron is not
+        // served here" and "Chiron is misspelled". Saying it here is what
+        // lets an agent stop guessing.
+        {"asteroids",
+         {{"loaded", ctx.catalogs != 0},
+          {"catalogs", ctx.catalogs},
+          {"note", ctx.catalogs != 0
+                       ? "catalog bodies by name, designation or number; matched exactly"
+                       : "no small-body catalog is loaded on this server, so no asteroid name "
+                         "resolves; it is served with --catalog"}}},
         {"zodiacs", zodiacs},
         {"frames", {"true-of-date", "mean-of-date", "j2000", "icrf"}},
         {"coordinates", {"ecliptic", "equatorial"}},
@@ -982,7 +1023,13 @@ std::vector<Tool> tools() {
          {{"type", "object"},
           {"properties",
            {{"query", {{"type", "string"}}},
-            {"prefix", {{"type", "boolean"}, {"default", false}}}}},
+            {"prefix",
+             {{"type", "boolean"},
+              {"default", false},
+              {"description", "match names beginning with the query: for a star, the start of "
+                              "the name; for a planet, lunar point or hypothetical body, the "
+                              "start of any word in it, so \"node\" finds \"true node\". A "
+                              "catalog body is always matched exactly."}}}}},
           {"required", {"query"}}}},
         {"capabilities",
          "Capabilities",
@@ -1058,8 +1105,11 @@ std::string llms_txt() {
   Options: observer (topocentric with "site", or "body" with "center"),
   zodiac (e.g. "lahiri"), sidereal_plane, frame, coordinates, corrections,
   precession.
-- lookup: what a name could mean.
-- capabilities: what is served, and the limits.
+- lookup: what a name could mean; with "prefix" it also matches a name by
+  its start, or by the start of any word in it ("node" finds "true node").
+- capabilities: what is served, and the limits. Ask it before an asteroid
+  name: catalog bodies answer only when this server was given a catalog,
+  and "asteroids" there says whether one is loaded.
 - convert_time: UTC, TT, TDB, UT1 and delta T for one instant.
 
 ## Reading an answer

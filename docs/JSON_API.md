@@ -101,8 +101,8 @@ Each tool is one call, whether it arrives as an MCP `tools/call` or as a JSON
 | tool | what |
 |---|---|
 | `positions` | positions of objects at an instant or a short series |
-| `lookup` | resolve a name to the objects it could mean |
-| `capabilities` | what this engine answers: bodies, zodiacs, frames, coverage, in words |
+| `lookup` | resolve a name to the objects it could mean (`prefix` matches a half-remembered one) |
+| `capabilities` | what this engine answers: bodies, zodiacs, frames, coverage, in words, and whether a small-body catalog is loaded |
 | `convert_time` | UTC, TT, UT1 and Julian dates, with ΔT and leap seconds |
 
 The agent-facing summary of what to ask, and how, is the MCP resource
@@ -141,9 +141,22 @@ The agent-facing summary of what to ask, and how, is the MCP resource
   - Bare names resolve in a fixed order: planet, the Moon's points ("true
     node", "Lilith"…), hypothetical, star, catalog body.
   - A name that is unknown is a per-object error that says so, never a
-    silent guess.
+    silent guess. When the name could only have been a catalog body and
+    **this server was given no catalog**, the error says that instead, and
+    `capabilities` carries the same fact under `asteroids`
+    (`{"loaded", "catalogs", "note"}`): a deployment without a catalog
+    answers no asteroid name, and an agent that cannot tell that from a
+    misspelling will keep trying spellings.
   - `{"body"|"star"|"asteroid"|"hypothetical"|"naif": …}` and
     `{"point", "of", "method"}` say exactly which.
+- **`lookup` and a half-remembered name.** `prefix: true` matches a star by
+  the start of its name, and a planet, lunar point or hypothetical body by
+  the start of **any word** in its name: `node` finds `true node` and
+  `mean node`, `apogee` finds `natural apogee`, `Lili` finds both `lilith`
+  and the star Lilii Borea. The distinguishing word of a point's name is
+  usually last, so an anchored match would answer `true` and never `node`.
+  Without the flag every kind is exact. A catalog body is always exact —
+  the catalog index resolves a name, it does not enumerate.
 
 ## An answer
 

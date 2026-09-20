@@ -16,9 +16,11 @@ using jsontools::Json;
 
 namespace {
 
-Json run(Engine& e, const char* tool, const Json& args, jsontools::ToolError* err = nullptr) {
+Json run(Engine& e, const char* tool, const Json& args, jsontools::ToolError* err = nullptr,
+         size_t catalogs = 0) {
     jsontools::Context ctx;
     ctx.engine = "test";
+    ctx.catalogs = catalogs;
     jsontools::ToolError scratch;
     auto r = jsontools::call(e, ctx, tool, args, err ? err : &scratch);
     return r.ok() ? r.value() : Json(nullptr);
@@ -401,4 +403,65 @@ TEST_CASE("json_vocabulary_matches_the_registries") {
                      {"zodiac", "lahiri"},
                      {"sidereal_plane", "anchor"}})
                     .is_null());
+}
+
+// An agent that cannot tell "not served on this deployment" from "misspelled"
+// keeps guessing spellings. Both answers say which.
+TEST_CASE("json_says_when_no_catalog_is_loaded") {
+    synth::TempFile tf("json-catalog");
+    Engine e = synth::open_synthetic(tf);
+
+    const Json none = run(e, "capabilities", Json::object());
+    CHECK(none["asteroids"]["loaded"] == false);
+    CHECK(none["asteroids"]["catalogs"] == 0);
+    CHECK(std::string(none["asteroids"]["note"]).find("no small-body catalog") !=
+          std::string::npos);
+    const Json loaded = run(e, "capabilities", Json::object(), nullptr, 2);
+    CHECK(loaded["asteroids"]["loaded"] == true);
+    CHECK(loaded["asteroids"]["catalogs"] == 2);
+
+    // The same distinction in the per-object error, where an agent meets it.
+    const Json args = {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Chiron"}}};
+    const std::string without = run(e, "positions", args)["results"][0]["error"]["message"];
+    const std::string with =
+        run(e, "positions", args, nullptr, 1)["results"][0]["error"]["message"];
+    CHECK(without.find("no small-body catalog loaded") != std::string::npos);
+    CHECK(with.find("no small-body catalog loaded") == std::string::npos);
+    CHECK(with.find("catalog body has that name") != std::string::npos);
+}
+
+// `prefix` reached the star index and nothing else until 2026-09-20: "node"
+// and "Lili" found a star and never "true node" or "lilith".
+TEST_CASE("json_lookup_prefix_reaches_every_kind") {
+    synth::TempFile tf("json-prefix");
+    Engine e = synth::open_synthetic(tf);
+    const auto names = [&](const char* q, bool prefix) {
+        std::vector<std::string> out;
+        // Bound to a local: `for (... : run(...)["matches"])` reads a
+        // subobject of a temporary that is already gone.
+        const Json got = run(e, "lookup", {{"query", q}, {"prefix", prefix}});
+        for (const Json& m : got["matches"]) {
+            const Json& o = m["object"];
+            out.push_back(o.is_string()                ? o.get<std::string>()
+                          : o.contains("body")         ? o["body"].get<std::string>()
+                          : o.contains("hypothetical") ? o["hypothetical"].get<std::string>()
+                                                       : std::string());
+        }
+        return out;
+    };
+    const auto has = [](const std::vector<std::string>& v, const char* w) {
+        return std::find(v.begin(), v.end(), w) != v.end();
+    };
+    // The distinguishing word of a point's name is usually last, so a prefix
+    // anchored at the start would answer "true" and never "node".
+    const std::vector<std::string> node = names("node", true);
+    CHECK(has(node, "true node"));
+    CHECK(has(node, "mean node"));
+    CHECK(has(node, "south node"));
+    CHECK(has(names("apogee", true), "natural apogee"));
+    CHECK(has(names("jup", true), "jupiter"));
+    // Exact is still exact: a half-name matches nothing without the flag.
+    CHECK(names("node", false).empty());
+    CHECK(has(names("true node", false), "true node"));
+    CHECK(has(names("mars", false), "mars"));
 }

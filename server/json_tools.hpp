@@ -46,6 +46,12 @@ struct Context {
     std::string engine;  // e.g. "Prometheia 0.7.0, JPL DE440 binary"
     std::string dataset; // the dataset identity, when there is one
     Limits limits;
+    // How many small-body catalogs were loaded. Zero is the interesting
+    // value: without one, every asteroid name is unknown-name, and an agent
+    // that cannot tell "not served on this deployment" from "misspelled"
+    // will keep guessing spellings. capabilities and the unknown-name
+    // message both say so.
+    size_t catalogs = 0;
 };
 
 // A tool's failure as a whole: the arguments were wrong, or the name is not a

@@ -345,6 +345,7 @@ int main(int argc, char** argv) {
     ctx.engine = dataset.engine;
     ctx.dataset = dataset.id;
     ctx.limits = limits;
+    ctx.catalogs = catalogs.size();
     mcp::Dispatcher dispatcher(engine, ctx, PROMETHEIA_VERSION);
 
     if (stdio)
