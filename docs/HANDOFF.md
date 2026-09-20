@@ -530,6 +530,20 @@ Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
   widest measurement either side holds, because this number has twice been
   wrong from being set *at* a measurement. `1e-5` AU/day in particular
   would fail on the day: the measurement is 1.0014e-5.
+  - **Asked again 2026-09-20**, with both sides' numbers and one question:
+    do they intend to change what `0x0013` advertises, and to what. Our
+    sweep grades against whatever is on the wire, so if it stays
+    `5e-3`/`1e-4` we grade against that and say so in the record rather
+    than carrying the gap as a finding. The ambiguity is the only problem;
+    either answer settles it. **Awaiting their reply.**
+  - The same message relayed, reciprocally, the defect shape found five
+    times here that day -- *the denominator came from the same input that
+    had lost the rows* -- including the one instance that would have
+    reached them: `crossrun.py`'s leg-by-leg diff reported legs a narrowed
+    run had not run as `N -> 0`, a change in their server where the only
+    thing that changed was which legs were asked for. No such row was ever
+    sent; the near miss is the point, and it is the same class as the
+    `corrapplied.py` 0x0004 mis-attribution reported earlier.
 - ~~**§3.5a's distance tolerance cannot be met for a fixed star**~~:
   answered by them at their `022b0a4`, and not by any shape either side had
   proposed. **§3.5a now defines the comparison on f64 positions** — one
