@@ -77,7 +77,11 @@ for _naif, _name in (("301", "Moon"), ("199", "Mercury"), ("299", "Venus"), ("4"
 POINTS += [("--node", "301.A.2", "Moon natural apogee"),
            ("--node", "301.p.2", "Moon natural perigee")]
 
-STARS = [("--star", n, n) for n in ("Sirius", "Vega", "Polaris", "Rigil Kentaurus")]
+# Aldebaran is here because the Astrolog side's own sweep found its worst
+# distance rate on it (2026-09-20), topocentric, and a bound either side
+# recommends should be measured over the other's worst object too.
+STARS = [("--star", n, n)
+         for n in ("Sirius", "Vega", "Polaris", "Rigil Kentaurus", "Aldebaran")]
 
 OBJECTS = BODIES + POINTS + STARS
 
@@ -93,6 +97,10 @@ CONFIGS = [
     ("topo Quito, apparent", ["--corrections", "7", "--topo", "-78.47,-0.18,2850"]),
     ("geo apparent, lahiri", ["--corrections", "7", "--sid", "lahiri"]),
     ("geo apparent, fagan-bradley", ["--corrections", "7", "--sid", "fagan-bradley"]),
+    # Their worst distance-rate cell was topocentric on J2000 axes, which no
+    # config above reaches: the two topocentric ones are true of date.
+    ("topo Zurich, apparent, J2000", ["--corrections", "7", "--j2000",
+                                      "--topo", "8.55,47.37,500"]),
 ]
 
 DELTA_T = 69.2

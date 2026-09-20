@@ -1227,7 +1227,9 @@ against this side.**
 - **The plane-2 star origin** (their `1ecb8b9`): `sidsweep` is 530 agree,
   46 refused by us, no findings. Record t had 64 findings there.
 - **Their advertised rate bound.** They advertise `ratesDegPerDay = 5e-3`
-  and `ratesAuPerDay = 1e-4`. Measured off their wire by our five-point
+  and `ratesAuPerDay = 1e-4` **at the time of this record**; they moved the
+  AU figure to `4e-3` afterwards ("The chase does not converge", below, and
+  read off their wire again 2026-09-20). Measured off their wire by our five-point
   difference, their worst is **8.22e-4 °/day** in longitude and 3.88e-4
   °/day in latitude (the topocentric Moon at Zurich), and 1.77e-6 AU/day
   per AU in distance (Mercury, geocentric). The advertisement holds. Their

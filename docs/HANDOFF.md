@@ -522,14 +522,46 @@ Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
 
 **Open with them, awaiting their decision.**
 
-- **Their advertised rate bound.** Still `5e-3` °/day and `1e-4` AU/day,
-  which their own fix has made loose. Our sweep's worst against their
-  fixed build is **1.3939e-3** °/day (the topocentric Moon at Quito in
-  2100), wider than their own 8.216e-4 because of the site and the epoch,
-  not the object. We recommended `3e-3` and `3e-5` — two to three times the
-  widest measurement either side holds, because this number has twice been
-  wrong from being set *at* a measurement. `1e-5` AU/day in particular
-  would fail on the day: the measurement is 1.0014e-5.
+- **Their advertised rate bound.** `5e-3` °/day and **`4e-3` AU/day**.
+  - **This document said `1e-4` on the AU axis and was wrong by a factor of
+    forty**, for as long as it stood. Corrected 2026-09-20 by reading it off
+    the wire — `ratesweep.py --server 127.0.0.1:47392` prints
+    `bound 0.005 deg/day, 0.004 AU/day absolute (advertised)` — after the
+    Astrolog session said so. A capability another project advertises is
+    read, never remembered; this is the second time a number here was
+    carried from memory and the second time it was wrong.
+  - **The angle axis is covered.** Our worst against their fixed build is
+    **1.3939e-3** °/day (the topocentric Moon at Quito in 2100), theirs
+    1.7255e-3 on the same object, site and epoch. `5e-3` carries about 2.9×.
+  - **The `3e-5` AU/day recommendation is withdrawn.** Its basis,
+    "the measurement is 1.0014e-5", appears nowhere else in these documents
+    and is not our worst: on our own server the widest star distance rate is
+    **2.4722e-5** AU/day (Polaris, topocentric Quito, JD 2415020.5). A
+    recommendation two to three times a measurement is worth nothing when
+    the measurement was not the widest one, and this is the third time this
+    number has been wrong from being set *at* something.
+  - **The AU axis is still exceeded at one cell, and this is not news.**
+    Polaris, topocentric Quito, JD 2415020.5 → 7.4824e-3 AU/day, 1.87× the
+    `4e-3`. Re-measured 2026-09-20 and reproducible bit for bit, the only
+    row over in an eighteen-row subgrid. **CROSS-TEST.md already carries it**
+    ("The chase does not converge") with the adjudication: no honest
+    absolute number exists while a tolerance in AU/day is applied to a
+    column whose ulp is 6e-9 AU, a bound wide enough to cover it with
+    headroom would be ~2e-2 AU/day and describe nothing, and the fix is the
+    §3.5a sentence — which landed. It is a standing, adjudicated row, not a
+    finding, and it was nearly re-reported to them as one from this page's
+    stale copy of the numbers.
+  - **Our grid gained what theirs found.** Their worst distance rate was
+    Aldebaran, topocentric, on J2000 axes; we swept four stars and no
+    topocentric J2000 configuration, so the cell was not in our grid at all.
+    Both added (`ratesweep.py`). Aldebaran measures 4.7075e-6 on ours and
+    7.8385e-4 on theirs.
+  - **No number is recommended this time.** The measurements are above; what
+    to advertise is theirs to set, and CROSS-TEST.md's conclusion stands:
+    this side suggested `1e-4` once at a moment when its own table already
+    showed 7.48e-3 on their wire, false by 75× against data it held. The
+    lesson is not "pick a wider number" but "read the table before
+    recommending one".
   - **Asked again 2026-09-20**, with both sides' numbers and one question:
     do they intend to change what `0x0013` advertises, and to what. Our
     sweep grades against whatever is on the wire, so if it stays
