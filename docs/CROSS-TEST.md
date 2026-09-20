@@ -1776,7 +1776,14 @@ and ruinous elsewhere is caught only if it ranks anyway.
 
 Confirmed by hand on a separate code path from the sweep, and independently
 by the Astrolog side against `libswe` with no server at all — their figures
-agree with the 500 m row to four digits.
+agree with both rows to four digits.
+
+They retitled their entry from "at the 1900.0 epoch" to **scattered
+(instant, ΔT, site) cells**, quoting the wrong sentence in it rather than
+deleting it, and noted the two consequences neither side predicted: ΔT **0**
+is one of the values that goes over and any client may send it, and 69.2 —
+the value both sweeps used — is clean at both sites. It is reachable from
+ordinary inputs, not an exotic instant to document around.
 
 The two Zurich rows are here because the first hand check ran at 400 m while
 the sweep's configuration is 500 m, and the mismatch was visible from their
@@ -1791,6 +1798,19 @@ is the only ΔT it had been asked at. So the region is not confined to
 bounded by a fixed axis exactly as the original count was. Third
 instance of that shape in one day, and this time it was in a conclusion
 rather than a count.
+
+**The rule that came out of it**, because four instances in a week is a
+pattern and not a run of luck — a floor that was exact when written, a
+count that was the width of a list, a bound measured on five bodies and
+stated about every object, and this, a conclusion about which epoch a
+defect lived at. The first draft of the check was "grep any sentence
+with *all*, *every* or *only*". That is wrong: **"the region is at the
+1900.0 epoch"** has none of the three and was the worst of the four. The
+quantifier is a symptom. The question to put to a claim is not *does
+this generalise?* but **which axes were varied to produce this, and
+which were held?** — and a claim naming no axis at all is the one to
+distrust first. In Astrolog's words, who found the better half: *a count
+invites the question "how many?" and a conclusion invites nothing.*
 
 **And on our own server the pass found nothing, which is also a
 result.** Nine cells widened, no hidden cell: our star distance-rate

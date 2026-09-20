@@ -6,6 +6,53 @@ working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
 
+## Resume here (state at 2026-09-20 13:57)
+
+`6216e9c` on `initial`, pushed, gate green, tree clean. Nothing is in
+flight: no background work but `prometheiad` on :47190, no scheduled jobs.
+The Astrolog exchange reached a close on both sides at their `a0fc9ad`;
+their spare `astrolog-ephd` on **:47392** is the 13:37 build (1739128
+bytes, sha256 `9635191d6ee5ec6c…`) and is not to be assumed alive later.
+**:47391 is their production daemon and is never touched.**
+
+**Three decisions are the maintainer's and nothing proceeds without
+them.** All three are in "Parked" below with their evidence:
+
+1. **Vega's radial velocity** — ours −13.5 km/s, theirs −20.6, and it is
+   one database at two vintages rather than two sources, so the question
+   is whether to re-query rather than which source to believe.
+2. **The analytic star rate** — diagnosed (`1dc0767`), not implemented,
+   because it changes a value on the wire.
+3. **What we advertise for rates** — we send no A.3 `0x0013` at all.
+   *Not* the same decision as 2: one fixes a number, the other fixes a
+   promise. Astrolog holds the mirror question; neither side widens a
+   bound alone.
+
+**Open, unassigned, needing no decision** — full detail in "Open items":
+the two-engines-on-rates instrument gap (named, deliberately unfilled);
+`--deltat` blind in 18 of 18 legs; `crosstest.py`'s **legs**, the last
+thing under `tools/check/` whose falsification is still prose rather than
+a selftest; and v0.7.1, offered and not taken.
+
+**The day's lesson, if only one survives:** four times in a week a claim
+here or in Astrolog was bounded by an axis nobody varied — a floor exact
+when written, a count that was the width of a list, a bound measured on
+five bodies and stated about every object, and a *conclusion* about which
+epoch a defect lived at. Their framing, which is the better one: **a
+count invites the question "how many?" and a conclusion invites
+nothing.**
+
+The grep started as "any sentence with *all*, *every* or *only*" and that
+was wrong: **"the region is at the 1900.0 epoch"** contains none of the
+three and was the worst of the four. The quantifier is a symptom. The
+question to ask a claim is not *does this generalise?* but **which axes
+were varied to produce this, and which were held?** — and a claim that
+names no axis at all is the one to distrust first. That reformulation
+(Astrolog, 2026-09-20) fits all four retroactively, which is how it is
+known to be the right one: the floor, the list-width count and the
+five-body bound each named no axis either, and the quantifier in each was
+incidental.
+
 ## Shipped in v0.7.0 (2026-09-19)
 
 The full list, with its numbers, is CHANGELOG.md "0.7.0".
@@ -674,6 +721,27 @@ Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
   (Vega is a pole-on rapid rotator with a wide literature spread).
   Changing ours changes a published catalogue value, so it is not a
   thing a cross-test decides; parked on their side for the same reason.
+- **The analytic star rate.** Diagnosed at `1dc0767`: a fixed star's
+  reported distance rate misses a difference of its own positions by one
+  f64 ulp of that position over the engine's `kSpeedStepDays` stencil
+  (2/4096 d, 42 s), not by a missing term. Predicted across five stars
+  over a hundredfold in distance, each within 3×; a *smaller* step makes
+  it worse; the longitude channel is the same error divided by r and only
+  looks clean. The fix is to compute a star's rate in closed form, since
+  a star is a straight line. **It changes a value on the wire**, which is
+  why it is here and not done.
+- **What we advertise for rates.** `prometheiad` sends no A.3 `0x0013`
+  record at all, so the registry default (1e-5 °/day, **1e-9 AU/day**) is
+  what a client is entitled to assume, and the sweep's 60 Polaris rows
+  all exceed the AU figure — worst 2.4722e-05, four decades (CROSS-TEST.md,
+  "The ΔT axis becomes part of the sweep"). The longitude side is fine at
+  5.2e-10. This is **not** the same decision as the analytic star rate:
+  one fixes the number, the other fixes the promise, and either alone
+  leaves the other wrong. Astrolog holds the mirror-image question (their
+  `4e-3`, also with their maintainer), and the standing joint adjudication
+  is that **no honest absolute number exists for this column while a
+  tolerance in AU/day is applied to a quantity whose ulp is 6e-9 AU** — so
+  neither side widens a bound alone.
 - The `deadlineMs` strategy switch: parsed and advisory today, and
   documented as unimplemented in SERVER.md.
 - Nightly or automated catalogue release builds: an idea only.
