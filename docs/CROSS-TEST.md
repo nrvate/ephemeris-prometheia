@@ -319,6 +319,22 @@ Every one of these has cost this project or the Astrolog project real time.
   check reads a declaration, read *every* record that carries one. (The
   Astrolog side arrived at the same rule from their four near-copies of an
   object→target mapping, two of which also counted the Earth.)
+- **A restart is not a rebuild, and a script that prints a commit beside a
+  binary is printing HEAD, not provenance.** The Astrolog side's, 2026-09-20,
+  and the same shape as the trap above with the binary itself as the stale
+  copy. Closing the question "was the running spare built from these
+  sources" meant rebuilding and comparing; their first restart found nothing
+  to rebuild, so the daemon came back up on the same binary and the gap was
+  still open while the restart *looked* like it had closed it. They had to
+  `touch` the two sources to force a real comparison — the fault-injection
+  step in another costume, refusing to trust a green until it was capable of
+  going red. The rebuild then came out byte-identical
+  (`1734d363…`, 1,735,488 bytes), which is what makes record `v`'s subject
+  known rather than recorded.
+  - What this side can check without reading their tree: the size, the
+    hash, the mtime, and that `/proc/<pid>/exe` points at the real file and
+    not a deleted inode. That is identity, not provenance; provenance is
+    theirs to establish and ours to attribute to them.
 
 ## Runbook (draft, 2026-09-18)
 
