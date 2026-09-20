@@ -1620,25 +1620,52 @@ our answers depend on the value and not on the order:
 A stale observer would have made each pair identical and each instant's pair
 equal to whichever value was asked first.
 
-**Our own inconsistency, localised and still open.** Separately, our
-reported *distance rate* for a fixed star disagrees with a five-point
-difference of our own distances once `deltaTSec` is supplied at all:
+**The fixed build, measured 2026-09-20 12:22 local.** Their binary on :47392
+is 1735824 bytes, sha256 `9e9e56a70dbc263b…`, pid 4064228 — confirmed from
+this side by reading the running process's own image, not from their
+message. Their distinctness leg is green on it.
 
-| object, topocentric | no `deltaTSec` | ΔT=0 | ΔT=69.2 | ΔT=200 |
-|---|---|---|---|---|
-| Moon, distance | 9.25e-11 | 9.28e-11 | 9.30e-11 | 9.33e-11 |
-| Mars, distance | 9.81e-11 | 9.86e-11 | 1.00e-10 | 9.84e-11 |
-| Polaris, distance | 2.68e-07 | **3.62e-05** | **2.47e-05** | **1.34e-05** |
-| Polaris, longitude | 4.85e-10 | 4.87e-10 | 4.90e-10 | 4.93e-10 |
+**The standing row did not go away.** Polaris, topocentric Quito,
+JD 2415020.5 with `deltaTSec` 69.2 still reads reported −4.013041749e-04
+against a differenced −7.883707682e-03, a miss of **7.4824e-03** —
+bit-for-bit what the previous build gave. The observer-cache fix was a fix
+for a different defect, as they withdrew the inference for, and the single
+row over their advertised `4e-3` stands.
 
-Bodies are clean at every ΔT, and the star's *longitude* is clean; only the
-star's distance rate moves, and it moves whether the supplied value is 0,
-69.2 or 200 while the differenced distances barely move. 2.68e-07 is the
-differencing floor — at 2.7e7 AU one f64 ulp is 3.7e-9 AU, which over
-h = 1/1024 d is ~3e-07 AU/day — so the no-ΔT row is noise and the others are
-not. It is nine parts in 10^13 of the distance and matters to nothing
-observable, but a rate and a position that disagree about the observer is a
-defect whatever its size. **Open**, and ours.
+**The fuller grid, both servers, Polaris, corrections 7.** `miss` is
+|reported − differenced|, AU/day:
+
+| observer | ΔT | theirs (fixed) | ours |
+|---|---|---|---|
+| geocentric | absent / 0 / 69.2 / 200 | 9.896e-05 (all four) | 1.691e-05 (all four) |
+| topo Quito | absent | 5.509e-04 | 2.683e-07 |
+| topo Quito | 0 | 1.405e-05 | 3.617e-05 |
+| topo Quito | 69.2 | 7.482e-03 | 2.472e-05 |
+| topo Quito | 200 | 7.683e-03 | 1.340e-05 |
+
+Three things this says that the earlier, thinner table did not:
+
+- **Geocentrically both servers are already wrong**, by a constant that no
+  `deltaTSec` moves — 9.9e-05 theirs, 1.7e-05 ours, against a differencing
+  floor of ~3e-07. Earth rotation cannot enter a geocentric answer, so this
+  is a plainer defect underneath the ΔT one, and it is on both sides. It is
+  0.2% of the rate on ours, which is the size of a physical term present in
+  one path and not the other.
+- **The ΔT dependence runs opposite ways.** Theirs is near-clean at ΔT = 0
+  and breaks at 69.2 and 200; ours is worst at ΔT = 0 and shrinks as the
+  value grows. Two different defects that happen to live in the same cell.
+- **Our topocentric no-ΔT figure of 2.683e-07 is the floor** and is *better*
+  than our own geocentric figure, which a topocentric answer has no business
+  being. That, rather than the ΔT response, is the thread to pull.
+
+A previous message to the Astrolog side described ours as firing "as soon as
+`deltaTSec` is supplied at all". That was true of the topocentric rows we
+had then and not of the geocentric ones we had not measured; corrected to
+them and here.
+
+Ours is **open**. Nine parts in 10^13 of the distance and observable in
+nothing, but a rate and a position disagreeing about the observer is a
+defect at any size.
 
 ### Finding, theirs: a topocentric orbit point's position and rate describe different observers
 
