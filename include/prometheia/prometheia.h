@@ -63,7 +63,7 @@ typedef struct prometheia_error {
 
 /* ---- Library ------------------------------------------------------------ */
 
-PROMETHEIA_API const char* prometheia_version(void); /* "0.6.0" */
+PROMETHEIA_API const char* prometheia_version(void); /* "0.7.0" */
 PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION */
 
 /* ---- Bodies (NAIF IDs; catalog bodies use their SPK-ID) ----------------- */

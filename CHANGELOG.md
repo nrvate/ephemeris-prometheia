@@ -11,7 +11,16 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.7.0 — 2026-09-19
+
+The library and tools are 0.7.0; the C ABI is unchanged (6), and no
+interface in [docs/C_API.md](docs/C_API.md) changed, so nothing was owed to
+consumers before this landed. `prometheiad` is 0.8.0, because it answers a
+request it used to refuse. **Two things move for anyone pinning values:**
+the Moon's natural apsides by up to 0.03 mas, and the dataset id's digest
+once (`…#70cddb41` → `…#7ddcde20` for DE440 alone), because the id is now
+computed in parallel pieces. Everything else in the performance work is
+byte for byte what 0.6.0 answered.
 
 - **A planet's own orbit points, seen from its centre, are answered.**
   `prometheiad` refused Mars's node and perihelion from Mars's centre as "the

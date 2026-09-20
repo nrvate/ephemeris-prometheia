@@ -6,10 +6,9 @@ working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
 
-## Unreleased, on `initial` (2026-09-19)
+## Shipped in v0.7.0 (2026-09-19)
 
-Everything below is committed and pushed; no tag has been cut. The full
-list, with its numbers, is CHANGELOG.md "Unreleased".
+The full list, with its numbers, is CHANGELOG.md "0.7.0".
 
 - **A planet's own orbit points are answered from its centre** — a defect
   of ours that record s found (ORBIT-POINTS.md, "From any observer").
@@ -35,6 +34,16 @@ list, with its numbers, is CHANGELOG.md "Unreleased".
 
 ## Released
 
+- **v0.7.0**, published 2026-09-19
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.7.0).
+  - The library and tools are 0.7.0 (C ABI 6, unchanged); `prometheiad` is
+    0.8.0.
+  - New: the performance expedition (small bodies 2,712 → 7.1 µs a call,
+    `prometheiad` 31,900 → 49,300 requests a second); a clock time before
+    1972 read as UT1; `prometheia-json` hardened by `fuzz_json`; a planet's
+    own orbit points answered from its centre.
+  - Moves a pinned value twice: the natural apsides by ≤ 0.03 mas, and the
+    dataset id's digest once.
 - **v0.6.0**, published 2026-09-18
   (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.6.0).
   - The library and tools are 0.6.0 (C ABI 6); `prometheiad` is 0.7.0.
@@ -58,7 +67,7 @@ list, with its numbers, is CHANGELOG.md "Unreleased".
 ## Next
 
 1. ~~Binary-star orbits~~: done (`53d5f58`, STARS.md "Binary stars").
-2. ~~Releases v0.4.0, v0.5.0 and v0.6.0~~: done.
+2. ~~Releases v0.4.0 through v0.7.0~~: done.
 3. **Astrolog's side of 2026-09-18**, settled (their commits, read from
    their log):
    - **§3.5a:** closed at `b5c67d2`. A zodiac with no anchor epoch gets
@@ -73,8 +82,9 @@ list, with its numbers, is CHANGELOG.md "Unreleased".
      library does, measured by probe (`f3eaeec`). We keep the published
      epoch-anchored reading and do not implement the mode, so nothing
      diverges.
-   - **Still to come from them:** the binary-star offsets. Their elements
-     are in at `7c05f7f`, and the prerequisites at `97d7ab6` and `6838e50`.
+   - **The binary-star offsets** landed at their `13d3e5e` (elements
+     `7c05f7f`, prerequisites `97d7ab6` and `6838e50`); they grade them at
+     0.40 mas on Sirius against our fixtures. Not yet measured here.
 4. **Done on 2026-09-18, for the record:**
    - both §3.5a parts, and every fix they named, verified (records g–k);
    - the FK5 star check;
@@ -118,7 +128,8 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
 - **Latest record:** `docs/crosstest/2026-09-19t.tsv`, record s
   adjudicated (CROSS-TEST.md, "Record s adjudicated"): their Moon points
   from Mars fixed; the points' missing light time graded as declared in
-  their corrApplied; the mean-perihelion rates with their maintainer.
+  their corrApplied; the mean-perihelion rates still findings, since fixed
+  on their side at `d1f1287` and awaiting a run of ours.
 - **Record s:** `docs/crosstest/2026-09-18s.tsv`, against Astrolog's
   `429c764` on a spare port (47392). Orbit points are now asked from the
   Sun, the barycentre and Mars's centre too (CROSS-TEST.md, "Orbit points
@@ -211,8 +222,6 @@ terms.
 
 **Ours.**
 
-- **No tag for the work above.** `initial` carries a release's worth of
-  changes with no version bump; the maintainer has not asked for one.
 - **One gate failure on 2026-09-19 that did not reproduce.** It came right
   after a `pkill` of `prometheiad`; three further gates and thirty runs of
   `test_prometheiad` were clean, and the failing test's name was not kept.
