@@ -309,6 +309,10 @@ Every one of these has cost this project or the Astrolog project real time.
 
 ## Runbook (draft, 2026-09-18)
 
+Since 2026-09-20 the whole of this side's half runs as
+`tools/check/crossrun.py --record` ("One command", below). What follows is
+what that sequence does, and why each step is in it.
+
 The principles above say what counts as a pass. This says what is actually
 run, by whom, in what order. It is a draft for both sides to amend: the
 Astrolog side owns everything that drives its client or its daemon.
@@ -335,7 +339,7 @@ Astrolog side owns everything that drives its client or its daemon.
 | our client → both daemons | `tools/check/crosstest.py`: one request, sent to each daemon, diffed as angular separation, checked against the anchor where one exists, written to the leg table | **run**: legs 2, 6, 7, 9 (below) |
 | their client → `prometheiad` | their harness, the live parity group pointed at `prometheiad` | Astrolog side |
 | their client → their daemon | their gate | exists |
-| both daemons, self-consistency | `tools/check/corrapplied.py` | **done**: 27/29 each |
+| both daemons, self-consistency | `tools/check/corrapplied.py` | **run every time** by `crossrun.py`; both servers OK, 2026-09-20 |
 
 ### Legs, in order (each is cheap to stop at)
 
@@ -1474,3 +1478,65 @@ Worth stating so nobody reads a green matrix as more than it is.
   those bodies and a local Kepler solution is exact. So there is no
   diagonal cell for them. Kind 4 is tested another way, below, and more
   strongly than anything else here.
+
+### One command, 2026-09-20 (`tools/check/crossrun.py`)
+
+The cross-test needed two daemons, so it stayed out of `tools/gate.sh` — and
+nothing else ran it either. Every record above exists because someone
+remembered the whole sequence: start ours, check theirs is up, run
+`crosstest.py`, then `corrapplied.py` and `ratesweep.py` against each
+server, read four outputs, write up what changed. `tools/check/crossrun.py`
+is that sequence:
+
+    tools/check/crossrun.py --record
+
+It builds what it needs, starts `prometheiad` unless something already
+answers on the port, runs the four steps, stops **only the process it
+started**, and prints one summary. It never starts, stops or restarts their
+daemon: 47392 is the spare the Astrolog side put up for cross-tests and is
+the default, 47391 is theirs and is not ours to touch. If theirs is not
+answering it prints their launch line and stops, rather than proceeding
+with half a matrix.
+
+**The record is a file, not a verdict.** What it means still has to be read
+and written up here, by whoever ran it.
+
+**What it adds beyond convenience** is the diff. This matrix carries 99
+standing findings against their server and 548 rows their client does not
+ask for, all adjudicated above; a run that reproduces them exactly has
+found *nothing*, and a summary that says "99 findings" every time is one
+nobody reads by the third run. So the run compares its table against the
+previous record, by leg and verdict, and says either what changed or that
+nothing did.
+
+**First run, `docs/crosstest/2026-09-20v.tsv`** (3,758 rows, ours
+`1f70d75`, theirs `astrolog-ephd/2.0` built 2026-09-20T04:57:10Z). Against
+record `u` the whole matrix is identical, verdict for verdict, except the
+three legs that did not exist when `u` was written:
+
+| leg | rows | verdict |
+|---|---|---|
+| `deflection-geo` | 10 | all agree |
+| `deflection-topo` | 23 | all agree |
+| `arrival` | 8 | all agree |
+
+That is the reproduction `u` never had: the same servers, the same
+questions, a different hour, the same 3,717 answers.
+
+**And the first run found a defect — in our own instrument.** Two
+`corrapplied.py` FAILs against their server: `Jupiter asc node` seen
+heliocentrically and barycentrically, whose `corrApplied` claimed
+deflection and aberration that "no mask WELCOME honours for this observer
+carries". Their WELCOME does declare them — in A.3 **0x0014**, the per-kind
+record (`corrkind observers 12 kinds 2 corrections 3/5/7`: helio and bary,
+kind 1, an orbit point). `corrapplied.py` read only 0x0004, the per-observer
+record, and `wirelib.py` had parsed 0x0014 and offered `permitted()` for
+exactly this since the per-kind drop. The check now unions both, and both
+servers pass; removing the union again reds exactly those two rows. Their
+server was doing what it advertised, in the record our tool did not read.
+
+The standing reds a clean run still prints, both adjudicated above:
+`ratesweep` on either server, for the Polaris distance row (§3.5a's
+distance tolerance cannot be met for a star), and the 99 `rates` and
+`sidinstant` findings against theirs. The runner exits non-zero when any
+step does; the diff is what says whether that means anything.

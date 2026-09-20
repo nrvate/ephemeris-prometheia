@@ -2160,10 +2160,14 @@ def main():
         leg_bary(client, ours, theirs, table, args.verbose)
     if "topo" in legs:
         leg_topo(client, args.ut1, ours, theirs, a, b, table, args.verbose)
-    if "helio" in legs:
-        adjudicate_helio_light_time(table)
-    if "horizons" in legs or "helio" in legs:
-        adjudicate_same(table)
+    # Always, whatever ran. Both adjudicators already leave a row
+    # "unadjudicated" when the anchor it needs is missing, but they used to
+    # be called only when the anchor's leg was in --legs, so `--legs same`
+    # alone reported four findings the harness had never asked an anchor
+    # about. A verdict a run cannot support is the mis-attribution this
+    # harness exists to avoid.
+    adjudicate_helio_light_time(table)
+    adjudicate_same(table)
     adjudicate_coverage(table)  # last: an anchor refused for coverage still adjudicates nothing
 
     counts = {}

@@ -307,9 +307,23 @@ terms.
   `test_prometheiad` were clean, and the failing test's name was not kept.
   Recorded here because an unexplained red is worth remembering, not
   because there is a lead.
-- **The cross-test runs by hand.** It needs two daemons, so it stays out of
-  `tools/gate.sh` (CROSS-TEST.md, "What it leaves behind"), but nothing
-  schedules it either, and a record only exists when someone runs one.
+- ~~The cross-test runs by hand.~~ Closed 2026-09-20 by
+  `tools/check/crossrun.py --record` (CROSS-TEST.md, "One command"): one
+  command starts our daemon, runs every leg, then `corrapplied.py` and
+  `ratesweep.py` against each server, stops only what it started, and diffs
+  its table against the previous record so a run that reproduces the 99
+  standing findings says it found nothing. It still needs *their* daemon,
+  which it never manages, so it stays out of `tools/gate.sh`, and nothing
+  schedules it — but the sequence is no longer something to remember.
+  - First run: `docs/crosstest/2026-09-20v.tsv`, 3,758 rows, identical to
+    record `u` verdict for verdict except the three legs built since (41
+    rows, all agree) — the reproduction `u` never had.
+  - It also found a defect in our own instrument: `corrapplied.py` read
+    A.3 0x0004 alone and accused their server of claiming corrections it
+    had declared in 0x0014, the per-kind record. Fixed, both servers pass,
+    fault-injected. **Third time in two days that the measurement was
+    wrong and the program was fine** — the expected ratio once the cheap
+    checks are green, not a run of bad luck.
 - ~~The rate-bound sweep was a one-off script~~: it is now
   `tools/check/ratesweep.py`, committed, reading whichever bound is in
   force off the wire and exiting non-zero when a server misses it. Ours

@@ -743,8 +743,10 @@ are internal:
   for. A server that echoes the request into the slot fails here and nowhere
   else, and echoing is the easy bug: this server did it until the v4 rewrite.
 - **declared** — the byte is a subset of the correction bits WELCOME says can
-  be honoured for that observer (A.3 0x0004). Two things one server said,
-  disagreeing.
+  be honoured for that observer *and that object kind* (A.3 0x0004, as
+  widened or narrowed per kind by 0x0014). Two things one server said,
+  disagreeing. It read 0x0004 alone until 2026-09-20, which accused a server
+  of claiming corrections it had declared in the other record.
 - **truthful** — asking for one correction alone either moves the position or
   does not. A clear bit that moves the sky is a false denial. A set bit that
   moves nothing is correct and reported as a note, because that is what a term

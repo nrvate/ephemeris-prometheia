@@ -15,7 +15,8 @@ compares one server against itself:
                 repository shipped it until the v4 rewrite.
 
   declared      corrApplied is a subset of the correction bits WELCOME says
-                can be honoured for that observer (A.3 0x0004).  Two things
+                can be honoured for that observer AND object kind (A.3
+                0x0004, widened or narrowed per kind by 0x0014).  Two things
                 the same server said, disagreeing.
 
   truthful      asking for exactly one correction either moves the position
@@ -28,9 +29,11 @@ Only a clear movement accuses.  Anything under the noise ceiling is a note,
 never a failure: this harness is pointed at other people's servers, so it
 stays quiet unless it is sure.
 
-A.3 0x0004 lists the EXACT masks a server honours per observer, and any other
-combination is ERROR 11 (3.5a), so the masks asked for come from the server's
-own WELCOME.  A check whose masks the server does not honour is reported as
+A.3 0x0004 lists the EXACT masks a server honours per observer, 0x0014 says
+which of them apply to which object kind, and any other combination is ERROR
+11 (3.5a), so the masks asked for come from the server's own WELCOME -- both
+records, since reading 0x0004 alone accuses a server of claiming what it
+declared in the other one.  A check whose masks the server does not honour is reported as
 inapplicable -- never as passed.  And checking nothing is not a pass: the run
 fails if no case was checked, if fewer than --min-fraction of them were, or if
 any of the three checks never ran at all.  A green that could not have been
@@ -99,38 +102,46 @@ def separation_arcsec(a, b):
 
 
 def ask(client, host, port, obj_args, observer_args, mask, jd, verbose):
-    """One request: (answer, corrmasks, None), or (None, corrmasks, why) on error."""
+    """One request: (answer, report, None), or (None, report, why) on error."""
     rep = wirelib.run(client, host, port,
                       ["--jd", str(jd), "--corrections", str(mask)] + obj_args + observer_args,
                       verbose, timeout=60)
     if rep.returncode != 0 or not rep.objects:
-        return None, rep.corrmasks, rep.stderr or f"exit {rep.returncode}"
+        return None, rep, rep.stderr or f"exit {rep.returncode}"
     meta, row = rep.objects[0], rep.row(0)
     if meta.err != 0 or row is None:
-        return Answer(meta.name, meta.corr, meta.err, meta.err_text, 0.0, 0.0), rep.corrmasks, None
-    return Answer(meta.name, meta.corr, 0, "", row[0], row[1]), rep.corrmasks, None
+        return Answer(meta.name, meta.corr, meta.err, meta.err_text, 0.0, 0.0), rep, None
+    return Answer(meta.name, meta.corr, 0, "", row[0], row[1]), rep, None
 
 
-def honoured(corrmasks, observer_bit, mask):
-    """Whether WELCOME lists this exact mask for this observer (A.3 0x0004)."""
-    return any(observers & (1 << observer_bit) and m == mask for observers, m in corrmasks)
+def declared_for(rep, observer_bit, kind):
+    """Every correction bit this server declares for this (observer, kind).
 
-
-def declared_for(corrmasks, observer_bit):
-    """Every correction bit some honoured mask carries for this observer."""
+    A.3 0x0004 is per observer; 0x0014 widens or narrows it per object kind,
+    and this read only 0x0004 until 2026-09-20. Against a server that
+    declares deflection and aberration for an orbit point seen from the Sun
+    or the barycentre through 0x0014 alone -- which Astrolog's does -- the
+    check reported its honest corrApplied as a claim it had never made. Two
+    FAILs against a server doing exactly what it advertised: the third time
+    in two days that the instrument was wrong and the program was fine.
+    """
     allowed = 0
-    for observers, mask in corrmasks:
+    for observers, mask in rep.corrmasks:
         if observers & (1 << observer_bit):
+            allowed |= mask
+    for observers, kinds, mask in rep.corrkinds:
+        if observers & (1 << observer_bit) and kinds & (1 << kind):
             allowed |= mask
     return allowed
 
 
 class Case:
-    def __init__(self, label, obj_args, observer, observer_args):
+    def __init__(self, label, obj_args, observer, observer_args, kind=0):
         self.label = label
         self.obj_args = obj_args
         self.observer = observer
         self.observer_args = observer_args
+        self.kind = kind  # A.12, for the 0x0014 declarations
 
 
 def cases():
@@ -151,18 +162,18 @@ def cases():
         ("bary", ["--bary"]),
         ("body", ["--center", "5"]),
     ):
-        for label, obj_args in (
-            ("Jupiter", ["--obj", "5"]),
-            ("Saturn", ["--obj", "6"]),
-            ("Sun", ["--obj", "10"]),
-            ("Moon", ["--obj", "301"]),
-            ("Sirius", ["--star", "Sirius"]),
-            ("Jupiter asc node", ["--node", "5.a"]),
+        for label, obj_args, kind in (
+            ("Jupiter", ["--obj", "5"], 0),
+            ("Saturn", ["--obj", "6"], 0),
+            ("Sun", ["--obj", "10"], 0),
+            ("Moon", ["--obj", "301"], 0),
+            ("Sirius", ["--star", "Sirius"], 2),
+            ("Jupiter asc node", ["--node", "5.a"], 1),
         ):
             # An observer at Jupiter's centre cannot look at Jupiter.
             if obs == "body" and obj_args == ["--obj", "5"]:
                 continue
-            out.append(Case(f"{label} [{obs}]", obj_args, obs, obs_args))
+            out.append(Case(f"{label} [{obs}]", obj_args, obs, obs_args, kind))
     return out
 
 
@@ -187,16 +198,16 @@ def main():
 
     # WELCOME first: the masks this server honours, per observer. Any request
     # carries the WELCOME back, whether or not its REQUEST is answered.
-    _, corrmasks, _ = ask(client, args.host, args.port, ["--obj", "10"], [], 7, args.jd,
-                          args.verbose)
-    if not corrmasks:
+    _, welcome, _ = ask(client, args.host, args.port, ["--obj", "10"], [], 7, args.jd,
+                        args.verbose)
+    if not welcome.corrmasks:
         print("\nFAIL: WELCOME advertises no correction masks (A.3 0x0004); nothing can be asked")
         return 1
 
     for case in all_cases:
         obs = OBS_BIT[case.observer]
         masks = [m for m in (0, LIGHT_TIME, DEFLECTION, ABERRATION, 7)
-                 if honoured(corrmasks, obs, m)]
+                 if welcome.permitted(obs, case.kind, m)]
         if not masks:
             inapplicable.append(f"{case.label}: WELCOME honours none of masks 0, 1, 2, 4, 7 here")
             continue
@@ -239,7 +250,7 @@ def main():
         # answer, not just the first -- a server that echoes the request
         # reports 0 on mask 0, and 0 is a subset of anything.
         runs["declared"] += 1
-        allowed = declared_for(corrmasks, obs)
+        allowed = declared_for(welcome, obs, case.kind)
         over = 0
         for answer in answers.values():
             over |= answer.corr_applied & ~allowed
@@ -249,7 +260,7 @@ def main():
             )
             fails.append(
                 f"{case.label}: corrApplied claims {named}, which no mask WELCOME "
-                f"honours for this observer carries"
+                f"honours for this observer and kind carries"
             )
 
         # truthful: a clear bit must not move the sky. Needs mask 0 and the
