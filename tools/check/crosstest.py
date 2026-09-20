@@ -831,6 +831,7 @@ def points_from_elsewhere(client, ours, theirs, table, verbose, epochs):
             within = s <= band_s and dkm <= band_km
             if cls == "moon":
                 why = {}
+                held = {}  # was there an Earth beside it to be held to?
                 r_of = {"ours": ra, "theirs": rb}
                 for who, r, i in (("ours", ra, 0), ("theirs", rb, 1)):
                     n = len(specs)
@@ -839,19 +840,45 @@ def points_from_elsewhere(client, ours, theirs, table, verbose, epochs):
                         v0, e0 = r0[i].row(k), r0[i].row(n)
                         if not ok(v0) or not ok(e0):
                             v0 = e0 = None
-                    why[who] = _moon_anchor(r.row(k), r.row(n), v0, e0) if ok(r.row(n)) else ""
+                    held[who] = ok(r.row(n))
+                    why[who] = _moon_anchor(r.row(k), r.row(n), v0, e0) if held[who] else ""
                 bad = [w for w in ("ours", "theirs") if why[w]]
                 # corrApplied states what applies to an object structurally
                 # (SERVER.md): a server that says light time does not apply
-                # to a point answers mask 1 as mask 0, and says so.
-                declared = [w for w in bad if why[w].startswith("light time") and
-                            not (r_of[w].objects[k].corr & 1)] if mask == 1 else []
+                # to a point answers mask 1 as mask 0, and says so. That
+                # statement stands on its own. It does NOT need the Earth
+                # beside it: a server refuses the Earth at the edge of its
+                # coverage, and requiring both pieces of evidence turned six
+                # rows at 1800 into unattributed findings on 2026-09-20,
+                # reading as ours when their own corrApplied explained them.
+                nolt = [w for w in ("ours", "theirs")
+                        if not (r_of[w].objects[k].corr & 1)] if mask == 1 else []
+                declared = [w for w in bad if why[w].startswith("light time") and w in nolt]
                 note += "".join(f"; {w}: {why[w]}" for w in bad)
                 if bad and len(declared) == len(bad) and within_but_lighttime(s, dkm):
                     table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
                               sep_servers=s, verdict="expected-difference",
-                              note=note + f"; {declared[0]}'s corrApplied has no light time "
+                              note=note + f"; {declared[0]}: corrApplied has no light time "
                                           "for this point, so mask 1 is its mask 0")
+                    continue
+                if not bad and not within and len(nolt) == 1 and within_but_lighttime(s, dkm):
+                    table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
+                              sep_servers=s, verdict="expected-difference",
+                              note=note + f"; {nolt[0]}: corrApplied has no light time for "
+                                          "this point, so mask 1 is its mask 0" +
+                                   ("" if all(held.values()) else
+                                    f"; {[w for w in held if not held[w]][0]} refused the "
+                                    "Earth here, so corrApplied is the whole evidence"))
+                    continue
+                if not bad and not within and not all(held.values()):
+                    # Nothing to attribute with: the anchor is missing and no
+                    # corrApplied explains the gap. Say so rather than letting
+                    # it read as the other server's defect.
+                    table.add(**base, ours=(va[0], va[1]), theirs=(vb[0], vb[1]),
+                              sep_servers=s, band=f"{band_s}\" {band_km} km",
+                              verdict="unadjudicated",
+                              note=note + f"; {[w for w in held if not held[w]][0]} refused "
+                                          "the Earth here, so neither side can be held to it")
                     continue
                 verdict = "agree" if within and not bad else \
                     f"finding ({bad[0]})" if len(bad) == 1 else "finding"
@@ -1645,23 +1672,71 @@ def git_head(path, ignore=None):
         return "?"
 
 
-def binary_time(path):
-    """The daemon file's build time, marked STALE when a running process of
-    that name still executes a file since replaced (a rebuild under a live
-    daemon), since then the time describes a binary that did not answer."""
+def pids_listening(port):
+    """The pids holding a listening TCP socket on this port, from /proc alone
+    (no ss, no lsof). Empty when none is found or /proc cannot be read."""
+    inodes = set()
+    for name in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(name) as f:
+                next(f, None)
+                for line in f:
+                    p = line.split()
+                    if len(p) < 10 or p[3] != "0A":  # 0A = TCP_LISTEN
+                        continue
+                    if int(p[1].rsplit(":", 1)[1], 16) == port:
+                        inodes.add(p[9])
+        except OSError:
+            continue
+    pids = set()
+    if not inodes:
+        return pids
+    for pid in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        if not pid.isdigit():
+            continue
+        try:
+            for fd in os.listdir(f"/proc/{pid}/fd"):
+                try:
+                    link = os.readlink(f"/proc/{pid}/fd/{fd}")
+                except OSError:
+                    continue
+                if link.startswith("socket:[") and link[8:-1] in inodes:
+                    pids.add(int(pid))
+                    break
+        except OSError:
+            continue
+    return pids
+
+
+def binary_time(path, port=None):
+    """The daemon file's build time, marked STALE when the daemon that
+    ANSWERED still executes a file since replaced (a rebuild under a live
+    daemon), since then the time describes a binary that did not answer.
+
+    Only the process listening on `port` counts. Matching any process of the
+    same name instead reported a stale binary on 2026-09-20 because a second,
+    older `astrolog-ephd` was up on another port; the daemon under test was
+    current, and the record carried a warning that was true of nothing it
+    measured. A check that cannot say which process it means is not a check.
+    """
     try:
         t = os.path.getmtime(path)
     except OSError:
         return "unknown"
     out = datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    name = os.path.basename(path)
-    for pid in os.listdir("/proc") if os.path.isdir("/proc") else []:
+    if port is None:
+        return out
+    pids = pids_listening(port)
+    if not pids:
+        return out + f" (no listener on port {port}: staleness unchecked)"
+    for pid in sorted(pids):
         try:
             exe = os.readlink(f"/proc/{pid}/exe")
         except OSError:
-            continue
-        if os.path.basename(exe).startswith(name) and exe.endswith(" (deleted)"):
-            return out + " STALE: a running daemon predates this file"
+            return out + f" (pid {pid} unreadable: staleness unchecked)"
+        if exe.endswith(" (deleted)"):
+            return out + (f" STALE: the daemon on port {port} (pid {pid}) runs a "
+                          "binary since replaced, so this time is not its build")
     return out
 
 
@@ -1743,7 +1818,7 @@ def main():
             f"crosstest {datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}",
             f"ours   {a.server} dataset {a.dataset} prometheia {git_head(REPO, args.out)}",
             f"theirs {b.server} dataset {b.dataset} astrolog {git_head(args.astrolog)}"
-            f" binary built {binary_time(args.astrolog_bin)}",
+            f" binary built {binary_time(args.astrolog_bin, theirs[1])}",
             "angles in arcsec; positions lon/lat or RA/Dec in degrees; docs/CROSS-TEST.md",
         ]
         table.write(args.out, header)
