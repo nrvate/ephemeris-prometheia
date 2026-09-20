@@ -962,7 +962,7 @@ between 1900 and 2100, so the result cache does not flatter the numbers.
   once a second, and again after every connection has closed.
 - **Exit status:** it exits 1 on any other failure (a transport error, a
   message that does not parse, or a canary that differed).
-- It runs by hand, never in the gate.
+- It runs from `tools/scheduled.sh`, never in the gate.
 
 **Measured 2026-09-18** on this machine, against `prometheiad` with DE440
 and `--threads 4`. The client ran on the same host.
@@ -1103,7 +1103,7 @@ and `--threads 4`. The client ran on the same host.
       re-runs. The case table below it is the part that does.
   - It starts its own daemon per case and stops only what it started. It
     needs an ephemeris, so it is not in `tools/gate.sh`, which must stay
-    seconds. **Nothing schedules it.**
+    seconds. `tools/scheduled.sh` runs it (below).
   - **It covers one tool.** `corrapplied.py` has had the same treatment
     since (`corrtest.py`, above) and `crosstest.py`'s adjudicators theirs.
     Named rather than counted, because a number here drifts and a list does
@@ -1139,6 +1139,53 @@ and `--threads 4`. The client ran on the same host.
     `prometheia-wire-client` frozen with SIGSTOP for 12 s from its first
     second. The server hit backpressure three times, and every one of the
     1,280,000 rows arrived within 3 s of the client resuming.
+
+## The checks the gate cannot run
+
+`tools/gate.sh` runs before every commit and has to stay hermetic and fast:
+no daemon, no ephemeris, seconds. Everything that needs one of those has
+been run by hand since it was written, which means it ran when somebody
+remembered it. `tools/scheduled.sh` is the list, in one command:
+
+```
+tools/scheduled.sh                  the checks that need only our own tree
+tools/scheduled.sh --with-cross     also the cross-test (needs their daemon)
+```
+
+In order: `tools/gate.sh` first, because a soak failure reported against a
+tree that does not compile has told nobody anything; then `corrtest.py` and
+`ratestest.py`, which need no daemon but spend more seconds than a gate
+should; then `loadselftest.py`; then a 60 s soak and the memory bound
+against a daemon it starts and stops itself.
+
+Every run writes `build/scheduled/<stamp>.log` and prints one summary; the
+exit status is the number of steps that failed. Two properties are load
+bearing, and both were injected before being believed:
+
+- **A skip is only ever a missing precondition.** The first version started
+  the daemon with `--log-level warn`, which that binary does not accept; it
+  exited, `/healthz` never answered, and the soak reported SKIP. A skip
+  whose precondition was met is a green that could not have been red. Once
+  the binary and the ephemeris are both present, a daemon that does not come
+  up is a failure.
+- **The port must be empty before it starts.** `/healthz` on a busy port is
+  answered by whoever is already there, and the soak would then drive that
+  server while `--pid` measured this script's corpse — rows from one
+  process, memory from another, and a pass. Checking "is our pid still
+  alive" after the wait loop does *not* catch it, because the loop breaks on
+  the other server's instant answer before the child has exited; that
+  version was written here and the injection went green. Verified 2026-09-20
+  by pointing it at the port of a running daemon: FAILED, and at a free one:
+  4 steps, 0 failed.
+
+`--with-cross` is opt-in on purpose: the cross-test reads another project's
+server, and a thing that reaches outside this tree should be asked for
+rather than happening because a default said so.
+
+There is no hosted CI and there will not be. `tools/systemd/` holds a
+user-level service and timer for whoever wants this daily; **nothing in this
+repository installs them**, the `.service` file carries the six commands
+that do, and `--with-cross` is deliberately absent from its `ExecStart`.
 
 ## Not implemented
 

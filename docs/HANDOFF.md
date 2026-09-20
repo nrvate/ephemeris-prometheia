@@ -333,8 +333,10 @@ terms.
   `ratesweep.py` against each server, stops only what it started, and diffs
   its table against the previous record so a run that reproduces the 99
   standing findings says it found nothing. It still needs *their* daemon,
-  which it never manages, so it stays out of `tools/gate.sh`, and nothing
-  schedules it — but the sequence is no longer something to remember.
+  which it never manages, so it stays out of `tools/gate.sh`.
+  `tools/scheduled.sh --with-cross` runs it, opt-in on purpose: a thing
+  that reaches outside this tree should be asked for and not arrive on a
+  timer. The sequence is no longer something to remember.
   - First run: `docs/crosstest/2026-09-20v.tsv`, 3,758 rows, identical to
     record `u` verdict for verdict except the three legs built since (41
     rows, all agree) — the reproduction `u` never had.
