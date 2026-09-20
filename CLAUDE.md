@@ -48,8 +48,9 @@ maintainer before any large pull.
 
 - C++20, no globals, one engine context per object; `namespace
   prometheia`; every file carries an SPDX GPL-2.0-or-later header.
-- `tools/gate.sh` runs clang-format, the v4 registries check, and the
-  full test set in both `build/` (Release) and `build-asan/`
+- `tools/gate.sh` runs clang-format, the v4 registries check, the
+  cross-test adjudicators' selftest (`tools/check/adjudicatetest.py`),
+  and the full test set in both `build/` (Release) and `build-asan/`
   (ASan+UBSan). It must pass before every commit.
 - Test binaries live at `build/test_*` (not `build/tests/`); build a
   single suite with `cmake --build build --target test_<name>`.

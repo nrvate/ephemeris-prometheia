@@ -3,6 +3,7 @@
 #
 # The pre-commit gate, run locally (the project uses no hosted CI):
 #   1. clang-format check over include/ src/ server/ tests/ tools/ fuzz/ (third_party excluded)
+#   1a. the v4 registries, and crosstest.py's adjudicators against hand-built tables
 #   2. Release build + ctest in build/
 #   3. ASan+UBSan build + ctest in build-asan/
 # Tests run serially: the integrator benchmark asserts a wall-clock bound.
@@ -40,6 +41,14 @@ step() {
 # The vendored protocol v4 pair must agree by name (instant, no build).
 echo "== registries (protocol v4, by name)"
 step python3 tools/check/ephproto4_registries.py
+
+# The cross-test's adjudicators decide what a disagreement means, and they
+# are what speaks to the other project. They are pure functions of the
+# results table, so they can be falsified here with no daemon and no
+# ephemeris: 29 cases in under a tenth of a second, plus a line-coverage
+# check that fails if a branch of one has no case.
+echo "== adjudicators (crosstest.py, by case)"
+step python3 tools/check/adjudicatetest.py
 
 tests() {
     local log

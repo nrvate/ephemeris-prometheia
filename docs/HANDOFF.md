@@ -368,9 +368,19 @@ terms.
     its cache plateau passes any bound, and it must be pointed at a fresh
     daemon (SERVER.md).
   - **The hole this does not close.** Every fault injection described in
-    these documents was done by hand once and never re-run; nine scripts
-    under `tools/check/` still carry their falsifications as prose. One
-    tool now has a selftest. That is one leg, not the hole.
+    these documents was done by hand once and never re-run; eight scripts
+    under `tools/check/` still carry their falsifications as prose. Two
+    tools now have selftests. That is two legs, not the hole.
+  - **`tools/check/adjudicatetest.py`** (2026-09-20) is the second, and
+    **the first falsification in this repo that runs on every commit**:
+    `crosstest.py`'s three `adjudicate_*` functions are pure functions of
+    the results table, so 29 cases drive them with no daemon and no
+    ephemeris in under a tenth of a second, and it is in `tools/gate.sh`
+    (which still finishes in ~23 s). It traces the three functions and
+    fails if any executable line has no case, so a branch added without
+    one fails the gate. Falsified three ways: two inverted branches each
+    failed exactly one named case, and deleting a case made the coverage
+    check name the three lines it orphaned.
   - **What needed doing first:** the tool graded
     nothing. It counted answers that arrived and never read their numbers,
     so it could not have seen a server answer differently under load than

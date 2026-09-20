@@ -311,10 +311,37 @@ Every one of these has cost this project or the Astrolog project real time.
     never repeated; nothing re-ran any of them, so they describe a build that
     may be two months gone. `tools/check/loadselftest.py` (2026-09-20) is the
     structural version for one tool, and the Astrolog side's
-    `ephsrv-soak.sh --selftest` is theirs. **Nine scripts under
-    `tools/check/` still carry prose**, so the hole is narrowed by one leg,
-    not closed — which is what their side said of theirs, and is worth
-    repeating rather than rounding up.
+    `ephsrv-soak.sh --selftest` is theirs. **Eight scripts under
+    `tools/check/` still carry prose**, so the hole is narrowed by two
+    legs, not closed — which is what their side said of theirs, and is
+    worth repeating rather than rounding up.
+  - **The adjudicators are the second leg, and the only one that re-runs
+    on every commit** (`tools/check/adjudicatetest.py`, 2026-09-20). The
+    three `adjudicate_*` functions decide what a disagreement *means* —
+    the code that turns a gap into `expected-difference`,
+    `unadjudicated` or a `finding` against another project — and they
+    are pure functions of the results table, so 29 cases drive them from
+    hand-built rows with no client, no daemon and no ephemeris, in under
+    a tenth of a second. That is why it is in `tools/gate.sh` while every
+    other falsification here is not: the cost of a cross-test leg is the
+    two servers, not the judgement.
+    - Half the cases are negative, because the branch that turns a right
+      server into a finding is the one where evidence is *absent* rather
+      than contradicting — which is exactly how record u's six false
+      findings happened, one leg over.
+    - Every row's verdict is asserted, not just the row under test: an
+      adjudicator that excuses its row and also touches its anchor is
+      wrong in a way that reading one row cannot see.
+    - **Coverage is traced, not claimed.** The script runs the three
+      functions under `trace` and fails if any executable line was never
+      reached, naming the line. A branch added to `crosstest.py` with no
+      case here fails the gate rather than being found by a peer. Proven
+      by deleting a case: it named the three lines that went unreached.
+    - It pinned one thing worth knowing: a topocentric row consults its
+      geocentric row *after* that row has been adjudicated, so a
+      geocentric gap the anchor excused carries the topocentric one with
+      it. Deliberate — the branch admits `expected-difference` — but it
+      is an order dependency in a table, and a case now holds it still.
   - **It is not enough to ask whether a broken input went red; the *named*
     assertion has to be the one that caught it.** Otherwise a gate whose
     bound has been deleted still passes, because a neighbouring check reds on
