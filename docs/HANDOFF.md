@@ -395,6 +395,19 @@ terms.
   - It stays a consistency check. The baseline is the server's own idle
     answer, so it says nothing about whether the numbers are right; that is
     every other leg's job.
+  - **The cross-test's own row counts are now derived rather than
+    reported** (`5ed3f48`, 2026-09-20). Not a selftest, the same class of
+    defect one level down: `crosstest.py` read its Horizons corpus from
+    gitignored `horizons-raw/` and used whatever rows were present, so an
+    interrupted fetch would have read out as "N of N agree" with a smaller
+    N — the number every record in CROSS-TEST.md is written up from.
+    `corpus_rows()` derives the expected count from the committed
+    request's own `TLIST` and refuses a short file. `_star_records()` was
+    the same over a *committed* file: a regex that on any drift in
+    `src/star_catalog.inc`'s layout matches fewer lines and reports the
+    remainder as the catalogue; it now requires a match for all 9,290
+    entries inside `kStarRecords[]`. Falsified four ways; legs `same`,
+    `stars` and `bary` re-run against both daemons afterwards, unchanged.
 - **Kinds 3 and 4 have no cross-test cell**, because the Astrolog client
   asks no server for them; kind 4 is covered another way.
 - ~~`/llms.txt` in both repositories, or one combined?~~ Settled
