@@ -235,9 +235,10 @@ terms.
 - ~~The rate-bound sweep was a one-off script~~: it is now
   `tools/check/ratesweep.py`, committed, reading whichever bound is in
   force off the wire and exiting non-zero when a server misses it. Ours
-  measures worst 3.6e-6 °/day and 1.7e-10 AU/day over 3,525 answered rows,
-  inside A.3's default, which is why we still send no `0x0013`. It needs a
-  daemon, so it is not in `tools/gate.sh`.
+  measures worst 3.6e-6 °/day and, in the corrected absolute unit,
+  1.7216e-10 AU/day over every solar-system row, inside A.3's default,
+  which is why we still send no `0x0013`. It needs a daemon, so it is not
+  in `tools/gate.sh`.
 - **`prometheia-load` has never been pointed at `astrolog-ephd`**
   (CROSS-TEST.md, "What this does not test").
 - **Kinds 3 and 4 have no cross-test cell**, because the Astrolog client
@@ -275,6 +276,14 @@ Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
   widest measurement either side holds, because this number has twice been
   wrong from being set *at* a measurement. `1e-5` AU/day in particular
   would fail on the day: the measurement is 1.0014e-5.
+- **§3.5a's distance tolerance cannot be met for a fixed star**, by either
+  server, and the protocol is theirs. Read absolutely — which is how both
+  `ephproto.h` and `registries.json` write it — A.3's 1e-9 AU/day sits
+  about four orders below the f64 floor of a star's distance column
+  (Polaris at 2.7e7 AU: one ulp is 6.07e-9 AU, the five-point difference
+  floor about 9.3e-6 AU/day). 218 rows of ours and 32 of theirs exceed it,
+  all stars, no solar-system object. Raised with them 2026-09-20; needs a
+  sentence in §3.5a, not a change in either server.
 - **Topocentric with the interpolated method** is now refused on their side
   (no `swe_nod_aps` destination exists), while their chart column keeps
   Swiss's wrong answer. Recorded in their registry §2.9; our sweep sees the

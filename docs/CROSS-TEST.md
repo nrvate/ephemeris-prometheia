@@ -1176,10 +1176,47 @@ were the width of a list. That is the one thing a server's own rate check
 structurally cannot do for itself, which is why each side should run this
 against the other.
 
+**The distance tolerance is absolute AU/day, not per AU.** Both
+`ephproto.h` and `registries.json` write it as "1e-9 AU/day" with no
+qualifier, and §3.5a's own worked example (3e-5 AU/day for Uranus) only
+reads as absolute. This side measured and reported the *relative* figure as
+though it were the bound until 2026-09-20, when the Astrolog session
+pointed at the units. The two differ by the body's distance: a factor of 5
+at Jupiter, 30 at Pluto, and about 3e7 at a star. `ratesweep.py` now
+reports both and tests the bound against the absolute one.
+
 **Ours, 2026-09-20** (`docs/crosstest/2026-09-20-ratesweep-ours.tsv`):
 3,525 answered, worst 3.6e-6 °/day (the Moon's osculating perihelion,
-topocentric) and 1.7e-10 AU/day per AU. Inside A.3's default by about
-threefold, so we still send no `0x0013`.
+topocentric). In the corrected unit the worst **solar-system** row is
+1.7216e-10 AU/day, inside A.3's default by about sixfold, so the claim
+behind sending no `0x0013` survives the correction for everything in the
+solar system.
+
+### The distance tolerance cannot be met for a star, by either server
+
+218 rows of ours and 32 of theirs exceed the bound in force once it is read
+absolutely. **Every one is a fixed star, and none is a solar-system
+object.** It is not a defect on either side: it is a floor in the
+representation.
+
+Polaris is served at 2.7356e7 AU by both servers. One f64 ulp there is
+6.07e-9 AU, so a five-point difference over h = 1/1024 day — whose
+numerator carries |1| + |8| + |8| + |1| = 18 ulp and is divided by
+12h = 0.0117 day — has a noise floor of about **9.3e-6 AU/day** before any
+arithmetic happens. A.3's default of 1e-9 AU/day is roughly four orders
+below what the column can represent. Ours measures 2.47e-5 AU/day there
+(a few times the floor) and theirs 7.48e-3.
+
+So **§3.5a's distance tolerance is unmeetable for a star at any conformance
+level**, and a server that says nothing is claiming something it cannot
+deliver. This is a question for the protocol rather than for either
+implementation, and it is with the Astrolog session, who own it. Until
+there is a sentence, this side records the solar-system figure as the
+meaningful one and says so rather than quietly dropping the star rows.
+
+Worst **non-star** absolute, for comparison: ours 1.7216e-10 AU/day, theirs
+9.0324e-5 (Saturn's osculating aphelion, topocentric, 2026) against the
+2e-4 they now advertise.
 
 ### Finding, theirs: a topocentric orbit point's position and rate describe different observers
 

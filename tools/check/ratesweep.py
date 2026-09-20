@@ -90,9 +90,19 @@ DELTA_T = 69.2
 
 
 def rate_error(v):
-    """Worst |reported rate - central difference| for lon, lat (deg/day) and
-    distance (AU/day, relative to the distance), from rows t-2h .. t+2h.
-    None when any row is missing. Five points: error ~ h^4 f5/30."""
+    """|reported rate - central difference| from rows t-2h .. t+2h, as
+    (lon, lat, dist_abs, dist_rel): degrees a day, then AU a day ABSOLUTE
+    and the same divided by the distance. None when a row is missing.
+    Five points: error ~ h^4 f5/30.
+
+    The bound is tested against the absolute figure, because that is the
+    unit 3.5a and A.3 0x0013 are written in ("1e-9 AU/day", with no per-AU
+    qualifier, in both ephproto.h and registries.json). The relative figure
+    is kept because it is the one that is comparable between a body at
+    0.0027 AU and one at 30, but reading it as if it were the spec's
+    understates a distant body by its distance -- 30x for Pluto. This side
+    reported the relative figure as though it were the bound until
+    2026-09-20, when the Astrolog session pointed at the units."""
     if any(r is None or any(math.isnan(x) for x in r) for r in v):
         return None
     mid = v[2]
@@ -103,8 +113,9 @@ def rate_error(v):
             f = [f[2] + ((x - f[2] + 180.0) % 360.0 - 180.0) for x in f]
         return (f[0] - 8.0 * f[1] + 8.0 * f[3] - f[4]) / (12.0 * H_DAYS)
 
+    dist_abs = abs(mid[5] - d(2))
     return (abs(mid[3] - d(0, True)), abs(mid[4] - d(1)),
-            abs(mid[5] - d(2)) / max(1.0, mid[2]))
+            dist_abs, dist_abs / max(1.0, mid[2]))
 
 
 def advertised(rep):
@@ -130,8 +141,8 @@ def main():
 
     bound_deg = bound_au = None
     source = "?"
-    worst = [0.0, 0.0, 0.0]
-    worst_where = ["", "", ""]
+    worst = [0.0, 0.0, 0.0, 0.0]
+    worst_where = ["", "", "", ""]
     over = []
     rows = []
     asked = answered = 0
@@ -152,31 +163,33 @@ def main():
                 e = rate_error([rep.row(0, r) for r in range(5)])
                 if e is None:
                     err = rep.objects[0].err if rep.objects else -1
-                    rows.append((label, jd, name, "", "", "", f"unanswered errCode {err}"))
+                    rows.append((label, jd, name, "", "", "", "", f"unanswered errCode {err}"))
                     continue
                 answered += 1
                 bad = e[0] > bound_deg or e[1] > bound_deg or e[2] > bound_au
                 rows.append((label, jd, name, "%.4e" % e[0], "%.4e" % e[1], "%.4e" % e[2],
-                             "OVER" if bad else ""))
-                for i in range(3):
+                             "%.4e" % e[3], "OVER" if bad else ""))
+                for i in range(4):
                     if e[i] > worst[i]:
                         worst[i] = e[i]
                         worst_where[i] = f"{name}, {label}, JD {jd}"
                 if bad:
                     over.append((name, label, jd, e))
                     print(f"  OVER  {name:26s} {label:40s} JD {jd:.1f}  "
-                          f"lon {e[0]:.3e} lat {e[1]:.3e} deg/d  dist {e[2]:.3e} AU/d per AU")
+                          f"lon {e[0]:.3e} lat {e[1]:.3e} deg/d  dist {e[2]:.3e} AU/d")
 
     print(f"\nserver {args.server}: bound {bound_deg:g} deg/day, {bound_au:g} AU/day per AU "
           f"({source})")
     print(f"asked {asked}, answered {answered}")
     print(f"worst lon  {worst[0]:.4e} deg/day   ({worst_where[0]})")
     print(f"worst lat  {worst[1]:.4e} deg/day   ({worst_where[1]})")
-    print(f"worst dist {worst[2]:.4e} AU/day per AU   ({worst_where[2]})")
+    print(f"worst dist {worst[2]:.4e} AU/day ABSOLUTE, the bound's unit   ({worst_where[2]})")
+    print(f"worst dist {worst[3]:.4e} AU/day per AU (diagnostic)   ({worst_where[3]})")
     if args.out:
         with open(args.out, "w") as f:
             f.write(f"# ratesweep {args.server} bound {bound_deg:g} {bound_au:g} ({source})\n")
-            f.write("config\tepoch_tt\tobject\tlon_err\tlat_err\tdist_err\tflag\n")
+            f.write("config\tepoch_tt\tobject\tlon_err\tlat_err\t"
+                    "dist_err_au_per_day\tdist_err_per_au\tflag\n")
             for r in rows:
                 f.write("\t".join(str(x) for x in r) + "\n")
         print(f"table: {args.out} ({len(rows)} rows)")
