@@ -1770,10 +1770,21 @@ and ruinous elsewhere is caught only if it ranks anyway.
 
 | instant | site | ΔT 0 | ΔT 30 | ΔT 69.2 | ΔT 140 |
 |---|---|---|---|---|---|
-| JD 2461300.5 (2026) | Quito | **8.24e−03** | 2.96e−04 | 6.70e−04 | 1.54e−04 |
-| JD 2461300.5 (2026) | Zurich | 1.69e−04 | 3.08e−04 | 7.35e−05 | **7.60e−03** |
+| JD 2461300.5 (2026) | Quito, −78.47, −0.18, 2850 | **8.2445e−03** | 2.9652e−04 | 6.6996e−04 | 1.5371e−04 |
+| JD 2461300.5 (2026) | Zurich, 8.55, 47.37, **500** | 2.3449e−04 | 3.5782e−05 | 4.6339e−04 | **7.5870e−03** |
+| JD 2461300.5 (2026) | Zurich, 8.55, 47.37, **400** | 1.6945e−04 | 3.0828e−04 | 7.3518e−05 | **7.5972e−03** |
 
-Confirmed by hand on a separate code path from the sweep. That epoch is
+Confirmed by hand on a separate code path from the sweep, and independently
+by the Astrolog side against `libswe` with no server at all — their figures
+agree with the 500 m row to four digits.
+
+The two Zurich rows are here because the first hand check ran at 400 m while
+the sweep's configuration is 500 m, and the mismatch was visible from their
+side before it was visible from this one. Both altitudes exceed the bound at
+ΔT 140 and neither does anywhere else, so nothing about the finding moves —
+but **a hundred metres changes the miss by an order of magnitude** at the ΔT
+values that stay inside the bound (3.1e−04 against 3.6e−05 at ΔT 30), which
+makes the site a third scattered axis rather than a label on the other two. That epoch is
 one of the ones reported clean — and it is clean, **at ΔT 69.2**, which
 is the only ΔT it had been asked at. So the region is not confined to
 1900.0, the two sites go over at *different* ΔT, and the narrowing was
