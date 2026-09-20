@@ -525,6 +525,17 @@ terms.
   exposes no agent tools to have one. It obliges them of nothing — if they
   ever serve agent tools they serve their own file beside them — so it did
   not need to go to the maintainer.
+- **No instrument compares two engines on rates.** Named 2026-09-20 and
+  not filled (CROSS-TEST.md, "The instrument gap this fell through"). The
+  `stars` leg compares the two servers on **positions**; `ratesweep.py`
+  and the `rates` leg compare one engine's reported rate with its own
+  difference — **one engine, with itself**. A quantity both engines report
+  self-consistently and differently from each other passes both, and Vega
+  is one: its distance rates differ by 7 km/s while its distance agrees to
+  0.011%. Found by reading four numbers, not by a tool. Filling the gap
+  needs an outside reference for a star's distance rate and there is none
+  — Horizons, the anchor the other legs lean on, does not serve fixed
+  stars — so this stays recorded rather than closed.
 
 **Theirs — all measured and closed in record u (2026-09-20).**
 
@@ -638,6 +649,12 @@ unlisted correction masks (both §3.5a parts approved).
 
 Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
 
+- **Vega's radial velocity.** Ours is −13.5 km/s (SIMBAD, quality C; the
+  BSC's own field says −14), theirs implies −20.60 (CROSS-TEST.md,
+  "Vega: the catalogues disagree on one radial velocity"). Our two
+  sources agree with each other; no outside reference has been asked.
+  Changing it changes a published catalogue value, so it is not a thing a
+  cross-test decides.
 - The `deadlineMs` strategy switch: parsed and advisory today, and
   documented as unimplemented in SERVER.md.
 - Nightly or automated catalogue release builds: an idea only.

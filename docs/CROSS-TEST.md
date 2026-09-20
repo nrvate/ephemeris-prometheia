@@ -1764,6 +1764,82 @@ sit **0.089″–0.32″** from ours, about the `swe_nod_aps` direction
 difference they described. Before it, the aphelion differed by the whole
 diurnal parallax, some 3,600″.
 
+### Vega: the catalogues disagree on one radial velocity, 2026-09-20
+
+Raised by the Astrolog side, recorded on theirs as registry §4.4 (their
+`799992e`), and confirmed here. Both servers' star distance rates for Vega
+disagree while the distances agree, in AU and AU/day, geocentric apparent,
+JD 2451545.0:
+
+| star | server | distance | reported rate | differenced rate |
+|---|---|---|---|---|
+| Vega | ours | 1584110.505 | −7.253626e−03 | −7.253885e−03 |
+| Vega | theirs | 1584285.200 | −1.160224e−02 | −1.135381e−02 |
+| Sirius | ours | 544038.133 | −3.783236e−03 | −3.783097e−03 |
+| Sirius | theirs | 544048.304 | −3.655958e−03 | −3.783623e−03 |
+
+The distances agree to 0.011%, which is the parallax and not the argument.
+Two different things are in this table and Sirius is what separates them:
+
+- **Sirius is a rate column.** Their *differenced* rate agrees with ours to
+  five digits (−3.783623e−03 against −3.783097e−03) while their *reported*
+  one does not. Whatever the difference is, it is in what the column
+  carries, not in where the star is going.
+- **Vega is the catalogue.** Their differenced rate disagrees too, so the
+  two engines disagree about how Vega's distance changes with time.
+
+In km/s, which is the unit the disagreement is actually in:
+
+| star | catalogue RV, ours | measured, ours | measured, theirs |
+|---|---|---|---|
+| Sirius | −5.5 | −6.550 | −6.551 |
+| Vega | −13.5 | −12.560 | −19.659 |
+
+The gap between a catalogue RV and a measured rate is the observer's own
+motion projected on the star, and Sirius shows it is not in dispute: where
+the catalogues agree the two servers land 0.001 km/s apart. Vega's own
+projection is +0.940 km/s (−13.5 catalogue against −12.560 measured), so
+applying it to their −19.659 recovers the radial velocity their catalogue
+must hold: **−20.60 km/s**, against our −13.5.
+
+Ours is what our sources say, by the rule `docs/STARS.md` already states —
+SIMBAD's value where quality is A–C, else the Bright Star Catalogue's.
+SIMBAD gives HIP 91262 −13.5 ± 0.4, quality C; the BSC's own field for
+HR 7001 reads −14. Two independent catalogues agreeing to 0.5 km/s is the
+whole of our evidence, and −20.60 is 7 km/s from both. Neither side is
+demonstrably wrong: this is a **source difference**, not a defect, and it
+is recorded rather than adjudicated. Changing it would change a published
+catalogue value, which is the maintainer's call and not a cross-test's.
+
+What the cross-test can say is narrower and worth keeping: a star's
+radial velocity reaches the wire *only* through the distance rate. It
+moves no position — the direction is proper motion and parallax, and the
+distance is parallax alone — so every position leg is green on Vega and
+always would be.
+
+### The instrument gap this fell through
+
+The Astrolog side's framing, kept in their words because it names the hole
+better than a description of it would:
+
+> One instrument compares two engines on positions, the other compares one
+> engine with itself on rates, and this falls exactly between them. A
+> third — two engines on rates — would see it, and neither of us has one.
+
+That is the literal state of the two tools. The `stars` leg compares
+`prometheiad` with `astrolog-ephd` on **positions**, in arcseconds.
+`tools/check/ratesweep.py` and the `rates` leg compare one engine's
+reported rate with its own five-point difference — **one engine, with
+itself**. A quantity that both engines report self-consistently and
+differently from each other is invisible to both, and Vega is one.
+
+This is recorded **named, not filled**. Filling it means choosing which
+rate is right, and as they put it, nothing on either side can: a rate
+disagreement between two engines needs an outside reference, and for a
+star's distance rate there is no Horizons row to ask — the anchor the
+other legs lean on does not serve fixed stars. Vega was found by a human
+reading four numbers, not by an instrument, and the honest record says so.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
