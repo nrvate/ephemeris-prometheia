@@ -1586,6 +1586,60 @@ goes from 2.68e-07 without the field to 2.47e-05 with it, a hundredfold on a
 much smaller number. That is ours to explain and is recorded here rather
 than only in a message.
 
+### The same instant, a different delta T (2026-09-20)
+
+**Their root cause, and a rebuild.** The Astrolog session traced the
+topocentric `deltaTSec` behaviour to a **stale observer**: on a connection
+loop that has already answered at instant *t*, a later request at the same
+*t* and the same site with a different `deltaTSec` is answered with the
+earlier request's Earth rotation. A change of *site* does invalidate it,
+which is why no leg had ever caught it. It is deterministic at one thread
+and depends on which loop takes the connection above that, so **the same
+request can answer differently between runs**. They are fixing it in their
+server and have surfaced the underlying fix to their maintainer.
+
+Only the observable behaviour is recorded here. Their message also carried
+internals of the Swiss library; this project does not read those and has not
+used them (CLAUDE.md, "Cleanroom"), and the check below was written from the
+behaviour alone.
+
+**Rebuild notice.** `astrolog-ephd` on :47392 is being rebuilt for the fix,
+so its mtime and size move. Records identify that binary by mtime and size,
+so rows taken before 2026-09-20 and after it are **different builds** and
+must not be compared as one.
+
+**Does ours do it?** No. Asked for the topocentric Moon at one instant and
+site with `deltaTSec` 0 then 100, and at a second instant with 100 then 0,
+our answers depend on the value and not on the order:
+
+| instant | order | ΔT=0 longitude | ΔT=100 longitude | apart |
+|---|---|---|---|---|
+| JD 2451545.25 | 0 then 100 | 226.207579419 | 226.203863076 | 13.379″ |
+| JD 2451545.75 | 100 then 0 | 232.799518932 | 232.803080083 | 12.820″ |
+
+A stale observer would have made each pair identical and each instant's pair
+equal to whichever value was asked first.
+
+**Our own inconsistency, localised and still open.** Separately, our
+reported *distance rate* for a fixed star disagrees with a five-point
+difference of our own distances once `deltaTSec` is supplied at all:
+
+| object, topocentric | no `deltaTSec` | ΔT=0 | ΔT=69.2 | ΔT=200 |
+|---|---|---|---|---|
+| Moon, distance | 9.25e-11 | 9.28e-11 | 9.30e-11 | 9.33e-11 |
+| Mars, distance | 9.81e-11 | 9.86e-11 | 1.00e-10 | 9.84e-11 |
+| Polaris, distance | 2.68e-07 | **3.62e-05** | **2.47e-05** | **1.34e-05** |
+| Polaris, longitude | 4.85e-10 | 4.87e-10 | 4.90e-10 | 4.93e-10 |
+
+Bodies are clean at every ΔT, and the star's *longitude* is clean; only the
+star's distance rate moves, and it moves whether the supplied value is 0,
+69.2 or 200 while the differenced distances barely move. 2.68e-07 is the
+differencing floor — at 2.7e7 AU one f64 ulp is 3.7e-9 AU, which over
+h = 1/1024 d is ~3e-07 AU/day — so the no-ΔT row is noise and the others are
+not. It is nine parts in 10^13 of the distance and matters to nothing
+observable, but a rate and a position that disagree about the observer is a
+defect whatever its size. **Open**, and ours.
+
 ### Finding, theirs: a topocentric orbit point's position and rate describe different observers
 
 **2026-09-20** (`docs/crosstest/2026-09-20-ratesweep-theirs.tsv`, their
