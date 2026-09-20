@@ -449,6 +449,16 @@ terms.
     `--memory-bound` measures growth *during* a run, so a server already at
     its cache plateau passes any bound, and it must be pointed at a fresh
     daemon (SERVER.md).
+  - **And one level up, 2026-09-20** (`tools/check/runners.py`, SERVER.md
+    "Is every check run by something?"): all of this asks whether a check
+    can go red, and nothing asked whether anything runs it. The Astrolog
+    side found their own soak selftest wired into no runner that day. Ours
+    now says, in the gate, that every tool under `tools/check/` is either
+    invoked by a runner or carries a reason why nothing invokes it — and a
+    mention in a comment is not an invocation, which matters because the
+    gate names five tools it does not run. Two tools are run by nothing:
+    `stars_fk5.py` and `ephproto4_fixtures.py`, both by hand, both with the
+    reason printed on every run.
   - **The hole this does not close.** Every fault injection described in
     these documents was done by hand once and never re-run. Eight tools now
     have selftests (`prometheia-load`, `corrapplied.py`, `crosstest.py`'s

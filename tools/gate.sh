@@ -99,6 +99,17 @@ step python3 tools/check/ratestest.py
 echo "== fixture reader (ephproto4_fixtures.py, by assertion)"
 step python3 tools/check/fixturestest.py
 
+# Everything above asks whether a check can go red. This asks whether
+# anything runs it: every tool under tools/check/ is either invoked by a
+# runner or carries a reason why nothing invokes it. The Astrolog side found
+# their own structural selftest wired into no runner on 2026-09-20 -- a rule
+# existing is not a rule running -- and this is the reciprocal. It reads
+# files and starts nothing.
+echo "== runners (is every check run by something?)"
+step python3 tools/check/runners.py
+echo "== runners audit (by assertion)"
+step python3 tools/check/runnerstest.py
+
 tests() {
     local log
     log="$(mktemp)"

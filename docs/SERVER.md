@@ -1166,6 +1166,45 @@ and `--threads 4`. The client ran on the same host.
     second. The server hit backpressure three times, and every one of the
     1,280,000 rows arrived within 3 s of the client resuming.
 
+## Is every check run by something?
+
+Everything under `tools/check/` asks whether a check could go red. Nothing
+asked whether anything **invokes** it, and on 2026-09-20 the Astrolog side
+found that their own structural soak selftest — written, documented in its
+own header, and the one they had told us about — was wired into no runner at
+all. *A rule existing is not a rule running.*
+
+`tools/check/runners.py` is the reciprocal, and it is in `tools/gate.sh`
+because it reads files and starts nothing. It holds a table: every `.py`
+beside it is either run by a named runner or carries a reason why nothing
+runs it. Four things rot and each is an assertion — a tool added and never
+classified; a table that claims a runner runs a tool the runner stopped
+running; a tool excused that a runner does run; a tool excused with no
+reason given. `runnerstest.py` falsifies all six against a built tree, and
+each reddens its own case alone.
+
+**A mention is not an invocation**, and that is the whole difficulty.
+`tools/gate.sh` names `corrtest.py`, `ratesweep.py`, `crosstest.py`,
+`ephproto4_fixtures.py` and `fakefixtures.py` in its comments while running
+none of them, and `tools/scheduled.sh` names `stars_fk5.py` while running
+`starstest.py`. A checker matching on mentions calls five tools gate-run
+that the gate never invokes, so comments and docstrings are stripped first.
+Deleting the stripper reds four of the seven cases and the mention case by
+name.
+
+**Being graded is not being run.** `starstest.py` drives `stars_fk5.py`
+against a mutated catalogue and a scripted client: that grades the tool, it
+does not compare a server with the FK5.
+
+What the first run says, and it is printed every time rather than hidden:
+**two tools are run by nothing.** `stars_fk5.py` needs a live server *and*
+`stars-raw/` with pyerfa, and is run by hand before a release;
+`ephproto4_fixtures.py` needs Astrolog's conformance directory, which is not
+in this tree and is not on this machine. Three more — `crosstest.py`,
+`corrapplied.py`, `ratesweep.py` — are reached only through `crossrun.py`,
+which `tools/scheduled.sh` runs behind `--with-cross`, opt-in because each
+reads another project's server.
+
 ## The checks the gate cannot run
 
 `tools/gate.sh` runs before every commit and has to stay hermetic and fast:
