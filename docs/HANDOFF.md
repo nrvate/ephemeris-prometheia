@@ -1,4 +1,4 @@
-# Handoff — where the work stands (2026-09-19, evening)
+# Handoff — where the work stands (2026-09-20)
 
 A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
@@ -92,7 +92,39 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
    - fuzzing and the load tool, with the codec's float finding fixed and
      re-pinned (`114f2a5`).
 
-5. **The agent interfaces** (maintainer, 2026-09-18: "AI-forward", with MCP
+5. **The topocentric deflection leg** — chosen by the maintainer as the
+   next piece of work, 2026-09-20. Not started; everything needed to start
+   it is here.
+   - **Why.** Both servers advertise deflection for a *topocentric*
+     observer (A.5 value 1), and neither project has ever refereed that
+     against a textbook. `deflection-geo` refereed the geocentric observer
+     only. The Astrolog side has recorded the topocentric term in their
+     registry §2.3 as unrefereed rather than assumed fine. The expectation
+     on both sides is that it is the same code path and therefore correct —
+     but "expected to be the same code path" is exactly what the frozen
+     topocentric orbit points turned out not to be (CROSS-TEST.md,
+     "a topocentric orbit point's position and rate describe different
+     observers"), so it gets measured.
+   - **How.** Generalise `leg_deflection_geo` in `tools/check/crosstest.py`
+     to take an observer: the geocentric case is `advertised(wel, 0)` with
+     no site flag, the topocentric case `advertised(wel, 1)` with
+     `--topo <lon,lat,alt>` on **every** request in the row — the body, the
+     Sun, and the elongation scan — because `textbook_deflection` needs the
+     observer-to-body and observer-to-Sun vectors of the *same* observer.
+     Keep `_elongation_scan`, the control row and the term-size column
+     unchanged; gate each observer on both servers advertising it.
+   - **Sites.** Zurich `8.55,47.37,500` and Quito `-78.47,-0.18,2850` — the
+     pair that exposed the frozen-position defect, one mid-latitude and one
+     on the equator at altitude, so a site that fails to reach the
+     computation shows as an equal answer at both.
+   - **Then.** Fault-inject the GM by 1% and confirm rows go red at both
+     sites (the geocentric leg's proof that it discriminates); commit the
+     record under `docs/crosstest/`; write the result into CROSS-TEST.md
+     beside the geocentric section; send the number to the Astrolog
+     session. Their daemon is on the spare port 47392 and is to be left
+     running.
+
+6. **The agent interfaces** (maintainer, 2026-09-18: "AI-forward", with MCP
    and streamable HTTP; the fast paths stay C++, C and the binary protocol).
    - `prometheia-json` serves the JSON tools over MCP (stdio and streamable
      HTTP) and plain JSON (docs/JSON_API.md).
@@ -113,16 +145,22 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
     47190 --threads 1`;
   - theirs: `astrolog-ephd` on 127.0.0.1:47391 (their own harness binds
     47291). The live tree is `/nvmraid/shares/Astrolog`, branch `qt`, since
-    ephv4 landed there; the Astrolog session builds and runs it;
+    ephv4 landed there; the Astrolog session builds and runs it. **47391 is
+    their long-running daemon and is never to be restarted from this side;
+    47392 is the spare they put up for cross-tests**, and the recent records
+    were taken against it;
   - then `python3 tools/check/crosstest.py --out docs/crosstest/<date>.tsv`,
-    and stop both with `pkill -x` (never `pkill -f`).
+    and stop both with `pkill -x` (never `pkill -f`) — ours only.
+  - `tools/check/ratesweep.py --server HOST:PORT --out <record>.tsv` sweeps
+    one server on its own, for the rate bound (below).
 - **Legs:**
   - `surfaces` (with refusals per observer, kind and mask);
   - `same` / `horizons`, `helio`, `hamburg`, `apparent`;
   - `topo`: ΔT from Horizons' sidereal time, via `build/prometheia-ut1`;
   - `bary`, `deflection` (textbook formula, from Jupiter's centre),
     `deflection-geo` (the same formula from the Earth, at each body's
-    searched-for closest approach to the Sun);
+    searched-for closest approach to the Sun; the topocentric observer is
+    "Next", item 5);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`;
   - `rates`: each server's rates against a five-point difference of its own
@@ -226,6 +264,9 @@ terms.
 
 **Ours.**
 
+- **The topocentric deflection leg is not written** ("Next", item 5). It is
+  the maintainer's chosen next piece of work, and the only open item here
+  with a decision already attached.
 - **One gate failure on 2026-09-19 that did not reproduce.** It came right
   after a `pkill` of `prometheiad`; three further gates and thirty runs of
   `test_prometheiad` were clean, and the failing test's name was not kept.

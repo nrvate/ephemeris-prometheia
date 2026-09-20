@@ -1231,6 +1231,20 @@ Fault-injected: a 1% change in the textbook's GM turns four rows red on
 both servers at up to 0.012" against the 0.0002" band. The control rows
 stay green, as they should — 1% of 0.005" is below the band.
 
+**It does not extend to the topocentric observer, which both servers also
+advertise** (A.5 value 1). That is the next piece of work here, chosen by
+the maintainer on 2026-09-20, and HANDOFF.md "Next" item 5 carries the
+construction. The honest expectation is that it is the same code path and
+therefore fine; the reason to measure it anyway is on this page — the
+topocentric orbit points were also expected to be the same code path, and
+their position column never reached the site while their rate column did.
+The leg takes an observer, `advertised(wel, 1)` in place of
+`advertised(wel, 0)`, and puts `--topo` on every request in a row, the
+elongation scan included, because the textbook formula needs the
+observer-to-body and observer-to-Sun vectors of one observer. Two sites,
+Zurich and Quito, so a site that never reaches the computation shows as
+two identical answers.
+
 ### The distance tolerance cannot be met for a star, by either server
 
 218 rows of ours and 32 of theirs exceed the bound in force once it is read
