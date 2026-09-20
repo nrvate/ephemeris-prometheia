@@ -13,7 +13,11 @@ point at it the way it points at Astrolog's own server (`astrolog-ephd`).
   if the copy has drifted, `tests/test_ephproto4.cpp` runs the locked
   conformance fixtures through the vendored codec (99/99, digest-pinned),
   and `tools/check/ephproto4_registries.py` (in `tools/gate.sh`) checks the
-  registries against the header by name.
+  registries against the header by name — in both directions: a registry
+  that grew is reported as unknown to the checker, and one the JSON no
+  longer carries is reported as a pin the pair has lost, because a registry
+  that simply disappears from the file drops out of the loop and would
+  otherwise leave the run saying "ok" over a smaller corpus.
 - **Transport.** Binary WebSocket frames, one protocol message per frame. The
   default port is 47190 (`eph::kDefaultPort`).
 

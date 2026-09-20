@@ -8,7 +8,10 @@ names for a registry must appear in the JSON with the same value, every token
 array must match the JSON's list element for element, and a JSON entry the
 header does not know (a registry that grew, or a value changed) is reported
 and fails the check -- the pin's whole point is to force a deliberate
-re-vendor when the peer's side moves.
+re-vendor when the peer's side moves. Coverage can shrink as well as grow,
+so a registry this checker pins that the JSON no longer carries is reported
+too: otherwise it would simply drop out of the loop and the run would still
+say "ok", with the count it prints derived from the same file that lost it.
 
 Run as part of tools/gate.sh, and by hand:
     tools/check/ephproto4_registries.py
@@ -156,6 +159,15 @@ def main():
     unchecked = {"precession_model_tokens"}
 
     bad = []
+    # The tables above name every registry this checker knows. A registry the
+    # JSON no longer carries would otherwise vanish from the loop below and
+    # the run would still say "ok" -- the pin's coverage shrinking silently,
+    # which is the one direction "unknown to this checker" cannot catch.
+    pinned = set(value_map) | set(tlv_map) | set(token_map) | set(unchecked)
+    gone = sorted(pinned - set(reg))
+    for name in gone:
+        bad.append(f"{name}: this checker pins it and the vendored registries.json no longer "
+                   f"carries it -- the pair changed shape, re-vendor deliberately")
     n_checked = 0
     for name, r in reg.items():
         if name in unchecked:
