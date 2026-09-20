@@ -1182,8 +1182,11 @@ In order: `tools/gate.sh` first, because a soak failure reported against a
 tree that does not compile has told nobody anything; then `corrtest.py`, which
 needs no daemon but spends fourteen seconds where the gate spends two
 (`ratestest.py` makes the same promise for `ratesweep.py` in under two, so
-it runs in the gate itself); then `loadselftest.py`; then a 60 s soak and the memory bound
-against a daemon it starts and stops itself.
+it runs in the gate itself); then `crossruntest.py` and `starstest.py`,
+which need no daemon either but do need the built binaries and
+`stars-raw/` with pyerfa; then `loadselftest.py`; then a 60 s soak and the
+memory bound against a daemon it starts and stops itself. Measured
+2026-09-20 at `6d669b2`: 27 + 14 + 2 + 4 + 178 + 61 s, all green.
 
 Every run writes `build/scheduled/<stamp>.log` and prints one summary; the
 exit status is the number of steps that failed. Two properties are load

@@ -416,8 +416,9 @@ terms.
   bound alone passes a server that caches nothing. Sabotage-proven five
   ways. Growth is about 1.4x the cap, flat at 20.8 MB over 818,169 requests
   at `--cache-mb 8`.
-  - **Nothing runs it on a schedule**, same as `crossrun.py`: it needs a
-    daemon, so it stays out of `tools/gate.sh`, which must stay seconds.
+  - It needs a daemon, so it stays out of `tools/gate.sh`, which must stay
+    seconds. ~~Nothing runs it on a schedule.~~ `tools/scheduled.sh` does
+    (2026-09-20), as it does `crossrun.py` behind `--with-cross`.
   - **`tools/check/loadselftest.py`** (2026-09-20) falsifies all nine of
     the load tool's assertions in ten cases and requires the *right* one to
     fire — a case passes only when the named assertion reds and no other
