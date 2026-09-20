@@ -18,6 +18,7 @@ CORRMASK_RE = re.compile(r"^# corrmask observers (\d+) corrections (\d+)$")
 CORRKIND_RE = re.compile(r"^# corrkind observers (\d+) kinds (\d+) corrections (\d+)$")
 CAPS_RE = re.compile(r"^# caps (.*)$")
 REQUEST_RE = re.compile(r"^# request (\d+)$")
+RATES_RE = re.compile(r"^# ratesbound (\S+) (\S+)$")
 META_RE = re.compile(r'^# object (\d+) name "(.*)" rowsOk (-?\d+) corr (\d+) err (\d+) "(.*)"$')
 ROW_RE = re.compile(r"^(\d+) (\d+) (.+)$")
 
@@ -47,6 +48,9 @@ class Reply:
         self.corrmasks = []  # (observer bitmask, exact mask), A.3 0x0004
         self.request_id = None  # what prometheiad's log calls req=<id>
         self.corrkinds = []  # (observer bitmask, kind bitmask, exact mask), A.3 0x0014
+        # A.3 0x0013 as advertised, or None when the server sends no such
+        # record. None is not zero: it means the registry's default applies.
+        self.rates_bound = None
         self.objects = []  # Meta, in request order
         self.rows = {}  # (object, row) -> [six floats]
 
@@ -108,6 +112,11 @@ def run(client, host, port, args, verbose=False, timeout=120):
         m = CAPS_RE.match(line)
         if m:
             rep.caps = _caps(m.group(1))
+            continue
+        m = RATES_RE.match(line)
+        if m:
+            rep.rates_bound = (None if m.group(1) == "-"
+                               else (float(m.group(1)), float(m.group(2))))
             continue
         m = META_RE.match(line)
         if m:

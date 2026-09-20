@@ -425,6 +425,16 @@ int main(int argc, char** argv) {
                                 caps.orbitPoints, caps.orbitMethods, caps.columns, caps.timeScales,
                                 caps.fSegments ? 1 : 0, caps.segKinds, unsigned(caps.lookupMax),
                                 list(caps.zodiacs).c_str(), list(caps.hypotheticals).c_str());
+                    // A.3 0x0013, the server's own bound on how far its rate
+                    // columns may sit from a central difference of its
+                    // positions. Absent means the registry's default, which
+                    // is why the two cases are printed differently: a checker
+                    // must not read silence as a promise of zero.
+                    if (caps.fRatesBound)
+                        std::printf("# ratesbound %.9g %.9g\n", double(caps.ratesDegPerDay),
+                                    double(caps.ratesAuPerDay));
+                    else
+                        std::printf("# ratesbound - -\n");
                 }
             }
             continue;

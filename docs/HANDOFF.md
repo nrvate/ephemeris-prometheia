@@ -232,9 +232,12 @@ terms.
 - **The cross-test runs by hand.** It needs two daemons, so it stays out of
   `tools/gate.sh` (CROSS-TEST.md, "What it leaves behind"), but nothing
   schedules it either, and a record only exists when someone runs one.
-- **The rate-bound sweep was a one-off script**, not a committed check. The
-  measured worst case (3.4e-6 °/day, 3.4e-10 AU/day) is why we send no
-  A.3 `0x0013`; nothing re-measures it after a change.
+- ~~The rate-bound sweep was a one-off script~~: it is now
+  `tools/check/ratesweep.py`, committed, reading whichever bound is in
+  force off the wire and exiting non-zero when a server misses it. Ours
+  measures worst 3.6e-6 °/day and 1.7e-10 AU/day over 3,525 answered rows,
+  inside A.3's default, which is why we still send no `0x0013`. It needs a
+  daemon, so it is not in `tools/gate.sh`.
 - **`prometheia-load` has never been pointed at `astrolog-ephd`**
   (CROSS-TEST.md, "What this does not test").
 - **Kinds 3 and 4 have no cross-test cell**, because the Astrolog client

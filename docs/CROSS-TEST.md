@@ -1155,6 +1155,66 @@ Fault-injected: with the `corrApplied` evidence removed, the six rows
 become `unadjudicated` and 56 more become findings, so the branch carries
 the leg rather than never running.
 
+## The rate sweep, and what a bound is worth
+
+`tools/check/ratesweep.py` asks one server whether its RATE columns
+describe its own positions, over a deliberately wide object list: bodies,
+both nodes and both apses of six bodies in mean and osculating form, the
+natural apsides, and stars, across eleven observer/frame configurations and
+five epochs — 3,575 requests. The oracle is the server's own positions,
+five rows at t±2h differenced five-point at h = 1/1024 day. It reads the
+bound in force off the wire (A.3 `0x0013`, or the registry's default of
+1e-5 °/day and 1e-9 AU/day when absent) and exits non-zero if the server
+missed its own advertisement. It needs a daemon, so it is not in the gate.
+
+**Why breadth is the whole point.** A bound is only as wide as the object
+list that measured it, and a check written beside a server measures the
+objects its author had in mind. Astrolog advertised 3e-6 °/day when its
+sweep was geocentric only, then 5e-3 when its sweep had bodies and the
+Moon's points but no planetary apsides. Neither number was dishonest; both
+were the width of a list. That is the one thing a server's own rate check
+structurally cannot do for itself, which is why each side should run this
+against the other.
+
+**Ours, 2026-09-20** (`docs/crosstest/2026-09-20-ratesweep-ours.tsv`):
+3,525 answered, worst 3.6e-6 °/day (the Moon's osculating perihelion,
+topocentric) and 1.7e-10 AU/day per AU. Inside A.3's default by about
+threefold, so we still send no `0x0013`.
+
+### Finding, theirs: a topocentric orbit point's position and rate describe different observers
+
+**2026-09-20** (`docs/crosstest/2026-09-20-ratesweep-theirs.tsv`, their
+`96aef21`). 2,871 answered; eight rows exceed their advertised 5e-3 °/day,
+worst **7.93e-2 °/day**, sixteen times the advertisement. Every one is the
+Moon's **osculating aphelion**, topocentric, at 1800, 1900, 2000 and 2026.
+
+The sweep found it; comparing the requests says what it is. For the Moon's
+osculating ascending node, descending node and aphelion, and for the
+natural apogee, their server returns a **byte-identical position** for a
+topocentric request and a geocentric one, while the **rate columns
+differ**:
+
+    301.A.o at JD 2451545.0, mask 7, theirs
+      geocentric   lon 252.99417262479935   dlon 1.637617849392534
+      topocentric  lon 252.99417262479935   dlon 1.6792064513889216
+
+So the site reaches the rate and not the place. The two columns describe
+different observers, and differencing the positions cannot reproduce the
+rate beside them — by 0.042 °/day here and 0.079 °/day at 1800. The same
+three-way comparison on ours moves both columns, as diurnal parallax on a
+point 0.0027 AU away must.
+
+Not every point is affected: the osculating perihelion, the mean points and
+the Moon itself all move with the site on their server. Ruled out on this
+side first — the two sites in the sweep (Zurich and Quito) were confirmed
+to produce genuinely different Moon positions through the same client, so
+the identical answers are theirs and not our argument parsing.
+
+Their own sweep reports worst 4.05321e-3 °/day, the topocentric lunar
+osculating node at 1800. This sweep reproduces that figure to six digits
+(4.0532e-3) — it is just under their 5e-3 and so never tripped their
+check. The aphelion, twenty times worse, was not in their list.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
