@@ -1231,19 +1231,46 @@ Fault-injected: a 1% change in the textbook's GM turns four rows red on
 both servers at up to 0.012" against the 0.0002" band. The control rows
 stay green, as they should — 1% of 0.005" is below the band.
 
-**It does not extend to the topocentric observer, which both servers also
-advertise** (A.5 value 1). That is the next piece of work here, chosen by
-the maintainer on 2026-09-20, and HANDOFF.md "Next" item 5 carries the
-construction. The honest expectation is that it is the same code path and
-therefore fine; the reason to measure it anyway is on this page — the
-topocentric orbit points were also expected to be the same code path, and
-their position column never reached the site while their rate column did.
-The leg takes an observer, `advertised(wel, 1)` in place of
-`advertised(wel, 0)`, and puts `--topo` on every request in a row, the
-elongation scan included, because the textbook formula needs the
-observer-to-body and observer-to-Sun vectors of one observer. Two sites,
-Zurich and Quito, so a site that never reaches the computation shows as
-two identical answers.
+### The topocentric deflection leg, 2026-09-20
+
+`deflection-topo` (`docs/crosstest/2026-09-20-deflection-topo.tsv`). Both
+servers advertise the same term for a *topocentric* observer (A.5 value 1),
+and neither project had refereed that either. `leg_deflection_geo` became
+`_leg_deflection_at`, which takes the observer bit and the flags that place
+it; the geocentric leg is that function with bit 0 and no site. The
+topocentric one runs the same construction from Zurich (8.55, 47.37, 500 m)
+and Quito (−78.47, −0.18, 2850 m), with `--topo` on **every** request in a
+row — the body, the Sun, and the elongation scan — because the textbook
+formula needs the observer-to-body and observer-to-Sun vectors of one
+observer, and a geocentric Sun in a topocentric row would test the mixture.
+
+Result: **20 graded rows, all agree**, ours within 0.000000" and theirs
+within 0.000011" — the same figures as the geocentric leg, from the same
+four bodies at conjunction (Jupiter's term is 1.2063" at Zurich, 1.2034" at
+Quito). Fault-injected the same way: 1% on the textbook GM turns four rows
+per site red and leaves the controls green.
+
+**Agreement on those rows was never the part worth measuring.** Each row
+grades a server against its own mask-1 answer, so a server that silently
+ignored the site would return geocentric directions for both masks and the
+row would still read "agree" — which is exactly how the frozen topocentric
+orbit points read for months, position column at the Earth's centre while
+the rate column moved with the site. So the leg measures the two things
+that verdict cannot see, and grades them:
+
+| | ours | theirs | floor |
+|---|---|---|---|
+| Zurich vs its own geocentric answer | 11.5576" | 11.5574" | 0.5" |
+| Quito vs its own geocentric answer | 15.4138" | 15.4139" | 0.5" |
+| Zurich vs Quito | 19.3633" | 19.3632" | 0.5" |
+
+Those are diurnal parallaxes, arcseconds where the deflection band is
+0.0002", so the site reaches the computation on both servers and the two
+sites are distinct. The floor is graded on the *largest* shift over the
+rows, not on each one: a body near a site's zenith or nadir shifts along
+the line of sight and can move very little. Fault-injected by dropping
+`--topo`: all twenty deflection rows stay green and the three site rows go
+red, which is the blindness they exist to cover.
 
 ### The distance tolerance cannot be met for a star, by either server
 

@@ -92,37 +92,26 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
    - fuzzing and the load tool, with the codec's float finding fixed and
      re-pinned (`114f2a5`).
 
-5. **The topocentric deflection leg** — chosen by the maintainer as the
-   next piece of work, 2026-09-20. Not started; everything needed to start
-   it is here.
-   - **Why.** Both servers advertise deflection for a *topocentric*
-     observer (A.5 value 1), and neither project has ever refereed that
-     against a textbook. `deflection-geo` refereed the geocentric observer
-     only. The Astrolog side has recorded the topocentric term in their
-     registry §2.3 as unrefereed rather than assumed fine. The expectation
-     on both sides is that it is the same code path and therefore correct —
-     but "expected to be the same code path" is exactly what the frozen
-     topocentric orbit points turned out not to be (CROSS-TEST.md,
-     "a topocentric orbit point's position and rate describe different
-     observers"), so it gets measured.
-   - **How.** Generalise `leg_deflection_geo` in `tools/check/crosstest.py`
-     to take an observer: the geocentric case is `advertised(wel, 0)` with
-     no site flag, the topocentric case `advertised(wel, 1)` with
-     `--topo <lon,lat,alt>` on **every** request in the row — the body, the
-     Sun, and the elongation scan — because `textbook_deflection` needs the
-     observer-to-body and observer-to-Sun vectors of the *same* observer.
-     Keep `_elongation_scan`, the control row and the term-size column
-     unchanged; gate each observer on both servers advertising it.
-   - **Sites.** Zurich `8.55,47.37,500` and Quito `-78.47,-0.18,2850` — the
-     pair that exposed the frozen-position defect, one mid-latitude and one
-     on the equator at altitude, so a site that fails to reach the
-     computation shows as an equal answer at both.
-   - **Then.** Fault-inject the GM by 1% and confirm rows go red at both
-     sites (the geocentric leg's proof that it discriminates); commit the
-     record under `docs/crosstest/`; write the result into CROSS-TEST.md
-     beside the geocentric section; send the number to the Astrolog
-     session. Their daemon is on the spare port 47392 and is to be left
-     running.
+5. ~~**The topocentric deflection leg**~~ — done, `62b8f80`, record
+   `docs/crosstest/2026-09-20-deflection-topo.tsv`, written up in
+   CROSS-TEST.md "The topocentric deflection leg". 23 rows, all agree.
+   `leg_deflection_geo` became `_leg_deflection_at(… bit, where)` and the
+   geocentric leg is that function with bit 0 and no site; the topocentric
+   one runs from Zurich and Quito with `--topo` on every request in a row.
+   - The deflection rows came out exactly as expected — ours 0.000000",
+     theirs 0.000011", the geocentric figures. **The part that was worth
+     building is the site-reach check.** A row graded against a server's
+     own mask-1 answer cannot tell a topocentric answer from a geocentric
+     one, so the leg also measures each server's shift from its own
+     geocentric answer (11.6" at Zurich, 15.4" at Quito) and between the
+     two sites (19.4"), against a 0.5" floor on the *largest* shift.
+     Fault-injected both ways: 1% on the GM reds four rows a site and
+     leaves the controls green; dropping `--topo` leaves all twenty
+     deflection rows green and reds the three site rows.
+   - Anything else built on this pattern should copy the second half, not
+     the first. The self-referential grading that makes the leg portable
+     across two servers is also what makes it blind to an argument that
+     never arrives.
 
 6. **The agent interfaces** (maintainer, 2026-09-18: "AI-forward", with MCP
    and streamable HTTP; the fast paths stay C++, C and the binary protocol).
@@ -159,8 +148,9 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `topo`: ΔT from Horizons' sidereal time, via `build/prometheia-ut1`;
   - `bary`, `deflection` (textbook formula, from Jupiter's centre),
     `deflection-geo` (the same formula from the Earth, at each body's
-    searched-for closest approach to the Sun; the topocentric observer is
-    "Next", item 5);
+    searched-for closest approach to the Sun), `deflection-topo` (the same
+    from two sites, plus three rows that grade whether the site reached the
+    computation at all);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`;
   - `rates`: each server's rates against a five-point difference of its own
@@ -264,9 +254,16 @@ terms.
 
 **Ours.**
 
-- **The topocentric deflection leg is not written** ("Next", item 5). It is
-  the maintainer's chosen next piece of work, and the only open item here
-  with a decision already attached.
+- ~~The topocentric deflection leg is not written~~: written and measured,
+  `62b8f80` ("Next", item 5; CROSS-TEST.md, "The topocentric deflection
+  leg"). All 23 rows agree, and the site demonstrably reaches the
+  computation on both servers.
+- **No leg yet grades an observer the way the topocentric one grades its
+  site.** The three site-reach rows exist because a row judged against a
+  server's own answer cannot see an argument that never arrived; the
+  heliocentric, barycentric and body-centred legs are judged the same way
+  and have no equivalent. Not a known defect — an untested direction, and
+  the cheapest one on this list.
 - **One gate failure on 2026-09-19 that did not reproduce.** It came right
   after a `pkill` of `prometheiad`; three further gates and thirty runs of
   `test_prometheiad` were clean, and the failing test's name was not kept.
