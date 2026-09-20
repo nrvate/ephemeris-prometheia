@@ -28,8 +28,12 @@ maintainer before any large pull.
 
 ## Git
 
-- Commit as `nrvate <nrvate@gmail.com>` (the repo-local config is
-  pinned; do not rely on any global identity).
+- Commit as `nrvate <11264848+nrvate@users.noreply.github.com>` (the
+  repo-local config is pinned; do not rely on any global identity).
+  Commits up to `c1cfc4b` carry the maintainer's personal address
+  instead; GitHub began refusing pushes that expose it on 2026-09-19,
+  and the maintainer chose the noreply address over relaxing the
+  setting. Do not rewrite the older commits to match.
 - The working branch is `initial`. Push over SSH to `origin/initial`
   only — never `main`, and never use the `gh` CLI for anything.
 - No hosted CI, ever: no GitHub Actions, no external runners. The gate

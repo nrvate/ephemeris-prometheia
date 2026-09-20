@@ -1,10 +1,37 @@
-# Handoff — where the work stands (2026-09-18, evening)
+# Handoff — where the work stands (2026-09-19, evening)
 
 A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 [DESIGN.md](DESIGN.md); the protocol state in [SERVER.md](SERVER.md); the
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
+
+## Unreleased, on `initial` (2026-09-19)
+
+Everything below is committed and pushed; no tag has been cut. The full
+list, with its numbers, is CHANGELOG.md "Unreleased".
+
+- **A planet's own orbit points are answered from its centre** — a defect
+  of ours that record s found (ORBIT-POINTS.md, "From any observer").
+- **The performance expedition**, `b200486`..`f41333e` (ENGINE.md,
+  "Performance", and the new `prometheia-engine-bench`). Same outputs, save
+  the natural apsides (≤ 0.03 mas) and nutation's second derivative
+  (2e-22). Small bodies 2,712 → 7.1 µs a call; the Moon's natural apogee
+  306 → 26 µs; `prometheiad` 31,900 → 49,300 requests a second, p99 4.63 →
+  2.05 ms; a three-body, 1,000-instant JSON call 19.2 → 1.8 s. **The
+  dataset id's digest changed once** as a result, so a pinned fixture
+  elsewhere will need repinning.
+- **`prometheia-json` reads a clock time before 1972 as UT1** (maintainer,
+  2026-09-19), answering `"ut1"` in place of `"utc"` (JSON_API.md, "Time").
+  It had refused every date before 1972, so most birth charts could not be
+  asked for by clock time.
+- **`prometheia-json` hardened**, by a new fuzzer, `fuzz_json` (SERVER.md,
+  "Fuzzing"): a 500,000-level body no longer overflows the stack (64 now),
+  a non-scalar `id` is answered null, `height_m` is bounded, and the HTTP
+  log writes only names the server knows.
+- **α Cen's proper motions** against Akeson et al. 2021's barycentre
+  (STARS.md). Closed: the catalogue's B−A ratio is B's HIP2 error, and our
+  model never reads B's proper motion. Nothing we answer moves.
 
 ## Released
 
@@ -179,6 +206,58 @@ terms.
   - now the §3.5a sentences.
 - Their plugin builds against [C_API.md](C_API.md), a cross-repo contract:
   ABI changes are announced and reviewed before they land.
+
+## Open items (2026-09-19)
+
+**Ours.**
+
+- **No tag for the work above.** `initial` carries a release's worth of
+  changes with no version bump; the maintainer has not asked for one.
+- **One gate failure on 2026-09-19 that did not reproduce.** It came right
+  after a `pkill` of `prometheiad`; three further gates and thirty runs of
+  `test_prometheiad` were clean, and the failing test's name was not kept.
+  Recorded here because an unexplained red is worth remembering, not
+  because there is a lead.
+- **The cross-test runs by hand.** It needs two daemons, so it stays out of
+  `tools/gate.sh` (CROSS-TEST.md, "What it leaves behind"), but nothing
+  schedules it either, and a record only exists when someone runs one.
+- **The rate-bound sweep was a one-off script**, not a committed check. The
+  measured worst case (3.4e-6 °/day, 3.4e-10 AU/day) is why we send no
+  A.3 `0x0013`; nothing re-measures it after a change.
+- **`prometheia-load` has never been pointed at `astrolog-ephd`**
+  (CROSS-TEST.md, "What this does not test").
+- **Kinds 3 and 4 have no cross-test cell**, because the Astrolog client
+  asks no server for them; kind 4 is covered another way.
+- **`/llms.txt` in both repositories, or one combined?** (JSON_API.md,
+  "Open questions") — a cross-repo decision, not ours alone.
+
+**Theirs, waiting on the Astrolog project.**
+
+- The **binary-star offsets** (elements at their `7c05f7f`).
+- Their half of the **request-id log join**.
+- The **16 `rates` rows** where a mean perihelion's latitude-rate column
+  holds the latitude: confirmed theirs, but a golden test pins those
+  columns, so the fix is their maintainer's call.
+- The **64 `sidsweep` rows and the plane-2 offset**, pending their
+  registry §4.1.
+- Their **advertised speed error is 5 °/day**, a symptom of the same
+  mean-element rate defect.
+- We sent them our inventory of outside-anchored checks on 2026-09-19 and
+  asked for theirs; no reply yet.
+
+**Cross-test rows still unadjudicated** (CROSS-TEST.md, "Still open").
+
+- **Deflection seen from Jupiter**, 7 mas on Mars: they deflect as seen
+  from the Earth and re-centre, we deflect with the observer at Jupiter.
+  No anchor observes from Jupiter, so nothing can decide it.
+- **Venus at its 2020 inferior conjunction** (2.03 mas from Horizons) and
+  **Mercury from the barycentre in 2100** (2.01 mas): both just over the
+  2 mas band, plausibly the Swiss refit.
+- **The 1800 Moon**, one row; and **six rows at 1650** where they refuse
+  the Earth, so a Moon point has nothing to be held to.
+- **Unlisted correction masks:** §3.5a says ERROR 11 and we send it; their
+  server answers them on purpose, and their client now narrows to a listed
+  mask. A per-kind list would let both servers keep the rule.
 
 ## Parked (maintainer go-ahead required before starting)
 
