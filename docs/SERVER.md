@@ -1108,10 +1108,13 @@ and `--threads 4`. The client ran on the same host.
     since (`corrtest.py`, above) and `crosstest.py`'s adjudicators theirs.
     `ratesweep.py` has it too (`ratestest.py`), and so does
     `ephproto4_registries.py` (`registriestest.py`); both run in the gate.
+    `stars_fk5.py` has `starstest.py`, which mutates a copy of `stars-raw/`
+    and answers from a scripted client, so it needs no daemon but does need
+    pyerfa and the catalogue: `tools/scheduled.sh`, not the gate.
     Named rather than counted, because a number here drifts and a list does
-    not: `crossrun.py`, `ephproto4_fixtures.py` and `stars_fk5.py` still
-    carry their falsifications as prose, and `crosstest.py`'s legs — as
-    opposed to its adjudicators — do too.
+    not: `crossrun.py` and `ephproto4_fixtures.py` still carry their
+    falsifications as prose, and `crosstest.py`'s legs — as opposed to its
+    adjudicators — do too.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
   "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none

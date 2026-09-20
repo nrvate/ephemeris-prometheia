@@ -13,8 +13,8 @@ frame and to the epoch by ERFA's fk52h and pmsafe (pyerfa, an output oracle
 only, as in tools/gen/gen_star_fixtures.py).
 
 Stars are matched by the Bright Star Catalogue's FK5 number, through the HR
-number in src/star_catalog.inc, so a component the FK5 does not list (Castor A)
-is reported as absent rather than compared with its neighbour.
+number in src/star_catalog.inc, so a star the BSC gives no FK5 number (Castor,
+HR 2891) is reported as absent rather than compared with the other component.
 
 The band is an estimate, not a measurement: the FK5's stated mean errors leave
 out its system errors (its ReadMe says so), and the Hipparcos proper motions of
@@ -27,6 +27,14 @@ arcseconds to arcminutes; it cannot referee milliarcseconds.
 Needs: stars-raw/ with the fk5 and bsc5 sources (tools/fetch/stars_fetch.py
 --only fk5 --only bsc5), pyerfa (tools/requirements-oracle.txt: .venv-oracle), build/prometheia-wire-client and one or
 more servers.
+
+Exit status is exactly "did any assertion fire"; `--list-assertions` prints
+them and tools/check/starstest.py drives one mutated catalogue per
+assertion.  Two of them are not about the sky at all.  A run that compared
+*no* star -- a truncated `stars-raw/` file, a catalogue whose columns moved
+-- used to print "all within band" and exit 0, and a star the server did not
+answer for was counted as DIFFERS, which accuses another project's server of
+disagreeing with the FK5 when it said nothing.
 
 Usage:
   stars_fk5.py                                   # ours on 47190
@@ -44,6 +52,7 @@ import warnings
 import erfa
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import assertlib  # noqa: E402
 import binary_orbits  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -60,6 +69,25 @@ EPOCHS = [2415020.5, 2451545.0, 2488069.5]  # 1900, 2000, 2100 (TT)
 EXTRA = ["Rigil Kentaurus"]
 
 BAND = 1.0  # arcsec; an estimate (see the docstring)
+
+# Stars this check knowingly cannot compare, with the reason. A fixed list,
+# so the skip is a decision and not a silence: any *other* star that falls
+# out of the comparison fires `star-without-fk5`, and a star here that turns
+# out to have an entry after all fires `expected-absence-is-present`. Both
+# directions, because a list of exceptions rots in both.
+NO_FK5 = {
+    "Castor": "src/star_catalog.inc names HR 2891, which the BSC gives no FK5 "
+              "number; FK5 287 is HR 2890, the fainter component, and comparing one "
+              "with the other would be worse than not comparing at all",
+}
+
+ASSERTIONS = (
+    "nothing-compared",             # no star survived to be compared at all
+    "star-without-fk5",             # a star fell out that NO_FK5 does not name
+    "expected-absence-is-present",  # a NO_FK5 star does have an entry: the list has rotted
+    "unanswered",                   # a server did not answer a star at an epoch
+    "differs",                      # a separation outside the band
+)
 BINARIES = {
     # Separation allowed, and why. Each has a companion whose orbit moves the
     # bright star's photocentre.
@@ -160,22 +188,48 @@ def main():
     ap.add_argument("--client", default=os.path.join(ROOT, "build", "prometheia-wire-client"))
     ap.add_argument("--server", action="append", default=[],
                     help="NAME=PORT (repeatable; default ours=47190)")
+    ap.add_argument("--list-assertions", action="store_true",
+                    help="print the assertions this tool makes, one per line, and exit")
     a = ap.parse_args()
+    if a.list_assertions:
+        return assertlib.Assertions(ASSERTIONS).list_and_exit()
+
+    asserts = assertlib.Assertions(ASSERTIONS)
     servers = [s.split("=", 1) for s in a.server] or [["ours", "47190"]]
     hr_of, hip_of, fk5_of_hr, fk5 = load(a.raw_dir)
     orbits = binary_orbits.load(a.raw_dir)
 
     refs = {}
+    missing, unexpected = [], []
     for name in STARS + EXTRA:
         hr = hr_of.get(name)
         n = fk5_of_hr.get(hr) if hr else None
+        if name in NO_FK5:
+            # Never compared, whatever the catalogue holds: the list says not
+            # to. What is checked is the list's own reason, so an entry
+            # appearing for one of these is a fault in the list and not in
+            # the star -- and the star staying out keeps that one fault from
+            # also arriving as a wild separation.
+            if n is not None and n in fk5:
+                unexpected.append(name)
+            print(f"{name}: not compared ({NO_FK5[name]})")
+            continue
         if n is None or n not in fk5:
+            missing.append(name)
             print(f"{name}: HR {hr} has no FK5 entry; not compared")
             continue
         refs[name] = (n, *reference(fk5[n]))
     names = list(refs)
 
-    failures = 0
+    fails = []
+    # Always evaluated: it cannot fire when nothing was found, so it does not
+    # need the cascade below and should not hide inside it.
+    asserts.judge("expected-absence-is-present", bool(unexpected),
+                  "NO_FK5 names " + ", ".join(unexpected) + " as having no FK5 entry and "
+                  "this catalogue has one; the exception list has rotted and the star is "
+                  "going uncompared for a reason that is no longer true", fails)
+
+    differs = 0
     for label, port in servers:
         print(f"\n== {label} (port {port}): separation from FK5, arcsec (FK5 sigma)")
         print(f"{'star':15s} {'FK5':>4s}  " + "  ".join(f"{y:>16s}" for y in ("1900", "2000", "2100")))
@@ -184,11 +238,11 @@ def main():
         for k, name in enumerate(names):
             n, star, err = refs[name]
             band, why = BINARIES.get(name, (BAND, ""))
-            cells, bad = [], False
+            cells, bad, silent = [], False, []
             for jd, rows in zip(EPOCHS, answers):
                 if k not in rows:
                     cells.append(f"{'unanswered':>16s}")
-                    bad = True
+                    silent.append(jd)
                     continue
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", erfa.ErfaWarning)
@@ -205,12 +259,44 @@ def main():
                 if not why:
                     worst = max(worst, s)
                 cells.append(f"{s:7.3f} ({sigma(err, jd):.3f})")
-            failures += bad
-            note = ("  DIFFERS" if bad else "") + (f"  [{why}]" if why else "")
+            # Silence and disagreement are different accusations, and this
+            # tool is pointed at another project's server. A star the server
+            # never answered for used to be printed as DIFFERS, which says it
+            # disagrees with the FK5 when it said nothing at all.
+            asserts.judge("unanswered", bool(silent),
+                          f"{label}: no answer for {name} at "
+                          + ", ".join(f"JD {j}" for j in silent), fails)
+            asserts.judge("differs", bad,
+                          f"{label}: {name} is outside the {band}\" band", fails)
+            differs += bad
+            note = ("  DIFFERS" if bad else "") + ("  UNANSWERED" if silent else "")
+            note += f"  [{why}]" if why else ""
             print(f"{name:15s} {n:4d}  " + "  ".join(cells) + note)
         print(f"worst single star: {worst:.3f}\" (band {BAND}\", an estimate)")
-    print(f"\n{failures} differing" if failures else "\nall within band")
-    return 1 if failures else 0
+
+    print()
+    # The cascade: a catalogue that yielded nothing would also report every
+    # star as falling out, and two assertions firing on one input is how a
+    # deleted check stays invisible. The specific truth first.
+    if not asserts.judge(
+            "nothing-compared", not names,
+            f"not one of the {len(STARS) + len(EXTRA)} stars had an FK5 entry to compare "
+            f"against. No separation was measured, so \"all within band\" would have been "
+            f"a statement about nothing -- check {a.raw_dir} and the catalogue's columns",
+            fails):
+        asserts.judge("star-without-fk5", bool(missing),
+                      "no FK5 entry for " + ", ".join(missing)
+                      + ", which NO_FK5 does not name: either the match by BSC FK5 number "
+                      "has drifted, or the exception belongs in NO_FK5 with its reason",
+                      fails)
+
+    for line in fails:
+        print("FAIL  " + line)
+    if not fails:
+        print(f"all within band: {len(names)} stars x {len(EPOCHS)} epochs x "
+              f"{len(servers)} server(s)")
+    asserts.report()
+    return 1 if asserts.any_fired() else 0
 
 
 if __name__ == "__main__":

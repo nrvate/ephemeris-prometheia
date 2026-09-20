@@ -252,8 +252,12 @@ so an error they share would pass. `tools/check/stars_fk5.py` compares a
 server with the **FK5** (Fricke et al. 1988), which is ground-based and
 predates Hipparcos:
 - **Stars:** the stars leg's 29, matched by the Bright Star Catalogue's FK5
-  number. Castor is not compared: FK5 287 is HR 2890, Castor's fainter
-  component, and the catalog's Castor is HR 2891.
+  number. Castor is not compared: the BSC gives HR 2891 -- the catalog's
+  Castor -- no FK5 number at all, and FK5 287 is HR 2890, the fainter
+  component. It is the tool's one named exception (`NO_FK5`), carrying its
+  reason, and a check runs in both directions: any *other* star that falls
+  out of the comparison is a failure, and so is this one turning out to have
+  an entry after all, because a list of exceptions rots both ways.
 - **Question:** each star as a barycentric direction, ICRS equatorial, no
   corrections, at 1900, 2000 and 2100.
 - **Reference:** the FK5 entry carried into the Hipparcos frame and to the
@@ -262,6 +266,18 @@ predates Hipparcos:
     the reference uses a nominal 1 mas and no radial velocity.
   - At zero parallax ERFA caps the space motion, which would erase the
     proper motion and put Zubeneschamali 10″ off.
+
+**Exit status is exactly "did any assertion fire"** (2026-09-20). Two of the
+five assertions are not about the sky: a run that compared *no* star -- a
+truncated `stars-raw/` file, a catalogue whose columns moved -- used to print
+"all within band" and exit 0, and a star the server did not answer for was
+reported as DIFFERS, which accuses another project's server of disagreeing
+with the FK5 when it said nothing. `tools/check/starstest.py` drives one
+mutated catalogue per assertion and requires the named one to fire and no
+other; `tools/check/fakestars.py` answers from the pristine catalogue, so no
+daemon is needed. It runs from `tools/scheduled.sh` rather than the gate,
+because it needs pyerfa and `stars-raw/`, and it exits 2 rather than 0 when
+the catalogue is absent.
 
 Measured 2026-09-18 on `prometheiad`:
 - **The ordinary stars:** 24 of them, all within 0.56″ over the two

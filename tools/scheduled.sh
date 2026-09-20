@@ -31,6 +31,7 @@ repo="$PWD"
 with_cross=0
 ephemeris="${PROMETHEIA_EPHEMERIS:-$repo/ephe/linux_p1550p2650.440}"
 port="${PROMETHEIA_SCHEDULED_PORT:-47193}"
+oracle="${PROMETHEIA_ORACLE_PYTHON:-$repo/.venv-oracle/bin/python}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -81,6 +82,17 @@ step "gate" "$repo/tools/gate.sh"
 # rather than in the gate only because eight scripted servers take about
 # twenty seconds, which a pre-commit gate should not spend.
 step "corrapplied selftest" python3 "$repo/tools/check/corrtest.py"
+
+# stars_fk5.py's assertions, each against a mutated copy of the catalogue and
+# a scripted client. It is the only check that compares a server with an
+# outside catalogue, so a quiet catalogue -- truncated, or columns moved -- is
+# its real failure mode, and that is what these six cases inject. Needs pyerfa
+# and stars-raw/, which is why it is not in the gate.
+if [[ -x "$oracle" ]] && [[ -d "$repo/stars-raw" ]]; then
+    step "stars_fk5 selftest" "$oracle" "$repo/tools/check/starstest.py"
+else
+    skipped+=("stars_fk5 selftest: needs .venv-oracle (pyerfa) and stars-raw/")
+fi
 
 # prometheia-load's assertions, each against a daemon started for that case.
 if [[ -f "$ephemeris" ]]; then
