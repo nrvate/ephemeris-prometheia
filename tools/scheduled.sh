@@ -145,6 +145,15 @@ if [[ -f "$ephemeris" ]] && [[ -x "$repo/build/prometheiad" ]]; then
             sleep 0.2
         done
         if curl -fsS --max-time 1 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then
+            # Which arguments each cross-test leg cannot see arriving, against
+            # the committed record. It needs only our daemon -- both endpoints
+            # are this one -- and it is the slowest thing here, about 25
+            # minutes, because it runs every leg once per argument it sends.
+            # It is here rather than by hand because a check nothing runs is
+            # the failure the Astrolog side found in their own soak selftest
+            # on 2026-09-20: a rule existing is not a rule running.
+            step "leg reach (blindspots)" python3 "$repo/tools/check/blindspots.py" \
+                --port "$port"
             step "soak and memory bound" "$repo/build/prometheia-load" --port "$port" \
                 --pid "$daemon" --seconds 60 --conns 8 --rows 10 --memory-bound 64
         else

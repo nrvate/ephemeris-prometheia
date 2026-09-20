@@ -1,0 +1,266 @@
+{
+  "apparent": {
+    "blind": [
+      "--bary",
+      "--center",
+      "--corrections",
+      "--deltat",
+      "--helio",
+      "--jd",
+      "--obj (probe)",
+      "--topo"
+    ],
+    "control": "green",
+    "seen": []
+  },
+  "arrival": {
+    "blind": [
+      "--corrections",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--bary",
+      "--center",
+      "--helio"
+    ]
+  },
+  "bary": {
+    "blind": [
+      "--deltat",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--bary",
+      "--corrections",
+      "--eq",
+      "--icrs",
+      "--jd"
+    ]
+  },
+  "deflection": {
+    "blind": [
+      "--center",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--corrections"
+    ]
+  },
+  "deflection-geo": {
+    "blind": [
+      "--count",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--obj (probe)",
+      "--step"
+    ],
+    "control": "green",
+    "seen": [
+      "--corrections"
+    ]
+  },
+  "deflection-topo": {
+    "blind": [
+      "--count",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--obj (probe)",
+      "--step"
+    ],
+    "control": "green",
+    "seen": [
+      "--corrections",
+      "--topo"
+    ]
+  },
+  "hamburg": {
+    "blind": [
+      "--corrections",
+      "--deltat",
+      "--helio",
+      "--j2000",
+      "--jd",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--hyp"
+    ]
+  },
+  "helio": {
+    "blind": [
+      "--deltat",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--corrections",
+      "--eq",
+      "--helio",
+      "--icrs",
+      "--jd"
+    ]
+  },
+  "horizons": {
+    "blind": [
+      "--deltat",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--corrections",
+      "--eq",
+      "--icrs",
+      "--jd"
+    ]
+  },
+  "points": {
+    "blind": [
+      "--bary",
+      "--center",
+      "--count",
+      "--deltat",
+      "--helio",
+      "--j2000",
+      "--obj (probe)",
+      "--step"
+    ],
+    "control": "green",
+    "seen": [
+      "--corrections",
+      "--jd",
+      "--node"
+    ]
+  },
+  "rates": {
+    "blind": [
+      "--corrections",
+      "--deltat",
+      "--eq",
+      "--helio",
+      "--icrs",
+      "--j2000",
+      "--jd",
+      "--obj (probe)",
+      "--sid",
+      "--topo"
+    ],
+    "control": "green",
+    "seen": [
+      "--count",
+      "--node",
+      "--star",
+      "--step"
+    ]
+  },
+  "same": {
+    "blind": [
+      "--corrections",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": []
+  },
+  "sidereal": {
+    "blind": [
+      "--corrections",
+      "--deltat",
+      "--jd",
+      "--obj (probe)",
+      "--sid-plane"
+    ],
+    "control": "green",
+    "seen": [
+      "--sid"
+    ]
+  },
+  "sidinstant": {
+    "blind": [
+      "--corrections",
+      "--deltat",
+      "--jd",
+      "--obj (probe)",
+      "--sid"
+    ],
+    "control": "green",
+    "seen": []
+  },
+  "sidsweep": {
+    "blind": [
+      "--corrections",
+      "--deltat",
+      "--jd",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--sid",
+      "--sid-plane",
+      "--sidu"
+    ]
+  },
+  "stars": {
+    "blind": [
+      "--corrections",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--obj (probe)",
+      "--sid"
+    ],
+    "control": "green",
+    "seen": [
+      "--star"
+    ]
+  },
+  "surfaces": {
+    "blind": [
+      "--bary",
+      "--center",
+      "--deltat",
+      "--jd",
+      "--obj (probe)",
+      "--topo"
+    ],
+    "control": "green",
+    "seen": [
+      "--corrections",
+      "--helio",
+      "--node"
+    ]
+  },
+  "topo": {
+    "blind": [
+      "--deltat",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--corrections",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--topo"
+    ]
+  }
+}

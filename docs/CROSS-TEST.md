@@ -1495,6 +1495,97 @@ No honest number exists while an absolute tolerance is applied to a column
 whose ulp is 6e-9 AU. The fix is a sentence in §3.5a, not a larger
 number.
 
+### What each leg can see arriving (2026-09-20, `tools/check/blindspots.py`)
+
+A leg asks both servers a question and compares the answers. If the argument
+that makes the question interesting reaches **neither** server, both answer
+the same thing, the comparison agrees, and the row is green. This was met
+on the deflection leg the same day: dropping `--topo` left all twenty of its
+rows green, and only the site-shift rows — which compare a server with its
+*own* other answer — noticed.
+
+`blindspots.py` measures it for every leg. It runs the leg with our daemon
+on **both** endpoints (`crosstest.py --self-compare`), which makes every
+cross-server verdict trivially `agree`, so only a leg's non-comparative
+checks can still go red; records every argument the leg actually sent, from
+the client's own argv rather than from a list written beside it; then
+re-runs once per argument with that argument stripped from every request.
+Green with the argument gone means the leg cannot tell it arrived. Each drop
+asserts that it removed something, because a drop that dropped nothing is a
+green that proves nothing.
+
+Eighteen legs, all measured, none red before the drops. The record is
+`tools/check/blindspots.json`, and a later run that finds a leg has *stopped*
+seeing an argument reds against it.
+
+**The result that matters: `--deltat` is blind in 18 of 18 legs.** Not one
+leg can tell whether the field arrived. This document says every numeric leg
+sends delta T explicitly so that neither server's own model enters the
+comparison — and nothing checks that it did. Within the hour that finding
+was made, `deltaTSec` turned out to move a number on the wire by 21× (below).
+
+`--jd` is blind in 13 of 18: if the epoch failed to arrive, most legs would
+compare two servers at whatever instant they defaulted to and agree. The
+legs that do see it are the ones with an outside anchor — `horizons`,
+`helio`, `topo`, `bary` — which is the same lesson as the deflection leg's
+site-shift rows: **a non-comparative check is the only kind that survives
+both servers being wrong together.**
+
+Blind in N of 18: `--deltat` 18, `--obj` 18 (dropping it breaks the WELCOME
+probe before any leg, so it is recorded as unreachable rather than unseen),
+`--jd` 13, `--corrections` 9, `--eq` 7, `--icrs` 7, `--center` 4, `--helio`
+4, `--bary` 3, `--topo` 3, `--count` 3, `--step` 3, `--j2000` 3, `--sid` 3,
+`--sid-plane` 1.
+
+Legs seeing nothing at all: `same`, `apparent`, `sidinstant`. Legs seeing
+most of what they send: `helio` and `topo` and `bary` (5 of 7), `horizons`
+(4 of 6).
+
+**What this cannot see**: whether a leg asks the right question, whether its
+band is the right band, and anything needing two different servers. It
+measures reach, not correctness. It agrees with the one reach measurement
+made by hand before it existed — `deflection-topo` sees `--topo` — which is
+the only independent check of it there is.
+
+### Finding, theirs: `deltaTSec` moves a topocentric star's reported distance rate by 21x
+
+**2026-09-20.** Polaris, corrections 7, five rows at h = 1/1024 d centred on
+JD 2415020.5, f64. `reported` is the centre row's `ddist`; `differenced` is
+the five-point central difference of the five answered distances.
+
+| observer | server | `deltaTSec` | reported | differenced |
+|---|---|---|---|---|
+| geocentric | ours | 69.2 | −7.901892e-03 | −7.884979e-03 |
+| geocentric | ours | absent | −7.901892e-03 | −7.884979e-03 |
+| geocentric | theirs | 69.2 | −7.993480e-03 | −7.894516e-03 |
+| geocentric | theirs | absent | −7.993480e-03 | −7.894516e-03 |
+| topo Quito | ours | 69.2 | −7.911927e-03 | −7.887204e-03 |
+| topo Quito | ours | absent | −7.894883e-03 | −7.895152e-03 |
+| **topo Quito** | **theirs** | **69.2** | **−4.013042e-04** | **−7.883708e-03** |
+| **topo Quito** | **theirs** | **absent** | **−8.434959e-03** | **−7.884026e-03** |
+
+Geocentric, the field changes nothing on either server, bit for bit, as it
+should: Earth rotation does not enter. Topocentric on theirs the reported
+rate moves by a factor of 21 while the five distances are **bit-identical**
+between the two requests and their difference moves by 3e-7.
+
+**Why it is not the harness.** Their five-point difference and ours agree to
+four figures at this cell (−7.883708e-03 against −7.887204e-03), through two
+independent clients and two engines. The positions are right on both sides;
+one column on one side is not. At 1900 a supplied 69.2 s and the true ΔT of
+about −2.7 s are 72 s apart, which is 0.3° of Earth rotation.
+
+**It explains the standing row.** The 7.4824e-3 AU/day of "The chase does
+not converge" is this: our sweep sends `deltaTSec`, the Astrolog side's own
+probe did not, and they measured 3.9949e-04 where we measured 7.4824e-03.
+The row is now attributable rather than mysterious, and if the rate column
+is corrected it may go away, which is a better outcome than a wider bound.
+
+**Ours is not clean either, two orders milder.** At the same cell our miss
+goes from 2.68e-07 without the field to 2.47e-05 with it, a hundredfold on a
+much smaller number. That is ours to explain and is recorded here rather
+than only in a message.
+
 ### Finding, theirs: a topocentric orbit point's position and rate describe different observers
 
 **2026-09-20** (`docs/crosstest/2026-09-20-ratesweep-theirs.tsv`, their

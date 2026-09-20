@@ -2148,6 +2148,12 @@ def main():
     ap.add_argument("--astrolog-bin", default="/nvmraid/shares/Astrolog/astrolog-ephd",
                     help="the daemon that ran, for its build time (a commit can postdate it)")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--self-compare", action="store_true",
+                    help="allow both endpoints to be the same server. For "
+                         "tools/check/blindspots.py only: every cross-server verdict is "
+                         "then trivially 'agree', so only a leg's non-comparative checks "
+                         "-- an anchor, a shift from the server's own other answer, a "
+                         "refusal it expects -- can go red. Never a cross-test.")
     args = ap.parse_args()
 
     client = shutil.which(args.client) or args.client
@@ -2159,12 +2165,16 @@ def main():
     b = ask(client, theirs, ["--obj", "10", "--corrections", "0"], args.verbose)
     if not a.server or not b.server:
         sys.exit("both servers must answer a WELCOME: " + (a.stderr or b.stderr))
-    if a.server == b.server and a.dataset == b.dataset:
+    if a.server == b.server and a.dataset == b.dataset and not args.self_compare:
         # Two harnesses on one machine have met: a port taken by someone
         # else's daemon compares a server with itself, and every verdict
         # after that is meaningless.
         sys.exit(f"both endpoints answered as {a.server} with the same dataset: "
                  "one of them is not the server it should be")
+    if args.self_compare:
+        print("SELF-COMPARE: both endpoints are the same server. Every cross-server "
+              "verdict below is trivially 'agree' and means nothing; what is being "
+              "read is which legs can still go red. Not a cross-test.")
     print(f"ours   {a.server}  {a.dataset}")
     print(f"theirs {b.server}  {b.dataset}")
 
@@ -2220,7 +2230,9 @@ def main():
             counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
     print("\nverdicts: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
     if args.out:
-        header = [
+        header = ([] if not args.self_compare else [
+            "SELF-COMPARE: both endpoints were the same server; cross-server verdicts "
+            "here are trivially 'agree'. This is not a cross-test record."]) + [
             f"crosstest {datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}",
             f"ours   {a.server} dataset {a.dataset} prometheia {git_head(REPO, args.out)}",
             f"theirs {b.server} dataset {b.dataset} astrolog {git_head(args.astrolog)}"

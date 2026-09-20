@@ -112,6 +112,22 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
      the first. The self-referential grading that makes the leg portable
      across two servers is also what makes it blind to an argument that
      never arrives.
+   - **Measured for every leg, 2026-09-20** (`tools/check/blindspots.py`,
+     CROSS-TEST.md "What each leg can see arriving"). Each leg is run with
+     our daemon on both endpoints, so only its non-comparative checks can
+     red, then re-run once per argument with that argument stripped. Green
+     means the leg cannot tell the argument arrived. Eighteen legs, all
+     measured. **`--deltat` is blind in all eighteen**, and this document
+     says every numeric leg sends delta T explicitly so that neither
+     server's model enters — with nothing checking that it did. `--jd` is
+     blind in thirteen. The record is committed, so a leg that *stops*
+     seeing an argument reds against it.
+   - **And within the hour the field mattered.** `deltaTSec` moves a
+     topocentric star's reported distance rate on their server by 21x while
+     its positions stay bit-identical (CROSS-TEST.md, "Finding, theirs:
+     `deltaTSec` moves…"). It also explains the one standing row over their
+     4e-3 bound: our sweep sends the field, their probe did not. Ours shows
+     the same shape two orders milder and that is ours to explain.
 
 6. **The agent interfaces** (maintainer, 2026-09-18: "AI-forward", with MCP
    and streamable HTTP; the fast paths stay C++, C and the binary protocol).
