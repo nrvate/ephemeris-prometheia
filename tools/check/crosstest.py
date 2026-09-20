@@ -862,6 +862,120 @@ def leg_deflection_topo(client, ours, theirs, wel_a, wel_b, table, verbose):
         _deflection_site_reach(client, ours, theirs, table, verbose, seen)
 
 
+# The arrival leg. Every numeric leg here grades a server against an anchor or
+# against the other server, and the two legs that cannot -- deflection from a
+# body centre, deflection topocentrically -- grade each server against its own
+# other answer. That construction is what makes them portable, and it is also
+# blind in one direction: it measures whether a server is consistent, never
+# whether the argument reached the computation. The topocentric leg's three
+# site rows were added for that, and this generalises them to the observers
+# nothing else interrogates that way.
+#
+# Two questions, asked geometrically (mask 0) so no correction convention
+# enters: did this observer move the answer at all, and are two observers that
+# should differ actually distinct? Plus one that should NOT differ -- a
+# heliocentric observer and an observer at the Sun's centre are the same place,
+# and at mask 0 they have nothing left to disagree about.
+ARRIVAL_EPOCHS = [2415020.5, 2451545.0, 2461300.5]
+ARRIVAL_BODIES = [4, 5, 6, 399]
+ARRIVAL_MASK = 0
+# Arcseconds. Every real observer change here moves the answer by degrees; the
+# floor is low because the row asks whether the argument arrived, not how far.
+ARRIVAL_FLOOR = 1.0
+# The two spellings of the Sun's centre have to agree this closely, which is
+# the deflection band: at mask 0 nothing separates them.
+ARRIVAL_SAME_BAND = 0.0002
+# (name, A.5 observer, flags, the body it cannot observe)
+ARRIVAL_OBSERVERS = [("geo", 0, [], None), ("helio", 2, ["--helio"], None),
+                     ("bary", 3, ["--bary"], None),
+                     ("centre Jupiter", 4, ["--center", "5"], 5),
+                     ("centre Mars", 4, ["--center", "4"], 4),
+                     ("centre Sun", 4, ["--center", "10"], 10)]
+# Pairs that must differ, and why each one is worth a row:
+#   bary vs helio   -- a server that treats the barycentre as the Sun
+#   Jupiter vs Mars -- a server that honours "a body's centre" but not which
+ARRIVAL_DISTINCT = [("bary", "helio"), ("centre Jupiter", "centre Mars")]
+# And the pair that must agree: two spellings of one place.
+ARRIVAL_SAME = [("centre Sun", "helio")]
+
+
+def _shift_row(table, leg, observer, keys, whos, shift, band, want, source, note):
+    """One graded row: the worst shift over `keys`, per server, against `band`.
+    `want` is "at least" when the row asks whether an observer arrived, and
+    "at most" when it asks whether two spellings of one observer agree."""
+    worst = {}
+    for w in whos:
+        vals = [v for v in (shift(k) for k in keys if k[0] == w) if v is not None]
+        worst[w] = max(vals) if vals else None
+    ok = {w: (worst[w] >= band if want == "at least" else worst[w] <= band)
+          for w in whos if worst[w] is not None}
+    if not ok:
+        verdict = "unanswered"
+    elif all(ok.values()):
+        verdict = "agree"
+    elif not any(ok.values()):
+        verdict = "finding"
+    else:
+        verdict = "finding (ours)" if not ok.get("ours", True) else "finding (theirs)"
+    table.add(leg=leg, observer=observer, frame="ICRF", plane="equator", mask=ARRIVAL_MASK,
+              deltat=DELTA_T, tier=3, anchor_source=source,
+              sep_ours_anchor=worst.get("ours") if worst.get("ours") is not None else "",
+              sep_theirs_anchor=worst.get("theirs") if worst.get("theirs") is not None else "",
+              band=band, verdict=verdict, note=note)
+    shown = "  ".join(f"{w} {worst[w]:.4f}\"" for w in sorted(worst) if worst[w] is not None)
+    print(f"  {observer:34s} {want:8s} {band:<8g} {shown}   {verdict}")
+
+
+def leg_arrival(client, ours, theirs, wel_a, wel_b, table, verbose):
+    """Does each observer reach the computation, and are observers distinct?"""
+    srv = {"ours": ours, "theirs": theirs}
+    wel = {"ours": wel_a, "theirs": wel_b}
+    seen = {}
+    for name, bit, where, cannot in ARRIVAL_OBSERVERS:
+        bodies = [b for b in ARRIVAL_BODIES if b != cannot]
+        seen[name] = {}
+        for who in ("ours", "theirs"):
+            if ARRIVAL_MASK not in advertised(wel[who], bit):
+                continue
+            for jd in ARRIVAL_EPOCHS:
+                args = ["--jd", repr(jd), "--icrs", "--eq", "--corrections", str(ARRIVAL_MASK),
+                        "--deltat", str(DELTA_T)] + list(where)
+                for b in bodies:
+                    args += ["--obj", str(b)]
+                rep = ask(client, srv[who], args, verbose)
+                for i, b in enumerate(bodies):
+                    r = rep.row(i)
+                    if r is not None and not math.isnan(r[0]):
+                        seen[name][(who, b, jd)] = vector(r)
+    print("\n== arrival: did the observer argument reach the computation?")
+    print("   (mask 0, so nothing but the observer's own position is in the answer)")
+    whos = sorted({k[0] for v in seen.values() for k in v})
+    table.asked(None, None)
+
+    def pair(a, b, band, want, source, note):
+        keys = sorted(set(seen[a]) & set(seen[b]))
+        if not keys:
+            return
+        _shift_row(table, "arrival", f"{a} vs {b}", keys, whos,
+                   lambda k: angle(seen[a][k], seen[b][k]), band, want, source, note)
+
+    for name, _, _, _ in ARRIVAL_OBSERVERS:
+        if name == "geo":
+            continue
+        pair(name, "geo", ARRIVAL_FLOOR, "at least",
+             "the same server's geocentric answer at the same instant",
+             "an observer that never reached the computation would answer geocentrically")
+    for a, b in ARRIVAL_DISTINCT:
+        pair(a, b, ARRIVAL_FLOOR, "at least", "the same server's answer at the other observer",
+             "these two observers are different places; equal answers mean one of them "
+             "was not read")
+    for a, b in ARRIVAL_SAME:
+        pair(a, b, ARRIVAL_SAME_BAND, "at most",
+             "the same server's answer at the other spelling of the same place",
+             "a heliocentric observer and an observer at the Sun's centre are the same "
+             "place, and at mask 0 nothing separates them")
+
+
 # Orbit points (kind 1), geometric (mask 0) in the frame of date: the portable
 # comparison, where light-time conventions for a point stay out. Bands from
 # the first measurement (2026-09-18, the corpus epochs), each with its reason.
@@ -1983,7 +2097,7 @@ def main():
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
     ap.add_argument("--legs",
                     default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,"
-                            "deflection,deflection-geo,deflection-topo,points,rates,"
+                            "deflection,deflection-geo,deflection-topo,arrival,points,rates,"
                             "sidereal,sidsweep,sidinstant,stars")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvmraid/shares/Astrolog", help="the Astrolog tree, for its commit")
@@ -2040,6 +2154,8 @@ def main():
         leg_deflection_geo(client, ours, theirs, a, b, table, args.verbose)
     if "deflection-topo" in legs:
         leg_deflection_topo(client, ours, theirs, a, b, table, args.verbose)
+    if "arrival" in legs:
+        leg_arrival(client, ours, theirs, a, b, table, args.verbose)
     if "bary" in legs:
         leg_bary(client, ours, theirs, table, args.verbose)
     if "topo" in legs:
