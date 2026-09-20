@@ -1022,18 +1022,36 @@ and `--threads 4`. The client ran on the same host.
     `prometheia-load` and every case would still have passed, while the
     docstring said it falsified *every* assertion the tool makes. Found by
     reading the case table against the assertion table rather than by running
-    anything — a count, not a measurement. The script now refuses to run at
-    all if an assertion has no case, and names it.
+    anything — a count, not a measurement.
+  - **The list now comes out of the binary, because the first fix left the
+    half that mattered.** Refusing to run when the table and the cases
+    disagree catches an assertion with no case; it cannot catch an assertion
+    added to `prometheia-load` and to neither list, since both lists were in
+    Python. So the tool names its own: every check is an entry in `A`, judged
+    through `Assertions::judge`, and `--list-assertions` prints the table
+    while each run ends with `assertions evaluated [...] fired [...]`. The
+    selftest reads names instead of matching patterns — a pattern rots in the
+    worst direction, where it stops matching, the derived list shrinks and
+    everything goes green. (The Astrolog side raised that objection against
+    their own message-grepping version the same afternoon, and moved to
+    recording each assertion as it evaluates.)
+  - **The exit status is now exactly "did any assertion fire".** It used to
+    count `st.failures`, a differing canary, an ungraded canary and the
+    memory verdict a second time, on its own — which is how deleting the
+    silence guard left the run red on the right input for the wrong reason.
+    A condition counted twice lets a deleted check stay invisible. With the
+    duplicate gone, deleting that judge reports `exit 0, wanted 1` as well as
+    `did not fire`: a hole found by falsification and closed in the thing
+    falsified, not in the falsifier.
   - **Falsified against itself**, each fault failing exactly one case, by
-    name. Deleting the bound assertion: "did not fire: memory-over". Deleting
-    the silence guard: only "every canary is refused" fails — **and that run
-    still exited 1**, because the exit status still counts an ungraded
-    canary, so a selftest asking only whether something went red would have
-    passed a deleted assertion. Reporting the failure count as zero: only the
-    sham-server case fails. Making the cache check fire unconditionally fails
-    the two cases it should not have fired in, one of which was *otherwise
-    reddening correctly on its own assertion*. Adding a tenth assertion with
-    no case stops the script before it starts a daemon.
+    name. Deleting the bound assertion: "did not fire: memory-over".
+    Reporting the failure count as zero: only the sham-server case fails.
+    Making the cache check fire unconditionally fails the two cases it should
+    not have fired in, one of which was *otherwise reddening correctly on its
+    own assertion*. Adding a tenth assertion to the binary with no case stops
+    the script before it starts a daemon. Deleting the silence guard fails
+    only its own case — and now fails it twice over, on the assertion and on
+    the exit status, which is the fix described above.
     - This paragraph is the one layer that stays prose: falsifying the
       falsifier means patching and rebuilding the binary, which nothing here
       re-runs. The case table below it is the part that does.

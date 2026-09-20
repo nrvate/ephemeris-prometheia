@@ -14,6 +14,16 @@
 // load started, and grades the numbers. That is a consistency check and not a
 // correctness one -- the baseline is the server's own idle answer -- but it is
 // the bug load testing exists to find: contention changing an answer.
+//
+// Every check this tool makes is an entry in `A`, judged through
+// Assertions::judge and named in the run's last line. The exit status is
+// exactly "did any of them fire" and counts nothing separately, because a
+// second copy of a condition lets a deleted check stay invisible: the run
+// goes red on the right input for the wrong reason, and a selftest that
+// asks only whether something went red passes it. That happened to this
+// file on 2026-09-20. `--list-assertions` prints the table, which is what
+// tools/check/loadselftest.py builds its cases against rather than keeping
+// its own copy.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -61,13 +71,20 @@ constexpr const char* kUsage =
     "                     before grading it, so the grading can be shown to\n"
     "                     go red: values, shape or identity. For\n"
     "                     tools/check/loadselftest.py; never for a real run\n"
+    "  --list-assertions  print every assertion this tool makes, one a line,\n"
+    "                     and exit. Each run also ends with the assertions it\n"
+    "                     evaluated and the ones that fired; the exit status\n"
+    "                     is exactly whether any of them fired\n"
     "  --chunk-rows N     the load asks for answers in chunks of N rows; the\n"
     "                     baseline always takes the server's own chunking, so\n"
     "                     this grades an answer against a differently chunked\n"
     "                     copy of itself (default: the server chooses, both)\n"
-    "Exit 1 if any connection failed for a reason other than a refusal the\n"
-    "server announced (HTTP 503, ERROR 6), a message did not parse, or a\n"
-    "canary answer differed from the same server's answer before the load.\n";
+    "Exit 1 if any assertion fired, and nothing else -- the run's last line\n"
+    "names them. A refusal the server announced (HTTP 503, ERROR 6) is not a\n"
+    "failure; a connection that failed for another reason, a message that did\n"
+    "not parse, and a canary answer that differed from the same server's\n"
+    "answer before the load all are. Exit 2 if the run was refused before any\n"
+    "load was applied.\n";
 
 std::vector<uint8_t> frame(uint16_t type, uint32_t id, const std::vector<uint8_t>& payload) {
     std::vector<uint8_t> out;
@@ -192,6 +209,72 @@ Ask ask(WsClient& ws, uint32_t id, double jd, int rows, int chunk_rows, Answer* 
     }
 }
 
+// Every assertion this tool makes, named once, in the binary that makes
+// them. A check calls judge() with its name; the run prints what it
+// evaluated and what fired, and the exit status is "did anything fire" --
+// so an assertion cannot be deleted while a neighbouring exit condition
+// keeps the run red on the same input, which is how a deleted check hid
+// from an earlier version of tools/check/loadselftest.py.
+//
+// The selftest reads these two lists instead of keeping its own copy of
+// this table. A second copy of a decision need not be wrong when written,
+// only to stop being updated (the Astrolog side's memassert, 2026-09-20).
+enum class A {
+    kFailures,
+    kCanaryDiffered,
+    kCanaryShape,
+    kCanaryIdentity,
+    kCanaryNoneGraded,
+    kMemoryOver,
+    kMemoryNotCaching,
+    kRefusedNoPid,
+    kRefusedNoMetrics,
+    kCount,
+};
+
+constexpr const char* kAssertionNames[] = {
+    "failures",           "canary-differed",    "canary-shape",
+    "canary-identity",    "canary-none-graded", "memory-over",
+    "memory-not-caching", "refused-no-pid",     "refused-no-metrics",
+};
+static_assert(std::size(kAssertionNames) == size_t(A::kCount),
+              "every A needs a name: the selftest derives its case list from these");
+
+struct Assertions {
+    bool evaluated[size_t(A::kCount)] = {};
+    bool fired[size_t(A::kCount)] = {};
+
+    // Records that this assertion was reached, and whether it failed.
+    bool judge(A a, bool bad) {
+        evaluated[size_t(a)] = true;
+        fired[size_t(a)] = fired[size_t(a)] || bad;
+        return bad;
+    }
+    bool any_fired() const {
+        for (bool f : fired) {
+            if (f) {
+                return true;
+            }
+        }
+        return false;
+    }
+    void report() const {
+        std::printf("assertions evaluated [");
+        for (size_t i = 0, n = 0; i < size_t(A::kCount); ++i) {
+            if (evaluated[i]) {
+                std::printf("%s%s", n++ ? " " : "", kAssertionNames[i]);
+            }
+        }
+        std::printf("] fired [");
+        for (size_t i = 0, n = 0; i < size_t(A::kCount); ++i) {
+            if (fired[i]) {
+                std::printf("%s%s", n++ ? " " : "", kAssertionNames[i]);
+            }
+        }
+        std::printf("]\n");
+    }
+};
+
 struct Stats {
     std::mutex mu;
     std::vector<double> latency_ms;
@@ -204,6 +287,9 @@ struct Stats {
     // The canaries: answers graded against the same server's answer before
     // the load started.
     uint64_t canary_checks = 0, canary_mismatch = 0;
+    // By kind, so canary-shape and canary-identity are assertions in their
+    // own right rather than something a reader infers from the samples.
+    uint64_t canary_shape = 0, canary_identity = 0;
     double canary_max_delta = 0.0; // largest |difference| seen, mismatch or not
     std::vector<std::string> canary_samples;
 };
@@ -236,9 +322,11 @@ void sabotage(const std::string& what, Answer* a) {
 
 void grade(Stats& st, int canary, double jd, const Answer& got, const Answer& want) {
     std::string bad;
+    bool shape_bad = false, ident_bad = false;
     double worst = 0.0;
     if (got.nObj != want.nObj || got.totalRows != want.totalRows || got.cols != want.cols ||
         got.columnsPresent != want.columnsPresent) {
+        shape_bad = true;
         bad = "shape: " + got.shape() + ", idle it was " + want.shape();
     } else {
         for (size_t i = 0; i < want.values.size(); ++i) {
@@ -260,6 +348,7 @@ void grade(Stats& st, int canary, double jd, const Answer& got, const Answer& wa
         // its own request, which is what a contaminated answer looks like.
         for (size_t i = 0; i < got.resolved.size() && i < std::size(kBodies); ++i) {
             if (got.resolved[i] != eph::kNaifNone && got.resolved[i] != kBodies[i]) {
+                ident_bad = true;
                 bad = "object " + std::to_string(i) + " came back as NAIF " +
                       std::to_string(got.resolved[i]) + ", asked for " + std::to_string(kBodies[i]);
             }
@@ -270,6 +359,8 @@ void grade(Stats& st, int canary, double jd, const Answer& got, const Answer& wa
     st.canary_max_delta = std::max(st.canary_max_delta, worst);
     if (!bad.empty()) {
         ++st.canary_mismatch;
+        st.canary_shape += shape_bad ? 1 : 0;
+        st.canary_identity += ident_bad ? 1 : 0;
         if (st.canary_samples.size() < 5) {
             char jds[32];
             std::snprintf(jds, sizeof jds, "%.6f", jd);
@@ -413,6 +504,9 @@ double percentile(std::vector<double>& v, double q) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // Named here so every assertion below records itself, including the two
+    // that refuse the run before any load is applied.
+    Assertions asserts;
     std::string host = "127.0.0.1";
     int port = eph::kDefaultPort, conns = 8, seconds = 30, rows = 1, report = 10;
     int canaries = 8, canary_every = 16, chunk_rows = 0;
@@ -456,6 +550,13 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "--sabotage takes values, shape or identity\n");
                 return 2;
             }
+        } else if (arg == "--list-assertions") {
+            // The whole table, so a reader (and the selftest) learns what
+            // this binary checks without being told separately.
+            for (const char* name : kAssertionNames) {
+                std::printf("%s\n", name);
+            }
+            return 0;
         } else if (arg == "--chunk-rows") {
             chunk_rows = std::max(0, std::atoi(value()));
         } else if (arg == "--canary-every") {
@@ -472,19 +573,21 @@ int main(int argc, char** argv) {
     // never arrived. So refuse the run rather than assert half of it.
     double hits_before = -1.0;
     if (memory_bound_mb >= 0.0) {
-        if (pid <= 0) {
+        if (asserts.judge(A::kRefusedNoPid, pid <= 0)) {
             std::fprintf(stderr, "--memory-bound needs --pid: nothing else samples the server's "
                                  "resident memory\n");
+            asserts.report();
             return 2;
         }
         hits_before = counter(host, port, "prometheiad_cache_hits_total");
-        if (hits_before < 0.0) {
+        if (asserts.judge(A::kRefusedNoMetrics, hits_before < 0.0)) {
             std::fprintf(stderr,
                          "--memory-bound needs the server's /metrics, and "
                          "prometheiad_cache_hits_total was not readable at %s:%d. A bound on "
                          "memory alone is passed by a server that caches nothing, so this run "
                          "would assert half of the check and report a pass.\n",
                          host.c_str(), port);
+            asserts.report();
             return 2;
         }
     }
@@ -599,11 +702,20 @@ int main(int argc, char** argv) {
         std::printf(" ERROR %u x %llu", code, (unsigned long long)n);
     }
     std::printf("\nrefused    %llu at the upgrade (503)\n", (unsigned long long)st.connect_refused);
+    asserts.judge(A::kFailures, st.failures > 0);
     std::printf("failures   %llu\n", (unsigned long long)st.failures);
     for (const std::string& f : st.failure_samples) {
         std::printf("  %s\n", f.c_str());
     }
     if (canaries > 0) {
+        asserts.judge(A::kCanaryDiffered, st.canary_mismatch > 0);
+        asserts.judge(A::kCanaryNoneGraded, st.canary_checks == 0);
+        if (st.canary_checks > 0) {
+            // Reached only when something was graded: an assertion nothing
+            // evaluated must not be reported as one that passed.
+            asserts.judge(A::kCanaryShape, st.canary_shape > 0);
+            asserts.judge(A::kCanaryIdentity, st.canary_identity > 0);
+        }
         std::printf("canaries   %llu answers graded, %llu differed",
                     (unsigned long long)st.canary_checks, (unsigned long long)st.canary_mismatch);
         if (st.canary_mismatch) {
@@ -613,7 +725,7 @@ int main(int argc, char** argv) {
         for (const std::string& c : st.canary_samples) {
             std::printf("  %s\n", c.c_str());
         }
-        if (st.canary_checks == 0) {
+        if (asserts.fired[size_t(A::kCanaryNoneGraded)]) {
             std::printf("  nothing was graded: no canary request completed\n");
         }
     }
@@ -622,35 +734,31 @@ int main(int argc, char** argv) {
                     "-> %ld\n",
                     rss_first, rss_peak, rss_last, fds_first, fds_peak, fds_last);
     }
-    bool memory_failed = false;
     if (memory_bound_mb >= 0.0) {
         const double grew = rss_last - rss_first;
         const double hits_after = counter(host, port, "prometheiad_cache_hits_total");
         const double hits = hits_after - hits_before;
         std::printf("memory     grew %.1f MB against a bound of %.1f; cache hits rose by %.0f\n",
                     grew, memory_bound_mb, hits);
-        if (grew > memory_bound_mb) {
+        if (asserts.judge(A::kMemoryOver, grew > memory_bound_mb)) {
             std::printf("  OVER: resident memory grew %.1f MB, more than the %.1f MB bound\n", grew,
                         memory_bound_mb);
-            memory_failed = true;
         }
         // The pairing. Without this a --cache-mb 0 server grows by nothing
         // and passes the bound while caching nothing at all.
-        if (hits <= 0.0) {
+        if (asserts.judge(A::kMemoryNotCaching, hits <= 0.0)) {
             std::printf("  NOT CACHING: the cache answered nothing during the run, so the bound "
                         "above says only that an empty cache stays empty. The canaries alone "
                         "re-asked %llu instants.\n",
                         (unsigned long long)st.canary_checks);
-            memory_failed = true;
         }
     }
 
-    // A canary that differed is a failure of the run, not a statistic: the
-    // server answered, and answered differently under load than it does
-    // idle. Zero graded answers is one too, when canaries were asked for --
-    // silence is not a pass.
-    return (st.failures || st.canary_mismatch || (canaries > 0 && st.canary_checks == 0) ||
-            memory_failed)
-               ? 1
-               : 0;
+    // The exit status is exactly "did any assertion fire", and nothing
+    // else. Counting a condition here as well as at its assertion is how a
+    // deleted check stays invisible: the run goes red on the right input
+    // for the wrong reason, and a selftest that asks only whether something
+    // went red passes it (found on this tool, 2026-09-20).
+    asserts.report();
+    return asserts.any_fired() ? 1 : 0;
 }

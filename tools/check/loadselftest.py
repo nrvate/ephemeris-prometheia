@@ -23,29 +23,45 @@ kind. The three canary cases use `prometheia-load --sabotage`, which damages
 the client's own copy of an answer next to the grading it falsifies, inside
 the binary that ships rather than in a copy of the check.
 
-The table below is the list this script is checked against, and the check is
-to read it: the first version of this file declared nine assertions and
-exercised seven. `canary-none-graded` and `failures` had no case, so either
-could have been deleted from prometheia-load and every case here would still
-have passed -- the same overclaim ("falsifies every assertion") that the rest
-of this docstring is about. Both turned out to need no hook either, so if a
-new assertion is added to ASSERTIONS without a case, say so rather than
-leaving the count to be recounted by hand later.
+**There is no list of assertions in this file.** The first version kept one
+-- nine names and nine regexes -- and it was wrong on the day it was written:
+`canary-none-graded` and `failures` had no case, so either could have been
+deleted from prometheia-load with every case here still green, under a
+docstring claiming to falsify every assertion the tool makes. Adding a
+refusal when the two disagreed fixed half of it and left the half that
+matters, because both lists were still in Python: an assertion added to the
+binary appeared in neither.
+
+So the binary names its own. `prometheia-load --list-assertions` is the
+table, every run ends with `assertions evaluated [...] fired [...]`, and this
+script reads names rather than matching patterns. A pattern would rot in the
+worst direction -- stop matching, derived list shrinks, everything green --
+which is the objection the Astrolog side raised against their own
+message-grepping version the same afternoon. Three checks come out of it:
+an assertion the binary declares that no case fires stops the script; a case
+expecting an assertion the binary does not declare stops it; and an
+assertion no case ever *reaches* fails the run at the end.
 
 Falsified against itself, 2026-09-20, each fault failing exactly one case by
-name: deleting the bound assertion from prometheia-load ("did not fire:
-memory-over"); deleting the silence guard, which fails only "every canary is
-refused" -- and that run still exited 1, because the exit status still counts
-an ungraded canary, so a selftest asking only whether something went red
-would have passed a deleted assertion; reporting the failure count as zero,
-which fails only the sham-server case; making the cache check fire
-unconditionally, which fails the two cases it should not have fired in
-("fired but should not have: memory-not-caching"), one of which was otherwise
-reddening correctly on its own assertion.
+name: deleting the bound assertion ("did not fire: memory-over"); reporting
+the failure count as zero, which fails only the sham-server case; making the
+cache check fire unconditionally, which fails the two cases it should not
+have fired in, one of which was otherwise reddening correctly on its own
+assertion; adding a tenth assertion to the binary with no case, which stops
+the script before it starts a daemon.
 
-That paragraph is the one layer that stays prose -- falsifying the falsifier
-means patching and rebuilding the binary, and nothing re-runs it. The case
-table is the part that does.
+The silence guard is the one worth keeping. Deleting it used to fail its own
+case while the run **still exited 1**, because the exit status counted an
+ungraded canary separately -- red on the right input for the wrong reason,
+with the assertion gone, which a selftest asking only "did it go red" passes.
+prometheia-load's exit status is now exactly "did any assertion fire" and
+counts nothing on its own, so deleting that judge now reports `exit 0, wanted
+1` as well as `did not fire`. A hole found by falsification, closed in the
+thing falsified rather than in the falsifier.
+
+Those paragraphs are the one layer that stays prose -- falsifying the
+falsifier means patching and rebuilding the binary, and nothing re-runs it.
+The case table is the part that does.
 
 It starts its own daemon and stops only what it started. It needs an
 ephemeris, so it is not in tools/gate.sh, which must stay seconds.
@@ -64,20 +80,21 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
-# Every distinct way prometheia-load can report a failure, as a name and the
-# pattern that says it fired. A case declares which of these it expects; any
-# other one firing fails the case, whatever the exit status.
-ASSERTIONS = {
-    "canary-differed": re.compile(r"^canaries .*, ([1-9]\d*) differed", re.M),
-    "canary-shape": re.compile(r"^  canary \d+ .* shape: ", re.M),
-    "canary-identity": re.compile(r"came back as NAIF", re.M),
-    "canary-none-graded": re.compile(r"nothing was graded", re.M),
-    "memory-over": re.compile(r"^  OVER: ", re.M),
-    "memory-not-caching": re.compile(r"^  NOT CACHING: ", re.M),
-    "refused-no-pid": re.compile(r"--memory-bound needs --pid", re.M),
-    "refused-no-metrics": re.compile(r"--memory-bound needs the server's /metrics", re.M),
-    "failures": re.compile(r"^failures   ([1-9]\d*)", re.M),
-}
+# prometheia-load names its own assertions: --list-assertions is the whole
+# table, and every run ends with the ones it evaluated and the ones that
+# fired. So there is no table here and no pattern here -- both would be a
+# second copy of a decision in the binary, and a pattern rots in the worst
+# direction (it stops matching, the derived list shrinks, everything goes
+# green).
+REPORT = re.compile(r"^assertions evaluated \[([^\]]*)\] fired \[([^\]]*)\]", re.M)
+
+
+def parse_report(text):
+    """(evaluated, fired) as name sets, or (None, None) if the tool said nothing."""
+    m = REPORT.search(text)
+    if m is None:
+        return None, None
+    return set(m.group(1).split()), set(m.group(2).split())
 
 
 def free_port():
@@ -150,8 +167,13 @@ class Sham:
             self.proc.wait(timeout=5)
 
 
-def fired(text):
-    return {name for name, pattern in ASSERTIONS.items() if pattern.search(text)}
+def all_assertions(load_exe):
+    """The binary's own list, which is the only list."""
+    done = subprocess.run([load_exe, "--list-assertions"], capture_output=True, text=True,
+                          timeout=60)
+    if done.returncode != 0 or not done.stdout.strip():
+        raise SystemExit(f"{load_exe} --list-assertions said nothing; is it the current build?")
+    return [n for n in done.stdout.split() if n]
 
 
 def run_load(exe, port, pid, extra, seconds):
@@ -215,13 +237,21 @@ def main():
 
     # The check this script failed when it was written: an assertion with no
     # case could be deleted from prometheia-load and nothing here would
-    # notice.
-    unexercised = set(ASSERTIONS) - {a for c in cases for a in c[3]} - {
-        "refused-no-pid", "refused-no-metrics"}
+    # notice. The list comes from the binary, so an assertion added there
+    # and nowhere else stops this script instead of passing unseen.
+    declared = all_assertions(args.load)
+    covered = {a for c in cases for a in c[3]} | {"refused-no-pid", "refused-no-metrics"}
+    unexercised = [a for a in declared if a not in covered]
     if unexercised:
-        raise SystemExit("no case exercises: " + ", ".join(sorted(unexercised)))
+        raise SystemExit("prometheia-load declares these and no case fires them: "
+                         + ", ".join(unexercised))
+    stray = sorted(covered - set(declared))
+    if stray:
+        raise SystemExit("cases expect assertions the binary does not declare: "
+                         + ", ".join(stray))
 
     failures = []
+    evaluated = set()  # every assertion any case actually reached
     caching = None
     sham = Sham()
     try:
@@ -237,8 +267,13 @@ def main():
             code, out = run_load(args.load, port, pid, extra, args.seconds)
             if args.verbose:
                 print(out)
-            got = fired(out)
+            seen, got = parse_report(out)
             note = []
+            if got is None:
+                note.append("the run printed no assertion report")
+                got = set()
+            else:
+                evaluated |= seen
             if code != want_exit:
                 note.append(f"exit {code}, wanted {want_exit}")
             if got != expect:
@@ -269,8 +304,13 @@ def main():
         ]:
             pid = caching.proc.pid if "no /metrics" in name else 0
             code, out = run_load(args.load, port, pid, extra, 3)
-            got = fired(out)
+            seen, got = parse_report(out)
             note = []
+            if got is None:
+                note.append("the refusal printed no assertion report")
+                got = set()
+            else:
+                evaluated |= seen
             if code != 2:
                 note.append(f"exit {code}, wanted 2 (refused before any load)")
             if got != expect:
@@ -286,10 +326,17 @@ def main():
         sham.stop()
 
     print()
+    never = [a for a in declared if a not in evaluated]
+    if never:
+        # Declared, and no case ever even reached it: it could be deleted
+        # from prometheia-load with every case above still green.
+        print("no case reaches: " + ", ".join(never))
     if failures:
         print(f"{len(failures)} of {len(cases) + 2} cases FAILED: " + ", ".join(failures))
+    if failures or never:
         return 1
-    print(f"all {len(cases) + 2} cases: each assertion fires on its own fault and no other")
+    print(f"all {len(cases) + 2} cases: each of the {len(declared)} assertions "
+          f"prometheia-load declares is reached, and fires on its own fault and no other")
     return 0
 
 
