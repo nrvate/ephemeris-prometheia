@@ -24,10 +24,17 @@ What it does, in order:
      when --record is given (the letter continues the sequence: after
      2026-09-20u comes v);
   5. runs corrapplied.py and ratesweep.py against each server in turn;
-  6. prints one summary, and exits non-zero if any step did.
+  6. prints one summary, and exits on exactly "did any assertion fire".
 
 The record is a file, not a claim: what it means still has to be read and
 written up in docs/CROSS-TEST.md, by whoever ran it.
+
+Exit 2 means it could not run -- their daemon is down, ours would not come
+up, the binaries are missing -- and says so; 1 means an assertion fired; 0
+means it ran and none did. The difference matters because this script points
+at another project's server: "could not run" must never read as a finding,
+and must never read as a pass either. `--list-assertions` prints the
+assertions and tools/check/crossruntest.py drives one per case.
 """
 
 import argparse
@@ -41,6 +48,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import assertlib  # noqa: E402
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHECK = os.path.join(REPO, "tools", "check")
 RECORDS = os.path.join(REPO, "docs", "crosstest")
@@ -49,6 +59,14 @@ RECORDS = os.path.join(REPO, "docs", "crosstest")
 # script never manages any daemon but the one it starts, and says so here so
 # that nobody adds a "restart theirs if it is down" convenience later.
 THEIRS_PRODUCTION_PORT = 47391
+
+ASSERTIONS = (
+    "nothing-ran",          # not one step ran, and a summary of nothing exited 0
+    "step-failed",          # a step exited non-zero
+    "record-missing",       # a record was asked for and no file appeared
+    "record-empty",         # the record has no rows: "nothing new" about nothing
+    "comparison-skipped",   # a previous record existed and nothing was compared
+)
 
 
 def endpoint(s):
@@ -91,12 +109,12 @@ def bump(letter):
     return "".join(reversed(out))
 
 
-def next_record_letter():
+def next_record_letter(records=RECORDS):
     """The next letter in the record sequence, which runs across days: the
     records are 2026-09-18b .. 2026-09-19t .. 2026-09-20u, one sequence."""
     seen = set()
-    if os.path.isdir(RECORDS):
-        for name in os.listdir(RECORDS):
+    if os.path.isdir(records):
+        for name in os.listdir(records):
             m = re.fullmatch(r"\d{4}-\d{2}-\d{2}([a-z]+)\.tsv", name)
             if m:
                 seen.add(m.group(1))
@@ -112,22 +130,23 @@ def read_table(path):
     return list(csv.DictReader(lines, delimiter="\t"))
 
 
-def latest_record(before=None):
+def latest_record(records=RECORDS, before=None):
     """The newest existing record, by the sequence letter."""
     best = None
-    if os.path.isdir(RECORDS):
-        for name in sorted(os.listdir(RECORDS)):
+    if os.path.isdir(records):
+        for name in sorted(os.listdir(records)):
             m = re.fullmatch(r"\d{4}-\d{2}-\d{2}([a-z]+)\.tsv", name)
             if not m or (before and name == os.path.basename(before)):
                 continue
             key = (len(m.group(1)), m.group(1))
             if best is None or key > best[0]:
-                best = (key, os.path.join(RECORDS, name))
+                best = (key, os.path.join(records, name))
     return best[1] if best else None
 
 
 def compare_records(new, prev):
-    """What changed since the last record, by leg and verdict.
+    """What changed since the last record, by leg and verdict, and the legs
+    only one of them carries.
 
     The counts alone read badly out of context: this matrix carries 99
     standing findings against their server and 548 rows their client does
@@ -136,13 +155,21 @@ def compare_records(new, prev):
     otherwise every run looks alarming and soon nobody reads one.
     """
     import collections
-    a = collections.Counter((r["leg"], r["verdict"]) for r in read_table(prev))
-    b = collections.Counter((r["leg"], r["verdict"]) for r in read_table(new))
+    rows_a, rows_b = read_table(prev), read_table(new)
+    a = collections.Counter((r["leg"], r["verdict"]) for r in rows_a)
+    b = collections.Counter((r["leg"], r["verdict"]) for r in rows_b)
+    # A narrowed run (--legs) records fewer legs, and counting the absent ones
+    # as "N -> 0" reports a change in another project's server where the only
+    # thing that changed is what was asked. Compare the legs both carry, and
+    # name the rest rather than diffing them.
+    legs_a = {r["leg"] for r in rows_a}
+    legs_b = {r["leg"] for r in rows_b}
+    both = legs_a & legs_b
     out = []
     for key in sorted(set(a) | set(b)):
-        if a[key] != b[key]:
+        if key[0] in both and a[key] != b[key]:
             out.append(f"    {key[0]:22} {key[1]:22} {a[key]:5} -> {b[key]}")
-    return out
+    return out, sorted(legs_a ^ legs_b), bool(both)
 
 
 class Step:
@@ -193,7 +220,18 @@ def main():
     ap.add_argument("--keep", action="store_true",
                     help="leave our daemon running (it is stopped by default)")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--records-dir", default=RECORDS,
+                    help="where records are written and the previous one is looked for")
+    ap.add_argument("--check-dir", default=CHECK,
+                    help="where to find crosstest.py and the sweeps; a seam for "
+                         "tools/check/crossruntest.py, which drives this script with "
+                         "scripted steps and no daemon at all")
+    ap.add_argument("--list-assertions", action="store_true",
+                    help="print the assertions this tool makes, one per line, and exit")
     args = ap.parse_args()
+    if args.list_assertions:
+        return assertlib.Assertions(ASSERTIONS).list_and_exit()
+    asserts = assertlib.Assertions(ASSERTIONS)
 
     client = os.path.join(REPO, "build", "prometheia-wire-client")
     daemon = os.path.join(REPO, "build", "prometheiad")
@@ -208,12 +246,16 @@ def main():
             cwd=REPO, text=True, capture_output=True)
         if b.returncode != 0:
             sys.stderr.write(b.stdout + b.stderr)
-            return "the binaries do not build"
+            print("cannot run: the binaries do not build", file=sys.stderr)
+            return 2
     for path in (client, daemon):
         if not os.path.exists(path):
-            return f"{os.path.relpath(path, REPO)} is missing (build it, or pass --no-build off)"
+            print(f"cannot run: {os.path.relpath(path, REPO)} is missing "
+                  "(build it, or drop --no-build)", file=sys.stderr)
+            return 2
     if not os.path.exists(args.ephemeris):
-        return f"{args.ephemeris} is missing; pass --ephemeris"
+        print(f"cannot run: {args.ephemeris} is missing; pass --ephemeris", file=sys.stderr)
+        return 2
 
     # Theirs: read-only, always. A daemon we did not start is one we never
     # stop, and the production port is never even the default.
@@ -241,17 +283,21 @@ def main():
             cwd=REPO, stdout=log, stderr=subprocess.STDOUT)
         if not wait_until_listening("127.0.0.1", args.ours_port, 30.0, started):
             started.send_signal(signal.SIGTERM)
-            return f"prometheiad did not come up on {ours}; see build/crossrun-prometheiad.log"
+            print(f"cannot run: prometheiad did not come up on {ours}; see "
+                  "build/crossrun-prometheiad.log", file=sys.stderr)
+            return 2
 
     out = args.out
-    previous = latest_record()
+    previous = latest_record(args.records_dir)
     if args.record and not out:
         today = datetime.date.today().isoformat()
-        out = os.path.join(RECORDS, f"{today}{next_record_letter()}.tsv")
+        os.makedirs(args.records_dir, exist_ok=True)
+        out = os.path.join(args.records_dir,
+                           f"{today}{next_record_letter(args.records_dir)}.tsv")
 
     steps = []
     try:
-        argv = [sys.executable, os.path.join(CHECK, "crosstest.py"),
+        argv = [sys.executable, os.path.join(args.check_dir, "crosstest.py"),
                 "--ours", ours, "--theirs", args.theirs]
         if args.legs:
             argv += ["--legs", args.legs]
@@ -266,11 +312,11 @@ def main():
                 host, port = endpoint(ep)
                 steps.append(run_step(Step(
                     f"corrapplied {who}",
-                    [sys.executable, os.path.join(CHECK, "corrapplied.py"),
+                    [sys.executable, os.path.join(args.check_dir, "corrapplied.py"),
                      "--host", host, "--port", str(port), "--client", client]), args.verbose))
                 steps.append(run_step(Step(
                     f"ratesweep {who}",
-                    [sys.executable, os.path.join(CHECK, "ratesweep.py"),
+                    [sys.executable, os.path.join(args.check_dir, "ratesweep.py"),
                      "--server", ep, "--client", client]), args.verbose))
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
@@ -285,19 +331,71 @@ def main():
         elif started is not None:
             print(f"\nours   left running (pid {started.pid}), as asked")
 
-    changes, compared_to = None, None
-    if out and os.path.exists(out) and previous and os.path.abspath(previous) != os.path.abspath(out):
-        try:
-            changes, compared_to = compare_records(out, previous), os.path.basename(previous)
-        except Exception as e:  # noqa: BLE001 -- a readable record beats a traceback
-            print(f"\n(could not compare against {previous}: {e})", file=sys.stderr)
+    # The cascade. A run that ran no step also wrote no record and compared
+    # nothing, and three assertions firing on one input is how a deleted
+    # check stays invisible: the specific truth first, the rest nested under
+    # "a step ran at all".
+    changes, compared_to, only_one = None, None, []
+    if not asserts.judge("nothing-ran", not steps,
+                         "not one step ran, so there is no record, nothing to compare, "
+                         "and the summary below is a summary of nothing"):
+        # A record that was asked for and did not appear, or appeared with no
+        # rows, used to print its path in the summary and exit 0 -- a path to
+        # a file that is not there, and "found nothing new" about nothing.
+        wrote = bool(out) and os.path.exists(out)
+        rows = []
+        if wrote:
+            try:
+                rows = read_table(out)
+            except Exception as e:  # noqa: BLE001 -- a summary beats a traceback
+                print(f"\n(could not read {out}: {e})", file=sys.stderr)
+        if not asserts.judge("record-missing", bool(out) and not wrote,
+                             f"{out} was asked for and no file appeared: the step that "
+                             "writes it left nothing behind, so there is no record of "
+                             "this run"):
+            if not asserts.judge("record-empty", wrote and not rows,
+                                 f"{out} has no rows, so nothing was cross-tested and "
+                                 "\"found nothing new\" would be a statement about "
+                                 "nothing"):
+                why = None
+                have_previous = bool(previous) and (
+                    not out or os.path.abspath(previous) != os.path.abspath(out))
+                if wrote and have_previous:
+                    try:
+                        changes, only_one, overlapped = compare_records(out, previous)
+                        compared_to = os.path.basename(previous)
+                        if not overlapped:
+                            changes, compared_to = None, None
+                            why = (f"{os.path.basename(previous)} and this run share no "
+                                   "leg, so there is nothing to compare; run the same "
+                                   "legs to compare them")
+                    except Exception as e:  # noqa: BLE001
+                        why = (f"could not compare against {os.path.basename(previous)}"
+                               f": {e}")
+                        print(f"\n({why})", file=sys.stderr)
+                # Having a previous record and not comparing against it is the
+                # quiet failure here: the run still prints a summary and a
+                # record path, and nothing says it cannot tell whether
+                # anything changed. Having no previous record is a fact, not a
+                # fault, and does not fire.
+                asserts.judge("comparison-skipped",
+                              bool(have_previous) and compared_to is None,
+                              (why or "nothing was compared against "
+                               f"{os.path.basename(previous) if previous else 'it'}")
+                              + ", so this run cannot say whether anything changed "
+                                "since the last record")
 
     print("\n=== summary")
+    asserts.judge("step-failed", any(s.code != 0 for s in steps),
+                  "a step exited non-zero: "
+                  + ", ".join(s.name for s in steps if s.code != 0))
     for s in steps:
         mark = "ok  " if s.code == 0 else "FAIL"
         if s.code != 0 and s.name == "crosstest" and changes == []:
             mark = "same"
         print(f"  {mark} {s.name}" + (f": {s.tail}" if s.tail else ""))
+    if only_one:
+        print("\n  not compared (only one record carries them): " + ", ".join(only_one))
     if compared_to is not None:
         if not changes:
             print(f"\n  every verdict is what {compared_to} already carries: this run found "
@@ -311,8 +409,8 @@ def main():
         print(f"  record {os.path.relpath(out, REPO) if inside else os.path.abspath(out)}")
         print("  a record is a file, not a verdict: write up what it means in "
               "docs/CROSS-TEST.md")
-    bad = [s.name for s in steps if s.code != 0]
-    return 1 if bad else 0
+    asserts.report()
+    return 1 if asserts.any_fired() else 0
 
 
 if __name__ == "__main__":

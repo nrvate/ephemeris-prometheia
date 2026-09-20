@@ -337,6 +337,13 @@ terms.
   `tools/scheduled.sh --with-cross` runs it, opt-in on purpose: a thing
   that reaches outside this tree should be asked for and not arrive on a
   timer. The sequence is no longer something to remember.
+  - **Its own assertions, 2026-09-20** (`tools/check/crossruntest.py`): five
+    named, four of which were silent -- a record never written, a record
+    with no rows, a comparison that raised, and an interrupted run -- plus a
+    narrowed run that reported every leg it skipped as a change in their
+    server. Exit 2 now means "could not run" and nothing else. Driven with
+    scripted steps and two sockets, so no daemon starts and theirs is never
+    touched.
   - First run: `docs/crosstest/2026-09-20v.tsv`, 3,758 rows, identical to
     record `u` verdict for verdict except the three legs built since (41
     rows, all agree) — the reproduction `u` never had.
@@ -426,11 +433,12 @@ terms.
     its cache plateau passes any bound, and it must be pointed at a fresh
     daemon (SERVER.md).
   - **The hole this does not close.** Every fault injection described in
-    these documents was done by hand once and never re-run. Seven tools now
+    these documents was done by hand once and never re-run. Eight tools now
     have selftests (`prometheia-load`, `corrapplied.py`, `crosstest.py`'s
     adjudicators, `ratesweep.py`, `ephproto4_registries.py`, `stars_fk5.py`,
-    `ephproto4_fixtures.py`); `crossrun.py` still carries its falsification
-    as prose, as do `crosstest.py`'s legs. That is seven legs, not the
+    `ephproto4_fixtures.py`, `crossrun.py`), which is every tool under
+    `tools/check/` that accuses; `crosstest.py`'s legs, as opposed to its
+    adjudicators, still carry theirs as prose. That is eight legs, not the
     hole.
   - **`tools/check/adjudicatetest.py`** (2026-09-20) is the second, and
     **the first falsification in this repo that runs on every commit**:

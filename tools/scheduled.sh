@@ -83,6 +83,16 @@ step "gate" "$repo/tools/gate.sh"
 # twenty seconds, which a pre-commit gate should not spend.
 step "corrapplied selftest" python3 "$repo/tools/check/corrtest.py"
 
+# crossrun.py's assertions, with scripted steps and two sockets standing in
+# for the daemons -- no daemon is started and their server is never touched.
+# It needs the built binaries, which crossrun.py checks for before anything
+# else, so it runs here after the gate rather than inside it.
+if [[ -x "$repo/build/prometheiad" ]] && [[ -x "$repo/build/prometheia-wire-client" ]]; then
+    step "crossrun selftest" python3 "$repo/tools/check/crossruntest.py"
+else
+    skipped+=("crossrun selftest: needs build/prometheiad and build/prometheia-wire-client")
+fi
+
 # stars_fk5.py's assertions, each against a mutated copy of the catalogue and
 # a scripted client. It is the only check that compares a server with an
 # outside catalogue, so a quiet catalogue -- truncated, or columns moved -- is

@@ -1131,10 +1131,12 @@ and `--threads 4`. The client ran on the same host.
     `ephproto4_fixtures.py` has `fixturestest.py`, which runs in the gate
     although the tool it grades cannot: the reader needs Astrolog's
     conformance directory, its assertions need only a set that
-    `fakefixtures.py` builds. Named rather than counted, because a number
-    here drifts and a list does not: `crossrun.py` still carries its
-    falsification as prose, and `crosstest.py`'s legs — as opposed to its
-    adjudicators — do too.
+    `fakefixtures.py` builds. `crossrun.py` has `crossruntest.py`, which drives it
+    with scripted steps and two sockets in place of the daemons.
+    Named rather than counted, because a number here drifts and a list does
+    not: what still carries its falsification as prose is `crosstest.py`'s
+    legs — as opposed to its adjudicators — and nothing else under
+    `tools/check/`.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
   "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none

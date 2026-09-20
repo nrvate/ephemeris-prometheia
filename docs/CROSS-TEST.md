@@ -317,10 +317,10 @@ Every one of these has cost this project or the Astrolog project real time.
     never repeated; nothing re-ran any of them, so they describe a build that
     may be two months gone. `tools/check/loadselftest.py` (2026-09-20) is the
     structural version for one tool, and the Astrolog side's
-    `ephsrv-soak.sh --selftest` is theirs. **One checker under
-    `tools/check/` still carries prose** -- `crossrun.py` -- named rather
-    than counted, because a number drifts and a list does not; so the hole
-    is narrowed by seven legs, not closed — which is what their side said of theirs,
+    `ephsrv-soak.sh --selftest` is theirs. **Every checker under
+    `tools/check/` now has one**; what still carries its falsification as
+    prose is `crosstest.py`'s legs, as opposed to its adjudicators, so the
+    hole is narrowed by eight legs, not closed — which is what their side said of theirs,
     and is worth repeating rather than rounding up.
   - **The adjudicators are the second leg, and the only one that re-runs
     on every commit** (`tools/check/adjudicatetest.py`, 2026-09-20). The
@@ -1719,6 +1719,23 @@ found *nothing*, and a summary that says "99 findings" every time is one
 nobody reads by the third run. So the run compares its table against the
 previous record, by leg and verdict, and says either what changed or that
 nothing did.
+
+**Exit status is exactly "did any assertion fire"** (2026-09-20), over five
+named assertions, and four of them were silent failures. A record asked for
+and never written printed its own path in the summary and exited 0; a record
+with no rows read out as "this run found nothing new" about nothing; a
+comparison that raised printed a line to stderr and exited 0; and a run
+interrupted during the first step exited 0 with a summary of nothing. The
+comparison also diffed leg by leg across the whole table, so a narrowed run
+(`--legs`) reported every leg it had not run as `N -> 0` — a change in
+*their* server where the only thing that changed was what was asked. It now
+compares the legs both records carry and names the rest as not compared.
+Exit 2 is reserved for "could not run" — their daemon down, ours not coming
+up, the binaries missing — because a script pointed at another project's
+server must never let that read as a finding, or as a pass.
+`tools/check/crossruntest.py` drives one case per assertion with scripted
+steps (`fakecross.py`) and two sockets in place of the daemons, so it starts
+no daemon and never touches theirs; `tools/scheduled.sh` runs it.
 
 **First run, `docs/crosstest/2026-09-20v.tsv`** (3,758 rows, ours
 `1f70d75`, theirs `astrolog-ephd/2.0` built 2026-09-20T04:57:10Z). The
