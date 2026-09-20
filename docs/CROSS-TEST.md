@@ -1215,6 +1215,28 @@ osculating node at 1800. This sweep reproduces that figure to six digits
 (4.0532e-3) — it is just under their 5e-3 and so never tripped their
 check. The aphelion, twenty times worse, was not in their list.
 
+**Fixed the same day, at their `b631333`**
+(`docs/crosstest/2026-09-20-ratesweep-theirs-fixed.tsv`). Their account:
+Swiss's `SE_TRUE_NODE`, `SE_MEAN_APOG`, `SE_OSCU_APOG` and `SE_INTP_APOG`
+are geocentric definitions that it does not serve topocentrically and does
+not say so, returning the geocentric position under `SEFLG_TOPOCTR` while
+still moving the rate columns; their server passed that through. The named
+points now fall through to `swe_nod_aps`, which honours the site, at the
+cost of the 0.06″ by which its direction differs from the named body's.
+Topocentric with the interpolated method has no correct destination there
+and is now refused rather than answered wrongly.
+
+All eight rows are gone: the osculating apogee falls 7.93e-2 → 2.5e-6
+°/day. Re-measured here, their worst is now **1.3939e-3 °/day**, and it is
+no longer an orbit point — it is the topocentric Moon itself, their
+registry §2.6.
+
+The fix also closes a gap against *our* answers, which self-consistency
+alone could not have shown: their topocentric lunar osculating points now
+sit **0.089″–0.32″** from ours, about the `swe_nod_aps` direction
+difference they described. Before it, the aphelion differed by the whole
+diurnal parallax, some 3,600″.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
