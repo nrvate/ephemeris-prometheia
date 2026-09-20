@@ -3,8 +3,9 @@
 #
 # The pre-commit gate, run locally (the project uses no hosted CI):
 #   1. clang-format check over include/ src/ server/ tests/ tools/ fuzz/ (third_party excluded)
-#   1a. the v4 registries, crosstest.py's adjudicators, and ratesweep.py's
-#       assertions -- each against scripted inputs, no daemon and no ephemeris
+#   1a. the v4 registries; then the assertions of the registries checker,
+#       crosstest.py's adjudicators and ratesweep.py -- each against scripted
+#       or mutated inputs, no daemon and no ephemeris
 #   2. Release build + ctest in build/
 #   3. ASan+UBSan build + ctest in build-asan/
 # Tests run serially: the integrator benchmark asserts a wall-clock bound.
@@ -66,9 +67,13 @@ format_check() {
 echo "== format ($("$clang_format" --version | head -1))"
 step format_check
 
-# The vendored protocol v4 pair must agree by name (instant, no build).
+# The vendored protocol v4 pair must agree by name (instant, no build),
+# and the checker that says so is itself graded against a mutated copy of
+# the pair -- never the pair, which is the byte-level authority for v4.
 echo "== registries (protocol v4, by name)"
 step python3 tools/check/ephproto4_registries.py
+echo "== registries checker (by assertion)"
+step python3 tools/check/registriestest.py
 
 # The cross-test's adjudicators decide what a disagreement means, and they
 # are what speaks to the other project. They are pure functions of the

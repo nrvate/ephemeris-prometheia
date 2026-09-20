@@ -1106,11 +1106,12 @@ and `--threads 4`. The client ran on the same host.
     seconds. `tools/scheduled.sh` runs it (below).
   - **It covers one tool.** `corrapplied.py` has had the same treatment
     since (`corrtest.py`, above) and `crosstest.py`'s adjudicators theirs.
-    `ratesweep.py` has it too (`ratestest.py`, in the gate). Named rather
-    than counted, because a number here drifts and a list does not:
-    `crossrun.py`, `ephproto4_fixtures.py`, `ephproto4_registries.py` and
-    `stars_fk5.py` still carry their falsifications as prose, and
-    `crosstest.py`'s legs — as opposed to its adjudicators — do too.
+    `ratesweep.py` has it too (`ratestest.py`), and so does
+    `ephproto4_registries.py` (`registriestest.py`); both run in the gate.
+    Named rather than counted, because a number here drifts and a list does
+    not: `crossrun.py`, `ephproto4_fixtures.py` and `stars_fk5.py` still
+    carry their falsifications as prose, and `crosstest.py`'s legs — as
+    opposed to its adjudicators — do too.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
   "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none

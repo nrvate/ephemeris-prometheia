@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 """Checks the vendored protocol v4 pair against each other BY NAME.
 
 third_party/ephproto/v4/{ephproto.h,registries.json} are a pinned pair, both
@@ -15,16 +16,47 @@ say "ok", with the count it prints derived from the same file that lost it.
 
 Run as part of tools/gate.sh, and by hand:
     tools/check/ephproto4_registries.py
-Exit 0 = agree, 1 = disagreement.
+    tools/check/ephproto4_registries.py --header H --registries J   (a copy)
+
+Exit status is exactly "did any assertion fire"; `--list-assertions` prints
+them and tools/check/registriestest.py drives one mutated copy of the
+vendored pair per assertion.  The pair itself is never touched: the two
+paths above exist so the selftest can point at a temporary copy, because the
+byte-level authority for protocol v4 is what is in third_party/.
 """
 
+import argparse
 import json
 import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import assertlib  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 V4 = os.path.normpath(os.path.join(HERE, "..", "..", "third_party", "ephproto", "v4"))
+
+# What this checker asserts, by name. The messages say what the maintainer
+# must DO -- re-vendor, extend the tables -- so the names follow the action
+# and not the line of code that noticed.
+ASSERTIONS = (
+    "pin-lost-a-registry",       # this checker pins one the JSON no longer carries
+    "registry-unknown",          # the JSON carries one no table here names
+    "header-symbol-missing",     # the header no longer spells a symbol we pin
+    "value-disagrees",           # name, value or tag differs between the pair
+    "registry-grew",             # a JSON entry the header table does not cover
+    "reserved-now-implemented",  # a value reserved by design that the header now spells
+)
+# There is deliberately no "nothing-checked" here, and the reason is worth
+# keeping. Every other checker in tools/check/ needs one, because a run that
+# measured nothing otherwise reports a pass. This one cannot: the count it
+# prints is bounded below by `pin-lost-a-registry`, which names all 23
+# registries the tables pin, so a registries.json that lost enough to make
+# the count zero fires that assertion 22 times over first. Adding the
+# assertion anyway would have been a check that could not fire -- and
+# registriestest.py refuses an assertion no case exercises, which is how it
+# was noticed rather than shipped.
 
 
 def header_symbols(text):
@@ -70,9 +102,20 @@ def header_tokens(text, array):
 
 
 def main():
-    with open(os.path.join(V4, "ephproto.h")) as f:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--header", default=os.path.join(V4, "ephproto.h"))
+    ap.add_argument("--registries", default=os.path.join(V4, "registries.json"))
+    ap.add_argument("--list-assertions", action="store_true",
+                    help="print the assertions this tool makes, one per line, and exit")
+    args = ap.parse_args()
+    if args.list_assertions:
+        return assertlib.Assertions(ASSERTIONS).list_and_exit()
+
+    asserts = assertlib.Assertions(ASSERTIONS)
+    with open(args.header) as f:
         text = f.read()
-    with open(os.path.join(V4, "registries.json")) as f:
+    with open(args.registries) as f:
         reg = json.load(f)["registries"]
     syms = header_symbols(text)
 
@@ -154,6 +197,10 @@ def main():
     # Reserved by design: the registry holds the value, the header implements
     # nothing for it (an unknown type is kUnsupported at the session).
     reserved = {"message_types": {11, 12, 13, 14}}
+    # The header-symbol prefix each reserved registry uses, so "reserved by
+    # design" can be checked rather than assumed: the reservation is a claim
+    # that no header symbol spells the value, and claims expire.
+    prefix = {"message_types": "kMsg"}
     # No header constants: the registry's token strings are the payload of
     # REQUEST TLV 0x0003 and this check pins only the tag (in tlv_map).
     unchecked = {"precession_model_tokens"}
@@ -168,6 +215,12 @@ def main():
     for name in gone:
         bad.append(f"{name}: this checker pins it and the vendored registries.json no longer "
                    f"carries it -- the pair changed shape, re-vendor deliberately")
+    asserts.judge("pin-lost-a-registry", bool(gone))
+
+    # Each judge below is evaluated on every pass, not only when it fires:
+    # "this assertion was reached" and "this assertion fired" are different
+    # facts, and a selftest can only require the first if the tool records it.
+    unknown = []
     n_checked = 0
     for name, r in reg.items():
         if name in unchecked:
@@ -178,26 +231,36 @@ def main():
             array = token_map[name]
             want = header_tokens(text, array)
             got = [e["token"] for e in entries]
-            if want != got:
-                bad.append(f"{name}: header {array} differs from the registry "
-                           f"({len(want or [])} vs {len(got)} tokens)"
-                           + ("" if want == got else
-                              "; first diff: " + next((f"{a!r} != {b!r}" for a, b in zip(want, got)
-                                                       if a != b), "length")))
+            asserts.judge(
+                "value-disagrees", want != got,
+                f"{name}: header {array} differs from the registry "
+                f"({len(want or [])} vs {len(got)} tokens)"
+                + ("" if want == got else
+                   "; first diff: " + next((f"{a!r} != {b!r}" for a, b in zip(want, got)
+                                            if a != b), "length")), bad)
             continue
         if name in value_map:
             spec = value_map[name]
             if isinstance(spec, str):
                 # A registry whose header spells only the largest value.
                 want = max(x.get("value", x.get("mask")) for x in entries)
-                if syms.get(spec) != want:
-                    bad.append(f"{name}: largest value {want} in the registry, "
-                               f"header {spec} = {syms.get(spec)}")
+                asserts.judge("header-symbol-missing", spec not in syms,
+                              f"{name}: header symbol {spec} not found", bad)
+                asserts.judge(
+                    "value-disagrees", spec in syms and syms[spec] != want,
+                    f"{name}: largest value {want} in the registry, "
+                    f"header {spec} = {syms.get(spec)}", bad)
                 continue
             covered = set()
             for sym, jname in spec:
-                if sym not in syms:
-                    bad.append(f"{name}: header symbol {sym} not found")
+                if asserts.judge("header-symbol-missing", sym not in syms,
+                                 f"{name}: header symbol {sym} not found", bad):
+                    # Without this the entry it names would be reported again
+                    # below as "the registry grew", which tells the reader to
+                    # re-vendor when what happened is that the header lost a
+                    # symbol. One fault, one instruction.
+                    covered.update(x.get("value", x.get("mask")) for x in entries
+                                   if x.get("name") == jname)
                     continue
                 if jname is not None:
                     e = [x for x in entries if x["name"] == jname]
@@ -205,44 +268,65 @@ def main():
                     # No name known: match the registry entry by the symbol's value.
                     e = [x for x in entries
                          if x.get("value", x.get("mask")) == syms[sym]]
-                if not e:
-                    bad.append(f"{name}: no entry for {jname or sym} "
-                               f"(header value {syms[sym]})")
+                if asserts.judge("value-disagrees", not e,
+                                 f"{name}: no entry for {jname or sym} "
+                                 f"(header value {syms[sym]})", bad):
                     continue
                 v = e[0].get("value", e[0].get("mask"))
-                if v != syms[sym]:
-                    bad.append(f"{name}: {jname or sym} = {v} in the registry, "
-                               f"header {sym} = {syms[sym]}")
+                asserts.judge("value-disagrees", v != syms[sym],
+                              f"{name}: {jname or sym} = {v} in the registry, "
+                              f"header {sym} = {syms[sym]}", bad)
                 covered.add(v)
             # Every valued entry the header table does not cover, and is not
             # reserved by design, is the registry having grown: re-vendor.
             for x in entries:
                 v = x.get("value", x.get("mask"))
-                if v is None or v in covered or v in reserved.get(name, set()):
+                if v is None or v in covered:
                     continue
-                bad.append(f"{name}: registry entry {x['name']!r} ({v}) is not in the "
-                           f"header table -- re-vendor")
+                # A value reserved by design is skipped here, so a header that
+                # starts implementing one would silently leave this registry
+                # with less coverage than the count says. The reservation is
+                # the claim "no header symbol spells this", so check it.
+                if v in reserved.get(name, set()):
+                    spells = sorted(s for s, sv in syms.items()
+                                    if sv == v and s.startswith(prefix.get(name, "\0")))
+                    asserts.judge(
+                        "reserved-now-implemented", bool(spells),
+                        f"{name}: {v} is reserved by design in this checker and the header "
+                        f"now spells it ({', '.join(spells)}) -- the reservation has expired "
+                        f"and that entry is checked by nothing", bad)
+                    continue
+                asserts.judge("registry-grew", True,
+                              f"{name}: registry entry {x['name']!r} ({v}) is not in the "
+                              f"header table -- re-vendor", bad)
             continue
         if name in tlv_map:
             for sym in tlv_map[name]:
-                if sym not in syms:
-                    bad.append(f"{name}: header symbol {sym} not found")
+                if asserts.judge("header-symbol-missing", sym not in syms,
+                                 f"{name}: header symbol {sym} not found", bad):
                     continue
-                if not any(e["tag"] == syms[sym] for e in entries):
-                    bad.append(f"{name}: no TLV with tag {hex(syms[sym])} ({sym})")
+                asserts.judge("value-disagrees",
+                              not any(e["tag"] == syms[sym] for e in entries),
+                              f"{name}: no TLV with tag {hex(syms[sym])} ({sym})", bad)
             for e in entries:
-                if e["tag"] not in {syms[s] for s in tlv_map[name] if s in syms}:
-                    bad.append(f"{name}: TLV tag {hex(e['tag'])} is not in the header -- re-vendor")
+                asserts.judge(
+                    "registry-grew",
+                    e["tag"] not in {syms[s] for s in tlv_map[name] if s in syms},
+                    f"{name}: TLV tag {hex(e['tag'])} is not in the header -- re-vendor", bad)
             continue
+        unknown.append(name)
         bad.append(f"{name}: registry unknown to this checker -- extend the tables")
+    asserts.judge("registry-unknown", bool(unknown))
 
     for b in bad:
         print("DISAGREE " + b)
     if bad:
         print(f"{len(bad)} disagreement(s); the vendored pair must be re-checked and re-pinned")
-        return 1
-    print(f"registries ok: {n_checked} of {len(reg)} registries checked, {len(syms)} header symbols, by name and value")
-    return 0
+    else:
+        print(f"registries ok: {n_checked} of {len(reg)} registries checked, "
+              f"{len(syms)} header symbols, by name and value")
+    asserts.report()
+    return 1 if asserts.any_fired() else 0
 
 
 if __name__ == "__main__":

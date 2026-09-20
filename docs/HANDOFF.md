@@ -354,6 +354,26 @@ terms.
   which is why we still send no `0x0013`. It needs a daemon, so the sweep
   itself is not in `tools/gate.sh`; `tools/scheduled.sh` runs it through
   `crossrun.py --with-cross`.
+  - **The registries checker has one too** (`tools/check/registriestest.py`,
+    2026-09-20), and it is the last gate-resident checker to get one. Seven
+    cases against a *copy* of the vendored v4 pair — the pair itself is the
+    byte-level authority and is never touched — each mutating it one way:
+    a registry removed, one added that no table pins, a symbol renamed, a
+    value changed, an entry added, and a reserved message type the header
+    starts spelling. That last is a new check: the checker skips values
+    "reserved by design", so a header that begins implementing one was the
+    single way its coverage could shrink with every count unchanged.
+    - Two things fell out of writing it. A drafted `nothing-checked`
+      assertion turned out **unfirable** — a `registries.json` empty enough
+      to make the count zero fires `pin-lost-a-registry` twenty-two times
+      first — and was dropped rather than shipped as a check that cannot
+      fail; the selftest's refusal of an unexercised assertion is what
+      caught it. And a missing header symbol used to produce a *second*,
+      misleading message telling the reader to re-vendor the registry, when
+      what moved was the header. One fault, one instruction.
+    - Every mutation asserts that it changed the file. The first run of the
+      reserved-value case anchored on a string the header does not contain,
+      and said so instead of passing.
   - **Its own assertions are in the gate** (`tools/check/ratestest.py`,
     2026-09-20). What nothing graded was not the arithmetic: `asked` and
     `answered` were counted, printed, and compared to nothing, so a sweep
