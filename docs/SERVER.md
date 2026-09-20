@@ -574,7 +574,24 @@ sharing no code with Astrolog's codec or with its fixture generator. A
 disagreement between the two readings means the spec, one parser or one
 fixture is wrong. Run it against the conformance directory in Astrolog's
 tree; it reports the verdict (ok, malformed, unsupported) for every fixture
-and exits nonzero on a disagreement. Runs: 74/74 on the first drop, 85/85 on
+and exits nonzero on a disagreement.
+
+**Exit status is exactly "did any assertion fire"** (2026-09-20), over six
+named assertions, and three of them are not about the bytes. A manifest
+listing no fixture printed "0/0 agree" and exited 0; a manifest with no
+`# set-sha256` line printed a note and exited 0, so nothing said the
+directory had been read whole; and a missing `JUDGEMENTS.tsv` skipped the
+per-kind drop's section 2 in silence. An inconsistent set is still not a
+finding — a directory read while their generator was writing it exits 2 with
+no verdict reported, since a half-written set must not become an accusation.
+`tools/check/fixturestest.py` grades all six against a set
+`tools/check/fakefixtures.py` builds, and grades the two refusals on their
+messages, which the case table cannot tell apart. Those built fixtures carry
+no authority about the protocol. They are written from the vendored
+`ephproto.h` and `registries.json` and their expected verdicts are what
+*this* reader should say, so a misunderstanding the builder and the reader
+share stays invisible; Astrolog's set remains the only thing that says
+whether the reader reads the protocol right. Runs: 74/74 on the first drop, 85/85 on
 the second, and — 2026-09-17, after the reader learned `deadlineMs`, the
 batched LOOKUP, `u8 nQueries` and `corrApplied` (all its own staleness, not
 the drop's bytes) — **91/91 on the corrApplied drop** (ephv4 `0fbc863`,
@@ -1111,9 +1128,12 @@ and `--threads 4`. The client ran on the same host.
     `stars_fk5.py` has `starstest.py`, which mutates a copy of `stars-raw/`
     and answers from a scripted client, so it needs no daemon but does need
     pyerfa and the catalogue: `tools/scheduled.sh`, not the gate.
-    Named rather than counted, because a number here drifts and a list does
-    not: `crossrun.py` and `ephproto4_fixtures.py` still carry their
-    falsifications as prose, and `crosstest.py`'s legs — as opposed to its
+    `ephproto4_fixtures.py` has `fixturestest.py`, which runs in the gate
+    although the tool it grades cannot: the reader needs Astrolog's
+    conformance directory, its assertions need only a set that
+    `fakefixtures.py` builds. Named rather than counted, because a number
+    here drifts and a list does not: `crossrun.py` still carries its
+    falsification as prose, and `crosstest.py`'s legs — as opposed to its
     adjudicators — do too.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,

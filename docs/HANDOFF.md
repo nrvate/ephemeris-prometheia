@@ -426,12 +426,12 @@ terms.
     its cache plateau passes any bound, and it must be pointed at a fresh
     daemon (SERVER.md).
   - **The hole this does not close.** Every fault injection described in
-    these documents was done by hand once and never re-run. Six tools now
+    these documents was done by hand once and never re-run. Seven tools now
     have selftests (`prometheia-load`, `corrapplied.py`, `crosstest.py`'s
-    adjudicators, `ratesweep.py`, `ephproto4_registries.py`,
-    `stars_fk5.py`); `crossrun.py` and `ephproto4_fixtures.py` still carry
-    their falsifications as prose, as do `crosstest.py`'s legs. That is six
-    legs, not the hole.
+    adjudicators, `ratesweep.py`, `ephproto4_registries.py`, `stars_fk5.py`,
+    `ephproto4_fixtures.py`); `crossrun.py` still carries its falsification
+    as prose, as do `crosstest.py`'s legs. That is seven legs, not the
+    hole.
   - **`tools/check/adjudicatetest.py`** (2026-09-20) is the second, and
     **the first falsification in this repo that runs on every commit**:
     `crosstest.py`'s three `adjudicate_*` functions are pure functions of

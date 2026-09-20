@@ -4,8 +4,8 @@
 # The pre-commit gate, run locally (the project uses no hosted CI):
 #   1. clang-format check over include/ src/ server/ tests/ tools/ fuzz/ (third_party excluded)
 #   1a. the v4 registries; then the assertions of the registries checker,
-#       crosstest.py's adjudicators and ratesweep.py -- each against scripted
-#       or mutated inputs, no daemon and no ephemeris
+#       crosstest.py's adjudicators, ratesweep.py and the v4 fixture reader --
+#       each against scripted or mutated inputs, no daemon and no ephemeris
 #   2. Release build + ctest in build/
 #   3. ASan+UBSan build + ctest in build-asan/
 # Tests run serially: the integrator benchmark asserts a wall-clock bound.
@@ -90,6 +90,14 @@ step python3 tools/check/adjudicatetest.py
 # but spends fourteen, so it runs from tools/scheduled.sh instead.
 echo "== rate sweep (ratesweep.py, by assertion)"
 step python3 tools/check/ratestest.py
+
+# ephproto4_fixtures.py is our second, independent reading of protocol v4 --
+# section 3 is locked on its verdict -- and it cannot run here: it reads
+# Astrolog's conformance directory, which is not in this tree. Its assertions
+# can, against a set tools/check/fakefixtures.py builds, which is why the
+# selftest is in the gate although the tool it grades is not.
+echo "== fixture reader (ephproto4_fixtures.py, by assertion)"
+step python3 tools/check/fixturestest.py
 
 tests() {
     local log

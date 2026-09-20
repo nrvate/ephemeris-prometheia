@@ -25,6 +25,18 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import assertlib  # noqa: E402
+
+ASSERTIONS = (
+    "nothing-read",           # the manifest listed no fixture at all
+    "no-set-sha",             # ... and no checksum, so the set cannot be checked
+    "verdict-differs",        # a fixture's verdict is not the manifest's
+    "judgements-absent",      # JUDGEMENTS.tsv is missing: section 2 went unchecked
+    "judgement-differs",      # a judgement is not the table's
+    "judgements-one-sided",   # the table exercises one outcome, so it grades nothing
+)
+
 MAGIC = 0x1EF0
 CANONICAL_NAN = 0x7FF8000000000000
 CANONICAL_NAN_F32 = 0x7FC00000  # §3.1 since the floats drop (Astrolog 114f2a5)
@@ -780,12 +792,19 @@ def verdict(data):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dir", required=True, help="the conformance directory")
+    ap.add_argument("--dir", help="the conformance directory")
     ap.add_argument("--judge", nargs=2, action="append", metavar=("REQUEST", "WELCOME"),
                     default=[], help="judge a REQUEST fixture against a WELCOME fixture's "
                     "correction capabilities (the per-kind drop, section 2); repeatable")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--list-assertions", action="store_true",
+                    help="print the assertions this tool makes, one per line, and exit")
     args = ap.parse_args()
+    if args.list_assertions:
+        return assertlib.Assertions(ASSERTIONS).list_and_exit()
+    if not args.dir:
+        ap.error("--dir is required")
+    asserts = assertlib.Assertions(ASSERTIONS)
 
     manifest = os.path.join(args.dir, "MANIFEST.tsv")
     rows = []
@@ -812,9 +831,15 @@ def main():
         with open(os.path.join(args.dir, cells[0]), "rb") as fh:
             h.update(fh.read())
     computed = h.hexdigest()
+    # A set with no checksum is not a set that passed: nothing says the
+    # directory was read whole. This was a note for one line of output and
+    # was therefore indistinguishable from a pass.
+    asserts.judge("no-set-sha", set_sha is None,
+                  "the manifest carries no '# set-sha256' line, so nothing says the "
+                  "directory was read whole; a set half-written by the generator would "
+                  "be reported against rather than caught")
     if set_sha is None:
-        print("note: the manifest carries no '# set-sha256' line; the set cannot be "
-              "checked for consistency")
+        pass
     elif set_sha != computed:
         print(f"set-sha256 MISMATCH: manifest {set_sha[:16]}…, computed {computed[:16]}… — "
               "the set is inconsistent (half-written?), so no verdict is reported")
@@ -822,6 +847,13 @@ def main():
     else:
         print(f"set-sha256 ok ({set_sha[:16]}…)")
 
+    # A manifest with no rows used to print "0/0 agree; 0 disagreements" and
+    # exit 0. The count came from the same file that listed nothing, so no
+    # other number could notice -- the same shape as stars_fk5.py's
+    # `nothing-compared`.
+    asserts.judge("nothing-read", not rows,
+                  f"{manifest} lists no fixture, so \"0/0 agree\" would be a statement "
+                  "about nothing; check the directory and the manifest's rows")
     agree = 0
     disagreements = []
     for file, direction, mtype, expect, note in rows:
@@ -839,11 +871,19 @@ def main():
                   + (f" — {why}" if why else ""))
             print(f"       note: {note}")
     print(f"\n{agree}/{len(rows)} agree; {len(disagreements)} disagreements")
+    asserts.judge("verdict-differs", bool(disagreements),
+                  f"{len(disagreements)} fixture(s) read differently here than the "
+                  "manifest says; the spec, one parser or one fixture is wrong")
     # JUDGEMENTS.tsv (per-kind drop, section 2): request fixtures whose
     # outcome depends on a server's WELCOME, each paired with one. Its
     # set-sha256 is over the table's non-comment lines exactly as written.
     judgements = os.path.join(args.dir, "JUDGEMENTS.tsv")
     judged_bad = 0
+    # Absent means section 2 was not checked at all, which is not a pass. The
+    # table has been part of the set since the per-kind drop.
+    asserts.judge("judgements-absent", not os.path.exists(judgements),
+                  f"{judgements} is missing, so the per-kind drop's section 2 -- whether "
+                  "a request is served under a WELCOME -- went unchecked")
     if os.path.exists(judgements):
         with open(judgements) as fh:
             lines = fh.read().splitlines(keepends=True)
@@ -873,10 +913,13 @@ def main():
                 print(f"  DIFF judgement {req} under {wel}: table says {expect}, we say {got}")
         print(f"judgements: {len(body) - judged_bad}/{len(body)} agree "
               f"({outcomes['served']} served, {outcomes['error11']} ERROR 11)")
-        if not outcomes["served"] or not outcomes["error11"]:
-            # A table of one outcome passes a reader that always gives it.
-            print("judgements: FAIL, the table does not exercise both outcomes")
-            judged_bad += 1
+        asserts.judge("judgement-differs", bool(judged_bad),
+                      f"{judged_bad} judgement(s) differ from the table")
+        # A table of one outcome passes a reader that always gives it.
+        asserts.judge("judgements-one-sided",
+                      not outcomes["served"] or not outcomes["error11"],
+                      "the judgements table does not exercise both outcomes, so a reader "
+                      "that always answers the one it holds would pass it")
     for req, wel in args.judge:
         def load(name):
             with open(os.path.join(args.dir, name)) as fh:
@@ -884,7 +927,8 @@ def main():
                     bytes.fromhex("".join(fh.read().split())))
             return parse_payload(version, _t, rid, payload)
         print(f"  judge {req} under {wel}: {judge(load(wel), load(req))}")
-    return 1 if disagreements or judged_bad else 0
+    asserts.report()
+    return 1 if asserts.any_fired() else 0
 
 
 if __name__ == "__main__":
