@@ -20,9 +20,26 @@ if [[ "${1:-}" == "-j" && -n "${2:-}" ]]; then
 fi
 clang_format="${CLANG_FORMAT:-clang-format}"
 
-echo "== format ($("$clang_format" --version | head -1))"
-find include src server tests tools fuzz \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \
-    -o -name '*.inl' \) -print0 | xargs -0 "$clang_format" --dry-run -Werror
+# A failing step's output used to go to a mktemp file that was deleted after
+# being printed once, so a failure that scrolled away left nothing behind:
+# the gate failure of 2026-09-19 is recorded in docs/HANDOFF.md as "test name
+# unknown" for exactly that reason, and no amount of re-running found it.
+# The log now survives the run that produced it.
+failure_log="$PWD/build/gate-failure.log"
+mkdir -p "$PWD/build"
+rm -f "$failure_log"
+
+# What this run could see. Real-data suites SKIP when their files are absent,
+# so two runs of the same commit can check different things; a green means
+# nothing without knowing which. PROMETHEIA_ASTROLOG in particular points the
+# drift check at another project's working tree, which moves under us.
+# `|| true` is load-bearing: under `set -e` a grep that matches nothing
+# fails, and a command substitution that fails aborts the script -- which it
+# did, silently and with no output at all, the first time this ran on a
+# machine with no PROMETHEIA_* set. A step added to make failures legible
+# that makes the whole gate illegible.
+gated="$(env | grep -o '^PROMETHEIA_[A-Z0-9_]*' | sort | tr '\n' ' ' || true)"
+echo "== env: ${gated:-no PROMETHEIA_* set (real-data suites will SKIP)}"
 
 # Runs a step quietly; on failure prints its full output and stops.
 step() {
@@ -32,11 +49,21 @@ step() {
         rm -f "$log"
     else
         cat "$log"
+        { echo "== gate FAILED: $*"; cat "$log"; } >"$failure_log"
         rm -f "$log"
         echo "== gate FAILED: $*"
+        echo "== the full output is kept at $failure_log"
         exit 1
     fi
 }
+
+format_check() {
+    find include src server tests tools fuzz \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' \
+        -o -name '*.h' -o -name '*.inl' \) -print0 | xargs -0 "$clang_format" --dry-run -Werror
+}
+
+echo "== format ($("$clang_format" --version | head -1))"
+step format_check
 
 # The vendored protocol v4 pair must agree by name (instant, no build).
 echo "== registries (protocol v4, by name)"
@@ -58,8 +85,10 @@ tests() {
         rm -f "$log"
     else
         cat "$log"
+        { echo "== gate FAILED: tests in $1"; cat "$log"; } >"$failure_log"
         rm -f "$log"
         echo "== gate FAILED: tests in $1"
+        echo "== the full output is kept at $failure_log"
         exit 1
     fi
 }
