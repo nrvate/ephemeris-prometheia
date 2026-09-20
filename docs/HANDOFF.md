@@ -231,33 +231,35 @@ terms.
 - **`/llms.txt` in both repositories, or one combined?** (JSON_API.md,
   "Open questions") — a cross-repo decision, not ours alone.
 
-**Theirs, waiting on the Astrolog project.**
+**Theirs — claimed fixed on `qt`, not yet measured here.**
 
-- The **binary-star offsets** (elements at their `7c05f7f`).
-- Their half of the **request-id log join**.
-- The **16 `rates` rows** where a mean perihelion's latitude-rate column
-  holds the latitude: confirmed theirs, but a golden test pins those
-  columns, so the fix is their maintainer's call.
-- The **64 `sidsweep` rows and the plane-2 offset**, pending their
-  registry §4.1.
-- Their **advertised speed error is 5 °/day**, a symptom of the same
-  mean-element rate defect.
-- We sent them our inventory of outside-anchored checks on 2026-09-19 and
-  asked for theirs; no reply yet.
+The Astrolog session reported all five on 2026-09-19. Each hash exists on
+their branch with the subject given; none has been graded by a run of ours
+yet. Record u is what turns this list into measurements — until it exists,
+this paragraph is their testimony, not our evidence.
 
-**Cross-test rows still unadjudicated** (CROSS-TEST.md, "Still open").
+- The **binary-star offsets**, their `13d3e5e`, graded on their side at
+  0.40 mas on Sirius and 0.29 mas on α Cen A against our fixtures.
+- The **16 `rates` rows** (a mean perihelion's latitude-rate column holding
+  the latitude), their `d1f1287`, by five-point difference at h = 1/1024 d.
+- The **64 `sidsweep` rows and the plane-2 offset**, their `1ecb8b9`: their
+  stars took Swiss's plane-2 origin while their planets took ours.
+- Their **advertised rate bound**, now `5e-3` °/day and `1e-4` AU/day in
+  place of the 5 °/day that had been raised to cover the row above.
+- Their half of the **request-id log join** was never outstanding: it has
+  been there since their `943b74e`, and both sides' notes had it wrong.
 
-- **Deflection seen from Jupiter**, 7 mas on Mars: they deflect as seen
-  from the Earth and re-centre, we deflect with the observer at Jupiter.
-  No anchor observes from Jupiter, so nothing can decide it.
-- **Venus at its 2020 inferior conjunction** (2.03 mas from Horizons) and
-  **Mercury from the barycentre in 2100** (2.01 mas): both just over the
-  2 mas band, plausibly the Swiss refit.
-- **The 1800 Moon**, one row; and **six rows at 1650** where they refuse
-  the Earth, so a Moon point has nothing to be held to.
-- **Unlisted correction masks:** §3.5a says ERROR 11 and we send it; their
-  server answers them on purpose, and their client now narrows to a listed
-  mask. A per-kind list would let both servers keep the rule.
+**Still genuinely unadjudicated.**
+
+- **The 1800 Moon**, one row, whose anchor lies outside their coverage.
+- **Six rows at 1650**, where they refuse the Earth, so a Moon point has
+  nothing to be held to.
+
+Closed earlier and not to be reopened: deflection from a planet centre
+(record d, refereed against USNO Circular 179; their registry §2.3 carries
+the 0.544″ and they no longer advertise the term), the Venus 2020 and
+Mercury 2100 edge rows (inside the band once it became a length), and
+unlisted correction masks (both §3.5a parts approved).
 
 ## Parked (maintainer go-ahead required before starting)
 

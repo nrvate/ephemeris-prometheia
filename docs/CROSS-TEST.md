@@ -1068,9 +1068,15 @@ against their build with the fix (their tree at `02bb758`).
   20,000 km). Without that statement it stays a finding.
 - **The mean perihelia's latitude-rate column holding the latitude** is
   their library's, confirmed by them calling it directly. The true rate,
-  differenced, is 2.8e-7 °/day. Their golden test pins those columns bit
-  for bit, so a fix goes to their maintainer. The 16 `rates` rows stay
-  findings (theirs) until then.
+  differenced, is 2.8e-7 °/day. The 16 `rates` rows stay findings (theirs)
+  until a run grades a build with the fix.
+
+  This entry first said the fix "goes to their maintainer" because a golden
+  test pinned those columns bit for bit. That was wrong and is recorded
+  rather than quietly deleted: **a gate asserting the wrong thing is a
+  second defect, not a reason to keep serving the first.** The Astrolog
+  session reached the same sentence independently, was corrected for it by
+  its own maintainer, and fixed both (their `d1f1287`, registry §1.5).
 - **Left unattributed:** six rows at 1650, where they refuse the Earth, so
   a Moon point has nothing to be held to.
 
