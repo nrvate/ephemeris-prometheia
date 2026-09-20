@@ -163,6 +163,51 @@ For a TT epoch *t*:
      three-point truncation. At 0.001 day it was 2.6e-5 °/day; smaller
      steps than 1/4096 lose to roundoff. The cross-test's `rates` leg
      checks this through the server.
+   - **A fixed star's distance rate is the exception, and it is
+     quantisation, not truncation** (2026-09-20). The measurement above
+     covered the Sun, Moon, Mercury, Mars and Jupiter; no star was in it,
+     and "consistent with differencing positions" was stated without one.
+     A star's distance rate is not: Polaris misses a five-point difference
+     of its own distance column by **1.45e-05 AU/day**, 0.18% of the rate.
+     - **It is not a correction.** The miss is the same size with
+       `corrections 0`: 1.92e-05 geometric against 1.69e-05 with all three.
+       Light time, deflection and aberration are all ruled out.
+     - **It is not the checking step.** Sweeping the five-point difference
+       over h = 1/256 … 1/2048 leaves it at 1.43, 1.48, 1.92, 1.44e-05 —
+       stable while the check's own floor moves 8×, which is what a real
+       disagreement looks like and a noise floor does not.
+     - **It is one f64 ulp of the star's position, differenced over 42 s.**
+       Polaris sits at 2.7356e7 AU = 4.093e15 km, where one ulp is 0.50 km.
+       The engine's stencil spans 2/4096 day, so a single ulp of position
+       becomes `ulp / (2h · kAuKm)` = **6.8e-06 AU/day** of rate. Every star
+       measured lands within a factor of three of its own such floor, over a
+       hundredfold range of distance:
+
+       | star | distance (AU) | ulp (km) | predicted | observed |
+       |---|---|---|---|---|
+       | Rigil Kentaurus | 273,562 | 0.0078 | 1.07e-07 | 4.92e-08 |
+       | Sirius | 544,038 | 0.0156 | 2.14e-07 | 1.62e-08 |
+       | Vega | 1,584,111 | 0.0312 | 4.28e-07 | 1.21e-06 |
+       | Aldebaran | 4,213,599 | 0.1250 | 1.71e-06 | 2.83e-06 |
+       | Polaris | 27,356,391 | 0.5000 | 6.85e-06 | 1.48e-05 |
+
+     - **The longitude channel is not cleaner, it is divided by the
+       distance.** The same quantisation gives a transverse velocity error
+       of the same size, and a longitude rate is that divided by *r*: at
+       2.7e7 AU it comes out at 1.9e-11 °/day, and Polaris's measured
+       longitude miss is 3.7e-12 to 9.5e-12. One mechanism, two channels,
+       and the angular one only *looks* clean. Reading the two misses as
+       comparable numbers is a mistake either side can make.
+     - **What would fix it** is not a smaller step — a smaller step makes it
+       worse, linearly. A star's barycentric motion is a straight line in
+       closed form and the observer's velocity is already known, so a star's
+       rate can be computed analytically instead of differenced. **Not
+       done**; it changes a wire value and is recorded here first.
+     - **What it costs today:** 1.45e-05 AU/day on 2.7e7 AU is nine parts in
+       10^13, and the column is f32 on the wire at conformance level 32,
+       where one ulp is 3.26 AU. Nothing observable depends on it. It is
+       recorded because the sentence above it claimed something about every
+       object and had been tested on five.
 
 Cost (`-O2`, DE440, measured 2026-09-17 on ten bodies × 10,000 hourly
 instants):

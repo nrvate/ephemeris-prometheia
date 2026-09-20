@@ -1663,9 +1663,24 @@ A previous message to the Astrolog side described ours as firing "as soon as
 had then and not of the geocentric ones we had not measured; corrected to
 them and here.
 
-Ours is **open**. Nine parts in 10^13 of the distance and observable in
-nothing, but a rate and a position disagreeing about the observer is a
-defect at any size.
+**Ours is diagnosed** (ENGINE.md, "Rates"): it is one f64 ulp of a star's
+position differenced over the engine's 42-second stencil, not a missing
+term. Polaris sits at 4.093e15 km where one ulp is 0.50 km, and
+`ulp / (2h · kAuKm)` is 6.8e-06 AU/day against 1.48e-05 measured; every star
+measured lands within a factor of three of its own floor over a hundredfold
+range of distance. It survives `corrections 0`, so no correction causes it,
+and it is stable while the checking step moves 8x, so it is not the check's
+floor either. A smaller step makes it worse. The fix is to compute a star's
+rate analytically rather than by differencing, which is **not done** because
+it changes a wire value.
+
+**And the two channels are one mechanism.** The same quantisation puts the
+same error into the transverse velocity, and a longitude rate is that
+divided by *r* — at 2.7e7 AU, 1.9e-11 °/day, against 3.7e-12 to 9.5e-12
+measured. A distance-rate miss and a longitude-rate miss are therefore not
+comparable numbers, and "the angular channel is clean, so the missing term
+is radial" does not follow from the two figures alone. Relayed to the
+Astrolog side, who reached the opposite reading from their own pair.
 
 ### Finding, theirs: a topocentric orbit point's position and rate describe different observers
 
