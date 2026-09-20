@@ -8,13 +8,21 @@
 // Each connection sends HELLO once, then REQUESTs back to back, each for a
 // fresh random instant between 1900 and 2100 unless --cached asks for the
 // same one every time.
+//
+// Counting arrivals cannot see a wrong answer, so one request in --canary-every
+// re-asks an instant whose answer was taken from this same server before the
+// load started, and grades the numbers. That is a consistency check and not a
+// correctness one -- the baseline is the server's own idle answer -- but it is
+// the bug load testing exists to find: contention changing an answer.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <dirent.h>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <random>
@@ -41,17 +49,137 @@ constexpr const char* kUsage =
     "  --cached           the same instant every time (cache hits)\n"
     "  --pid PID          the server's process: sample its memory and open files\n"
     "  --report S         a progress line every S seconds (default 10)\n"
+    "  --canaries N       instants graded under load (default 8, 0 to disable)\n"
+    "  --canary-every K   one request in K is a canary (default 16)\n"
+    "  --chunk-rows N     the load asks for answers in chunks of N rows; the\n"
+    "                     baseline always takes the server's own chunking, so\n"
+    "                     this grades an answer against a differently chunked\n"
+    "                     copy of itself (default: the server chooses, both)\n"
     "Exit 1 if any connection failed for a reason other than a refusal the\n"
-    "server announced (HTTP 503, ERROR 6), or a message did not parse.\n";
-
-// The chart a client sends: the Sun, Moon, planets and Pluto.
-const int kBodies[] = {10, 301, 199, 299, 4, 5, 6, 7, 8, 9};
+    "server announced (HTTP 503, ERROR 6), a message did not parse, or a\n"
+    "canary answer differed from the same server's answer before the load.\n";
 
 std::vector<uint8_t> frame(uint16_t type, uint32_t id, const std::vector<uint8_t>& payload) {
     std::vector<uint8_t> out;
     eph::WriteEnvelope(&out, type, id, payload.size());
     out.insert(out.end(), payload.begin(), payload.end());
     return out;
+}
+
+// The chart a client sends: the Sun, Moon, planets and Pluto.
+const int kBodies[] = {10, 301, 199, 299, 4, 5, 6, 7, 8, 9};
+
+// One server's whole answer to one request, reassembled from its chunks into
+// a layout that does not depend on how the server chose to chunk it: a server
+// under load may split an answer differently from the same server when idle,
+// and that is not a difference in the answer.
+struct Answer {
+    uint16_t nObj = 0;
+    uint32_t totalRows = 0, columnsPresent = 0;
+    int cols = 0;
+    std::vector<double> values;    // nObj x totalRows x cols
+    std::vector<int32_t> resolved; // meta[i].resolvedNaif, chunk 0
+    std::string shape() const {
+        return std::to_string(nObj) + " objects x " + std::to_string(totalRows) + " rows x " +
+               std::to_string(cols) + " cols, columns 0x" + std::to_string(columnsPresent);
+    }
+};
+
+// Same number, counting a NaN as equal to a NaN: an object the server cannot
+// answer for is a canonical NaN in every row, and that is a stable answer.
+bool same(double a, double b) {
+    return (std::isnan(a) && std::isnan(b)) || a == b;
+}
+
+enum class Ask {
+    kOk,          // a complete answer, assembled into *out
+    kServerError, // the server said ERROR; *code and *retry_ms are set
+    kBroken,      // the connection or the framing failed; *why says how
+};
+
+// Sends one REQUEST and reads until the last chunk or an ERROR.
+Ask ask(WsClient& ws, uint32_t id, double jd, int rows, int chunk_rows, Answer* out, unsigned* code,
+        unsigned* retry_ms, std::string* why) {
+    eph::Request req;
+    req.profiles.emplace_back();
+    for (int b : kBodies) {
+        eph::Object o;
+        o.kind = eph::kObjBody;
+        o.naif = b;
+        req.objs.push_back(o);
+    }
+    req.start.jd1 = jd;
+    req.chunkRows = uint32_t(chunk_rows);
+    req.nTime = uint32_t(rows);
+    req.stepNs = rows > 1 ? int64_t(86400) * 1000000000 : 0;
+    std::vector<uint8_t> payload;
+    eph::EncodeRequest(&payload, req);
+    if (auto r = ws.send(frame(eph::kMsgRequest, id, payload)); !r) {
+        *why = "REQUEST: " + r.error().message;
+        return Ask::kBroken;
+    }
+    *out = Answer{};
+    bool sized = false;
+    for (;;) {
+        auto m = ws.receive(60000);
+        if (!m) {
+            *why = "answer: " + m.error().message;
+            return Ask::kBroken;
+        }
+        eph::Envelope env{};
+        if (eph::ParseFrame(m.value().data(), m.value().size(), &env, why) != eph::kOk) {
+            *why = "a message that does not parse: " + *why;
+            return Ask::kBroken;
+        }
+        if (env.requestId != id) {
+            continue;
+        }
+        const uint8_t* p = m.value().data() + eph::kEnvelopeSize;
+        if (env.type == eph::kMsgError) {
+            eph::Error e;
+            eph::ParseError(p, env.payloadLen, &e, why);
+            *code = e.code;
+            *retry_ms = e.retryAfterMs;
+            return Ask::kServerError;
+        }
+        if (env.type != eph::kMsgData) {
+            continue;
+        }
+        eph::DataChunk d;
+        if (eph::ParseData(p, env.payloadLen, &d, why) != eph::kOk) {
+            *why = "DATA does not parse: " + *why;
+            return Ask::kBroken;
+        }
+        if (!sized) {
+            out->nObj = d.nObj;
+            out->totalRows = d.totalRows;
+            out->columnsPresent = d.columnsPresent;
+            out->cols = d.Cols();
+            out->values.assign(size_t(d.nObj) * d.totalRows * size_t(d.Cols()),
+                               std::numeric_limits<double>::quiet_NaN());
+            for (const eph::Meta& mt : d.meta) {
+                out->resolved.push_back(mt.resolvedNaif);
+            }
+            sized = true;
+        }
+        // Place the chunk's rows where they belong, so two different
+        // chunkings of one answer compare equal.
+        if (d.nObj == out->nObj && d.Cols() == out->cols &&
+            uint64_t(d.iTime) + d.nRows <= out->totalRows &&
+            d.values.size() >= size_t(d.nObj) * d.nRows * size_t(d.Cols())) {
+            for (uint32_t o = 0; o < d.nObj; ++o) {
+                for (uint32_t r = 0; r < d.nRows; ++r) {
+                    const double* from = &d.values[(size_t(o) * d.nRows + r) * size_t(d.Cols())];
+                    double* to = &out->values[(size_t(o) * out->totalRows + d.iTime + r) *
+                                              size_t(out->cols)];
+                    std::copy(from, from + out->cols, to);
+                }
+            }
+        }
+        if (d.flags & eph::kChunkLast) {
+            return Ask::kOk;
+        }
+    }
 }
 
 struct Stats {
@@ -63,6 +191,11 @@ struct Stats {
     uint64_t failures = 0;        // anything else: a transport error, a bad message
     std::vector<std::string> failure_samples;
     std::atomic<uint64_t> done{0}; // requests answered, for the progress lines
+    // The canaries: answers graded against the same server's answer before
+    // the load started.
+    uint64_t canary_checks = 0, canary_mismatch = 0;
+    double canary_max_delta = 0.0; // largest |difference| seen, mismatch or not
+    std::vector<std::string> canary_samples;
 };
 
 void note_failure(Stats& st, const std::string& what) {
@@ -73,98 +206,127 @@ void note_failure(Stats& st, const std::string& what) {
     }
 }
 
-void connection(int index, const std::string& host, int port, int rows, bool cached,
-                Clock::time_point deadline, Stats& st) {
-    std::mt19937_64 rng(uint64_t(index) * 0x9E3779B97F4A7C15ull + 1);
-    std::uniform_real_distribution<double> when(2415020.5, 2488069.5);
-    WsClient ws;
-    if (auto r = ws.connect(host, port); !r) {
-        if (r.error().message.find("503") != std::string::npos) {
-            std::lock_guard<std::mutex> lock(st.mu);
-            ++st.connect_refused;
-        } else {
-            note_failure(st, "connect: " + r.error().message);
+// Grades one canary answer against its baseline, and records how far off it
+// was. The magnitude matters as much as the verdict: a last-bit difference
+// and an answer for the wrong body are both "not equal", and they are not the
+// same finding.
+void grade(Stats& st, int canary, double jd, const Answer& got, const Answer& want) {
+    std::string bad;
+    double worst = 0.0;
+    if (got.nObj != want.nObj || got.totalRows != want.totalRows || got.cols != want.cols ||
+        got.columnsPresent != want.columnsPresent) {
+        bad = "shape: " + got.shape() + ", idle it was " + want.shape();
+    } else {
+        for (size_t i = 0; i < want.values.size(); ++i) {
+            if (!same(got.values[i], want.values[i])) {
+                const double d = std::fabs(got.values[i] - want.values[i]);
+                if (bad.empty() || d > worst) {
+                    const size_t obj = i / (size_t(want.totalRows) * size_t(want.cols));
+                    const size_t col = i % size_t(want.cols);
+                    bad = "object " +
+                          std::to_string(kBodies[std::min(obj, std::size(kBodies) - 1)]) +
+                          " column " + std::to_string(col) + ": " + std::to_string(got.values[i]) +
+                          ", idle it was " + std::to_string(want.values[i]);
+                }
+                worst = std::max(worst, d);
+            }
         }
-        return;
+        // The objects must come back as the ones that were asked for, in
+        // order. This needs no baseline: it is the answer disagreeing with
+        // its own request, which is what a contaminated answer looks like.
+        for (size_t i = 0; i < got.resolved.size() && i < std::size(kBodies); ++i) {
+            if (got.resolved[i] != eph::kNaifNone && got.resolved[i] != kBodies[i]) {
+                bad = "object " + std::to_string(i) + " came back as NAIF " +
+                      std::to_string(got.resolved[i]) + ", asked for " + std::to_string(kBodies[i]);
+            }
+        }
+    }
+    std::lock_guard<std::mutex> lock(st.mu);
+    ++st.canary_checks;
+    st.canary_max_delta = std::max(st.canary_max_delta, worst);
+    if (!bad.empty()) {
+        ++st.canary_mismatch;
+        if (st.canary_samples.size() < 5) {
+            char jds[32];
+            std::snprintf(jds, sizeof jds, "%.6f", jd);
+            st.canary_samples.push_back("canary " + std::to_string(canary) + " (JD " + jds + ") " +
+                                        bad);
+        }
+    }
+}
+
+// Connects and says HELLO. Empty on success, else why not.
+std::string open_session(WsClient& ws, const std::string& host, int port) {
+    if (auto r = ws.connect(host, port); !r) {
+        return "connect: " + r.error().message;
     }
     eph::Hello hello;
     hello.clientName = "prometheia-load/0.7.0";
     std::vector<uint8_t> payload;
     eph::EncodeHello(&payload, hello);
     if (auto r = ws.send(frame(eph::kMsgHello, 0, payload)); !r) {
-        note_failure(st, "HELLO: " + r.error().message);
-        return;
+        return "HELLO: " + r.error().message;
     }
     if (auto w = ws.receive(); !w) {
-        note_failure(st, "WELCOME: " + w.error().message);
+        return "WELCOME: " + w.error().message;
+    }
+    return "";
+}
+
+void connection(int index, const std::string& host, int port, int rows, int chunk_rows, bool cached,
+                const std::vector<double>& canary_jd, const std::vector<Answer>& canary_want,
+                int canary_every, Clock::time_point deadline, Stats& st) {
+    std::mt19937_64 rng(uint64_t(index) * 0x9E3779B97F4A7C15ull + 1);
+    std::uniform_real_distribution<double> when(2415020.5, 2488069.5);
+    WsClient ws;
+    if (const std::string why = open_session(ws, host, port); !why.empty()) {
+        if (why.find("503") != std::string::npos) {
+            std::lock_guard<std::mutex> lock(st.mu);
+            ++st.connect_refused;
+        } else {
+            note_failure(st, why);
+        }
         return;
     }
     std::vector<double> local;
     uint32_t id = 1;
+    uint64_t sent = 0;
     while (Clock::now() < deadline) {
-        eph::Request req;
-        req.profiles.emplace_back();
-        for (int b : kBodies) {
-            eph::Object o;
-            o.kind = eph::kObjBody;
-            o.naif = b;
-            req.objs.push_back(o);
-        }
-        req.start.jd1 = cached ? 2461300.5 : when(rng);
-        req.nTime = uint32_t(rows);
-        req.stepNs = rows > 1 ? int64_t(86400) * 1000000000 : 0;
-        payload.clear();
-        eph::EncodeRequest(&payload, req);
+        // Every canary_every'th request re-asks an instant whose answer was
+        // taken from this same server before the load started.
+        const bool is_canary =
+            !canary_want.empty() && canary_every > 0 && sent % uint64_t(canary_every) == 0;
+        const int canary =
+            is_canary ? int((sent / uint64_t(canary_every)) % canary_want.size()) : 0;
+        const double jd = is_canary ? canary_jd[size_t(canary)] : (cached ? 2461300.5 : when(rng));
+        ++sent;
+        Answer got;
+        unsigned code = 0, retry_ms = 0;
+        std::string why;
         const auto t0 = Clock::now();
-        if (auto r = ws.send(frame(eph::kMsgRequest, id, payload)); !r) {
-            note_failure(st, "REQUEST: " + r.error().message);
+        // A canary asks exactly what the load asks, --rows and all, so that a
+        // run with a chunked answer grades a chunked answer.
+        const Ask outcome = ask(ws, id, jd, rows, chunk_rows, &got, &code, &retry_ms, &why);
+        if (outcome == Ask::kBroken) {
+            note_failure(st, why);
             break;
         }
-        bool open = true;
-        for (;;) {
-            auto m = ws.receive(60000);
-            if (!m) {
-                note_failure(st, "answer: " + m.error().message);
-                open = false;
-                break;
+        if (outcome == Ask::kServerError) {
+            {
+                std::lock_guard<std::mutex> lock(st.mu);
+                ++st.errors[code];
             }
-            eph::Envelope env{};
-            std::string why;
-            if (eph::ParseFrame(m.value().data(), m.value().size(), &env, &why) != eph::kOk) {
-                note_failure(st, "a message that does not parse: " + why);
-                open = false;
-                break;
+            if (code == eph::kErrRateLimited) {
+                // Honour the server's retry hint, as a client should.
+                std::this_thread::sleep_for(std::chrono::milliseconds(retry_ms));
             }
-            if (env.requestId != id) {
-                continue;
-            }
-            const uint8_t* p = m.value().data() + eph::kEnvelopeSize;
-            if (env.type == eph::kMsgError) {
-                eph::Error e;
-                eph::ParseError(p, env.payloadLen, &e, &why);
-                {
-                    std::lock_guard<std::mutex> lock(st.mu);
-                    ++st.errors[e.code];
-                }
-                if (e.code == eph::kErrRateLimited) {
-                    // Honour the server's retry hint, as a client should.
-                    std::this_thread::sleep_for(std::chrono::milliseconds(e.retryAfterMs));
-                }
-                break;
-            }
-            if (env.type == eph::kMsgData) {
-                eph::DataChunk d;
-                eph::ParseData(p, env.payloadLen, &d, &why);
-                if (d.flags & eph::kChunkLast) {
-                    local.push_back(
-                        std::chrono::duration<double, std::milli>(Clock::now() - t0).count());
-                    ++st.done;
-                    break;
-                }
-            }
+            ++id;
+            continue;
         }
-        if (!open) {
-            break;
+        local.push_back(std::chrono::duration<double, std::milli>(Clock::now() - t0).count());
+        ++st.done;
+        if (is_canary) {
+            grade(st, canary, jd, got, canary_want[size_t(canary)]);
         }
         ++id;
     }
@@ -208,6 +370,7 @@ double percentile(std::vector<double>& v, double q) {
 int main(int argc, char** argv) {
     std::string host = "127.0.0.1";
     int port = eph::kDefaultPort, conns = 8, seconds = 30, rows = 1, report = 10;
+    int canaries = 8, canary_every = 16, chunk_rows = 0;
     long pid = 0;
     bool cached = false;
     for (int i = 1; i < argc; ++i) {
@@ -235,10 +398,54 @@ int main(int argc, char** argv) {
             pid = std::atol(value());
         } else if (arg == "--report") {
             report = std::max(1, std::atoi(value()));
+        } else if (arg == "--canaries") {
+            canaries = std::max(0, std::atoi(value()));
+        } else if (arg == "--chunk-rows") {
+            chunk_rows = std::max(0, std::atoi(value()));
+        } else if (arg == "--canary-every") {
+            canary_every = std::max(1, std::atoi(value()));
         } else {
             std::fprintf(stderr, "bad option %s\n%s", arg.c_str(), kUsage);
             return 2;
         }
+    }
+
+    // The baseline: what this server answers for the canary instants with
+    // nothing else asking. The instants are fixed, so two runs and two
+    // servers grade the same questions.
+    std::vector<double> canary_jd;
+    std::vector<Answer> canary_want;
+    if (canaries > 0) {
+        std::mt19937_64 rng(0xCA11A21Eull);
+        std::uniform_real_distribution<double> when(2415020.5, 2488069.5);
+        for (int i = 0; i < canaries; ++i) {
+            canary_jd.push_back(when(rng));
+        }
+        WsClient ws;
+        if (const std::string why = open_session(ws, host, port); !why.empty()) {
+            std::fprintf(stderr, "the canary baseline could not be taken: %s\n", why.c_str());
+            return 2;
+        }
+        for (int i = 0; i < canaries; ++i) {
+            // chunkRows 0: the baseline takes whatever chunking the server
+            // prefers, so that --chunk-rows grades across two of them.
+            Answer a;
+            unsigned code = 0, retry_ms = 0;
+            std::string why;
+            const Ask outcome =
+                ask(ws, uint32_t(i + 1), canary_jd[size_t(i)], rows, 0, &a, &code, &retry_ms, &why);
+            if (outcome != Ask::kOk) {
+                std::fprintf(stderr, "the canary baseline could not be taken: %s\n",
+                             outcome == Ask::kServerError
+                                 ? ("the server answered ERROR " + std::to_string(code)).c_str()
+                                 : why.c_str());
+                return 2;
+            }
+            canary_want.push_back(std::move(a));
+        }
+        ws.close();
+        std::printf("baseline   %d canary instants, %s\n", canaries,
+                    canary_want.front().shape().c_str());
     }
 
     Stats st;
@@ -247,7 +454,9 @@ int main(int argc, char** argv) {
     std::vector<std::thread> threads;
     threads.reserve(size_t(conns));
     for (int c = 0; c < conns; ++c) {
-        threads.emplace_back(connection, c, host, port, rows, cached, deadline, std::ref(st));
+        threads.emplace_back(connection, c, host, port, rows, chunk_rows, cached,
+                             std::cref(canary_jd), std::cref(canary_want), canary_every, deadline,
+                             std::ref(st));
     }
 
     double rss_first = -1.0, rss_peak = -1.0, rss_last = -1.0;
@@ -311,10 +520,28 @@ int main(int argc, char** argv) {
     for (const std::string& f : st.failure_samples) {
         std::printf("  %s\n", f.c_str());
     }
+    if (canaries > 0) {
+        std::printf("canaries   %llu answers graded, %llu differed",
+                    (unsigned long long)st.canary_checks, (unsigned long long)st.canary_mismatch);
+        if (st.canary_mismatch) {
+            std::printf(", worst |difference| %.17g", st.canary_max_delta);
+        }
+        std::printf("\n");
+        for (const std::string& c : st.canary_samples) {
+            std::printf("  %s\n", c.c_str());
+        }
+        if (st.canary_checks == 0) {
+            std::printf("  nothing was graded: no canary request completed\n");
+        }
+    }
     if (pid > 0) {
         std::printf("server     rss %.1f -> peak %.1f -> %.1f MB after close; fds %ld -> peak %ld "
                     "-> %ld\n",
                     rss_first, rss_peak, rss_last, fds_first, fds_peak, fds_last);
     }
-    return st.failures ? 1 : 0;
+    // A canary that differed is a failure of the run, not a statistic: the
+    // server answered, and answered differently under load than it does
+    // idle. Zero graded answers is one too, when canaries were asked for --
+    // silence is not a pass.
+    return (st.failures || st.canary_mismatch || (canaries > 0 && st.canary_checks == 0)) ? 1 : 0;
 }

@@ -891,10 +891,38 @@ between 1900 and 2100, so the result cache does not flatter the numbers.
 `--cached` asks for the same instant every time.
 - **What it reports:** throughput, latency percentiles, ERRORs by code, and
   upgrades refused with 503.
+- **The canaries.** A run that counts arrivals cannot see a wrong answer, so
+  one request in `--canary-every` (default 16) re-asks one of `--canaries`
+  fixed instants (default 8) and grades every number against what the *same
+  server* answered for that instant before the load started. A difference is
+  a failure of the run, not a statistic, and so is grading nothing at all
+  when canaries were asked for. Three things it checks:
+  - every value, bit for bit, NaN counting as equal to NaN, with the worst
+    `|difference|` printed so a last-bit difference and an answer for the
+    wrong body are told apart;
+  - the shape: objects, rows, columns present;
+  - that each object came back as the NAIF id it was asked for, which needs
+    no baseline — it is the answer disagreeing with its own request, which
+    is what a contaminated answer looks like.
+  - **This is consistency, not correctness.** The baseline is the server's
+    own idle answer, so a server that is wrong the same way twice passes.
+    Whether the numbers are right at all is the cross-test's question
+    (CROSS-TEST.md). What this catches is contention changing an answer —
+    a race, a corrupted cache, one request's answer delivered to another.
+  - `--chunk-rows N` makes the load ask for chunks of N rows while the
+    baseline keeps the server's own chunking, so one answer is graded
+    against a differently chunked copy of itself. Answers are reassembled
+    by `iTime` into a layout that does not depend on the chunking.
+  - **Fault-injected four ways** (2026-09-20), each reddening only its own
+    check: a canary instant moved by 1e-6 d reds all 874 of a run (worst
+    1.53e-5°, on the Moon); asking a canary for 3 rows reds the shape;
+    dropping `iTime` from the reassembly reds a `--chunk-rows 37` run
+    against an unchunked baseline (the Moon's longitude 21.48° where
+    316.13° was expected); and a clean run of each is green.
 - **With `--pid`:** the server's resident memory and open files, sampled
   once a second, and again after every connection has closed.
-- **Exit status:** it exits 1 on any other failure (a transport error, or a
-  message that does not parse).
+- **Exit status:** it exits 1 on any other failure (a transport error, a
+  message that does not parse, or a canary that differed).
 - It runs by hand, never in the gate.
 
 **Measured 2026-09-18** on this machine, against `prometheiad` with DE440
@@ -913,6 +941,18 @@ and `--threads 4`. The client ran on the same host.
   same run gave
   31,900, p50 1.91 ms and p99 4.63 ms before it. Nutation had been 43% of
   the server's CPU (ENGINE.md, "Performance").
+- **With the canaries, 2026-09-20**, same machine, `--threads 4`,
+  `--cells-per-sec 0`, a freshly started server, 64 connections for 20 s:
+  **42,066 requests a second**, p50 1.48 ms, p99 2.80 ms, **52,646 canary
+  answers graded and none differed**. Back to back on the same server, the
+  same run with `--canaries 0` gave 40,015 a second against 41,770 with
+  them: the check costs nothing measurable, because a canary is a cache
+  hit. These are below the 48,300–49,300 above because the machine was not
+  idle — a second ephemeris daemon and a compiler were running — not
+  because of the canaries.
+  - A chunked run, 400 rows a request in 37-row chunks, 8 connections for
+    8 s: 89 canary answers graded, none differed. Each is 24,000 doubles
+    over 11 chunks.
 - **Limits, at their defaults:** 100 connections from one address for 10 s.
   - 36 were refused at the upgrade with 503, which is the 64-per-address
     cap.

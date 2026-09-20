@@ -332,7 +332,22 @@ terms.
   which is why we still send no `0x0013`. It needs a daemon, so it is not
   in `tools/gate.sh`.
 - **`prometheia-load` has never been pointed at `astrolog-ephd`**
-  (CROSS-TEST.md, "What this does not test").
+  (CROSS-TEST.md, "What this does not test"). Needs their consent and a
+  quiet machine, not code: it speaks v4 and takes `--host`/`--port`.
+  - **What did need doing first, and is done 2026-09-20:** the tool graded
+    nothing. It counted answers that arrived and never read their numbers,
+    so it could not have seen a server answer differently under load than
+    it does idle — the same blindness as a leg graded against a server's
+    own other answer, in a second place. It now re-asks fixed instants
+    under load and grades every value, the shape, and each object's NAIF
+    id against the baseline it took before the load (SERVER.md, "Load and
+    soak", "The canaries"), fault-injected four ways. Against ours: 52,646
+    canary answers graded in a 20 s run, none differed, and the check
+    costs nothing measurable (41,770 requests a second with it, 40,015
+    without — a canary is a cache hit).
+  - It stays a consistency check. The baseline is the server's own idle
+    answer, so it says nothing about whether the numbers are right; that is
+    every other leg's job.
 - **Kinds 3 and 4 have no cross-test cell**, because the Astrolog client
   asks no server for them; kind 4 is covered another way.
 - ~~`/llms.txt` in both repositories, or one combined?~~ Settled

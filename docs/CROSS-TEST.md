@@ -1485,6 +1485,18 @@ Worth stating so nobody reads a green matrix as more than it is.
   (SERVER.md, "Load and soak"): 64 connections for 5 minutes at about 35,600
   requests a second, with memory flat and nothing leaked, and the
   per-address caps holding. It has not been pointed at `astrolog-ephd`.
+  - Until 2026-09-20 it also could not have said much if it had been: it
+    counted answers that *arrived* and never looked at their numbers, which
+    is the blindness the `arrival` leg was built to fix, in a second place.
+    It now re-asks fixed instants under load and grades them against the
+    same server's idle answer (SERVER.md, "Load and soak", "The canaries").
+    Nothing in it is ours-only — it speaks v4 and takes `--host`/`--port`
+    — so pointing it at their spare is a matter of their consent and a
+    quiet machine, not of code.
+  - What it would and would not show. It would show contention changing
+    *their* answers, their caps and their memory over a run. It would not
+    say whether their numbers are right: the baseline is their own idle
+    answer. That comparison is what every other leg here is for.
 - **Kinds 3 and 4 against the Astrolog client.** This server now serves
   named hypotheticals and bodies from elements; the Astrolog client does not
   request them from any server, because its user's own element file defines
