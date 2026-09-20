@@ -18,6 +18,16 @@ kind the server will answer -- bodies, both nodes and both apses of six
 bodies in both mean and osculating form, the natural apsides, and stars --
 across observers, frames and epochs, and reports the worst it can find.
 
+One axis it held fixed until 2026-09-20 was `deltaTSec`, and that was not
+free: the single Astrolog row this sweep ever found over the AU bound is
+*inside* it at delta T 0, 20 and 25 and outside it at 30 and above.  Had the
+constant been 0 the sweep would have reported no exceedance and been just as
+confident.  So the worst cells are now re-measured across a short delta T
+list afterwards, and a cell that is clean at the swept value and over the
+bound away from it is its own assertion -- `deltat-undersampled` -- because
+"the bound is exceeded here" and "the bound is exceeded only where this grid
+does not look" are different statements, and the second is about the grid.
+
 The oracle is the server's own positions: five rows at t-2h .. t+2h with
 h = 1/1024 day (84.375 s, so every row time is exact in f64), differenced
 five-point. There is no outside reference here and none is wanted: the
@@ -118,7 +128,22 @@ ASSERTIONS = (
     "nothing-answered",        # every object came back unanswered
     "min-fraction",            # too few did to call this a sweep
     "exceeds-advertisement",   # a rate error is larger than the bound in force
+    "deltat-undersampled",     # a cell inside the bound at DELTA_T is outside it at another
 )
+
+# The grid above fixes `DELTA_T` for every request, and on 2026-09-20 that
+# turned out to be load-bearing. The one row this sweep found over the
+# Astrolog bound -- Polaris, topocentric Quito, JD 2415020.5 -- is inside the
+# bound at ΔT 0, 20 and 25 and outside it at 30 and every larger value tested,
+# eight of eleven in all. Had the constant been 0 the sweep would have
+# reported no exceedance at all and been just as confident.
+#
+# So after the grid, the worst cells are re-measured across these values. It
+# is **a floor on coverage, not a ceiling**: the cells are chosen by their
+# error at DELTA_T, and a cell that is clean there and ruinous elsewhere is
+# only caught if it ranks anyway. Widening every cell would multiply a 3,575
+# request sweep by the length of this list.
+DELTA_T_WIDEN = (0.0, 30.0, 140.0)
 
 
 def rate_error(v):
@@ -171,6 +196,10 @@ def main():
     ap.add_argument("--min-fraction", type=float, default=0.5,
                     help="fail unless at least this fraction of requests was answered "
                          "(default 0.5)")
+    ap.add_argument("--widen", type=int, default=3,
+                    help="after the grid, re-measure this many of the worst cells across "
+                         f"ΔT {', '.join('%g' % d for d in DELTA_T_WIDEN)} (default 3; 0 "
+                         "disables). The grid fixes ΔT, and that choice decides verdicts")
     ap.add_argument("--out", help="write every measured row here as TSV")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--list-assertions", action="store_true",
@@ -200,12 +229,14 @@ def main():
     worst_where = ["", "", "", ""]
     over = []
     rows = []
+    cells = []
     asked = answered = 0
 
     for label, cfg in configs:
         for jd in epochs:
-            base = ["--jd", repr(jd - 2 * H_DAYS), "--step", repr(H_DAYS * 86400.0),
-                    "--count", "5", "--deltat", str(DELTA_T)] + cfg
+            stencil = ["--jd", repr(jd - 2 * H_DAYS), "--step", repr(H_DAYS * 86400.0),
+                       "--count", "5"] + cfg
+            base = stencil + ["--deltat", str(DELTA_T)]
             # One request per object: a server that refuses the whole request
             # over one bad object would otherwise cost the rest of the sweep.
             for spec in objects:
@@ -231,6 +262,11 @@ def main():
                     if e[i] > worst[i]:
                         worst[i] = e[i]
                         worst_where[i] = f"{name}, {label}, JD {jd}"
+                # Everything needed to ask this exact cell again at another
+                # ΔT. Kept for every answered cell, because which ones get
+                # widened is decided after the grid has ranked them.
+                cells.append({"key": f"{name}, {label}, JD {jd}", "argv": stencil + [flag, value],
+                              "e": e, "bad": bad})
                 if bad:
                     over.append((name, label, jd, e))
                     print(f"  OVER  {name:26s} {label:40s} JD {jd:.1f}  "
@@ -253,6 +289,38 @@ def main():
             for r in rows:
                 f.write("\t".join(str(x) for x in r) + "\n")
         print(f"table: {args.out} ({len(rows)} rows)")
+    # The ΔT axis the grid held fixed. Rank by each graded axis separately --
+    # the worst longitude cell and the worst distance cell are usually not the
+    # same cell, and the bound has a column for each.
+    widened_cells = widened_measurements = 0
+    hidden = []
+    if args.widen > 0 and cells:
+        picked, seen = [], set()
+        for axis in (0, 1, 2):
+            for c in sorted(cells, key=lambda c: -c["e"][axis])[:args.widen]:
+                if c["key"] not in seen:
+                    seen.add(c["key"])
+                    picked.append(c)
+        for c in picked:
+            widened_cells += 1
+            for dt in DELTA_T_WIDEN:
+                if dt == DELTA_T:
+                    continue
+                rep = wirelib.run(args.client, host, port,
+                                  c["argv"] + ["--deltat", repr(dt)], verbose=args.verbose)
+                e = rate_error([rep.row(0, r) for r in range(5)])
+                if e is None:
+                    continue
+                widened_measurements += 1
+                if (e[0] > bound_deg or e[1] > bound_deg or e[2] > bound_au) and not c["bad"]:
+                    hidden.append((c["key"], dt, e))
+                    print(f"  HIDDEN  {c['key']}  ΔT {dt:g}s  lon {e[0]:.3e} lat {e[1]:.3e} "
+                          f"deg/d  dist {e[2]:.3e} AU/d  (inside the bound at ΔT {DELTA_T:g})")
+        print(f"widened {widened_cells} cell(s) x {len(DELTA_T_WIDEN)} ΔT value(s): "
+              f"{widened_measurements} measurement(s)")
+    elif args.widen > 0:
+        print("widened nothing: the grid answered no cell to widen")
+
     print()
     fails = []
     # The cascade is deliberate. Each condition is judged once and only where
@@ -289,6 +357,16 @@ def main():
                 "exceeds-advertisement", bool(over),
                 f"{len(over)} of {answered} answered row(s) exceed what this server "
                 "advertises", fails)
+            # Named apart from exceeds-advertisement on purpose. "The bound is
+            # exceeded at the ΔT this sweep fixes" and "the bound is exceeded
+            # only away from it" are different statements: the first is about
+            # the server, the second is also about this sweep's grid.
+            asserts.judge(
+                "deltat-undersampled", bool(hidden),
+                f"{len(hidden)} cell(s) inside the bound at ΔT {DELTA_T:g}s are outside it "
+                "at another ΔT this grid does not sample: "
+                + "; ".join(f"{k} at ΔT {dt:g}s" for k, dt, _ in hidden[:4])
+                + " -- the grid's verdict there was a property of its fixed ΔT", fails)
 
     for line in fails:
         print("FAIL  " + line)

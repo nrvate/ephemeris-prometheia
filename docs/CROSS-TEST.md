@@ -1730,6 +1730,66 @@ sample over a bound is a curiosity, a bound exceeded at eight of eleven
 measurable only because the sweep recomputes the oracle per cell instead
 of comparing every ΔT against one differenced value.
 
+**They reproduced it, and found the width.** Their `69d282d`, registry
+§2.11a, kept apart from §2.11 so the fixed observer-cache defect and this
+one are not read as one thing — ours survives the fork fix unchanged,
+which is the evidence that they are different. Their transition is
+between 28 and 30 s, the same values, and `swe_fixstar2_r` called
+directly returns them bit for bit, so it is the library and their server
+relays it. At ΔT 69.2, sweeping the instant: 2415020.4990 → 1.7e-04,
+**2415020.5000 → 7.5e-03**, .5005 → 7.6e-03, .5008 → 4.1e-04, .5010 →
+7.1e-04. About **1e-3 day wide**, on a standard epoch rather than an
+arbitrary date.
+
+Worth recording for its own sake: they had an explanation — that the
+region is TT in `[epoch, epoch + ΔT/86400]`, the window where UT has
+crossed the epoch and TT has not, which predicts a width of 8.0e-04 d at
+ΔT 69.2 and matches the measured edge — and they tested it at ΔT 140,
+where it predicts twice the window and the measurement is clean. The
+region gets *narrower* with larger ΔT. They recorded the mechanism as
+unknown rather than shipping the story that fit two thirds of the data.
+
+### The ΔT axis becomes part of the sweep, 2026-09-20
+
+`tools/check/ratesweep.py` now re-measures its worst cells across ΔT 0,
+30 and 140 after the grid, under a seventh assertion —
+**`deltat-undersampled`**, a cell inside the bound at the swept ΔT and
+outside it at one the grid does not sample. It is named apart from
+`exceeds-advertisement` on purpose: "the bound is exceeded here" and "the
+bound is exceeded only where this grid does not look" are different
+statements, and the second is about the grid. `tools/check/ratestest.py`
+gained the matching case (`fakewire.py` gained a ΔT-conditional error),
+and with the pass disabled that scenario prints "within its
+advertisement everywhere this sweep reached" and exits 0 — the silent
+pass it exists to refuse. It is **a floor on coverage, not a ceiling**:
+cells are ranked by their error at the swept ΔT, so a cell clean there
+and ruinous elsewhere is caught only if it ranks anyway.
+
+**It found two more cells on its first real run, and they are not at
+1900.** Polaris, `--only Polaris`, against `9635191d…`:
+
+| instant | site | ΔT 0 | ΔT 30 | ΔT 69.2 | ΔT 140 |
+|---|---|---|---|---|---|
+| JD 2461300.5 (2026) | Quito | **8.24e−03** | 2.96e−04 | 6.70e−04 | 1.54e−04 |
+| JD 2461300.5 (2026) | Zurich | 1.69e−04 | 3.08e−04 | 7.35e−05 | **7.60e−03** |
+
+Confirmed by hand on a separate code path from the sweep. That epoch is
+one of the ones reported clean — and it is clean, **at ΔT 69.2**, which
+is the only ΔT it had been asked at. So the region is not confined to
+1900.0, the two sites go over at *different* ΔT, and the narrowing was
+bounded by a fixed axis exactly as the original count was. Third
+instance of that shape in one day, and this time it was in a conclusion
+rather than a count.
+
+**And on our own server the pass found nothing, which is also a
+result.** Nine cells widened, no hidden cell: our star distance-rate
+error is ΔT-independent, consistent with it being the f64-ulp stencil
+artefact already diagnosed. What the same run did surface is ours, not
+theirs: `prometheiad` sends **no `0x0013` record at all**, so the A.3
+default of 1e-9 AU/day is the bound in force, and **all 60 Polaris rows
+exceed it**, worst 2.4722e-05 — four decades. That is the same question
+their 4e-3 raised, pointed here, and it is open (HANDOFF.md).
+
 **The fuller grid, both servers, Polaris, corrections 7.** `miss` is
 |reported − differenced|, AU/day:
 

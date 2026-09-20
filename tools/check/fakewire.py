@@ -38,6 +38,16 @@ ratestest.py drives, and the extra fields are:
     ratesbound_alt_when   ... this substring (one server, two answers)
     rate_error_deg   added to the reported longitude rate
     rate_error_au    added to the reported distance rate
+    rate_error_deg_alt  added on top of those, and
+    rate_error_au_alt   ... only when
+    rate_error_alt_under ... only when --deltat is BELOW this value. This is
+                     the shape the Astrolog server showed on 2026-09-20: a
+                     cell inside the advertised bound at one delta T and far
+                     outside it at another, which a grid that fixes delta T
+                     cannot see. Mirrored deliberately -- theirs was dirty
+                     ABOVE a threshold, and ratesweep.py fixes delta T at
+                     69.2, so a case that must be clean at the grid's value
+                     and dirty at a widened one has to inject below it
     answer_objects   name substrings this server answers; anything else
                      draws errCode 2
     no_welcome     omit the WELCOME line entirely, which is what a drift in
@@ -60,7 +70,7 @@ SHIFT_ARCSEC = {LIGHT_TIME: 20.0, DEFLECTION: 5.0, ABERRATION: 12.0}
 def parse_argv(argv):
     """The subset of the client's command line the checkers ever pass."""
     out = {"observer": "geo", "kind": 0, "name": "?", "mask": 0,
-           "jd": 2451545.0, "step": 0.0, "count": 1}
+           "jd": 2451545.0, "step": 0.0, "count": 1, "deltat": 0.0}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -75,6 +85,9 @@ def parse_argv(argv):
             i += 2
         elif a == "--count":
             out["count"] = int(argv[i + 1])
+            i += 2
+        elif a == "--deltat":
+            out["deltat"] = float(argv[i + 1])
             i += 2
         elif a == "--obj":
             out["name"], out["kind"] = "body " + argv[i + 1], 0
@@ -152,6 +165,9 @@ def emit_series(scn, ask):
         lon, lat, dist, dlon, dlat, ddist = ephemeris(ask["name"], ask["jd"] + i * ask["step"])
         dlon += scn.get("rate_error_deg", 0.0)
         ddist += scn.get("rate_error_au", 0.0)
+        if ask["deltat"] < scn.get("rate_error_alt_under", float("-inf")):
+            dlon += scn.get("rate_error_deg_alt", 0.0)
+            ddist += scn.get("rate_error_au_alt", 0.0)
         # Twelve places: the central difference divides by 12h = 0.0117 d, so
         # the printed resolution alone sets a noise floor of ~1e-10 deg/day.
         # At the .9f the corrApplied scenarios use, that floor is 1e-7 and

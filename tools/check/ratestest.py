@@ -107,6 +107,17 @@ def cases():
           "ratesbound_alt_when": "node"},
          [], {"bound-varies"}, 1),
 
+        # Clean at the ΔT the grid fixes, ten times the bound at a ΔT it does
+        # not. This is the 2026-09-20 Polaris shape, mirrored: the grid would
+        # report this server within its advertisement everywhere it reached,
+        # and be wrong because of a constant nobody was looking at. Before the
+        # widening pass existed, this scenario exited 0 with no output about
+        # ΔT at all.
+        ("a rate outside the advertisement only at a delta T the grid skips",
+         {"mode": "rates", "ratesbound": BOUND,
+          "rate_error_deg_alt": 1e-2, "rate_error_alt_under": 25.0},
+         [], {"deltat-undersampled"}, 1),
+
         # The grid selected nothing at all. Judged before the others on
         # purpose: an empty grid also answers nothing, and two assertions
         # firing on one input is how a deleted check stays invisible.

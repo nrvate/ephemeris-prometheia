@@ -525,6 +525,18 @@ terms.
   exposes no agent tools to have one. It obliges them of nothing — if they
   ever serve agent tools they serve their own file beside them — so it did
   not need to go to the maintainer.
+- **We advertise no rate bound at all, and would miss the default.**
+  Found 2026-09-20 by the widened sweep (CROSS-TEST.md, "The ΔT axis
+  becomes part of the sweep"). `prometheiad` sends no A.3 `0x0013`, so
+  the registry default 1e-5 deg/day / **1e-9 AU/day** is what a client is
+  entitled to assume, and all 60 Polaris rows in that run exceed the AU
+  figure — worst 2.4722e-05, four decades over. The longitude side is
+  fine (worst 5.2e-10). It is the f64-ulp star-rate artefact already
+  diagnosed, seen from the advertisement rather than from the arithmetic,
+  and it is the same question Astrolog's 4e-3 raised, pointed here. Two
+  ways out and they are not equivalent: fix the star rate analytically
+  (changes a wire value), or advertise a figure we can meet. Both are
+  maintainer calls; the second is also a `docs/C_API.md`-adjacent promise.
 - **No instrument compares two engines on rates.** Named 2026-09-20 and
   not filled (CROSS-TEST.md, "The instrument gap this fell through"). The
   `stars` leg compares the two servers on **positions**; `ratesweep.py`
