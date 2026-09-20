@@ -306,6 +306,19 @@ Every one of these has cost this project or the Astrolog project real time.
 - **A check that has never gone red is not known to work.** Fault-inject before
   trusting a green: `corrapplied.py` had two bugs that only a deliberately
   broken server revealed, one of which made a whole check vacuous.
+- **Anything that re-states the spec in a second place needs its own oracle,
+  or it is a copy waiting to go stale.** A server is graded against Horizons
+  and against the other server; nothing grades the *measuring* code against
+  the protocol the same way, and both harness defects of 2026-09-20 were
+  readers of a protocol record rather than computations: `ratesweep.py`'s
+  absolute-vs-per-AU unit, and `corrapplied.py` reading A.3 0x0004 while
+  ignoring 0x0014 — a narrower copy of a rule `wirelib.py` had already
+  implemented correctly and offered as `permitted(observer, kind, mask)`. A
+  second copy of a decision does not have to be wrong when it is written; it
+  only has to stop being updated. So: call the shared parser, and when a
+  check reads a declaration, read *every* record that carries one. (The
+  Astrolog side arrived at the same rule from their four near-copies of an
+  object→target mapping, two of which also counted the Earth.)
 
 ## Runbook (draft, 2026-09-18)
 
@@ -1510,7 +1523,18 @@ previous record, by leg and verdict, and says either what changed or that
 nothing did.
 
 **First run, `docs/crosstest/2026-09-20v.tsv`** (3,758 rows, ours
-`1f70d75`, theirs `astrolog-ephd/2.0` built 2026-09-20T04:57:10Z). Against
+`1f70d75`, theirs `astrolog-ephd/2.0` built 2026-09-20T04:57:10Z). The
+header records a build time and not only a commit because a commit can
+postdate the binary; here the two are reconciled. **The record is valid for
+their `5558135`**: the Astrolog session reports that nothing the daemon
+compiles changed between `21eaee2` and `5558135` — the day's commits are
+elsewhere in their tree — and that rebuilding both commits *in the same
+path* gives one binary, the differing hash they first saw being 88 bytes of
+embedded build directory. That is their statement about their own source,
+which this side does not read (CLAUDE.md, "Cleanroom"). What is checked
+here: the process serving 47392 is still the same file, `mtime`
+2026-09-20T04:57:10Z, 1,735,488 bytes, so the record measures the daemon
+that is still running. Against
 record `u` the whole matrix is identical, verdict for verdict, except the
 three legs that did not exist when `u` was written:
 
