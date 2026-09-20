@@ -316,14 +316,20 @@ Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
   widest measurement either side holds, because this number has twice been
   wrong from being set *at* a measurement. `1e-5` AU/day in particular
   would fail on the day: the measurement is 1.0014e-5.
-- **§3.5a's distance tolerance cannot be met for a fixed star**, by either
-  server, and the protocol is theirs. Read absolutely — which is how both
-  `ephproto.h` and `registries.json` write it — A.3's 1e-9 AU/day sits
-  about four orders below the f64 floor of a star's distance column
-  (Polaris at 2.7e7 AU: one ulp is 6.07e-9 AU, the five-point difference
-  floor about 9.3e-6 AU/day). 218 rows of ours and 32 of theirs exceed it,
-  all stars, no solar-system object. Raised with them 2026-09-20; needs a
-  sentence in §3.5a, not a change in either server.
+- ~~**§3.5a's distance tolerance cannot be met for a fixed star**~~:
+  answered by them at their `022b0a4`, and not by any shape either side had
+  proposed. **§3.5a now defines the comparison on f64 positions** — one
+  sentence, every object, no relative tolerance and no exemption for stars.
+  Their held-open outlier (Polaris from Quito at 1900) turned out to be an
+  **f32 artifact**: at f32 the ulp of 2.7e7 AU is 3.26 AU, the distance
+  column cannot move across the window, and the "discrepancy" is the
+  server's own rate with the sign off. Reproduced here (CROSS-TEST.md, "The
+  distance tolerance…"): our engine freezes the same column, so it is the
+  wire type, not an engine. **Our sweep already read f64** — nothing in
+  `tools/check/` passes `--f32` — so our 218 star rows stand, and we
+  advertise no `0x0013` for the artifact to have described. What remains
+  true is the original point: at f64 the floor is still ~9e-6 AU/day for
+  Polaris, four orders above A.3's 1e-9 default.
 - **Topocentric with the interpolated method** is now refused on their side
   (no `swe_nod_aps` destination exists), while their chart column keeps
   Swiss's wrong answer. Recorded in their registry §2.9; our sweep sees the

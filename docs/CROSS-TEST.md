@@ -1294,6 +1294,36 @@ implementation, and it is with the Astrolog session, who own it. Until
 there is a sentence, this side records the solar-system figure as the
 meaningful one and says so rather than quietly dropping the star rows.
 
+**Closed, 2026-09-20, and not by any of the three shapes either side had
+on the table.** The Astrolog session found that the outlier they had held
+the bound open for — Polaris from Quito at 1900, 7.4824e-3, 11× the next
+star row — was an **f32 artifact**. At f32 the ulp of 2.7356e7 AU is
+3.26 AU, so the distance column cannot move over a 4-hour window: its
+central difference is identically zero and the "discrepancy" is the
+server's own rate with the sign taken off. Their §3.5a now says the
+comparison is **defined on f64 positions**, one sentence for every object,
+and the existing numbers stand.
+
+Reproduced here on our engine at their request (`prometheia-wire-client`
+`--f32` against 47190, Polaris, Quito, JD 2415020.498046875, five rows at
+h = 1/1024 day): all five distances bit-identical at 27356390, and the
+longitude and latitude columns bit-identical too. Two unrelated
+implementations freeze the same column, so it is the wire type rather than
+either engine's rounding.
+
+**Our sweep was already reading f64**, which is why our figures do not
+move: nothing in `tools/check/` passes `--f32`, and the recorded
+Polaris/Quito/1900 row (2.4722e-05 AU/day, `2026-09-20-ratesweep-ours.tsv`
+line 2731) recomputes exactly from the f64 distances, which span 8274 ulp
+over that window. Nor did this side ever advertise `0x0013`, so no bound
+of ours was describing the artifact.
+
+What survives unchanged is the reason the sentence was needed: at f64 the
+floor is still ~9e-6 AU/day for Polaris, four orders above A.3's 1e-9
+default. The case was never that the star rows are large — it is that the
+default sits below what the column can represent. Their 4e-3 clears the
+floor; the default does not, for any server, at any precision.
+
 Worst **non-star** absolute, for comparison: ours 1.7216e-10 AU/day, theirs
 9.0324e-5 (Saturn's osculating aphelion, topocentric, 2026).
 
