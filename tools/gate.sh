@@ -3,7 +3,8 @@
 #
 # The pre-commit gate, run locally (the project uses no hosted CI):
 #   1. clang-format check over include/ src/ server/ tests/ tools/ fuzz/ (third_party excluded)
-#   1a. the v4 registries, and crosstest.py's adjudicators against hand-built tables
+#   1a. the v4 registries, crosstest.py's adjudicators, and ratesweep.py's
+#       assertions -- each against scripted inputs, no daemon and no ephemeris
 #   2. Release build + ctest in build/
 #   3. ASan+UBSan build + ctest in build-asan/
 # Tests run serially: the integrator benchmark asserts a wall-clock bound.
@@ -76,6 +77,14 @@ step python3 tools/check/ephproto4_registries.py
 # check that fails if a branch of one has no case.
 echo "== adjudicators (crosstest.py, by case)"
 step python3 tools/check/adjudicatetest.py
+
+# ratesweep.py decides whether another project's server misses the rate
+# bound it advertises, and five of its six assertions are about the sweep
+# having happened at all. Seven scripted servers, no daemon, no ephemeris,
+# under two seconds. corrtest.py makes the same promise for corrapplied.py
+# but spends fourteen, so it runs from tools/scheduled.sh instead.
+echo "== rate sweep (ratesweep.py, by assertion)"
+step python3 tools/check/ratestest.py
 
 tests() {
     local log

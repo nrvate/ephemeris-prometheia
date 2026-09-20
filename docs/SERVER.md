@@ -1106,11 +1106,11 @@ and `--threads 4`. The client ran on the same host.
     seconds. `tools/scheduled.sh` runs it (below).
   - **It covers one tool.** `corrapplied.py` has had the same treatment
     since (`corrtest.py`, above) and `crosstest.py`'s adjudicators theirs.
-    Named rather than counted, because a number here drifts and a list does
-    not: `crossrun.py`, `ephproto4_fixtures.py`, `ephproto4_registries.py`,
-    `ratesweep.py` and `stars_fk5.py` still carry their falsifications as
-    prose, and `crosstest.py`'s legs — as opposed to its adjudicators — do
-    too.
+    `ratesweep.py` has it too (`ratestest.py`, in the gate). Named rather
+    than counted, because a number here drifts and a list does not:
+    `crossrun.py`, `ephproto4_fixtures.py`, `ephproto4_registries.py` and
+    `stars_fk5.py` still carry their falsifications as prose, and
+    `crosstest.py`'s legs — as opposed to its adjudicators — do too.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
   "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none
@@ -1153,9 +1153,10 @@ tools/scheduled.sh --with-cross     also the cross-test (needs their daemon)
 ```
 
 In order: `tools/gate.sh` first, because a soak failure reported against a
-tree that does not compile has told nobody anything; then `corrtest.py` and
-`ratestest.py`, which need no daemon but spend more seconds than a gate
-should; then `loadselftest.py`; then a 60 s soak and the memory bound
+tree that does not compile has told nobody anything; then `corrtest.py`, which
+needs no daemon but spends fourteen seconds where the gate spends two
+(`ratestest.py` makes the same promise for `ratesweep.py` in under two, so
+it runs in the gate itself); then `loadselftest.py`; then a 60 s soak and the memory bound
 against a daemon it starts and stops itself.
 
 Every run writes `build/scheduled/<stamp>.log` and prints one summary; the

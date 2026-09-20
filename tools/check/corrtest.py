@@ -18,11 +18,10 @@ deleted, because a neighbouring assertion reds on the same input.
 **There is no list of assertions in this file.**  `corrapplied.py
 --list-assertions` is the table and every run ends with `assertions evaluated
 [...] fired [...]`, so a check added there and nowhere else stops this script
-instead of passing unseen.  Three refusals come out of that: an assertion the
-tool declares that no case fires; a case expecting one the tool does not
-declare; and an assertion no case ever *reaches*, which is the strongest,
-because a case can name an assertion and never arrive at the code evaluating
-it.
+instead of passing unseen.  The grading -- the three refusals, and "this
+assertion and no other" -- lives in assertlib.py, which ratestest.py drives
+the same way.  What is left here is the part that is really about
+corrApplied: eight servers, each wrong in one specific way.
 
 The fault is injected at the client, not the server: corrapplied.py reaches a
 server only through prometheia-wire-client and sees only what wirelib.py
@@ -44,35 +43,16 @@ where it belongs, by the conformance fixtures and the cross-test.
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import assertlib  # noqa: E402  (the register, and the driver that grades one)
+
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-REPORT = re.compile(r"^assertions evaluated \[([^\]]*)\] fired \[([^\]]*)\]", re.M)
 
 LIGHT_TIME, DEFLECTION, ABERRATION = 1, 2, 4
 ALL_OBSERVERS = 31  # the five observer bits of A.3 0x0004
-
-
-def parse_report(text):
-    """(evaluated, fired) as name sets, or (None, None) if the run printed none."""
-    m = REPORT.search(text)
-    if not m:
-        return None, None
-    return set(m.group(1).split()), set(m.group(2).split())
-
-
-def all_assertions(tool):
-    """The assertion table, from the tool rather than from a copy beside it."""
-    out = subprocess.run([sys.executable, tool, "--list-assertions"],
-                         capture_output=True, text=True, timeout=60)
-    if out.returncode != 0:
-        raise SystemExit(f"{tool} --list-assertions failed: {out.stderr.strip()}")
-    names = out.stdout.split()
-    if not names:
-        raise SystemExit(f"{tool} --list-assertions printed nothing")
-    return names
 
 
 def run_case(tool, fake, scenario, extra, tmp):
@@ -160,72 +140,19 @@ def main():
     ap.add_argument("-v", "--verbose", action="store_true", help="echo each run's output")
     args = ap.parse_args()
 
-    table = cases()
-
-    # Two cases that red identically are one case, and the table does not say
-    # so: delete either and everything still passes.
-    same = {}
-    for name, _, _, expect, want_exit in table:
-        key = (frozenset(expect), want_exit)
-        if key in same:
-            raise SystemExit(f"'{name}' and '{same[key]}' assert the same thing "
-                             f"({sorted(expect) or 'nothing'}, exit {want_exit}): "
-                             "either is redundant, and deleting it would go unnoticed")
-        same[key] = name
-
-    declared = all_assertions(args.tool)
-    covered = {a for c in table for a in c[3]}
-    unexercised = [a for a in declared if a not in covered]
-    if unexercised:
-        raise SystemExit("corrapplied.py declares these and no case fires them: "
-                         + ", ".join(unexercised))
-    stray = sorted(covered - set(declared))
-    if stray:
-        raise SystemExit("cases expect assertions the tool does not declare: "
-                         + ", ".join(stray))
-
     tmp = os.environ.get("CLAUDE_JOB_DIR")
     tmp = os.path.join(tmp, "tmp") if tmp else os.path.join(ROOT, "build")
     os.makedirs(tmp, exist_ok=True)
 
-    failures, evaluated = [], set()
-    for name, scenario, extra, expect, want_exit in table:
-        code, out = run_case(args.tool, args.fake, scenario, extra, tmp)
-        if args.verbose:
-            print(out)
-        seen, got = parse_report(out)
-        note = []
-        if got is None:
-            note.append("the run printed no assertion report")
-            got = set()
-        else:
-            evaluated |= seen
-        if code != want_exit:
-            note.append(f"exit {code}, wanted {want_exit}")
-        if got != expect:
-            missing = sorted(expect - got)
-            fired = sorted(got - expect)
-            if missing:
-                note.append("did not fire: " + ", ".join(missing))
-            if fired:
-                note.append("fired but should not have: " + ", ".join(fired))
-        print(f"{'ok' if not note else 'FAILED':6}  {name}")
-        for line in note:
-            print(f"          {line}")
-        if note:
-            failures.append(name)
+    table = cases()
+    by_name = {c[0]: c for c in table}
 
-    print()
-    never = [a for a in declared if a not in evaluated]
-    if never:
-        print("no case reaches: " + ", ".join(never))
-    if failures:
-        print(f"{len(failures)} of {len(table)} cases FAILED: " + ", ".join(failures))
-    if failures or never:
-        return 1
-    print(f"all {len(table)} cases: each of the {len(declared)} assertions corrapplied.py "
-          f"declares is reached, and fires on its own fault and no other")
-    return 0
+    def run_one(name):
+        _, scenario, extra, _, _ = by_name[name]
+        return run_case(args.tool, args.fake, scenario, extra, tmp)
+
+    return assertlib.drive(args.tool, [(c[0], c[3], c[4]) for c in table],
+                           run_one, verbose=args.verbose)
 
 
 if __name__ == "__main__":

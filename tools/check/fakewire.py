@@ -25,9 +25,27 @@ The scenario is a JSON file named by $FAKEWIRE_SCENARIO:
     claim_extra    bits added to corrApplied under `overclaim`
     answer         observers this server answers at all; any other draws
                    errCode 2, which corrapplied.py counts as skipped
+
+Under `mode: "rates"` it instead answers a series -- `--jd`, `--step`,
+`--count` -- from a smooth analytic ephemeris whose RATE columns are the
+exact derivative, plus whatever error the scenario asks for.  That is what
+ratestest.py drives, and the extra fields are:
+
+    ratesbound     [deg/day, AU/day] for A.3 0x0013, or absent for no such
+                   record at all, which is not zero: the registry default
+                   then applies and ratesweep.py has to know the difference
+    ratesbound_alt   a second bound, sent instead for objects matching
+    ratesbound_alt_when   ... this substring (one server, two answers)
+    rate_error_deg   added to the reported longitude rate
+    rate_error_au    added to the reported distance rate
+    answer_objects   name substrings this server answers; anything else
+                     draws errCode 2
+    no_welcome     omit the WELCOME line entirely, which is what a drift in
+                   wirelib's regex would look like from here
 """
 
 import json
+import math
 import os
 import sys
 
@@ -40,13 +58,23 @@ SHIFT_ARCSEC = {LIGHT_TIME: 20.0, DEFLECTION: 5.0, ABERRATION: 12.0}
 
 
 def parse_argv(argv):
-    """The subset of the client's command line corrapplied.py ever passes."""
-    out = {"observer": "geo", "kind": 0, "name": "?", "mask": 0}
+    """The subset of the client's command line the checkers ever pass."""
+    out = {"observer": "geo", "kind": 0, "name": "?", "mask": 0,
+           "jd": 2451545.0, "step": 0.0, "count": 1}
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--corrections":
             out["mask"] = int(argv[i + 1])
+            i += 2
+        elif a == "--jd":
+            out["jd"] = float(argv[i + 1])
+            i += 2
+        elif a == "--step":           # seconds on the wire, days here
+            out["step"] = float(argv[i + 1]) / 86400.0
+            i += 2
+        elif a == "--count":
+            out["count"] = int(argv[i + 1])
             i += 2
         elif a == "--obj":
             out["name"], out["kind"] = "body " + argv[i + 1], 0
@@ -86,6 +114,52 @@ def declared_for(scn, observer_bit, kind):
     return allowed
 
 
+# A smooth analytic ephemeris, so the RATE columns can be the *exact*
+# derivative and any difference ratesweep.py measures is the scenario's doing
+# and not the model's. The period is long next to the 1/1024-day step, which
+# leaves the five-point formula's truncation error around 1e-14 deg/day --
+# nine orders under the tightest bound in play, so "within the bound" is
+# never a statement about this arithmetic.
+PERIOD_DAYS = 27.3
+W_LON = 0.9856  # deg/day of secular drift
+A_LON, A_LAT, A_DIST = 5.0, 2.0, 0.2
+
+
+def ephemeris(name, t):
+    """(lon, lat, dist, dlon, dlat, ddist) -- position and its true rate."""
+    w = 2.0 * math.pi / PERIOD_DAYS
+    ph = w * (t - 2451545.0) + (sum(ord(c) for c in name) % 360) * math.pi / 180.0
+    base = sum(ord(c) for c in name) % 360
+    lon = (base + W_LON * (t - 2451545.0) + A_LON * math.sin(ph)) % 360.0
+    lat = A_LAT * math.sin(ph + 1.0)
+    dist = 1.5 + A_DIST * math.sin(ph + 2.0)
+    return (lon, lat, dist,
+            W_LON + A_LON * math.cos(ph) * w,
+            A_LAT * math.cos(ph + 1.0) * w,
+            A_DIST * math.cos(ph + 2.0) * w)
+
+
+def emit_series(scn, ask):
+    """`--count` rows at `--step`, with the rate columns the scenario asks for."""
+    answers = scn.get("answer_objects")
+    if answers is not None and not any(s in ask["name"] for s in answers):
+        print(f'# object 0 name "{ask["name"]}" rowsOk 0 corr 0 err 2 '
+              f'"not supported by this server for this object"')
+        return 0
+
+    print(f'# object 0 name "{ask["name"]}" rowsOk {ask["count"]} corr 7 err 0 ""')
+    for i in range(ask["count"]):
+        lon, lat, dist, dlon, dlat, ddist = ephemeris(ask["name"], ask["jd"] + i * ask["step"])
+        dlon += scn.get("rate_error_deg", 0.0)
+        ddist += scn.get("rate_error_au", 0.0)
+        # Twelve places: the central difference divides by 12h = 0.0117 d, so
+        # the printed resolution alone sets a noise floor of ~1e-10 deg/day.
+        # At the .9f the corrApplied scenarios use, that floor is 1e-7 and
+        # the A.3 default bound of 1e-5 would be only two decades away.
+        print(f"0 {i} " + " ".join(f"{v:.12f}" for v in (lon, lat, dist, dlon, dlat, ddist)))
+    return 0
+
+
 def main(argv):
     path = os.environ.get("FAKEWIRE_SCENARIO")
     if not path:
@@ -97,13 +171,23 @@ def main(argv):
     ask = parse_argv(argv)
     obs_bit = OBS_BIT[ask["observer"]]
 
-    print('# WELCOME fakewire/1 protocol 4 engine "scripted" dataset none maxCells 100000')
+    if not scn.get("no_welcome"):
+        print('# WELCOME fakewire/1 protocol 4 engine "scripted" dataset none maxCells 100000')
     for observers, mask in scn.get("corrmasks", []):
         print(f"# corrmask observers {observers} corrections {mask}")
     for observers, kinds, mask in scn.get("corrkinds", []):
         print(f"# corrkind observers {observers} kinds {kinds} corrections {mask}")
+    bound = scn.get("ratesbound")
+    alt_when = scn.get("ratesbound_alt_when")
+    if alt_when is not None and alt_when in ask["name"]:
+        bound = scn.get("ratesbound_alt", bound)
+    if bound:
+        print(f"# ratesbound {bound[0]:g} {bound[1]:g}")
     print("# caps kinds 63 observers 31")
     print("# request 1")
+
+    if scn.get("mode") == "rates":
+        return emit_series(scn, ask)
 
     if ask["observer"] not in scn.get("answer", list(OBS_BIT)):
         print(f'# object 0 name "{ask["name"]}" rowsOk 0 corr 0 err 2 '

@@ -351,8 +351,24 @@ terms.
   force off the wire and exiting non-zero when a server misses it. Ours
   measures worst 3.6e-6 °/day and, in the corrected absolute unit,
   1.7216e-10 AU/day over every solar-system row, inside A.3's default,
-  which is why we still send no `0x0013`. It needs a daemon, so it is not
-  in `tools/gate.sh`.
+  which is why we still send no `0x0013`. It needs a daemon, so the sweep
+  itself is not in `tools/gate.sh`; `tools/scheduled.sh` runs it through
+  `crossrun.py --with-cross`.
+  - **Its own assertions are in the gate** (`tools/check/ratestest.py`,
+    2026-09-20). What nothing graded was not the arithmetic: `asked` and
+    `answered` were counted, printed, and compared to nothing, so a sweep
+    in which *every* object came back unanswered found no exceedance,
+    printed "within its advertisement everywhere this sweep reached" and
+    exited 0. In the tool that produced a finding against another
+    project's server. It now declares six assertions, five of them about
+    the sweep having happened at all — an empty grid, no WELCOME anywhere,
+    a bound that changes mid-sweep, nothing answered, too little answered
+    — and the exit status is exactly "did any fire". Seven scripted
+    servers, one per assertion, under two seconds, no daemon.
+  - It also latched the bound from the *first* reply whether or not that
+    reply carried a WELCOME, so one dropped connection at the start would
+    have judged a server advertising 5e-3 °/day against A.3's 1e-5 default
+    — four hundred false accusations from a single failed request.
 - ~~**`prometheia-load` has never been pointed at `astrolog-ephd`**~~ —
   done 2026-09-20 with their consent, on terms agreed beforehand
   (CROSS-TEST.md, "Pointed at `astrolog-ephd`"): their spare on 47392, 16

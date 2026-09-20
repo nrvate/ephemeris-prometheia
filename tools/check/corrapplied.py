@@ -50,6 +50,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import assertlib  # noqa: E402
 import wirelib  # noqa: E402  (the one reader of the client's output)
 
 LIGHT_TIME, DEFLECTION, ABERRATION = 1, 2, 4
@@ -93,33 +94,9 @@ ASSERTIONS = (
 )
 
 
-class Assertions:
-    """Which assertions this run evaluated, and which fired.
-
-    Evaluated is not fired and neither is inferable from the output: a check
-    that never reaches its comparison is the failure mode a per-assertion
-    selftest exists to catch, so both lists are printed.
-    """
-
-    def __init__(self):
-        self.evaluated = set()
-        self.fired = set()
-
-    def judge(self, name, bad, message=None, into=None):
-        assert name in ASSERTIONS, name
-        self.evaluated.add(name)
-        if bad:
-            self.fired.add(name)
-            if into is not None and message is not None:
-                into.append(message)
-        return bool(bad)
-
-    def any_fired(self):
-        return bool(self.fired)
-
-    def report(self):
-        print(f"assertions evaluated [{' '.join(sorted(self.evaluated))}] "
-              f"fired [{' '.join(sorted(self.fired))}]")
+# The register itself lives in assertlib.py: ratesweep.py makes the same
+# three-property promise, and a second copy of a class whose whole point is
+# "a copy beside the thing rots toward green" would have been a joke.
 
 
 def separation_arcsec(a, b):
@@ -238,11 +215,9 @@ def main():
     args = ap.parse_args()
 
     if args.list_assertions:
-        for name in ASSERTIONS:
-            print(name)
-        return 0
+        return assertlib.Assertions(ASSERTIONS).list_and_exit()
 
-    asserts = Assertions()
+    asserts = assertlib.Assertions(ASSERTIONS)
     client = shutil.which(args.client) or args.client
     fails, notes, skipped, inapplicable = [], [], [], []
     runs = {"independence": 0, "declared": 0, "truthful": 0}
