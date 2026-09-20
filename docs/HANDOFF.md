@@ -331,10 +331,18 @@ terms.
   1.7216e-10 AU/day over every solar-system row, inside A.3's default,
   which is why we still send no `0x0013`. It needs a daemon, so it is not
   in `tools/gate.sh`.
-- **`prometheia-load` has never been pointed at `astrolog-ephd`**
-  (CROSS-TEST.md, "What this does not test"). Needs their consent and a
-  quiet machine, not code: it speaks v4 and takes `--host`/`--port`.
-  - **What did need doing first, and is done 2026-09-20:** the tool graded
+- ~~**`prometheia-load` has never been pointed at `astrolog-ephd`**~~ —
+  done 2026-09-20 with their consent, on terms agreed beforehand
+  (CROSS-TEST.md, "Pointed at `astrolog-ephd`"): their spare on 47392, 16
+  connections, 30 s, their caps untouched. **2,463 canary answers graded,
+  none differed** — their answers do not change under contention. Their
+  compute budget matched ours to one request in 20,000 (19,999 in the
+  first ten seconds, then 1,000 and 999 a second), which is two
+  independent readings of A.3 landing on the same arithmetic and the only
+  evidence either side has about the limiter. Their RSS rose 29.4 → 89.4
+  MB and had not plateaued when the run ended; **that is the run's length,
+  not a finding**, and was not reported as one.
+  - **What needed doing first:** the tool graded
     nothing. It counted answers that arrived and never read their numbers,
     so it could not have seen a server answer differently under load than
     it does idle — the same blindness as a leg graded against a server's

@@ -953,6 +953,13 @@ and `--threads 4`. The client ran on the same host.
   - A chunked run, 400 rows a request in 37-row chunks, 8 connections for
     8 s: 89 canary answers graded, none differed. Each is 24,000 doubles
     over 11 chunks.
+- **The same tool against another implementation, 2026-09-20.** Pointed at
+  `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
+  "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none
+  differed, and their compute budget produced the same arithmetic as the
+  limits run below — 19,999 ten-cell requests in the first ten seconds,
+  then 1,000 a second. Nothing in `prometheia-load` is ours-only; it
+  speaks v4 and takes `--host`/`--port`.
 - **Limits, at their defaults:** 100 connections from one address for 10 s.
   - 36 were refused at the upgrade with 503, which is the 64-per-address
     cap.

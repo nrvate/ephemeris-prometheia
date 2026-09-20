@@ -1497,6 +1497,64 @@ Worth stating so nobody reads a green matrix as more than it is.
     *their* answers, their caps and their memory over a run. It would not
     say whether their numbers are right: the baseline is their own idle
     answer. That comparison is what every other leg here is for.
+
+#### Pointed at `astrolog-ephd`, 2026-09-20
+
+With the Astrolog session's consent and on terms agreed with them
+beforehand — their spare on 47392 only, 16 connections, 30 s, `--rows 1`,
+default canaries, **their caps and budget left exactly as they were**.
+Their daemon: `6dc840a`, `1734d363…`, 1,735,488 bytes, `--threads 2`,
+verified from this side by `/proc/<pid>/exe` before the run. 06:41:59Z to
+06:42:30Z.
+
+    answered   39997 (1333 req/s)
+    latency    p50 1.26  p90 2.07  p99 3.41  max 9.74 ms
+    errors     ERROR 6 x 351241
+    refused    0 at the upgrade (503)
+    failures   0
+    canaries   2463 answers graded, 0 differed
+    server     rss 29.4 -> peak 89.4 -> 89.4 MB after close; fds 38 -> 22
+
+Three results, in order of what they are worth.
+
+1. **Their answers do not change under contention.** 2,463 canary answers
+   graded against their own pre-load answers, every value bit for bit, the
+   shape, and every object's `resolvedNaif` against the id asked for. None
+   differed. This is consistency, not correctness — their numbers against
+   ours is every other leg's question — but it is the first statement
+   anyone has of that kind about their server.
+2. **Their compute budget matches ours to one request in twenty thousand,
+   and neither of us fitted it to the other.** The throttling is the whole
+   reason the throughput is 1,333/s rather than the 43,000/s ours gives
+   unthrottled, and it is the measurement, not an obstacle to one. At ten
+   cells a request: the first 10 s answered **19,999**, which is the
+   100,000-cell bucket's 10,000 requests plus 10,000 cells a second
+   refilling for ten seconds; the second and third windows answered 1,000
+   and 999 a second, which is the refill exactly. Our own limits run
+   (SERVER.md, "Load and soak") gave the same arithmetic for `prometheiad`:
+   "exactly 20,000 ten-cell requests were answered". Two independent
+   implementations of A.3's budget, landing on the same numbers. No leg
+   covers the limiter, and this is the only evidence either side has that
+   it is read the same way.
+   - Their advertised limit is `cellsPerSec` 10000 and `maxCells` 100000,
+     which is also where ours sits by default.
+   - 351,241 ERROR 6 in 30 s, every one honoured by waiting out its
+     `retryAfterMs`. No connection was dropped and no upgrade refused. The
+     Astrolog session asked beforehand that a run coming back mostly
+     ERROR 6 be taken as the answer rather than tuned around, which is
+     what made this a result instead of a retry at different settings.
+3. **Their resident memory rose through the run and did not come back.**
+   29.4 MB at the first sample, 48.1 / 68.8 / 89.4 at ten-second marks, and
+   still 89.4 a second after every connection had closed, while open files
+   fell 38 → 22. **This run cannot tell a filling cache from unbounded
+   growth**, because it never plateaued inside 30 s, and a result cache
+   that has not filled yet looks exactly like this. Ours does the same
+   thing and is understood: it reaches 369 MB within 30 s as the caches
+   fill (64 MB a loop) and then stays there for the rest of a 5-minute
+   soak. Theirs was still climbing when the run ended, which is a statement
+   about the run's length and not about their server. **Not a finding**,
+   and it was not reported to them as one; a longer run at the same
+   settings would settle it, and is theirs to want.
 - **Kinds 3 and 4 against the Astrolog client.** This server now serves
   named hypotheticals and bodies from elements; the Astrolog client does not
   request them from any server, because its user's own element file defines
