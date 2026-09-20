@@ -1254,8 +1254,20 @@ there is a sentence, this side records the solar-system figure as the
 meaningful one and says so rather than quietly dropping the star rows.
 
 Worst **non-star** absolute, for comparison: ours 1.7216e-10 AU/day, theirs
-9.0324e-5 (Saturn's osculating aphelion, topocentric, 2026) against the
-2e-4 they now advertise.
+9.0324e-5 (Saturn's osculating aphelion, topocentric, 2026).
+
+**The chase does not converge, which is the argument for the sentence.**
+Astrolog moved the advertised figure 1e-4 → 2e-4 → 4e-3 as each sweep
+widened, and this side suggested 1e-4 at a moment when its own table
+already showed 7.48e-3 on their wire — a suggestion that was false by 75×
+against data we held. At 4e-3 (their `21eaee2`) exactly one row still
+exceeds it: **Polaris, topocentric at Quito, 1900, 7.4824e-3 AU/day**,
+1.87× the bound, and an outlier — the next-worst star row is 6.7e-4,
+eleven times smaller. A bound wide enough to cover it with any headroom
+would be ~2e-2 AU/day, which is 3 million km a day and describes nothing.
+No honest number exists while an absolute tolerance is applied to a column
+whose ulp is 6e-9 AU. The fix is a sentence in §3.5a, not a larger
+number.
 
 ### Finding, theirs: a topocentric orbit point's position and rate describe different observers
 
