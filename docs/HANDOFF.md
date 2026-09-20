@@ -220,7 +220,7 @@ terms.
 - Their plugin builds against [C_API.md](C_API.md), a cross-repo contract:
   ABI changes are announced and reviewed before they land.
 
-## Open items (2026-09-19)
+## Open items (2026-09-20)
 
 **Ours.**
 
@@ -253,19 +253,39 @@ terms.
   verdict — they fitted the fix against numbers this side reported.
 - The **64 `sidsweep` rows and the plane-2 offset** (`1ecb8b9`): 530 agree,
   no findings.
-- Their **advertised rate bound** (`5e-3` °/day, `1e-4` AU/day): holds,
-  worst 8.22e-4 °/day measured off their wire.
+- The **topocentric lunar points** (`b631333`): Swiss's named points are
+  geocentric definitions it does not serve topocentrically and does not say
+  so. Found here by `tools/check/ratesweep.py` (8 rows over their bound,
+  worst 7.93e-2 °/day); fixed the same day, re-measured at 2.5e-6, and
+  their points now sit 0.089″–0.32″ from ours where the apogee had been a
+  whole diurnal parallax away.
 - Their half of the **request-id log join** was never outstanding; it has
   been there since `943b74e`, and both sides' notes had it wrong.
 
 Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
 `sidinstant` rows for the IAU 1958 pole.
 
+**Open with them, awaiting their decision.**
+
+- **Their advertised rate bound.** Still `5e-3` °/day and `1e-4` AU/day,
+  which their own fix has made loose. Our sweep's worst against their
+  fixed build is **1.3939e-3** °/day (the topocentric Moon at Quito in
+  2100), wider than their own 8.216e-4 because of the site and the epoch,
+  not the object. We recommended `3e-3` and `3e-5` — two to three times the
+  widest measurement either side holds, because this number has twice been
+  wrong from being set *at* a measurement. `1e-5` AU/day in particular
+  would fail on the day: the measurement is 1.0014e-5.
+- **Topocentric with the interpolated method** is now refused on their side
+  (no `swe_nod_aps` destination exists), while their chart column keeps
+  Swiss's wrong answer. Recorded in their registry §2.9; our sweep sees the
+  refusal and records it as unanswered.
+
 **Still genuinely unadjudicated.**
 
 - **The 1800 Moon**, one row, whose anchor lies outside their coverage.
-- **Six rows at 1650**, where they refuse the Earth, so a Moon point has
-  nothing to be held to.
+  It is the only unadjudicated row in record u; the cluster that record t
+  left unattributed is gone, because `corrApplied` now attributes a
+  light-time difference without needing the Earth beside it.
 
 Closed earlier and not to be reopened: deflection from a planet centre
 (record d, refereed against USNO Circular 179; their registry §2.3 carries
