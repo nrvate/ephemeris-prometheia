@@ -650,11 +650,14 @@ unlisted correction masks (both §3.5a parts approved).
 Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
 
 - **Vega's radial velocity.** Ours is −13.5 km/s (SIMBAD, quality C; the
-  BSC's own field says −14), theirs implies −20.60 (CROSS-TEST.md,
-  "Vega: the catalogues disagree on one radial velocity"). Our two
-  sources agree with each other; no outside reference has been asked.
-  Changing it changes a published catalogue value, so it is not a thing a
-  cross-test decides.
+  BSC's own field says −14), theirs is −20.6 from `sefstars.txt`
+  (CROSS-TEST.md, "Vega: one database at two vintages"). Not two
+  catalogues: that file cites SIMBAD too, last updated from it in 2018,
+  so it is one database read at two times and the resolution is a
+  re-query rather than an argument. −20.6 is a real published value
+  (Vega is a pole-on rapid rotator with a wide literature spread).
+  Changing ours changes a published catalogue value, so it is not a
+  thing a cross-test decides; parked on their side for the same reason.
 - The `deadlineMs` strategy switch: parsed and advisory today, and
   documented as unimplemented in SERVER.md.
 - Nightly or automated catalogue release builds: an idea only.

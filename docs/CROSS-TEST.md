@@ -1764,7 +1764,7 @@ sit **0.089″–0.32″** from ours, about the `swe_nod_aps` direction
 difference they described. Before it, the aphelion differed by the whole
 diurnal parallax, some 3,600″.
 
-### Vega: the catalogues disagree on one radial velocity, 2026-09-20
+### Vega: one database at two vintages, 7 km/s apart, 2026-09-20
 
 Raised by the Astrolog side, recorded on theirs as registry §4.4 (their
 `799992e`), and confirmed here. Both servers' star distance rates for Vega
@@ -1788,6 +1788,12 @@ Two different things are in this table and Sirius is what separates them:
 - **Vega is the catalogue.** Their differenced rate disagrees too, so the
   two engines disagree about how Vega's distance changes with time.
 
+The Astrolog side has written that separation up as method (their §2.12
+is the Sirius rate column): a distance-rate disagreement is either a rate
+column or a catalogue line, and **one star cannot tell them apart**. Two
+stars and four numbers can, and it needed neither of the tools either
+project built that day.
+
 In km/s, which is the unit the disagreement is actually in:
 
 | star | catalogue RV, ours | measured, ours | measured, theirs |
@@ -1805,11 +1811,28 @@ must hold: **−20.60 km/s**, against our −13.5.
 Ours is what our sources say, by the rule `docs/STARS.md` already states —
 SIMBAD's value where quality is A–C, else the Bright Star Catalogue's.
 SIMBAD gives HIP 91262 −13.5 ± 0.4, quality C; the BSC's own field for
-HR 7001 reads −14. Two independent catalogues agreeing to 0.5 km/s is the
-whole of our evidence, and −20.60 is 7 km/s from both. Neither side is
-demonstrably wrong: this is a **source difference**, not a defect, and it
-is recorded rather than adjudicated. Changing it would change a published
-catalogue value, which is the maintainer's call and not a cross-test's.
+HR 7001 independently reads −14.
+
+**It is one database at two vintages, not two catalogues.** Asked for a
+source name and a number and nothing else, the Astrolog side answered
+(their `27e1056`): −20.6, from Swiss's `sefstars.txt`, whose own header
+records updates *"with data from the SIMBAD Astronomical Database"* on
+11 Jan 2006, 22 May 2016 and 4 Jan 2018. Ours is current SIMBAD. Two
+projects citing the same database carefully, landing 7 km/s apart — which
+is a better-posed problem than a disagreement between sources, because
+the resolution is a re-query and not an argument, and it explains how
+this happened to two careful trees at once.
+
+Nothing is changed on either side. −20.6 is a real published value: Vega
+is a pole-on rapid rotator and its measured radial velocity has a wide
+literature spread. Editing a shipped catalogue against its upstream is a
+maintainer's call in both trees, and it is parked in both.
+
+The value was **derived before it was looked up**, which is the part of
+this worth keeping. +0.940 applied to their −19.659 gave −20.60; the file
+carries −20.6, exact to the digit it holds. The provenance above is
+theirs, reported to us; the number is ours, measured. No file of theirs
+was read to get either.
 
 What the cross-test can say is narrower and worth keeping: a star's
 radial velocity reaches the wire *only* through the distance rate. It
@@ -1839,6 +1862,18 @@ disagreement between two engines needs an outside reference, and for a
 star's distance rate there is no Horizons row to ask — the anchor the
 other legs lean on does not serve fixed stars. Vega was found by a human
 reading four numbers, not by an instrument, and the honest record says so.
+
+They split this out as their own §4.4a so that solving Vega would not
+read as closing the hole, and stated the reason more sharply than this
+section first did: **the one class of object where the gap exists is the
+one class the usual referee cannot adjudicate.** Horizons serves the
+bodies whose rates can be graded from outside; fixed stars are both where
+it cannot and where a catalogue line reaches the wire through a rate and
+nothing else. The two facts are the same fact.
+
+That Vega was solved anyway, by four numbers and no tool, is not evidence
+the gap does not matter. It is what having no instrument looks like when
+someone happens to look.
 
 ### What it leaves behind
 

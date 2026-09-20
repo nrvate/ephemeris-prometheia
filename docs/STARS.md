@@ -141,16 +141,19 @@ wrong, and the catalog uses Hipparcos or SIMBAD positions.
   cluster's published position put it one time-minute later. HEASARC
   omits M 102; SIMBAD identifies it with NGC 5866.
 
-**A radial velocity another ephemeris carries differently.** Vega's. The
+**A radial velocity this catalog reads at a later vintage.** Vega's. The
 rule above gives it SIMBAD's −13.5 ± 0.4 km/s (quality C), and the Bright
-Star Catalogue's own field for HR 7001 reads −14. Astrolog's Swiss-backed
-server implies −20.60, measured from its distance rate on 2026-09-20
-(`docs/CROSS-TEST.md`, "Vega: the catalogues disagree on one radial
-velocity"). Our two sources agree with each other and not with it; no
-outside reference has been consulted, so this is recorded as a difference
-between sources and nothing here has been changed on the strength of it.
-A radial velocity reaches the wire only through the distance rate — it
-moves no position — so nothing else in this catalog turns on it.
+Star Catalogue's own field for HR 7001 independently reads −14. Astrolog's
+Swiss-backed server implies −20.60, measured from its distance rate on
+2026-09-20 (`docs/CROSS-TEST.md`, "Vega: one database at two vintages").
+Theirs comes from `sefstars.txt`, which cites **the same database** — its
+header records SIMBAD updates in 2006, 2016 and 2018 — so this is one
+source read at two times, not two sources disagreeing. −20.6 is a real
+published value: Vega is a pole-on rapid rotator and its measured radial
+velocity has a wide literature spread. Nothing here has been changed on
+the strength of it, and nothing there either. A radial velocity reaches
+the wire only through the distance rate — it moves no position — so
+nothing else in this catalog turns on it.
 
 ## Lookup
 
