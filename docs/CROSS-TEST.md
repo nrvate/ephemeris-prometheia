@@ -1489,7 +1489,14 @@ already showed 7.48e-3 on their wire — a suggestion that was false by 75×
 against data we held. At 4e-3 (their `21eaee2`) exactly one row still
 exceeds it: **Polaris, topocentric at Quito, 1900, 7.4824e-3 AU/day**,
 1.87× the bound, and an outlier — the next-worst star row is 6.7e-4,
-eleven times smaller. A bound wide enough to cover it with any headroom
+eleven times smaller.
+
+*Qualified 2026-09-20 ("The standing row is not one row"): "exactly one
+row" is a statement about this sweep's grid, and the grid samples **one
+ΔT per configuration**. Sweeping ΔT at that same instant puts eight of
+eleven values over the bound. The adjudication below is unaffected — it
+never rested on the count — but the count was the width of a list, which
+is the failure this document has now recorded four times.* A bound wide enough to cover it with any headroom
 would be ~2e-2 AU/day, which is 3 million km a day and describes nothing.
 No honest number exists while an absolute tolerance is applied to a column
 whose ulp is 6e-9 AU. The fix is a sentence in §3.5a, not a larger
@@ -1655,8 +1662,73 @@ message. Their distinctness leg is green on it.
 JD 2415020.5 with `deltaTSec` 69.2 still reads reported −4.013041749e-04
 against a differenced −7.883707682e-03, a miss of **7.4824e-03** —
 bit-for-bit what the previous build gave. The observer-cache fix was a fix
-for a different defect, as they withdrew the inference for, and the single
-row over their advertised `4e-3` stands.
+for a different defect, as they withdrew the inference for.
+
+**The fork fix, and a third build (13:37 local).** `astrolog-ephd` on
+:47392 is now 1739128 bytes, sha256 `9635191d6ee5ec6c…`, pid 86423 —
+confirmed from this side by reading the running process's own image. The
+12:22 binary is superseded, so rows taken between 12:22 and 13:37 are a
+**third, intermediate** build and must not be pooled with either. Their
+account, stated observably: the defect was *at one instant and site, a
+later request with a different `deltaTSec` got the earlier request's Earth
+rotation; a site change invalidated and a `deltaTSec` change did not*, and
+the fix is that *a `deltaTSec` change now forces the observer to be
+recomputed*. It is in their Swiss fork rather than their server; the
+server-side workaround stays in the binary deliberately, because their
+deployment pin still names the unfixed library. Their engine string on
+the wire still reads `2.10.03-ts.14`, consistent with that.
+
+**Re-verified here on the new build.** Ten rounds of the order probe
+above, both orders, topocentric Moon: every pair differs, and every round
+is identical to the last. The vacuity guard is what makes that worth
+anything — if ΔT moved nothing at this site and instant the pairs would
+agree for the wrong reason — and it does not fire: the pairs sit 13.4″
+and 12.8″ apart, the same separations ours gives. One limit worth
+stating, because it is the difference between this probe and the defect
+it tests: our client sends one `deltaTSec` per run, so these are separate
+connections, not two ΔT values down one. The probe is weaker than the
+behaviour it is aimed at, and a same-connection version would need a
+client change.
+
+**The standing row is not one row.** They predicted the Polaris cell
+unchanged and asked for nothing; it is unchanged. But that cell had only
+ever been sampled at one ΔT. Sweeping ΔT at the same instant — with the
+five-point difference recomputed per cell, since ΔT moves the positions
+too — the row turns out to be the visible edge of a region:
+
+| ΔT (s) | their reported | their differenced | miss | ours |
+|---|---|---|---|---|
+| 0 | −7.898072e−03 | −7.884026e−03 | 1.40e−05 | 3.62e−05 |
+| 20 | −8.462413e−03 | −7.883708e−03 | 5.79e−04 | 3.23e−05 |
+| 25 | | | 1.25e−04 | |
+| 30 | | | **7.15e−03** | |
+| 35 | | | **7.49e−03** | |
+| 40 | −4.538965e−04 | −7.886569e−03 | **7.43e−03** | 1.76e−05 |
+| 60 | −1.007572e−03 | −7.884661e−03 | **6.88e−03** | 1.19e−05 |
+| 69.2 | −4.013042e−04 | −7.883708e−03 | **7.48e−03** | 2.47e−05 |
+| 80 | −4.320065e−04 | −7.886887e−03 | **7.45e−03** | 2.21e−05 |
+| 100 | −9.694922e−04 | −7.881165e−03 | **6.91e−03** | 2.23e−05 |
+| 140 | −9.050384e−04 | −7.884026e−03 | **6.98e−03** | 2.57e−05 |
+
+**Eight of the eleven ΔT values tested exceed their advertised `4e-3`**,
+and the transition sits between 25 and 30 s — which brackets every ΔT a
+twentieth-century date actually carries. Their *differenced* value is
+stable at −7.884e−03 across the whole sweep, so their positions are
+consistent and it is the rate column that moves: the same shape Sirius
+showed, at a different scale.
+
+**It is this instant, though.** At J2000.0, and at the same epoch shifted
+by 2/1024 d (169 s), every ΔT tested is clean — 6.6e−06 to 9.5e−04. So
+the over-bound region is one instant wide in JD and open-ended in ΔT
+above about 30 s, rather than a property of topocentric star rates in
+general. Ours sits between 1.2e−05 and 3.6e−05 at every cell in this
+table, well inside the same bound.
+
+Relayed to them on 2026-09-20. It changes what the row means — a single
+sample over a bound is a curiosity, a bound exceeded at eight of eleven
+ΔT values at one instant is a shape with an edge to find — and it was
+measurable only because the sweep recomputes the oracle per cell instead
+of comparing every ΔT against one differenced value.
 
 **The fuller grid, both servers, Polaris, corrections 7.** `miss` is
 |reported − differenced|, AU/day:

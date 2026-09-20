@@ -580,7 +580,11 @@ Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
   - **The AU axis is still exceeded at one cell, and this is not news.**
     Polaris, topocentric Quito, JD 2415020.5 → 7.4824e-3 AU/day, 1.87× the
     `4e-3`. Re-measured 2026-09-20 and reproducible bit for bit, the only
-    row over in an eighteen-row subgrid. **CROSS-TEST.md already carries it**
+    row over in an eighteen-row subgrid — but that subgrid samples **one
+    ΔT per configuration**, and sweeping ΔT at that instant puts **eight
+    of eleven** values over (CROSS-TEST.md, "The standing row is not one
+    row"). The transition is between 25 and 30 s, which is below every ΔT
+    a twentieth-century date carries. **CROSS-TEST.md already carries it**
     ("The chase does not converge") with the adjudication: no honest
     absolute number exists while a tolerance in AU/day is applied to a
     column whose ulp is 6e-9 AU, a bound wide enough to cover it with
