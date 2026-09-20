@@ -83,8 +83,8 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
      epoch-anchored reading and do not implement the mode, so nothing
      diverges.
    - **The binary-star offsets** landed at their `13d3e5e` (elements
-     `7c05f7f`, prerequisites `97d7ab6` and `6838e50`); they grade them at
-     0.40 mas on Sirius against our fixtures. Not yet measured here.
+     `7c05f7f`, prerequisites `97d7ab6` and `6838e50`) and are confirmed
+     here in record u: `stars` 174 of 174 agree at a 0.02″ band.
 4. **Done on 2026-09-18, for the record:**
    - both §3.5a parts, and every fix they named, verified (records g–k);
    - the FK5 star check;
@@ -125,11 +125,13 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
     graded on whether a plane moves the answer), `stars`;
   - `rates`: each server's rates against a five-point difference of its own
     positions (CROSS-TEST.md, "Rates, a new leg").
-- **Latest record:** `docs/crosstest/2026-09-19t.tsv`, record s
-  adjudicated (CROSS-TEST.md, "Record s adjudicated"): their Moon points
-  from Mars fixed; the points' missing light time graded as declared in
-  their corrApplied; the mean-perihelion rates still findings, since fixed
-  on their side at `d1f1287` and awaiting a run of ours.
+- **Latest record:** `docs/crosstest/2026-09-20u.tsv` (CROSS-TEST.md,
+  "Record u"), against their `96aef21` on the spare port. No findings
+  against this side. Their binary-star offsets, mean-apsis rates and
+  plane-2 star origin all confirmed by measurement, and their advertised
+  rate bound holds (worst 8.22e-4 °/day off their wire against 5e-3
+  advertised). It also found two defects in this harness, both of which
+  misread a correct server.
 - **Record s:** `docs/crosstest/2026-09-18s.tsv`, against Astrolog's
   `429c764` on a spare port (47392). Orbit points are now asked from the
   Sun, the barycentre and Mars's centre too (CROSS-TEST.md, "Orbit points
@@ -240,23 +242,21 @@ terms.
 - **`/llms.txt` in both repositories, or one combined?** (JSON_API.md,
   "Open questions") — a cross-repo decision, not ours alone.
 
-**Theirs — claimed fixed on `qt`, not yet measured here.**
+**Theirs — all measured and closed in record u (2026-09-20).**
 
-The Astrolog session reported all five on 2026-09-19. Each hash exists on
-their branch with the subject given; none has been graded by a run of ours
-yet. Record u is what turns this list into measurements — until it exists,
-this paragraph is their testimony, not our evidence.
+- The **binary-star offsets** (`13d3e5e`): `stars` 174 of 174 agree.
+- The **16 mean-apsis `rates` rows** (`d1f1287`): Moon mean node 16/16 and
+  Mars mean perihelion 16/16 agree. A regression pin, not an independent
+  verdict — they fitted the fix against numbers this side reported.
+- The **64 `sidsweep` rows and the plane-2 offset** (`1ecb8b9`): 530 agree,
+  no findings.
+- Their **advertised rate bound** (`5e-3` °/day, `1e-4` AU/day): holds,
+  worst 8.22e-4 °/day measured off their wire.
+- Their half of the **request-id log join** was never outstanding; it has
+  been there since `943b74e`, and both sides' notes had it wrong.
 
-- The **binary-star offsets**, their `13d3e5e`, graded on their side at
-  0.40 mas on Sirius and 0.29 mas on α Cen A against our fixtures.
-- The **16 `rates` rows** (a mean perihelion's latitude-rate column holding
-  the latitude), their `d1f1287`, by five-point difference at h = 1/1024 d.
-- The **64 `sidsweep` rows and the plane-2 offset**, their `1ecb8b9`: their
-  stars took Swiss's plane-2 origin while their planets took ours.
-- Their **advertised rate bound**, now `5e-3` °/day and `1e-4` AU/day in
-  place of the 5 °/day that had been raised to cover the row above.
-- Their half of the **request-id log join** was never outstanding: it has
-  been there since their `943b74e`, and both sides' notes had it wrong.
+Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
+`sidinstant` rows for the IAU 1958 pole.
 
 **Still genuinely unadjudicated.**
 

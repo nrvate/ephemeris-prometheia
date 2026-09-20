@@ -1080,6 +1080,81 @@ against their build with the fix (their tree at `02bb758`).
 - **Left unattributed:** six rows at 1650, where they refuse the Earth, so
   a Moon point has nothing to be held to.
 
+### Record u, 2026-09-20 (`docs/crosstest/2026-09-20u.tsv`)
+
+Astrolog's fixes of 2026-09-19 and 2026-09-20, graded rather than taken on
+trust. Against their daemon on the spare port (47392), binary built
+04:52:29 local, their tree at `96aef21`. They named the build `a0536b3`;
+that commit was rewritten while the run was in progress, to move its author
+to a noreply address, and the only content difference to `96aef21` is
+`CLAUDE.md`. The served binary never changed and the harness records its
+build time and checks the pid on the port it queried.
+
+Totals: agree 2,543, expected-difference 449, refused 46, refused (theirs)
+548, finding (theirs) 99, unadjudicated 1, unanswered 9. **No findings
+against this side.**
+
+**What the run confirms, by measurement:**
+
+- **The binary-star offsets** (their `13d3e5e`): the `stars` leg is 174 of
+  174 agree, at a 0.02″ band over 29 stars, three epochs, tropical and
+  Lahiri, and α Cen by both names. Their own grading against our fixtures
+  was 0.40 mas on Sirius; ours holds them 50× looser than that and they
+  pass with nothing to report.
+- **The mean-apsis rates** (their `d1f1287`): the Moon's mean node is 16 of
+  16 agree and Mars's mean perihelion is 16 of 16 agree, against our
+  five-point central difference of their own served positions. In record t
+  both were findings.
+  **This agreement is a regression pin, not an independent verdict.** The
+  Astrolog session says it checked its fix against the numbers this side
+  reported, so the two are no longer independent. The method is still
+  ours and applied to their wire, which is why it is worth recording; it
+  is not worth calling confirmation.
+- **The plane-2 star origin** (their `1ecb8b9`): `sidsweep` is 530 agree,
+  46 refused by us, no findings. Record t had 64 findings there.
+- **Their advertised rate bound.** They advertise `ratesDegPerDay = 5e-3`
+  and `ratesAuPerDay = 1e-4`. Measured off their wire by our five-point
+  difference, their worst is **8.22e-4 °/day** in longitude and 3.88e-4
+  °/day in latitude (the topocentric Moon at Zurich), and 1.77e-6 AU/day
+  per AU in distance (Mercury, geocentric). The advertisement holds. Their
+  own sweep reports a larger worst, 4.05e-3 °/day, because it reaches
+  epochs this leg does not.
+  Ours over the same rows: 1.58e-6 °/day and 6.47e-11 AU/day per AU, inside
+  A.3's default of 1e-5 and 1e-9, which is why we still send no `0x0013`.
+
+**What remains, all previously known:**
+
+- 84 `rates` rows of theirs, the body speeds their library computes
+  (`ratesApprox`), down from 91;
+- 15 `sidinstant` rows, the IAU 1958 pole, recorded on their side as an
+  ICRS-transfer difference rather than a defect;
+- 548 refusals of theirs in `points-observer`, mostly points from Mars's
+  centre and everything at 1800, where their files end;
+- the 1800 Moon, still the one unadjudicated row.
+
+**The run found two defects in this harness, not in either server**
+(`03f905a`), and both of them misread a correct server:
+
+- A Moon point from the Sun or barycentre is held to the Earth answered
+  beside it, and separately a server's `corrApplied` states whether light
+  time applies to that point at all. The grading demanded **both** before
+  it would call a light-time difference expected. Their server refuses the
+  Earth at 1800, so the anchor was missing, the `corrApplied` statement was
+  discarded, and six rows fell through to a bare `finding` — which reads as
+  ours. `corrApplied` now stands alone, as record t already said it should,
+  and a gap neither the anchor nor `corrApplied` can attribute is
+  `unadjudicated` rather than somebody's finding.
+- The staleness warning matched any process whose name began with the
+  daemon's and whose binary had been replaced. A second, older
+  `astrolog-ephd` was up on another port, so the first cut of this record
+  carried `STALE` about a daemon under test that was current. It now
+  resolves the pid listening on the port actually queried, and says so when
+  it cannot.
+
+Fault-injected: with the `corrApplied` evidence removed, the six rows
+become `unadjudicated` and 56 more become findings, so the branch carries
+the leg rather than never running.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every
