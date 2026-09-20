@@ -151,6 +151,9 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
     searched-for closest approach to the Sun), `deflection-topo` (the same
     from two sites, plus three rows that grade whether the site reached the
     computation at all);
+  - `arrival`: whether each observer reached the computation at all, and
+    whether observers that should differ do (CROSS-TEST.md, "The arrival
+    leg") — the one leg that measures arrival rather than consistency;
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`;
   - `rates`: each server's rates against a five-point difference of its own
@@ -258,12 +261,13 @@ terms.
   `62b8f80` ("Next", item 5; CROSS-TEST.md, "The topocentric deflection
   leg"). All 23 rows agree, and the site demonstrably reaches the
   computation on both servers.
-- **No leg yet grades an observer the way the topocentric one grades its
-  site.** The three site-reach rows exist because a row judged against a
-  server's own answer cannot see an argument that never arrived; the
-  heliocentric, barycentric and body-centred legs are judged the same way
-  and have no equivalent. Not a known defect — an untested direction, and
-  the cheapest one on this list.
+- ~~No leg yet grades an observer the way the topocentric one grades its
+  site~~: the `arrival` leg does, `ef8c32c` (CROSS-TEST.md, "The arrival
+  leg"). 8 rows, all agree on both servers, mask 0. Seven ask whether two
+  observers differ — each observer against geocentric, plus barycentric
+  against heliocentric and Jupiter's centre against Mars's — and one asks
+  the opposite, since a heliocentric observer and an observer at the Sun's
+  centre are the same place (both servers: 0.0000").
 - **One gate failure on 2026-09-19 that did not reproduce.** It came right
   after a `pkill` of `prometheiad`; three further gates and thirty runs of
   `test_prometheiad` were clean, and the failing test's name was not kept.

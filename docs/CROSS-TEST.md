@@ -1272,6 +1272,45 @@ the line of sight and can move very little. Fault-injected by dropping
 `--topo`: all twenty deflection rows stay green and the three site rows go
 red, which is the blindness they exist to cover.
 
+### The arrival leg, 2026-09-20
+
+`arrival` (`docs/crosstest/2026-09-20-arrival.tsv`). The topocentric leg
+above needed three rows that ask whether the site reached the computation,
+because a row graded against a server's own other answer measures
+consistency and never arrival. That question had never been put to the
+other observers, and every leg that judges a server against its own answer
+inherits the same blindness. This asks it.
+
+Geometric, mask 0, so nothing but the observer's own position is in the
+answer; four bodies at three epochs; both servers. Eight rows in two
+shapes, and the shapes matter more than the numbers:
+
+**Seven ask whether two observers differ.** Each of heliocentric,
+barycentric, Jupiter's centre, Mars's centre and the Sun's centre against
+the geocentric answer — an observer that never arrived answers
+geocentrically — then two pairs chosen for a specific confusion:
+
+| | ours | theirs |
+|---|---|---|
+| bary vs helio | 1581.1857" | 1581.1852" |
+| centre Jupiter vs centre Mars | 206173.7988" | 206173.7988" |
+
+The first is a server that treats the barycentre as the Sun; the second
+one that honours "a body's centre" without reading *which* body. Both
+clear the 1" floor by orders, so the offset is being read rather than
+assumed.
+
+**One asks the opposite.** A heliocentric observer and an observer at the
+Sun's centre are the same place, and at mask 0 they have nothing left to
+disagree about, so that row is graded *at most* 0.0002". Both servers:
+0.0000".
+
+Fault-injected in both directions. Never sending the observer flag turns
+all seven distinctness rows red — **and leaves the same-place row green**,
+which is correct and is the reason that row cannot stand alone: two
+observers that never arrived are trivially equal. Pointing the same-place
+row at Mars's centre instead of the Sun's turns it red at 218856".
+
 ### The distance tolerance cannot be met for a star, by either server
 
 218 rows of ours and 32 of theirs exceed the bound in force once it is read
