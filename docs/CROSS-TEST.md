@@ -1192,6 +1192,45 @@ topocentric). In the corrected unit the worst **solar-system** row is
 behind sending no `0x0013` survives the correction for everything in the
 solar system.
 
+### The geocentric deflection leg, 2026-09-20
+
+`deflection-geo` (`docs/crosstest/2026-09-20-deflection-geo.tsv`). Asked
+for by the Astrolog session: the planet-centred leg found 0.544" because no
+anchor observes from Jupiter, but the term both servers *do* advertise —
+geocentric solar deflection — had never been refereed against a textbook by
+either project. The `apparent` leg grades the servers against each other,
+which cannot see a term they both get wrong, and Horizons' apparent place
+carries frame offsets that swamp 1.75".
+
+Same `grav_vec` from USNO Circular 179, same construction: each server's
+mask-3 answer against the textbook bending applied to its own mask-1
+answer, so only the bending is compared.
+
+**The leg has to hunt for its own test.** Deflection falls off roughly as
+1/elongation — 1.75" at the limb, 0.004" at quadrature — so a calendar grid
+would leave almost every row carrying a term below the band, and both
+servers would "pass" by never being asked. Each body is therefore searched
+over 800 instants for its smallest elongation, with a wide-elongation row
+kept as a control, and **every row records the size of the term it
+tested**, so a verdict is legible as one. The search runs against our
+server only: it chooses where to look, and both servers are then asked the
+same instants, so a bias in the scan cannot flatter either.
+
+Result: **10 rows, all agree.** Ours within 0.000000", theirs within
+0.000011". Nine of the ten carry a term above the band, so nine of them
+graded something: Jupiter at 0.318 deg elongation carries 1.2032" of
+bending, Saturn 0.5135", Venus 0.3606", Mars 0.3212".
+
+The tenth is worth keeping. Mercury at 0.339 deg elongation carries a term
+of 0.0000", because that is an *inferior* conjunction — the planet is
+between the Earth and the Sun, so its light never passes the Sun and there
+is nothing to bend. The row is recorded as grading nothing rather than as
+an agreement, which is the distinction the term column exists to make.
+
+Fault-injected: a 1% change in the textbook's GM turns four rows red on
+both servers at up to 0.012" against the 0.0002" band. The control rows
+stay green, as they should — 1% of 0.005" is below the band.
+
 ### The distance tolerance cannot be met for a star, by either server
 
 218 rows of ours and 32 of theirs exceed the bound in force once it is read

@@ -120,7 +120,9 @@ daemons. `tools/check/wirelib.py` is the one reader of the client's output.
   - `surfaces` (with refusals per observer, kind and mask);
   - `same` / `horizons`, `helio`, `hamburg`, `apparent`;
   - `topo`: ΔT from Horizons' sidereal time, via `build/prometheia-ut1`;
-  - `bary`, `deflection` (textbook formula);
+  - `bary`, `deflection` (textbook formula, from Jupiter's centre),
+    `deflection-geo` (the same formula from the Earth, at each body's
+    searched-for closest approach to the Sun);
   - `points`, `sidereal`, `sidsweep` (every zodiac token on every plane,
     graded on whether a plane moves the answer), `stars`;
   - `rates`: each server's rates against a five-point difference of its own

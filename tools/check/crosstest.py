@@ -627,6 +627,128 @@ def leg_deflection(client, ours, theirs, wel_a, wel_b, table, verbose):
         print(f"  worst {who} vs textbook: {w:.6f}\"")
 
 
+# Solar deflection falls off roughly as 1/elongation: 1.75" grazing the limb,
+# ~0.004" at 90 degrees. A leg that samples a calendar grid therefore tests
+# almost nothing -- most rows carry a term smaller than the band, so both
+# servers pass by not being asked. These bodies are searched for their smallest
+# elongation instead (superior conjunction), and every row records the size of
+# the term it tested, so a pass is legible as a pass.
+DEFLECT_GEO_BODIES = [199, 299, 4, 5, 6]
+# The Sun's disc is ~0.267 deg; a request inside it is meaningless, so a
+# candidate closer than this is skipped rather than graded.
+DEFLECT_MIN_ELONG_DEG = 0.30
+DEFLECT_SCAN_START = 2451545.0
+DEFLECT_SCAN_STEP_DAYS = 2.0
+DEFLECT_SCAN_COUNT = 800  # ~4.4 years, so every body reaches conjunction
+# One wide-elongation row per body, as a control: the term is then far below
+# the band, and a leg that reports "agree" there is reporting that it tested
+# nothing. Recorded with its term size so the distinction is on the record.
+DEFLECT_CONTROL_ELONG_DEG = 60.0
+
+
+def _elongation_scan(client, srv, body, verbose):
+    """(jd, elongation deg) rows for one body against the Sun, from one
+    server's own mask-1 answers. The search runs on OUR server only: it picks
+    *where to look*, and both servers are then asked the same instants, so a
+    bias in the scan cannot flatter either of them."""
+    args = ["--jd", repr(DEFLECT_SCAN_START), "--step", repr(DEFLECT_SCAN_STEP_DAYS * 86400.0),
+            "--count", str(DEFLECT_SCAN_COUNT), "--icrs", "--eq", "--corrections", "1",
+            "--deltat", str(DELTA_T), "--obj", str(body), "--obj", "10"]
+    rep = ask(client, srv, args, verbose)
+    out = []
+    for r in range(DEFLECT_SCAN_COUNT):
+        vb, vs = rep.row(0, r), rep.row(1, r)
+        if vb is None or vs is None or math.isnan(vb[0]) or math.isnan(vs[0]):
+            continue
+        out.append((DEFLECT_SCAN_START + r * DEFLECT_SCAN_STEP_DAYS,
+                    angle(vector(vb), vector(vs)) / 3600.0))
+    return out
+
+
+def leg_deflection_geo(client, ours, theirs, wel_a, wel_b, table, verbose):
+    """Deflection at the GEOCENTRIC observer, where both servers claim the
+    term, against the same textbook formula the Jupiter leg uses.
+
+    The planet-centred leg found a 0.544" error because no anchor observes
+    from Jupiter. Geocentrically there is an anchor, but neither project had
+    used one: the `apparent` leg grades the two servers against each other,
+    which cannot see a term they both get wrong, and Horizons' apparent place
+    carries frame offsets that swamp a 1.75" effect. Asked for by the Astrolog
+    session, 2026-09-20, as the one place a textbook referee says something
+    new about a term they do advertise."""
+    judged = {who: {1, 3} <= advertised(wel, 0)
+              for who, wel in (("ours", wel_a), ("theirs", wel_b))}
+    if not any(judged.values()):
+        table.asked(None, None)
+        print("\n== deflection-geo: FAIL, neither server lists masks 1 and 3 geocentrically")
+        table.add(leg="deflection-geo", observer="geo", verdict="unanswered",
+                  note="no server lists masks 1 and 3 from the Earth")
+        return
+    print("\n== deflection-geo: from the Earth, mask 3 against mask 1 + the textbook bending")
+    print("   (searching each body's closest approach to the Sun, where the term is largest)")
+    targets = []
+    for b in DEFLECT_GEO_BODIES:
+        scan = _elongation_scan(client, ours, b, verbose)
+        near = [(e, jd) for jd, e in scan if e >= DEFLECT_MIN_ELONG_DEG]
+        if not near:
+            continue
+        e_min, jd_min = min(near)
+        targets.append((b, jd_min, e_min))
+        far = [(abs(e - DEFLECT_CONTROL_ELONG_DEG), jd, e) for jd, e in scan]
+        if far:
+            _, jd_far, e_far = min(far)
+            targets.append((b, jd_far, e_far))
+    worst = {}
+    tested = 0
+    for b, jd, elong in sorted(targets, key=lambda t: (t[0], t[1])):
+        args = ["--jd", repr(jd), "--icrs", "--eq", "--deltat", str(DELTA_T)]
+        got = {(who, m): ask(client, srv, args + ["--corrections", str(m), "--obj", str(b)],
+                             verbose)
+               for who, srv in (("ours", ours), ("theirs", theirs)) if judged[who]
+               for m in (1, 3)}
+        sun = {who: ask(client, srv, args + ["--corrections", "0", "--obj", "10"], verbose).row(0)
+               for who, srv in (("ours", ours), ("theirs", theirs)) if judged[who]}
+        table.asked(got.get(("ours", 3)), got.get(("theirs", 3)))
+        base = dict(leg="deflection-geo", epoch_tt=jd, object=b, observer="geo", frame="ICRF",
+                    plane="equator", mask=3, deltat=DELTA_T, tier=3,
+                    anchor_source="textbook deflection (USNO Circular 179) on each server's "
+                                  "own mask-1 answer")
+        rows = {k: r.row(0) for k, r in got.items()}
+        if any(v is None or math.isnan(v[0]) for v in rows.values()) or \
+                any(v is None or math.isnan(v[0]) for v in sun.values()):
+            table.add(**base, verdict="unanswered", note=f"elongation {elong:.3f} deg")
+            continue
+        res, term = {}, {}
+        for who in [w for w, j in judged.items() if j]:
+            p1 = vector(rows[(who, 1)])
+            bent = textbook_deflection(p1, vector(sun[who]))
+            # How big the term the row actually tested is: the angle the
+            # textbook moved the mask-1 direction. A verdict is only worth as
+            # much as this number.
+            term[who] = angle(p1, bent)
+            res[who] = angle(vector(rows[(who, 3)]), bent)
+            worst[who] = max(worst.get(who, 0.0), res[who])
+        t = max(term.values())
+        if t > DEFLECTION_BAND:
+            tested += 1
+        ok = {w: res[w] <= DEFLECTION_BAND for w in res}
+        verdict = ("agree" if all(ok.values()) else
+                   "finding" if not any(ok.values()) else
+                   "finding (ours)" if not ok.get("ours", True) else "finding (theirs)")
+        note = (f"elongation {elong:.3f} deg; the textbook term here is {t:.4f}\""
+                + ("" if t > DEFLECTION_BAND else
+                   f", below the {DEFLECTION_BAND}\" band: this row grades nothing"))
+        table.add(**base, sep_servers=angle(vector(rows[("ours", 3)]), vector(rows[("theirs", 3)]))
+                  if len(res) == 2 else "",
+                  sep_ours_anchor=res.get("ours", ""), sep_theirs_anchor=res.get("theirs", ""),
+                  band=DEFLECTION_BAND, verdict=verdict, note=note)
+        print(f"  body {b:3d}  JD {jd:.1f}  elong {elong:7.3f} deg  term {t:8.4f}\"  " +
+              "  ".join(f"{w} {res[w]:.6f}\"" for w in sorted(res)))
+    print(f"  rows whose term exceeds the band (so actually testing something): {tested}")
+    for who, w in sorted(worst.items()):
+        print(f"  worst {who} vs textbook: {w:.6f}\"")
+
+
 # Orbit points (kind 1), geometric (mask 0) in the frame of date: the portable
 # comparison, where light-time conventions for a point stay out. Bands from
 # the first measurement (2026-09-18, the corpus epochs), each with its reason.
@@ -1746,7 +1868,7 @@ def main():
     ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,points,rates,sidereal,sidsweep,sidinstant,stars")
+    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,deflection-geo,points,rates,sidereal,sidsweep,sidinstant,stars")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvmraid/shares/Astrolog", help="the Astrolog tree, for its commit")
     ap.add_argument("--astrolog-bin", default="/nvmraid/shares/Astrolog/astrolog-ephd",
@@ -1798,6 +1920,8 @@ def main():
         leg_sidinstant(client, ours, theirs, table, args.verbose)
     if "deflection" in legs:
         leg_deflection(client, ours, theirs, a, b, table, args.verbose)
+    if "deflection-geo" in legs:
+        leg_deflection_geo(client, ours, theirs, a, b, table, args.verbose)
     if "bary" in legs:
         leg_bary(client, ours, theirs, table, args.verbose)
     if "topo" in legs:
