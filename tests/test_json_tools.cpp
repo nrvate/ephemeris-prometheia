@@ -536,7 +536,7 @@ TEST_CASE("json_provenance_names_the_observer") {
 
 // An argument this engine does not serve -- houses, aspects, a misspelling --
 // was dropped in silence and the answer looked like the one asked for.
-TEST_CASE("json_an_unknown_positions_key_is_refused") {
+TEST_CASE("json_an_unknown_key_is_refused_by_every_tool") {
     synth::TempFile tf("json-keys");
     Engine e = synth::open_synthetic(tf);
     jsontools::ToolError err;
@@ -566,4 +566,47 @@ TEST_CASE("json_an_unknown_positions_key_is_refused") {
                          &err);
     REQUIRE(all.is_object());
     CHECK(all["results"][0]["error"].is_null());
+
+    // The same rule on the other three tools. A mistyped "prefix" matched
+    // exactly and answered nothing, which reads as "no such name".
+    CHECK(run(e, "lookup", {{"query", "node"}, {"prefixx", true}}, &err).is_null());
+    CHECK(err.message.find("\"prefixx\"") != std::string::npos);
+    CHECK(run(e, "capabilities", {{"verbose", true}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+    CHECK(run(e, "convert_time", {{"time", t}, {"scale", "tt"}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+    // And what each does read still works.
+    CHECK(run(e, "lookup", {{"query", "node"}, {"prefix", true}})["matches"].size() > 0);
+    CHECK(run(e, "capabilities", Json::object()).contains("limits"));
+    CHECK(run(e, "convert_time", {{"time", t}}).contains("jd_tt"));
+}
+
+// The sidereal plane moves the latitude by a degree and the precession model
+// the longitude by milliarcseconds, and neither appeared in the answer: the
+// same blindness as the observer, in the two arguments left.
+TEST_CASE("json_provenance_names_the_plane_and_the_precession") {
+    synth::TempFile tf("json-plane");
+    Engine e = synth::open_synthetic(tf);
+    const auto ask = [&](const Json& extra) {
+        Json a = {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}};
+        for (const auto& kv : extra.items())
+            a[kv.key()] = kv.value();
+        return run(e, "positions", a);
+    };
+    const Json date = ask({{"zodiac", "lahiri"}, {"sidereal_plane", "date"}});
+    const Json inv = ask({{"zodiac", "lahiri"}, {"sidereal_plane", "invariable"}});
+    CHECK(date["results"][0]["provenance"]["zodiac"]["plane"] == "date");
+    CHECK(inv["results"][0]["provenance"]["zodiac"]["plane"] == "invariable");
+    // The two answers differ, so the provenance had to.
+    CHECK(date["results"][0]["rows"][0]["latitude_deg"] !=
+          inv["results"][0]["rows"][0]["latitude_deg"]);
+    CHECK(date["results"][0]["provenance"] != inv["results"][0]["provenance"]);
+    // Precession appears where it entered the answer: an of-date frame or a
+    // sidereal zodiac, and not in a tropical answer on fixed axes.
+    CHECK(ask(Json::object())["results"][0]["provenance"]["precession"] == "iau2006");
+    CHECK(ask({{"precession", "vondrak2011"}})["results"][0]["provenance"]["precession"] ==
+          "vondrak2011");
+    CHECK(ask({{"frame", "icrf"}})["results"][0]["provenance"].contains("precession") == false);
+    CHECK(ask({{"frame", "icrf"},
+               {"zodiac", "lahiri"}})["results"][0]["provenance"]["precession"] == "iau2006");
 }

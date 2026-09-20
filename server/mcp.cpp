@@ -157,9 +157,10 @@ std::optional<Json> Dispatcher::one(const Json& m) {
                            {"instructions",
                             "Astronomical positions for astrology and astronomy. Call "
                             "capabilities first to see what is served; positions takes objects by "
-                            "name and times in ISO 8601 UTC. Read each result's resolved name and "
-                            "provenance. The resource prometheia://llms.txt explains the "
-                            "conventions."}});
+                            "name and times in ISO 8601 with their UTC offset or Z (a clock time "
+                            "without one is refused). Read each result's resolved name and "
+                            "provenance, which says what produced the answer. The resource "
+                            "prometheia://llms.txt explains the conventions."}});
     }
     if (method == "ping")
         return result(id, Json::object());

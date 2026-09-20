@@ -449,6 +449,11 @@ struct Options {
     // to a file, to another agent) loses the request that made it.
     std::string observer_words;
     Json observer_detail; // the site, or the body at whose centre
+    // The other two arguments that moved the answer without appearing in it:
+    // the sidereal plane (1.02 degrees of latitude between "date" and
+    // "invariable") and the precession model (6 mas at 1600).
+    std::string plane_token, precession_token;
+    bool of_date = false; // precession entered the answer through the frame
 };
 
 std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
@@ -508,6 +513,7 @@ std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
         return std::nullopt;
     }
     const std::string frame = str("frame", "true-of-date");
+    out.of_date = frame == "true-of-date" || frame == "mean-of-date";
     if (frame == "true-of-date") {
         o.frame = Frame::TrueOfDate;
         out.frame_words = "true equator/ecliptic and equinox of date";
@@ -571,6 +577,7 @@ std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
     }
     o.speed = a.contains("rates") ? a["rates"].get<bool>() : true;
     const std::string prec = str("precession", "iau2006");
+    out.precession_token = prec;
     if (prec == "iau2006") {
         o.precession = Precession::IAU2006;
     } else if (prec == "vondrak2011") {
@@ -608,6 +615,7 @@ std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
         }
     }
     const std::string plane = str("sidereal_plane", "date");
+    out.plane_token = plane;
     if (plane == "date") {
         o.sidereal_plane = SiderealPlane::EclipticOfDate;
     } else if (plane == "anchor" || plane == "invariable") {
@@ -717,30 +725,49 @@ std::string error_code(const Error& e) {
 // ---------------------------------------------------------------------------
 // The tools.
 
-// Everything `positions` reads. A key outside this list was ignored in
-// silence until 2026-09-20, so an agent asking for "houses" or "aspects"
-// -- neither of which this engine serves -- got positions back and no hint
-// that half its request had gone nowhere. Same rule as a name: never a
-// silent guess.
+// Everything a tool reads. A key outside its list was ignored in silence
+// until 2026-09-20, so an agent asking for "houses" or "aspects" -- neither
+// of which this engine serves -- got positions back and no hint that half
+// its request had gone nowhere, and a mistyped "prefix" on lookup quietly
+// matched exactly and answered nothing. Same rule as a name: never a silent
+// guess.
 constexpr const char* kPositionsKeys[] = {
     "time",  "times",       "series",      "objects", "observer",       "site",       "center",
     "frame", "coordinates", "corrections", "zodiac",  "sidereal_plane", "precession", "rates"};
 
+// True (and fills `err`) when the arguments carry a key the tool does not
+// read. `reads` is the sentence that tells the caller what it does read.
+template <size_t N>
+bool has_unknown_key(const Json& a, const char* const (&keys)[N], const char* tool,
+                     const char* reads, ToolError* err) {
+    if (!a.is_object())
+        return false;
+    for (const auto& kv : a.items())
+        if (std::find_if(std::begin(keys), std::end(keys),
+                         [&](const char* k) { return kv.key() == k; }) == std::end(keys)) {
+            *err = {"invalid-arguments",
+                    "\"" + kv.key() + "\" is not an argument of " + tool + "; " + reads};
+            return true;
+        }
+    return false;
+}
+
+// The same, for a tool that reads nothing at all.
+bool has_any_key(const Json& a, const char* tool, ToolError* err) {
+    if (!a.is_object() || a.empty())
+        return false;
+    *err = {"invalid-arguments", "\"" + a.items().begin().key() + "\" is not an argument of " +
+                                     tool + "; it takes none"};
+    return true;
+}
+
 Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolError* err) {
     Bad bad;
-    if (a.is_object())
-        for (const auto& kv : a.items())
-            if (std::find_if(std::begin(kPositionsKeys), std::end(kPositionsKeys),
-                             [&](const char* k) { return kv.key() == k; }) ==
-                std::end(kPositionsKeys)) {
-                const std::string m = "\"" + kv.key() +
-                                      "\" is not an argument of positions; it "
-                                      "reads time/times/series, objects, observer (site, center), "
-                                      "frame, coordinates, corrections, zodiac, sidereal_plane, "
-                                      "precession and rates";
-                *err = {"invalid-arguments", m};
-                return make_error(ErrorCode::ArgumentError, m);
-            }
+    if (has_unknown_key(a, kPositionsKeys, "positions",
+                        "it reads time/times/series, objects, observer (site, center), frame, "
+                        "coordinates, corrections, zodiac, sidereal_plane, precession and rates",
+                        err))
+        return make_error(ErrorCode::ArgumentError, err->message);
     auto times = parse_times(a, ctx.limits, bad);
     if (!times) {
         *err = {"invalid-arguments", bad.message};
@@ -833,7 +860,13 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
             prov[options->observer_words == "body" ? "center" : "site"] = options->observer_detail;
         if (options->sidereal)
             prov["zodiac"] = {{"token", options->zodiac_token},
+                              {"plane", options->plane_token},
                               {"doc", "docs/FRAMES.md (zodiacs) and docs/ENGINE.md (ayanamshas)"}};
+        // Only where it entered: a tropical answer in ICRF or J2000 axes is
+        // the same number under either model, and naming one there would
+        // claim a dependence the answer does not have.
+        if (options->of_date || options->sidereal)
+            prov["precession"] = options->precession_token;
         if (obj.no_parallax)
             prov["no_distance"] = true;
         r["provenance"] = prov;
@@ -846,7 +879,11 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
     return out;
 }
 
+constexpr const char* kLookupKeys[] = {"query", "prefix"};
+
 Result<Json> lookup(Engine& engine, const Json& a, ToolError* err) {
+    if (has_unknown_key(a, kLookupKeys, "lookup", "it reads query and prefix", err))
+        return make_error(ErrorCode::ArgumentError, err->message);
     if (!a.contains("query") || !a["query"].is_string() || a["query"].get<std::string>().empty()) {
         *err = {"invalid-arguments", "\"query\" is a non-empty name"};
         return make_error(ErrorCode::ArgumentError, "no query");
@@ -901,7 +938,9 @@ Result<Json> lookup(Engine& engine, const Json& a, ToolError* err) {
     return Json{{"query", q}, {"matches", matches}};
 }
 
-Result<Json> capabilities(Engine& engine, const Context& ctx) {
+Result<Json> capabilities(Engine& engine, const Context& ctx, const Json& a, ToolError* err) {
+    if (has_any_key(a, "capabilities", err))
+        return make_error(ErrorCode::ArgumentError, err->message);
     // Each zodiac with how it is defined and the planes it can be counted
     // along: one defined at the instant has no anchor epoch, so no "anchor"
     // plane (protocol v4 §3.5a).
@@ -962,7 +1001,11 @@ Result<Json> capabilities(Engine& engine, const Context& ctx) {
     return out;
 }
 
+constexpr const char* kConvertTimeKeys[] = {"time"};
+
 Result<Json> convert_time(const Json& a, ToolError* err) {
+    if (has_unknown_key(a, kConvertTimeKeys, "convert_time", "it reads time", err))
+        return make_error(ErrorCode::ArgumentError, err->message);
     Bad bad;
     Limits one;
     one.max_times = 1;
@@ -1111,7 +1154,7 @@ Result<Json> call_checked(Engine& engine, const Context& ctx, std::string_view t
     if (tool == "lookup")
         return lookup(engine, a, err);
     if (tool == "capabilities")
-        return capabilities(engine, ctx);
+        return capabilities(engine, ctx, a, err);
     if (tool == "convert_time")
         return convert_time(a, err);
     *err = {"unknown-tool", "no tool is called that"};
@@ -1155,8 +1198,9 @@ std::string llms_txt() {
   what a chart wants: apparent, geocentric, the ecliptic of date, tropical,
   with rates. Options: observer (topocentric with "site", or "body" with
   "center"), zodiac (e.g. "lahiri"), sidereal_plane, frame, coordinates,
-  corrections, precession. Any other argument is refused by name: this
-  engine serves positions, not houses or aspects.
+  corrections, precession. An argument no tool here reads is refused by
+  name rather than ignored -- this engine serves positions, not houses or
+  aspects, and a mistyped option is a refusal, not a silent default.
 - lookup: what a name could mean; with "prefix" it also matches a name by
   its start, or by the start of any word in it ("node" finds "true node").
 - capabilities: what is served, and the limits. Ask it before an asteroid
@@ -1168,7 +1212,8 @@ std::string llms_txt() {
 
 Each result names the object it resolved to (check it), its rows (units in
 the field names), and provenance: source, observer (with the site or the
-centre body that produced it), corrections applied, frame, zodiac, and a
+centre body that produced it), corrections applied, frame, zodiac (with the
+plane it is counted along), the precession model where it entered, and a
 measured accuracy statement with the document that measured it. An answer
 carries where it was seen from, so it still says what it is once it has
 travelled away from the request that asked for it. A

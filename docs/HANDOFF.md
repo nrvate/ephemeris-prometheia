@@ -139,9 +139,23 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
        `houses` or `aspects` got positions back and no hint. Each of the
        three was fault-injected: removing the behaviour reds its case and
        nothing else.
+     - The round after that, same class again, found by asking which
+       arguments move a number without appearing in the answer: the
+       **sidereal plane** (1.02° of latitude on Mars between `date` and
+       `invariable`, and provenance identical across all three planes) and
+       the **precession model** (6 mas at 1600), both now in provenance —
+       precession only where it entered, since a tropical answer on ICRF
+       or J2000 axes is the same number under either model. And the
+       unknown-key rule, which `positions` alone had, now covers all four
+       tools: a mistyped `prefix` on `lookup` had quietly matched exactly
+       and answered nothing, which reads as "no such name".
      - The one behaviour change a lenient client could notice is the
-       refusals: a caller that was sending a naive time, or an argument
-       this engine does not serve, now gets `invalid-arguments`.
+       refusals: a caller that was sending a naive time, or an argument a
+       tool does not read, now gets `invalid-arguments`.
+     - The rule these all came from, worth keeping: **an argument that
+       moved the answer is named in the answer**, and an argument that
+       moved nothing is refused rather than dropped. It is the arrival
+       problem (item 5) in the surface instead of the harness.
 
 ## The cross-test
 

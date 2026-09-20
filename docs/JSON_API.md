@@ -156,13 +156,16 @@ The agent-facing summary of what to ask, and how, is the MCP resource
     misspelling will keep trying spellings.
   - `{"body"|"star"|"asteroid"|"hypothetical"|"naif": …}` and
     `{"point", "of", "method"}` say exactly which.
-- **An argument `positions` does not read is refused by name.** It reads
-  `time`/`times`/`series`, `objects`, `observer` (`site`, `center`),
+- **An argument a tool does not read is refused by name.** `positions`
+  reads `time`/`times`/`series`, `objects`, `observer` (`site`, `center`),
   `frame`, `coordinates`, `corrections`, `zodiac`, `sidereal_plane`,
-  `precession` and `rates`; anything else is `invalid-arguments` naming
-  the key. An agent asking for `houses` or `aspects` — neither of which
-  this engine serves — used to get positions back and no hint that half
-  its request had gone nowhere. Same rule as a name: never a silent guess.
+  `precession` and `rates`; `lookup` reads `query` and `prefix`;
+  `convert_time` reads `time`; `capabilities` takes none. Anything else is
+  `invalid-arguments` naming the key. An agent asking for `houses` or
+  `aspects` — neither of which this engine serves — used to get positions
+  back and no hint that half its request had gone nowhere, and a mistyped
+  `prefix` on `lookup` quietly matched exactly and answered nothing, which
+  reads as "no such name". Same rule as a name: never a silent guess.
 - **`lookup` and a half-remembered name.** `prefix: true` matches a star by
   the start of its name, and a planet, lunar point or hypothetical body by
   the start of **any word** in its name: `node` finds `true node` and
@@ -198,8 +201,9 @@ digits cut):
         "corrections": ["light-time", "gravitational-deflection", "aberration"],
         "frame": "true equator/ecliptic and equinox of date",
         "coordinates": "ecliptic",
-        "zodiac": {"token": "lahiri",
+        "zodiac": {"token": "lahiri", "plane": "date",
                    "doc": "docs/FRAMES.md (zodiacs) and docs/ENGINE.md (ayanamshas)"},
+        "precession": "iau2006",
         "accuracy": {"statement": "JPL planetary ephemeris; positions agree with JPL Horizons to 6 µas",
                      "doc": "docs/VALIDATION.md"}
       },
@@ -211,12 +215,22 @@ digits cut):
 
 - **Every number is named with its unit.** No positional columns.
 - **Provenance is per object:** the source, the observer, the corrections
-  actually applied, the frame, and the zodiac.
+  actually applied, the frame, the zodiac and the precession model.
+  - The rule: *an argument that moved the answer is named in the answer.*
+    Three were missing until 2026-09-20 — the observer, the sidereal plane
+    (1.02° of latitude between `date` and `invariable`) and the precession
+    model (6 mas at 1600) — so answers that differ carried provenance that
+    did not.
   - `observer` is the word that was asked for, with `site` (topocentric) or
-    `center` (`{"naif"}`, a body observer) beside it. It was absent until
-    2026-09-20, so a geocentric answer and a topocentric one — arcseconds
-    apart — carried byte-identical provenance, and an answer that travels
-    (to Astrolog, to a file, to another agent) left the request behind.
+    `center` (`{"naif"}`, a body observer) beside it. An answer travels —
+    to Astrolog, to a file, to another agent — and there it no longer has
+    the request that made it.
+  - `zodiac.plane` is the plane the zodiac is counted along (`date`,
+    `anchor`, `invariable`), on every sidereal answer.
+  - `precession` appears where it entered the answer: an of-date frame or a
+    sidereal zodiac. A tropical answer in ICRF or J2000 axes is the same
+    number under either model, and naming one there would claim a
+    dependence the answer does not have.
   - The accuracy statement is a measured number with the document that
     measured it, never a promise.
 - **Errors** come in two kinds.
