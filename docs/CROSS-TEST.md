@@ -311,9 +311,11 @@ Every one of these has cost this project or the Astrolog project real time.
     never repeated; nothing re-ran any of them, so they describe a build that
     may be two months gone. `tools/check/loadselftest.py` (2026-09-20) is the
     structural version for one tool, and the Astrolog side's
-    `ephsrv-soak.sh --selftest` is theirs. **Eight scripts under
-    `tools/check/` still carry prose**, so the hole is narrowed by two
-    legs, not closed — which is what their side said of theirs, and is
+    `ephsrv-soak.sh --selftest` is theirs. **Five checkers under
+    `tools/check/` still carry prose** -- `crossrun.py`,
+    `ephproto4_fixtures.py`, `ephproto4_registries.py`, `ratesweep.py`,
+    `stars_fk5.py` -- named rather than counted, because a number drifts
+    and a list does not; so the hole is narrowed by three legs, not closed — which is what their side said of theirs, and is
     worth repeating rather than rounding up.
   - **The adjudicators are the second leg, and the only one that re-runs
     on every commit** (`tools/check/adjudicatetest.py`, 2026-09-20). The

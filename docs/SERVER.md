@@ -774,6 +774,41 @@ checking zero cases against the Astrolog server: a green that could not have
 been red, in the tool built to catch exactly that. Against this server it
 checks 27 of 29 cases.
 
+**Its own assertions are falsified by `tools/check/corrtest.py`** (2026-09-20),
+the second tool here to name its own checks rather than have a list kept
+beside it: `corrapplied.py --list-assertions` is the table, every run ends
+with `assertions evaluated [...] fired [...]`, and the exit status is exactly
+"did any assertion fire". Eight cases drive one scripted server each, and a
+case passes only when the *named* assertion fires and no other — the clause
+that separates a deleted check from a working one, since a neighbouring
+assertion reds on the same input.
+
+The fault goes in at the client, not the server. `corrapplied.py` reaches a
+server only through `prometheia-wire-client` and sees only what `wirelib.py`
+parses from its stdout, so `tools/check/fakewire.py` answers from a scenario
+file: no daemon, no ephemeris, no socket, and a server that lies in exactly
+one way at a time. That is what makes "this assertion and no other" a claim
+worth making — a real server cannot be asked to echo the request into
+`corrApplied` while staying honest about everything else.
+
+What it cannot see, said rather than left to be assumed: nothing here grades
+`wirelib.py` against a real client, and a drift in the client's printing has
+to be mirrored in `fakewire.py` by hand. The compensating property is the
+direction it rots — the regexes stop matching, every case loses its answers,
+and the run fails on `nothing-checked` rather than passing quietly. The wire
+itself is covered by the conformance fixtures and the cross-test.
+
+Meta-falsified four ways, each failing exactly the cases it should: deleting
+the independence judge (`did not fire: independence`, and `exit 0, wanted 1`,
+because the exit status no longer counts anything on its own); making
+`declared` fire unconditionally (five cases report `fired but should not
+have`, including the control); adding an eighth assertion with no case (the
+script refuses to start); and removing one the cases expect (`cases expect
+assertions the tool does not declare`). **The fourth injection was a silent
+no-op the first time** — the edit did not match, the run passed, and the pass
+meant nothing. An injection that does not change the file is a green that
+proves nothing, so assert the mutation before trusting its result.
+
 It is written to run against any v4 server, not only this one, and it never
 compares two servers against each other — §3.5a forbids gating on this field,
 and the interesting failures are self-inconsistencies anyway. The wire client
@@ -1069,8 +1104,13 @@ and `--threads 4`. The client ran on the same host.
   - It starts its own daemon per case and stops only what it started. It
     needs an ephemeris, so it is not in `tools/gate.sh`, which must stay
     seconds. **Nothing schedules it.**
-  - **It covers one tool.** The nine scripts under `tools/check/` still
-    carry their falsifications as prose, and this does not change that.
+  - **It covers one tool.** `corrapplied.py` has had the same treatment
+    since (`corrtest.py`, above) and `crosstest.py`'s adjudicators theirs.
+    Named rather than counted, because a number here drifts and a list does
+    not: `crossrun.py`, `ephproto4_fixtures.py`, `ephproto4_registries.py`,
+    `ratesweep.py` and `stars_fk5.py` still carry their falsifications as
+    prose, and `crosstest.py`'s legs — as opposed to its adjudicators — do
+    too.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
   "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none

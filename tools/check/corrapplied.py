@@ -75,6 +75,53 @@ class Answer:
         self.lat_deg = lat_deg
 
 
+# The assertions this tool makes, by name. tools/check/corrtest.py reads
+# this table with --list-assertions rather than keeping a copy: a list beside
+# the thing it describes rots toward green, and this project has shipped that
+# twice (prometheia-load, adjudicatetest.py). The exit status is exactly "did
+# any assertion fire" and counts nothing on its own, so deleting a judge
+# below reports both "did not fire" and "exit 0, wanted 1" -- a deleted check
+# cannot hide behind a neighbouring exit condition.
+ASSERTIONS = (
+    "welcome-no-corrmasks",   # A.3 0x0004 is empty: nothing can be asked
+    "independence",           # corrApplied tracks the request (3.4 says structural)
+    "declared",               # corrApplied claims what no WELCOME record carries
+    "truthful",               # a clear bit that moves the sky is a false denial
+    "nothing-checked",        # no case survived to be checked at all
+    "min-fraction",           # too few did, which is a green nobody should believe
+    "check-never-ran",        # a case was checked and one of the three checks never ran
+)
+
+
+class Assertions:
+    """Which assertions this run evaluated, and which fired.
+
+    Evaluated is not fired and neither is inferable from the output: a check
+    that never reaches its comparison is the failure mode a per-assertion
+    selftest exists to catch, so both lists are printed.
+    """
+
+    def __init__(self):
+        self.evaluated = set()
+        self.fired = set()
+
+    def judge(self, name, bad, message=None, into=None):
+        assert name in ASSERTIONS, name
+        self.evaluated.add(name)
+        if bad:
+            self.fired.add(name)
+            if into is not None and message is not None:
+                into.append(message)
+        return bool(bad)
+
+    def any_fired(self):
+        return bool(self.fired)
+
+    def report(self):
+        print(f"assertions evaluated [{' '.join(sorted(self.evaluated))}] "
+              f"fired [{' '.join(sorted(self.fired))}]")
+
+
 def separation_arcsec(a, b):
     """Angle between two spherical directions, in arcseconds.
 
@@ -186,8 +233,16 @@ def main():
     ap.add_argument("--min-fraction", type=float, default=0.5,
                     help="fail unless at least this fraction of cases is checked (default 0.5)")
     ap.add_argument("-v", "--verbose", action="store_true", help="echo each request")
+    ap.add_argument("--list-assertions", action="store_true",
+                    help="print the assertions this tool makes, one per line, and exit")
     args = ap.parse_args()
 
+    if args.list_assertions:
+        for name in ASSERTIONS:
+            print(name)
+        return 0
+
+    asserts = Assertions()
     client = shutil.which(args.client) or args.client
     fails, notes, skipped, inapplicable = [], [], [], []
     runs = {"independence": 0, "declared": 0, "truthful": 0}
@@ -200,8 +255,9 @@ def main():
     # carries the WELCOME back, whether or not its REQUEST is answered.
     _, welcome, _ = ask(client, args.host, args.port, ["--obj", "10"], [], 7, args.jd,
                         args.verbose)
-    if not welcome.corrmasks:
+    if asserts.judge("welcome-no-corrmasks", not welcome.corrmasks):
         print("\nFAIL: WELCOME advertises no correction masks (A.3 0x0004); nothing can be asked")
+        asserts.report()
         return 1
 
     for case in all_cases:
@@ -237,12 +293,12 @@ def main():
         if len(answers) >= 2:
             runs["independence"] += 1
             varying = {m: a.corr_applied for m, a in answers.items() if a.corr_applied != claimed}
-            if varying:
-                shown = ", ".join(f"mask {m} -> {c}" for m, c in sorted(varying.items()))
-                fails.append(
-                    f"{case.label}: corrApplied tracks the request "
-                    f"(mask {first} -> {claimed}, but {shown}); 3.4 says it is structural"
-                )
+            shown = ", ".join(f"mask {m} -> {c}" for m, c in sorted(varying.items()))
+            asserts.judge(
+                "independence", varying,
+                f"{case.label}: corrApplied tracks the request "
+                f"(mask {first} -> {claimed}, but {shown}); 3.4 says it is structural",
+                fails)
         else:
             inapplicable.append(f"{case.label}: independence needs two honoured masks")
 
@@ -254,14 +310,14 @@ def main():
         over = 0
         for answer in answers.values():
             over |= answer.corr_applied & ~allowed
-        if over:
-            named = ", ".join(
-                BIT_NAME[b] for b in (LIGHT_TIME, DEFLECTION, ABERRATION) if over & b
-            )
-            fails.append(
-                f"{case.label}: corrApplied claims {named}, which no mask WELCOME "
-                f"honours for this observer and kind carries"
-            )
+        named = ", ".join(
+            BIT_NAME[b] for b in (LIGHT_TIME, DEFLECTION, ABERRATION) if over & b
+        )
+        asserts.judge(
+            "declared", over,
+            f"{case.label}: corrApplied claims {named}, which no mask WELCOME "
+            f"honours for this observer and kind carries",
+            fails)
 
         # truthful: a clear bit must not move the sky. Needs mask 0 and the
         # bit asked for alone, both honoured.
@@ -275,12 +331,14 @@ def main():
             runs["truthful"] += 1
             moved = separation_arcsec(answers[0], answers[bit])
             has = bool(claimed & bit)
-            if not has and moved > MOVED_ARCSEC:
-                fails.append(
-                    f"{case.label}: corrApplied says no {BIT_NAME[bit]}, but asking for it "
-                    f"alone moves the position {moved:.4f}\""
-                )
-            elif has and moved < STILL_ARCSEC:
+            false_denial = asserts.judge(
+                "truthful", not has and moved > MOVED_ARCSEC,
+                f"{case.label}: corrApplied says no {BIT_NAME[bit]}, but asking for it "
+                f"alone moves the position {moved:.4f}\"",
+                fails)
+            if false_denial:
+                continue
+            if has and moved < STILL_ARCSEC:
                 notes.append(
                     f"{case.label}: {BIT_NAME[bit]} is reported applied and contributes "
                     f"{moved:.2e}\" -- allowed by 3.4 (the model ran, it was nothing)"
@@ -314,21 +372,23 @@ def main():
 
     # Checking nothing is not a pass.
     problems = []
-    if checked == 0:
-        problems.append(f"NOTHING CHECKED: 0 of {total} cases")
-    elif checked < args.min_fraction * total:
-        problems.append(f"only {checked} of {total} cases checked "
-                        f"(--min-fraction {args.min_fraction})")
+    if not asserts.judge("nothing-checked", checked == 0,
+                         f"NOTHING CHECKED: 0 of {total} cases", problems):
+        asserts.judge("min-fraction", checked < args.min_fraction * total,
+                      f"only {checked} of {total} cases checked "
+                      f"(--min-fraction {args.min_fraction})", problems)
     for name, n in runs.items():
-        if checked and n == 0:
-            problems.append(f"the {name} check never ran")
-    if fails or problems:
+        if checked:
+            asserts.judge("check-never-ran", n == 0,
+                          f"the {name} check never ran", problems)
+    if problems or fails:
         print("\nFAIL:")
         for f in problems + fails:
             print(f"  - {f}")
-        return 1
-    print("\nOK: corrApplied matches this server's own behaviour and its own WELCOME")
-    return 0
+    else:
+        print("\nOK: corrApplied matches this server's own behaviour and its own WELCOME")
+    asserts.report()
+    return 1 if asserts.any_fired() else 0
 
 
 if __name__ == "__main__":
