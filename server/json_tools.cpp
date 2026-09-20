@@ -124,9 +124,12 @@ std::optional<double> parse_utc(const std::string& s, Bad& bad) {
                 ++i;
             sec = std::atof(s.substr(start, i - start).c_str());
         }
+        bool zoned = false;
         if (i < s.size() && s[i] == 'Z') {
             ++i;
+            zoned = true;
         } else if (i < s.size() && (s[i] == '+' || s[i] == '-')) {
+            zoned = true;
             sign = s[i++] == '-' ? -1 : 1;
             if (!digits(2, oh)) {
                 bad.message = "a UTC offset must be +HH:MM";
@@ -138,6 +141,17 @@ std::optional<double> parse_utc(const std::string& s, Bad& bad) {
                 bad.message = "a UTC offset must be +HH:MM";
                 return std::nullopt;
             }
+        }
+        // A clock time with no zone was read as UTC until 2026-09-20, which
+        // is the one wrong answer this surface could give without saying
+        // anything: an agent holding "14:30 in Zurich" and forgetting the
+        // offset got a chart two hours out, and the reply called it UTC. A
+        // date alone stays 00:00 UTC -- that is a date, not a clock time.
+        if (!zoned) {
+            bad.message = "a clock time needs its UTC offset or a Z, e.g. "
+                          "1990-06-15T14:30:00+02:00 or 1990-06-15T12:30:00Z; a local time "
+                          "without one is ambiguous by up to a day";
+            return std::nullopt;
         }
     }
     if (i != s.size() || mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || sec >= 61.0) {
@@ -428,6 +442,13 @@ struct Options {
     CalcOptions opts;
     std::string frame_words, zodiac_token;
     bool sidereal = false;
+    // What the answer says about where it was seen from. Provenance named
+    // the frame, the corrections and the zodiac but never the observer, so
+    // a topocentric answer and a geocentric one were indistinguishable
+    // except by their numbers -- and an answer that travels (to Astrolog,
+    // to a file, to another agent) loses the request that made it.
+    std::string observer_words;
+    Json observer_detail; // the site, or the body at whose centre
 };
 
 std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
@@ -438,6 +459,7 @@ std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
                                                      : std::string(dflt);
     };
     const std::string obs = str("observer", "geocentric");
+    out.observer_words = obs;
     if (obs == "geocentric") {
         o.center = Center::Geocentric;
     } else if (obs == "heliocentric") {
@@ -469,6 +491,7 @@ std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
         }
         o.center = Center::Topocentric;
         o.site = {lon * 3.14159265358979323846 / 180.0, lat * 3.14159265358979323846 / 180.0, h};
+        out.observer_detail = {{"lon_deg", lon}, {"lat_deg", lat}, {"height_m", h}};
     } else if (obs == "body") {
         // A.5's fifth observer: the centre of a body ("Jupiter as seen from
         // Io" is {"observer": "body", "center": "Io"}).
@@ -479,6 +502,7 @@ std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
         }
         o.center = Center::Body;
         o.center_body = *c;
+        out.observer_detail = {{"naif", *c}};
     } else {
         bad.message = "the observer is geocentric, topocentric, heliocentric, barycentric or body";
         return std::nullopt;
@@ -693,8 +717,30 @@ std::string error_code(const Error& e) {
 // ---------------------------------------------------------------------------
 // The tools.
 
+// Everything `positions` reads. A key outside this list was ignored in
+// silence until 2026-09-20, so an agent asking for "houses" or "aspects"
+// -- neither of which this engine serves -- got positions back and no hint
+// that half its request had gone nowhere. Same rule as a name: never a
+// silent guess.
+constexpr const char* kPositionsKeys[] = {
+    "time",  "times",       "series",      "objects", "observer",       "site",       "center",
+    "frame", "coordinates", "corrections", "zodiac",  "sidereal_plane", "precession", "rates"};
+
 Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolError* err) {
     Bad bad;
+    if (a.is_object())
+        for (const auto& kv : a.items())
+            if (std::find_if(std::begin(kPositionsKeys), std::end(kPositionsKeys),
+                             [&](const char* k) { return kv.key() == k; }) ==
+                std::end(kPositionsKeys)) {
+                const std::string m = "\"" + kv.key() +
+                                      "\" is not an argument of positions; it "
+                                      "reads time/times/series, objects, observer (site, center), "
+                                      "frame, coordinates, corrections, zodiac, sidereal_plane, "
+                                      "precession and rates";
+                *err = {"invalid-arguments", m};
+                return make_error(ErrorCode::ArgumentError, m);
+            }
     auto times = parse_times(a, ctx.limits, bad);
     if (!times) {
         *err = {"invalid-arguments", bad.message};
@@ -778,10 +824,13 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
         }
         r["rows"] = rows;
         Json prov = {{"source", source},
+                     {"observer", options->observer_words},
                      {"corrections", corrections_applied(obj, o)},
                      {"frame", options->frame_words},
                      {"coordinates", o.coords == Coords::Ecliptic ? "ecliptic" : "equatorial"},
                      {"accuracy", accuracy(obj)}};
+        if (!options->observer_detail.is_null())
+            prov[options->observer_words == "body" ? "center" : "site"] = options->observer_detail;
         if (options->sidereal)
             prov["zodiac"] = {{"token", options->zodiac_token},
                               {"doc", "docs/FRAMES.md (zodiacs) and docs/ENGINE.md (ayanamshas)"}};
@@ -1098,13 +1147,16 @@ std::string llms_txt() {
 ## Tools
 
 - positions: objects by name ("Sun", "Moon", "Mars", "true node", "Lilith",
-  "Spica", "Ceres", "cupido") at "time" (ISO 8601 clock time with offset, e.g.
-  "1990-06-15T14:30:00+02:00": UTC from 1972, UT1 before it, and the reply
-  says which), "times" or "series". Defaults are what a chart
-  wants: apparent, geocentric, the ecliptic of date, tropical, with rates.
-  Options: observer (topocentric with "site", or "body" with "center"),
-  zodiac (e.g. "lahiri"), sidereal_plane, frame, coordinates, corrections,
-  precession.
+  "Spica", "Ceres", "cupido") at "time" (ISO 8601 clock time with its offset
+  or Z, e.g. "1990-06-15T14:30:00+02:00": UTC from 1972, UT1 before it, and
+  the reply says which), "times" or "series". A clock time with no offset
+  and no Z is refused -- a local time is ambiguous by up to a day, so send
+  the offset or convert it yourself. A bare date is 00:00 UTC. Defaults are
+  what a chart wants: apparent, geocentric, the ecliptic of date, tropical,
+  with rates. Options: observer (topocentric with "site", or "body" with
+  "center"), zodiac (e.g. "lahiri"), sidereal_plane, frame, coordinates,
+  corrections, precession. Any other argument is refused by name: this
+  engine serves positions, not houses or aspects.
 - lookup: what a name could mean; with "prefix" it also matches a name by
   its start, or by the start of any word in it ("node" finds "true node").
 - capabilities: what is served, and the limits. Ask it before an asteroid
@@ -1115,8 +1167,11 @@ std::string llms_txt() {
 ## Reading an answer
 
 Each result names the object it resolved to (check it), its rows (units in
-the field names), and provenance: source, corrections applied, frame, zodiac,
-and a measured accuracy statement with the document that measured it. A
+the field names), and provenance: source, observer (with the site or the
+centre body that produced it), corrections applied, frame, zodiac, and a
+measured accuracy statement with the document that measured it. An answer
+carries where it was seen from, so it still says what it is once it has
+travelled away from the request that asked for it. A
 failure is a per-object error with a code (unknown-name, ambiguous-name,
 outside-coverage, unsupported, numerical-failure) and a sentence; never a
 guess.

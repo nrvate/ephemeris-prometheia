@@ -123,6 +123,13 @@ The agent-facing summary of what to ask, and how, is the MCP resource
 - **Time:**
   - `time` is an ISO 8601 clock time (with an offset or `Z`), or
     `{"utc": …}`, `{"jd_tt": …}` or `{"jd_ut1": …}`.
+  - **A clock time without an offset or `Z` is refused**, wherever a time
+    is read (`time`, `times`, a `series` start, `convert_time`). It was
+    silently read as UTC until 2026-09-20, which is the one wrong answer
+    this surface could give without saying anything: an agent holding
+    "14:30 in Zurich" and forgetting the offset got a chart two hours out
+    and a reply that called it UTC. A bare date is still 00:00 UTC — that
+    is a date, not a clock time.
   - `times` is a list of those.
   - `series` is `{"start", "step_days", "count"}`.
   - UTC goes through the leap-second table and the engine's ΔT
@@ -149,6 +156,13 @@ The agent-facing summary of what to ask, and how, is the MCP resource
     misspelling will keep trying spellings.
   - `{"body"|"star"|"asteroid"|"hypothetical"|"naif": …}` and
     `{"point", "of", "method"}` say exactly which.
+- **An argument `positions` does not read is refused by name.** It reads
+  `time`/`times`/`series`, `objects`, `observer` (`site`, `center`),
+  `frame`, `coordinates`, `corrections`, `zodiac`, `sidereal_plane`,
+  `precession` and `rates`; anything else is `invalid-arguments` naming
+  the key. An agent asking for `houses` or `aspects` — neither of which
+  this engine serves — used to get positions back and no hint that half
+  its request had gone nowhere. Same rule as a name: never a silent guess.
 - **`lookup` and a half-remembered name.** `prefix: true` matches a star by
   the start of its name, and a planet, lunar point or hypothetical body by
   the start of **any word** in its name: `node` finds `true node` and
@@ -179,6 +193,8 @@ digits cut):
                           "distance_au_per_day": -0.0053913}}],
       "provenance": {
         "source": "JPL DE440 binary",
+        "observer": "topocentric",
+        "site": {"lon_deg": 8.55, "lat_deg": 47.37, "height_m": 500},
         "corrections": ["light-time", "gravitational-deflection", "aberration"],
         "frame": "true equator/ecliptic and equinox of date",
         "coordinates": "ecliptic",
@@ -194,8 +210,13 @@ digits cut):
 ```
 
 - **Every number is named with its unit.** No positional columns.
-- **Provenance is per object:** the source, the corrections actually
-  applied, the frame, and the zodiac.
+- **Provenance is per object:** the source, the observer, the corrections
+  actually applied, the frame, and the zodiac.
+  - `observer` is the word that was asked for, with `site` (topocentric) or
+    `center` (`{"naif"}`, a body observer) beside it. It was absent until
+    2026-09-20, so a geocentric answer and a topocentric one — arcseconds
+    apart — carried byte-identical provenance, and an answer that travels
+    (to Astrolog, to a file, to another agent) left the request behind.
   - The accuracy statement is a measured number with the document that
     measured it, never a promise.
 - **Errors** come in two kinds.
@@ -267,7 +288,15 @@ gets positions here, and may ask Astrolog, through its own interface, to
 *display* them: Astrolog draws what the agent already knows. That is why
 the words above must be one vocabulary.
 
-## Open questions
+## `/llms.txt`
 
-- Should `/llms.txt` live in both repositories, or should one project host a
-  combined one?
+One per surface, and here that means one: ours, served by `prometheia-json`
+at `GET /llms.txt` and as the MCP resource `prometheia://llms.txt`. A
+combined file was considered and settled against on 2026-09-20 — Astrolog
+exposes no chart tools to an agent (above), so a combined file would have
+one project's tools in it and a paragraph about the other, which is what
+this document is for. The file describes what the server it came from will
+answer, so an agent that reached a deployment reads that deployment's own
+limits and catalog; a second copy in another repository would be a
+description of a server the reader is not talking to. If Astrolog ever
+serves agent tools, it serves its own `/llms.txt` beside them.

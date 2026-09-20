@@ -465,3 +465,105 @@ TEST_CASE("json_lookup_prefix_reaches_every_kind") {
     CHECK(has(names("true node", false), "true node"));
     CHECK(has(names("mars", false), "mars"));
 }
+
+// A clock time with no offset was read as UTC and called "utc" in the answer:
+// the one wrong number this surface could hand back in silence.
+TEST_CASE("json_a_naive_clock_time_is_refused") {
+    synth::TempFile tf("json-naive");
+    Engine e = synth::open_synthetic(tf);
+    jsontools::ToolError err;
+    for (const char* naive : {"1990-06-15T14:30:00", "1990-06-15T14:30", "1990-06-15 14:30:00"}) {
+        CHECK(run(e, "convert_time", {{"time", naive}}, &err).is_null());
+        CHECK(err.code == "invalid-arguments");
+        CHECK(err.message.find("UTC offset or a Z") != std::string::npos);
+    }
+    // The zoned forms and a bare date (a date, not a clock time) still work,
+    // and the two zoned forms are the same instant.
+    const Json z = run(e, "convert_time", {{"time", "1990-06-15T12:30:00Z"}});
+    const Json off = run(e, "convert_time", {{"time", "1990-06-15T14:30:00+02:00"}});
+    REQUIRE(z.is_object());
+    // The offset form crosses the day through a JD and back, so the two agree
+    // to well under a millisecond rather than bit for bit.
+    CHECK(std::fabs(z["jd_tt"].get<double>() - off["jd_tt"].get<double>()) < 1e-8);
+    const Json day = run(e, "convert_time", {{"time", "1990-06-15"}});
+    REQUIRE(day.is_object());
+    CHECK(day["utc"] == "1990-06-15T00:00:00.000Z");
+    // Wherever a time is read: a series start too, not only `time`.
+    CHECK(run(e, "positions",
+              {{"series", {{"start", "2026-01-01T00:00:00"}, {"step_days", 1}, {"count", 2}}},
+               {"objects", {"Sun"}}},
+              &err)
+              .is_null());
+    CHECK(err.code == "invalid-arguments");
+}
+
+// Provenance named the frame, the corrections and the zodiac but never the
+// observer, so a geocentric answer and a topocentric one -- arcseconds apart
+// -- carried byte-identical provenance once they left the request behind.
+TEST_CASE("json_provenance_names_the_observer") {
+    synth::TempFile tf("json-prov");
+    Engine e = synth::open_synthetic(tf);
+    const Json t = {{"jd_tt", 2451545.0}};
+    const Json geo = run(e, "positions", {{"time", t}, {"objects", {"Sun"}}});
+    const Json topo = run(e, "positions",
+                          {{"time", t},
+                           {"observer", "topocentric"},
+                           {"site", {{"lon_deg", -78.47}, {"lat_deg", -0.18}, {"height_m", 2850}}},
+                           {"objects", {"Sun"}}});
+    const Json& pg = geo["results"][0]["provenance"];
+    const Json& pt = topo["results"][0]["provenance"];
+    CHECK(pg["observer"] == "geocentric");
+    CHECK_FALSE(pg.contains("site"));
+    CHECK(pt["observer"] == "topocentric");
+    REQUIRE(pt.contains("site"));
+    CHECK(pt["site"]["lon_deg"] == -78.47);
+    CHECK(pt["site"]["height_m"] == 2850.0);
+    CHECK(pg != pt);
+    // A body centre names the body, under "center" rather than "site".
+    // Jupiter's barycentre is one of the synthetic kernel's three bodies.
+    const Json body =
+        run(e, "positions",
+            {{"time", t}, {"observer", "body"}, {"center", "Jupiter"}, {"objects", {"Sun"}}});
+    const Json& pb = body["results"][0]["provenance"];
+    CHECK(pb["observer"] == "body");
+    CHECK(pb["center"]["naif"] == 5);
+    CHECK_FALSE(pb.contains("site"));
+    // The Sun seen from the Sun is degenerate on this kernel; ask for Earth.
+    const Json helio =
+        run(e, "positions", {{"time", t}, {"observer", "heliocentric"}, {"objects", {"Earth"}}});
+    CHECK(helio["results"][0]["provenance"]["observer"] == "heliocentric");
+}
+
+// An argument this engine does not serve -- houses, aspects, a misspelling --
+// was dropped in silence and the answer looked like the one asked for.
+TEST_CASE("json_an_unknown_positions_key_is_refused") {
+    synth::TempFile tf("json-keys");
+    Engine e = synth::open_synthetic(tf);
+    jsontools::ToolError err;
+    const Json t = {{"jd_tt", 2451545.0}};
+    CHECK(
+        run(e, "positions", {{"time", t}, {"objects", {"Sun"}}, {"housesystem", "placidus"}}, &err)
+            .is_null());
+    CHECK(err.code == "invalid-arguments");
+    CHECK(err.message.find("\"housesystem\"") != std::string::npos);
+    // A near miss of a real key is refused by the same rule.
+    CHECK(run(e, "positions", {{"time", t}, {"objects", {"Sun"}}, {"correction", {"light-time"}}},
+              &err)
+              .is_null());
+    CHECK(err.code == "invalid-arguments");
+    // Every documented key still passes, together.
+    const Json all = run(e, "positions",
+                         {{"time", t},
+                          {"objects", {"Sun"}},
+                          {"observer", "topocentric"},
+                          {"site", {{"lon_deg", 8.55}, {"lat_deg", 47.37}, {"height_m", 500}}},
+                          {"frame", "true-of-date"},
+                          {"coordinates", "ecliptic"},
+                          {"corrections", {"light-time", "aberration"}},
+                          {"zodiac", "tropical"},
+                          {"precession", "iau2006"},
+                          {"rates", true}},
+                         &err);
+    REQUIRE(all.is_object());
+    CHECK(all["results"][0]["error"].is_null());
+}

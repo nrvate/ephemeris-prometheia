@@ -122,6 +122,26 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
      display endpoint that draws what an agent got from here.
    - The natural (interpolated) lunar apogee and perigee are served
      (ORBIT-POINTS.md, "The natural apsides").
+   - **Driven end to end as an agent would, 2026-09-20** — a birth chart by
+     clock time and place, then the names and the words around it, against
+     JSON_API.md rather than against its own tests. Six gaps, all of one
+     kind: *the server knew something and did not say it.*
+     - `54482f2`: a deployment with no catalog was indistinguishable from a
+       misspelling (`capabilities.asteroids`, and the per-object error);
+       `lookup`'s `prefix` reached only the star index, so `node` never
+       found `true node`.
+     - The round after it: **a naive clock time was read as UTC** and the
+       reply called it `"utc"` — the one wrong number this surface could
+       hand back in silence — now refused wherever a time is read;
+       **provenance never named the observer**, so a geocentric answer and
+       a topocentric one 8.8" apart were byte-identical once they left the
+       request behind; **an unknown top-level key was ignored**, so
+       `houses` or `aspects` got positions back and no hint. Each of the
+       three was fault-injected: removing the behaviour reds its case and
+       nothing else.
+     - The one behaviour change a lenient client could notice is the
+       refusals: a caller that was sending a naive time, or an argument
+       this engine does not serve, now gets `invalid-arguments`.
 
 ## The cross-test
 
@@ -287,8 +307,11 @@ terms.
   (CROSS-TEST.md, "What this does not test").
 - **Kinds 3 and 4 have no cross-test cell**, because the Astrolog client
   asks no server for them; kind 4 is covered another way.
-- **`/llms.txt` in both repositories, or one combined?** (JSON_API.md,
-  "Open questions") — a cross-repo decision, not ours alone.
+- ~~`/llms.txt` in both repositories, or one combined?~~ Settled
+  2026-09-20 (JSON_API.md, "`/llms.txt`"): one per surface, and Astrolog
+  exposes no agent tools to have one. It obliges them of nothing — if they
+  ever serve agent tools they serve their own file beside them — so it did
+  not need to go to the maintainer.
 
 **Theirs — all measured and closed in record u (2026-09-20).**
 
