@@ -1853,15 +1853,51 @@ TEST_CASE("server_log_traces_a_request_without_its_contents") {
     CHECK(fx.session->on_message(request(helio, 6), true));
     drain(*fx.session);
 
+    // Each line is "prometheiad <ISO8601> <rest>", and the scan for leaked
+    // request contents must not see that timestamp. The site latitude here is
+    // 47.37, and a log line written 47.370 s into any minute reads
+    // "...T15:49:47.370Z" -- which contains "47.37". That is a real failure
+    // of this test, not of the server: it fired once on 2026-09-19, took the
+    // gate red, was recorded in docs/HANDOFF.md with the test name unknown
+    // because the output was discarded, and did not recur in sixty runs. The
+    // window is about ten milliseconds a minute per line, so roughly one gate
+    // run in a thousand. A timestamp is not request content.
+    const auto without_timestamps = [](const std::string& in) {
+        std::string out;
+        size_t at = 0;
+        while (at < in.size()) {
+            const size_t eol = in.find('\n', at);
+            const std::string line = in.substr(at, eol == std::string::npos ? eol : eol - at);
+            const size_t a = line.find(' ');
+            const size_t b = a == std::string::npos ? a : line.find(' ', a + 1);
+            out += (b == std::string::npos) ? line : line.substr(0, a) + line.substr(b);
+            out += '\n';
+            if (eol == std::string::npos) {
+                break;
+            }
+            at = eol + 1;
+        }
+        return out;
+    };
+
     const std::string text = read_all(f);
+    const std::string body = without_timestamps(text);
     INFO(text);
     CHECK(text.find("c=0.7 hello v=4") != std::string::npos);
     CHECK(text.find("c=0.7 req=5 accepted rows objs=2 (body:2) rows=3 profiles=1") !=
           std::string::npos);
     CHECK(text.find("c=0.7 req=5 done rows objs=2 rows=3 chunks=1") != std::string::npos);
     CHECK(text.find("c=0.7 req=6 error=11") != std::string::npos);
+    // The stripper against the exact line that took the gate red, so the
+    // paragraph above is a test and not a note: the timestamp goes and
+    // everything after it stays. A stripper that returned nothing would make
+    // every secret absent, which is why this and the REQUIRE below are here.
+    CHECK(without_timestamps("prometheiad 2026-09-19T15:49:47.370Z c=0.7 req=5 done\n") ==
+          "prometheiad c=0.7 req=5 done\n");
+    // The timestamp is stripped, so a hit here is the server's doing.
+    REQUIRE(body.find("prometheiad c=0.7 hello") != std::string::npos);
     for (const char* secret : {"2451545", "8.55", "47.37", "432"}) {
-        CHECK_MESSAGE(text.find(secret) == std::string::npos, secret);
+        CHECK_MESSAGE(body.find(secret) == std::string::npos, secret);
     }
     std::fclose(f);
 

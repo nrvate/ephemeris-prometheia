@@ -302,11 +302,31 @@ terms.
   against heliocentric and Jupiter's centre against Mars's — and one asks
   the opposite, since a heliocentric observer and an observer at the Sun's
   centre are the same place (both servers: 0.0000").
-- **One gate failure on 2026-09-19 that did not reproduce.** It came right
-  after a `pkill` of `prometheiad`; three further gates and thirty runs of
-  `test_prometheiad` were clean, and the failing test's name was not kept.
-  Recorded here because an unexplained red is worth remembering, not
-  because there is a lead.
+- ~~**One gate failure on 2026-09-19 that did not reproduce.**~~ Found
+  2026-09-20, and it was the test. `server_log_traces_a_request_without_
+  its_contents` asserts the log never carries what was asked, and one of
+  the secrets it scans for is the site latitude **47.37**. It scanned the
+  whole log line, timestamp included — and a line written 47.370 s into
+  any minute reads `...T15:49:47.370Z`. Ten milliseconds a minute per
+  line, four lines, two builds: about one gate run in a thousand. That is
+  why sixty clean runs found nothing; the estimate was in the right place
+  and the search was not.
+
+  It surfaced only because `tools/gate.sh` now keeps the failing output
+  (`build/gate-failure.log`, 742d36c) and `tools/scheduled.sh` runs the
+  gate into a dated log. The first failure after that change was this one,
+  with its name and its numbers.
+
+  The scan now drops the `prometheiad <ISO8601> ` prefix from each line
+  and reads only the rest. A stripper that returned nothing would make
+  every secret absent, so the test also checks the stripper against the
+  exact line that took the gate red, and requires the stripped text still
+  to contain the message it expects. Fault-injected both ways: a secret
+  that really is in the body still fails, and a stripper that strips
+  everything fails on two assertions rather than passing.
+
+  **Fourth time in three days that the measurement was wrong and the
+  program was fine.**
 - ~~The cross-test runs by hand.~~ Closed 2026-09-20 by
   `tools/check/crossrun.py --record` (CROSS-TEST.md, "One command"): one
   command starts our daemon, runs every leg, then `corrapplied.py` and
