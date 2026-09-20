@@ -27,9 +27,36 @@ anything that fails on both sides, and that is what a cross-test is -- but
 it is the leg's reach, and it should be known and not discovered by a drop
 that mattered.
 
+Three rules, each of which cost a rewrite here or on the Astrolog side:
+
+  * **assert the injection changed something** -- a drop that dropped
+    nothing leaves the leg green and proves nothing;
+  * **the injection must be a *weakening* of what that invocation actually
+    sent**, which is not implied by the first: substituting
+    `--corrections 6` into a leg that sends `0` changes something, by
+    *adding* two corrections, and the leg is then green because the
+    injection was meaningless. The only way to know is to read the value off
+    the invocation. A hand-run probe here made exactly that mistake;
+  * **the list of what to inject comes from execution, never from the text**
+    -- the Astrolog side's grep of their own gate found a mask that appears
+    only in a comment, and a trial built from it would have reported
+    something about an invocation that does not exist.
+
+An option can also be *half* tested -- one option, two effects, one of them
+reaching nothing -- and a whole-option drop reports it covered.  So for an
+option whose value is a bitmask (`MASKS` below), each set bit is cleared in
+turn as well.  That found two on its first run: `apparent` sees
+`--corrections` and not its deflection bit, `bary` sees it and not its light
+time bit.  The idea is the Astrolog side's, 2026-09-20, from the limit of
+their own copy of this tool.
+
 **What this cannot see:** whether a leg asks the right question, whether its
 band is the right band, and anything that needs two different servers.  It
-measures reach, not correctness.
+measures reach, not correctness.  And the half-tested hole is only closed
+for options this file knows to be masks: an option with two effects that is
+not a bitmask still reports covered, and finding that needs someone to ask
+what the option means and check there is a row per meaning.  This is a floor
+on coverage, not a ceiling.
 
 Needs our daemon and no other: their server is never contacted.
 
@@ -60,6 +87,12 @@ ALL_LEGS = ("surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,
 # it stops the request from being made at all.
 PLUMBING = {"--host", "--port"}
 
+# Options whose value is a bitmask, so that dropping the whole option is a
+# weaker question than clearing one bit of it. The value comes from the
+# leg's own argv; each set bit is cleared in turn and the result is recorded
+# as `--corrections~2`, read as "the leg still passes with bit 2 gone".
+MASKS = {"--corrections": "A.7's light time (1), deflection (2), aberration (4)"}
+
 ASSERTIONS = (
     "no-leg-measured",   # not one leg produced a map
     "control-red",       # a leg's own control run is not green, so nothing follows
@@ -78,7 +111,7 @@ ASSERTIONS = (
 EXPECTED = os.path.join(CHECK, "blindspots.json")
 
 
-def run_leg(args, leg, drop=None, log=None, counter=None):
+def run_leg(args, leg, drop=None, log=None, counter=None, subs=None):
     """One crosstest run. Returns (exit code, output)."""
     env = dict(os.environ)
     env["PROMETHEIA_DROP_CLIENT"] = args.client
@@ -90,6 +123,8 @@ def run_leg(args, leg, drop=None, log=None, counter=None):
         env["PROMETHEIA_DROP_LOG"] = log
     if counter:
         env["PROMETHEIA_DROP_COUNT"] = counter
+    if subs:
+        env["PROMETHEIA_DROP_SUB"] = json.dumps(subs)
     ep = f"127.0.0.1:{args.port}"
     argv = [sys.executable, os.path.join(CHECK, "crosstest.py"),
             "--ours", ep, "--theirs", ep, "--self-compare",
@@ -101,13 +136,42 @@ def run_leg(args, leg, drop=None, log=None, counter=None):
 
 def arguments_sent(path):
     """Every flag the leg's own requests carried, from the client's argv."""
-    flags = set()
+    flags, values = set(), {}
     with open(path) as f:
         for line in f:
-            for word in line.rstrip("\n").split("\t"):
-                if word.startswith("--"):
-                    flags.add(word)
-    return sorted(flags - PLUMBING)
+            words = line.rstrip("\n").split("\t")
+            for i, word in enumerate(words):
+                if not word.startswith("--"):
+                    continue
+                flags.add(word)
+                if i + 1 < len(words) and not words[i + 1].startswith("--"):
+                    values.setdefault(word, set()).add(words[i + 1])
+    return sorted(flags - PLUMBING), values
+
+
+def mask_cases(values):
+    """(label, flag, substituted value) for every set bit of every mask value
+    the leg actually sent.
+
+    The label carries the value the bit was cleared *from*: a leg that sends
+    two different masks produces two trials per bit, and labelling them by
+    the bit alone would collide and record one result under the other's name.
+    A leg that sends `--corrections 0` produces no trial at all, which is
+    right -- there is no bit to clear, and substituting a nonzero value there
+    would be adding a correction rather than removing one."""
+    out = []
+    for flag in MASKS:
+        for raw in sorted(values.get(flag, ())):
+            try:
+                v = int(raw)
+            except ValueError:
+                continue
+            bit = 1
+            while bit <= v:
+                if v & bit:
+                    out.append((f"{flag}={v}~{bit}", flag, str(v & ~bit)))
+                bit <<= 1
+    return sorted(set(out))
 
 
 def main():
@@ -154,7 +218,7 @@ def main():
             out[leg] = {"control": "red"}
             print(f"{leg:18s} CONTROL RED -- not measured")
             continue
-        flags = arguments_sent(log) if os.path.exists(log) else []
+        flags, values = arguments_sent(log) if os.path.exists(log) else ([], {})
         if asserts.judge("no-arguments", not flags,
                          f"{leg}: sent no argument this could drop, so \"nothing blind\" "
                          "would be a statement about nothing", fails):
@@ -162,33 +226,37 @@ def main():
             print(f"{leg:18s} NO ARGUMENTS")
             continue
         seen, blind = [], []
-        for flag in flags:
+        trials = [(f, f, None) for f in flags] + list(mask_cases(values))
+        for label, flag, value in trials:
             counter = os.path.join(work, f"{leg}.count")
             if os.path.exists(counter):
                 os.remove(counter)
-            c, t = run_leg(a, leg, drop=flag, counter=counter)
+            if value is None:
+                c, t = run_leg(a, leg, drop=flag, counter=counter)
+            else:
+                c, t = run_leg(a, leg, counter=counter, subs={flag: value})
             taken = 0
             if os.path.exists(counter):
                 with open(counter) as f:
                     taken = sum(int(x) for x in f.read().split())
             if asserts.judge("not-injected", taken == 0,
-                             f"{leg}: dropping {flag} removed nothing from any request, "
+                             f"{leg}: changing {label} changed nothing in any request, "
                              "so this leg staying green says nothing about it -- the "
                              "argument was discovered from the control run's own argv, "
                              "so the two runs did not ask the same thing", fails):
-                blind.append(flag + " (not injected)")
+                blind.append(label + " (not injected)")
                 continue
             if "SELF-COMPARE:" not in t:
                 # The run never reached the leg: dropping this argument broke
                 # the WELCOME probe crosstest.py makes before any leg. That is
                 # not the leg noticing.
-                blind.append(flag + " (probe)")
+                blind.append(label + " (probe)")
             elif c != 0:
-                seen.append(flag)
+                seen.append(label)
             else:
-                blind.append(flag)
+                blind.append(label)
         out[leg] = {"control": "green", "seen": seen, "blind": blind}
-        print(f"{leg:18s} sees {len(seen)}/{len(flags)}: "
+        print(f"{leg:18s} sees {len(seen)}/{len(trials)}: "
               + (" ".join(seen) if seen else "nothing")
               + ("   blind to " + " ".join(blind) if blind else ""))
 

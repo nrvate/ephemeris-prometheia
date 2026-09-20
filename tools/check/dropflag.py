@@ -17,6 +17,15 @@ Every run appends its argv to `$PROMETHEIA_DROP_LOG` when that is set, which
 is how the flags are discovered: blindspots.py reads what the leg actually
 sent rather than a list written beside it.
 
+`$PROMETHEIA_DROP_SUB` is the other half of the same idea: a JSON map
+`{flag: value}` that **replaces** a flag's value instead of removing the
+flag.  Dropping a whole option asks whether a leg depends on the option at
+all; substituting a value asks whether it depends on *this part* of it.  An
+option can be reported covered while half of what it means reaches nothing
+-- one option, two effects, one untested -- and a whole-option drop cannot
+tell (the Astrolog side, 2026-09-20).  Substitutions are counted the same
+way, and a substitution that changed no argument is not a measurement.
+
 It also appends how many arguments it removed to `$PROMETHEIA_DROP_COUNT`.
 That number is the difference between "the leg did not notice" and "nothing
 was taken away from it": a drop that dropped nothing leaves the leg green
@@ -54,8 +63,18 @@ def main():
         with open(log, "a") as f:
             f.write("\t".join(argv) + "\n")
     flag = os.environ.get("PROMETHEIA_DROP_FLAG")
+    dropped = 0
     if flag:
         argv, dropped = strip(argv, flag)
+    subs = os.environ.get("PROMETHEIA_DROP_SUB")
+    if subs:
+        import json
+        for name, value in json.loads(subs).items():
+            for i, a in enumerate(argv):
+                if a == name and i + 1 < len(argv) and argv[i + 1] != value:
+                    argv[i + 1] = value
+                    dropped += 1
+    if flag or subs:
         counter = os.environ.get("PROMETHEIA_DROP_COUNT")
         if counter:
             with open(counter, "a") as f:

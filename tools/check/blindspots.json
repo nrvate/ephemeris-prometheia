@@ -8,10 +8,16 @@
       "--helio",
       "--jd",
       "--obj (probe)",
-      "--topo"
+      "--topo",
+      "--corrections=5~1",
+      "--corrections=5~4",
+      "--corrections=7~2"
     ],
     "control": "green",
-    "seen": []
+    "seen": [
+      "--corrections=7~1",
+      "--corrections=7~4"
+    ]
   },
   "arrival": {
     "blind": [
@@ -54,7 +60,10 @@
     ],
     "control": "green",
     "seen": [
-      "--corrections"
+      "--corrections",
+      "--corrections=1~1",
+      "--corrections=3~1",
+      "--corrections=3~2"
     ]
   },
   "deflection-geo": {
@@ -69,7 +78,10 @@
     ],
     "control": "green",
     "seen": [
-      "--corrections"
+      "--corrections",
+      "--corrections=1~1",
+      "--corrections=3~1",
+      "--corrections=3~2"
     ]
   },
   "deflection-topo": {
@@ -85,7 +97,10 @@
     "control": "green",
     "seen": [
       "--corrections",
-      "--topo"
+      "--topo",
+      "--corrections=1~1",
+      "--corrections=3~1",
+      "--corrections=3~2"
     ]
   },
   "hamburg": {
@@ -113,7 +128,8 @@
       "--eq",
       "--helio",
       "--icrs",
-      "--jd"
+      "--jd",
+      "--corrections=1~1"
     ]
   },
   "horizons": {
@@ -126,7 +142,8 @@
       "--corrections",
       "--eq",
       "--icrs",
-      "--jd"
+      "--jd",
+      "--corrections=1~1"
     ]
   },
   "points": {
@@ -138,7 +155,8 @@
       "--helio",
       "--j2000",
       "--obj (probe)",
-      "--step"
+      "--step",
+      "--corrections=1~1"
     ],
     "control": "green",
     "seen": [
@@ -158,14 +176,18 @@
       "--jd",
       "--obj (probe)",
       "--sid",
-      "--topo"
+      "--topo",
+      "--corrections=1~1",
+      "--corrections=7~2"
     ],
     "control": "green",
     "seen": [
       "--count",
       "--node",
       "--star",
-      "--step"
+      "--step",
+      "--corrections=7~1",
+      "--corrections=7~4"
     ]
   },
   "same": {
@@ -186,7 +208,10 @@
       "--deltat",
       "--jd",
       "--obj (probe)",
-      "--sid-plane"
+      "--sid-plane",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
     ],
     "control": "green",
     "seen": [
@@ -199,7 +224,10 @@
       "--deltat",
       "--jd",
       "--obj (probe)",
-      "--sid"
+      "--sid",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
     ],
     "control": "green",
     "seen": []
@@ -209,7 +237,10 @@
       "--corrections",
       "--deltat",
       "--jd",
-      "--obj (probe)"
+      "--obj (probe)",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
     ],
     "control": "green",
     "seen": [
@@ -226,7 +257,10 @@
       "--icrs",
       "--jd",
       "--obj (probe)",
-      "--sid"
+      "--sid",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
     ],
     "control": "green",
     "seen": [
@@ -246,7 +280,19 @@
     "seen": [
       "--corrections",
       "--helio",
-      "--node"
+      "--node",
+      "--corrections=1~1",
+      "--corrections=2~2",
+      "--corrections=3~1",
+      "--corrections=3~2",
+      "--corrections=4~4",
+      "--corrections=5~1",
+      "--corrections=5~4",
+      "--corrections=6~2",
+      "--corrections=6~4",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
     ]
   },
   "topo": {
@@ -260,7 +306,11 @@
       "--eq",
       "--icrs",
       "--jd",
-      "--topo"
+      "--topo",
+      "--corrections=1~1",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
     ]
   }
 }

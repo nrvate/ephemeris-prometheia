@@ -1541,11 +1541,37 @@ Legs seeing nothing at all: `same`, `apparent`, `sidinstant`. Legs seeing
 most of what they send: `helio` and `topo` and `bary` (5 of 7), `horizons`
 (4 of 6).
 
+**An option can also be half tested**, and a whole-option drop reports it
+covered. One option, two effects, one of them reaching nothing: the Astrolog
+side hit exactly this — their gate sends `deltaTSec` and reds when it is
+dropped, so their tool called it covered, while the Earth-rotation half of
+that same field reached nothing and hid a defect. The idea is theirs,
+2026-09-20, offered as the limit of their own copy of this tool.
+
+So for an option whose value is a bitmask, each set bit is cleared in turn
+as well, the value coming from the leg's own argv. It found one on its first
+run: **`apparent` sees `--corrections` and is blind to its deflection bit** —
+clearing bit 2 from the mask 7 leaves every row green, so nothing in that leg
+would notice deflection ceasing to be applied.
+
+Two things had to be got right first. A leg that sends `--corrections 0`
+produces no bit trial, because there is no bit to clear and substituting a
+nonzero value there would *add* a correction — a hand-run probe of this made
+exactly that mistake and reported `bary` blind to a bit it never sends. And a
+leg that sends two different masks produces two trials per bit, so the record
+labels each by the value it was cleared from (`--corrections=7~2`); labelling
+by the bit alone collided and filed one result under the other's name.
+
 **What this cannot see**: whether a leg asks the right question, whether its
 band is the right band, and anything needing two different servers. It
-measures reach, not correctness. It agrees with the one reach measurement
-made by hand before it existed — `deflection-topo` sees `--topo` — which is
-the only independent check of it there is.
+measures reach, not correctness. The half-tested hole is closed only for
+options the tool knows to be masks — an option with two effects that is not a
+bitmask still reports covered, and finding that needs someone to ask what the
+option means and check there is a row per meaning. **A floor on coverage, not
+a ceiling**, which is how the Astrolog side put it and is worth repeating
+rather than rounding up. It agrees with the one reach measurement made by
+hand before it existed — `deflection-topo` sees `--topo` — which is the only
+independent check of it there is.
 
 ### Finding, theirs: `deltaTSec` moves a topocentric star's reported distance rate by 21x
 
