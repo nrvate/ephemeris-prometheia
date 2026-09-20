@@ -953,6 +953,43 @@ and `--threads 4`. The client ran on the same host.
   - A chunked run, 400 rows a request in 37-row chunks, 8 connections for
     8 s: 89 canary answers graded, none differed. Each is 24,000 doubles
     over 11 chunks.
+- **The memory bound, 2026-09-20 (`--memory-bound MB`).** Nothing in this
+  project asserted anything about memory until now: the 369 MB plateau below
+  was observed once and written down, and a result cache that stopped
+  evicting would have passed every check we have. The Astrolog side found the
+  same hole on their side the same day and gated it; this is ours.
+  - **Two assertions, or the run refuses to start.** Resident memory must
+    grow by no more than MB, *and* the cache must really be filling
+    (`prometheiad_cache_hits_total` from `/metrics` must rise). A bound on
+    its own is passed by a server that caches nothing at all, the same way a
+    row grading two observers as equal is passed by two observers that never
+    arrived. `--memory-bound` without `--pid`, or against a server whose
+    `/metrics` is unreadable, exits 2 **before any load is applied** rather
+    than asserting half the check and reporting a pass.
+  - RSS is sampled once *before* the load starts, not a second into it: a
+    small `--cache-mb` can be full within the first second, and growth
+    measured from there is growth already missed.
+  - **Measured, `--threads 1 --cells-per-sec 0`, 8 connections:**
+
+        --cache-mb 8    grew 11.3 MB   flat at 20.8 MB from t=5s to t=60s,
+                                       over 818,169 requests
+        --cache-mb 64   grew 89.3 MB
+        --cache-mb 0    grew  0.1 MB   and cache hits rose by 0
+
+    Growth is **about 1.4x the cap** at both points — the cache accounts
+    payload bytes, and per-entry and allocator overhead is the rest — and it
+    plateaus. That also explains the 369 MB below, which had never been
+    connected to the cap: 64 MB a loop x 4 loops x 1.4 is 358.
+  - **Sabotage-proven five ways**, each reddening only its own check: the
+    bound set below the known growth (OVER, exit 1); `--cache-mb 0`, where
+    the bound passes at 0.1 MB and only the pairing catches it (NOT CACHING,
+    exit 1); `--memory-bound` without `--pid` (exit 2); against a server with
+    no `prometheiad` `/metrics` (exit 2, no load applied); and the clean run
+    green.
+  - Cache hits rose by exactly the number of canary answers graded (22,390 of
+    22,390; 51,139 of 51,139), which is its own small confirmation: the
+    canaries are the only repeated instants, and a fresh random instant
+    always misses.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
   "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none

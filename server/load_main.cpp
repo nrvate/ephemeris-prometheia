@@ -51,6 +51,12 @@ constexpr const char* kUsage =
     "  --report S         a progress line every S seconds (default 10)\n"
     "  --canaries N       instants graded under load (default 8, 0 to disable)\n"
     "  --canary-every K   one request in K is a canary (default 16)\n"
+    "  --memory-bound MB  fail if the server's resident memory grows by more\n"
+    "                     than MB, AND if its result cache is not really\n"
+    "                     filling (/metrics cache hits must rise). Needs\n"
+    "                     --pid; refuses to run if /metrics is unreadable,\n"
+    "                     because the bound alone passes a server that\n"
+    "                     caches nothing at all\n"
     "  --chunk-rows N     the load asks for answers in chunks of N rows; the\n"
     "                     baseline always takes the server's own chunking, so\n"
     "                     this grades an answer against a differently chunked\n"
@@ -336,6 +342,23 @@ void connection(int index, const std::string& host, int port, int rows, int chun
     st.latency_ms.insert(st.latency_ms.end(), local.begin(), local.end());
 }
 
+// One Prometheus counter from the server's /metrics, or -1 when it is not
+// there. The whole point of reading it is the pairing below: a bound on
+// memory is passed by a server that stores nothing, so something has to say
+// the cache is really filling.
+double counter(const std::string& host, int port, const char* name) {
+    auto body = WsClient::http_get(host, port, "/metrics");
+    if (!body) {
+        return -1.0;
+    }
+    const std::string needle = std::string("\n") + name + " ";
+    const size_t at = ("\n" + body.value()).find(needle);
+    if (at == std::string::npos) {
+        return -1.0;
+    }
+    return std::strtod(body.value().c_str() + at + needle.size() - 1, nullptr);
+}
+
 // VmRSS in MB and the count of open file descriptors, or -1 when unreadable.
 std::pair<double, long> sample(long pid) {
     double rss = -1.0;
@@ -371,6 +394,7 @@ int main(int argc, char** argv) {
     std::string host = "127.0.0.1";
     int port = eph::kDefaultPort, conns = 8, seconds = 30, rows = 1, report = 10;
     int canaries = 8, canary_every = 16, chunk_rows = 0;
+    double memory_bound_mb = -1.0;
     long pid = 0;
     bool cached = false;
     for (int i = 1; i < argc; ++i) {
@@ -400,12 +424,37 @@ int main(int argc, char** argv) {
             report = std::max(1, std::atoi(value()));
         } else if (arg == "--canaries") {
             canaries = std::max(0, std::atoi(value()));
+        } else if (arg == "--memory-bound") {
+            memory_bound_mb = std::strtod(value(), nullptr);
         } else if (arg == "--chunk-rows") {
             chunk_rows = std::max(0, std::atoi(value()));
         } else if (arg == "--canary-every") {
             canary_every = std::max(1, std::atoi(value()));
         } else {
             std::fprintf(stderr, "bad option %s\n%s", arg.c_str(), kUsage);
+            return 2;
+        }
+    }
+
+    // Both halves of the memory check, or neither. A bound on its own is
+    // passed by a server whose cache stores nothing -- the same way a row
+    // that grades two observers as equal is passed by two observers that
+    // never arrived. So refuse the run rather than assert half of it.
+    double hits_before = -1.0;
+    if (memory_bound_mb >= 0.0) {
+        if (pid <= 0) {
+            std::fprintf(stderr, "--memory-bound needs --pid: nothing else samples the server's "
+                                 "resident memory\n");
+            return 2;
+        }
+        hits_before = counter(host, port, "prometheiad_cache_hits_total");
+        if (hits_before < 0.0) {
+            std::fprintf(stderr,
+                         "--memory-bound needs the server's /metrics, and "
+                         "prometheiad_cache_hits_total was not readable at %s:%d. A bound on "
+                         "memory alone is passed by a server that caches nothing, so this run "
+                         "would assert half of the check and report a pass.\n",
+                         host.c_str(), port);
             return 2;
         }
     }
@@ -448,6 +497,16 @@ int main(int argc, char** argv) {
                     canary_want.front().shape().c_str());
     }
 
+    double rss_first = -1.0, rss_peak = -1.0, rss_last = -1.0;
+    long fds_first = -1, fds_peak = -1, fds_last = -1;
+    if (pid > 0) {
+        // Before the load, not a second into it: a small --cache-mb can be
+        // full within the first second, and growth measured from there is
+        // growth already missed.
+        const auto [rss, fds] = sample(pid);
+        rss_first = rss_peak = rss_last = rss;
+        fds_first = fds_peak = fds_last = fds;
+    }
     Stats st;
     const auto start = Clock::now();
     const auto deadline = start + std::chrono::seconds(seconds);
@@ -459,8 +518,6 @@ int main(int argc, char** argv) {
                              std::ref(st));
     }
 
-    double rss_first = -1.0, rss_peak = -1.0, rss_last = -1.0;
-    long fds_first = -1, fds_peak = -1, fds_last = -1;
     int tick = 0;
     uint64_t done_before = 0;
     while (Clock::now() < deadline) {
@@ -468,10 +525,6 @@ int main(int argc, char** argv) {
         ++tick;
         if (pid > 0) {
             const auto [rss, fds] = sample(pid);
-            if (rss_first < 0.0) {
-                rss_first = rss;
-                fds_first = fds;
-            }
             rss_peak = std::max(rss_peak, rss);
             fds_peak = std::max(fds_peak, fds);
             rss_last = rss;
@@ -539,9 +592,35 @@ int main(int argc, char** argv) {
                     "-> %ld\n",
                     rss_first, rss_peak, rss_last, fds_first, fds_peak, fds_last);
     }
+    bool memory_failed = false;
+    if (memory_bound_mb >= 0.0) {
+        const double grew = rss_last - rss_first;
+        const double hits_after = counter(host, port, "prometheiad_cache_hits_total");
+        const double hits = hits_after - hits_before;
+        std::printf("memory     grew %.1f MB against a bound of %.1f; cache hits rose by %.0f\n",
+                    grew, memory_bound_mb, hits);
+        if (grew > memory_bound_mb) {
+            std::printf("  OVER: resident memory grew %.1f MB, more than the %.1f MB bound\n", grew,
+                        memory_bound_mb);
+            memory_failed = true;
+        }
+        // The pairing. Without this a --cache-mb 0 server grows by nothing
+        // and passes the bound while caching nothing at all.
+        if (hits <= 0.0) {
+            std::printf("  NOT CACHING: the cache answered nothing during the run, so the bound "
+                        "above says only that an empty cache stays empty. The canaries alone "
+                        "re-asked %llu instants.\n",
+                        (unsigned long long)st.canary_checks);
+            memory_failed = true;
+        }
+    }
+
     // A canary that differed is a failure of the run, not a statistic: the
     // server answered, and answered differently under load than it does
     // idle. Zero graded answers is one too, when canaries were asked for --
     // silence is not a pass.
-    return (st.failures || st.canary_mismatch || (canaries > 0 && st.canary_checks == 0)) ? 1 : 0;
+    return (st.failures || st.canary_mismatch || (canaries > 0 && st.canary_checks == 0) ||
+            memory_failed)
+               ? 1
+               : 0;
 }

@@ -1559,7 +1559,38 @@ Three results, in order of what they are worth.
      Astrolog session asked beforehand that a run coming back mostly
      ERROR 6 be taken as the answer rather than tuned around, which is
      what made this a result instead of a retry at different settings.
-3. **Their resident memory rose through the run and did not come back.**
+3. ~~**Their resident memory rose through the run and did not come back.**~~
+   **Settled the same day, and it turned into a finding against both of us.**
+   The Astrolog side measured their own growth against two `--cache-mb`
+   points: it tracks the cap and plateaus (8 MB cap → 8 MB grown, flat by
+   100 distinct windows; 64 → 64), and at their shipped 256 MB default the
+   plateau is about 285 MB. Our 29.4 → 89.4 over 30 s was that curve caught
+   before the knee. Marking it "not a finding" was right, and asking rather
+   than filing is what got it measured instead of argued.
+   - **The real finding was that neither project asserted anything about
+     memory.** A result cache that stopped evicting would have passed every
+     check on either side. They gated it in their soak's leg (e); ours is
+     `prometheia-load --memory-bound` (SERVER.md, "The memory bound"), with
+     the same pairing they arrived at: a bound *and* proof the cache is
+     really filling, because a bound alone passes a server that caches
+     nothing. That is the arrival row's lesson a third time, now in a
+     resource check.
+   - Our numbers, `--threads 1`: cap 8 → grew 11.3 MB, flat at 20.8 MB from
+     t=5s through t=60s over 818,169 requests; cap 64 → grew 89.3 MB; cap 0
+     → grew 0.1 MB and answered nothing from cache. Growth is about 1.4x the
+     cap at both points.
+   - Their own probe had been wrong before their server was interesting:
+     400 large windows moved RSS by 10 MB and they were one step from
+     concluding the cache was not storing, until `/metrics` showed **14
+     misses in 401 requests** — the rest were ERROR 6, discarded by their
+     own loop, after the first request drained the 100,000-cell bucket.
+     "Take the answer if it comes back ERROR 6" was advice they had given us
+     and then needed for their own harness. Fourth instrument defect in two
+     days across both projects, and the fourth time the program was fine.
+
+   The original observation, kept because the reasoning is the point:
+
+   **Their resident memory rose through the run and did not come back.**
    29.4 MB at the first sample, 48.1 / 68.8 / 89.4 at ten-second marks, and
    still 89.4 a second after every connection had closed, while open files
    fell 38 → 22. **This run cannot tell a filling cache from unbounded

@@ -341,7 +341,18 @@ terms.
   independent readings of A.3 landing on the same arithmetic and the only
   evidence either side has about the limiter. Their RSS rose 29.4 → 89.4
   MB and had not plateaued when the run ended; **that is the run's length,
-  not a finding**, and was not reported as one.
+  not a finding**, and was not reported as one. **Settled the same day** by
+  their two-cap measurement — it tracks `--cache-mb` and plateaus — and it
+  turned up a real finding against *both* projects: neither asserted
+  anything about memory, so a cache that stopped evicting would have passed
+  every check either side has. Ours is now
+  `prometheia-load --memory-bound MB` (SERVER.md, "The memory bound"), which
+  asserts the bound **and** that the cache is really filling, because a
+  bound alone passes a server that caches nothing. Sabotage-proven five
+  ways. Growth is about 1.4x the cap, flat at 20.8 MB over 818,169 requests
+  at `--cache-mb 8`.
+  - **Nothing runs it on a schedule**, same as `crossrun.py`: it needs a
+    daemon, so it stays out of `tools/gate.sh`, which must stay seconds.
   - **What needed doing first:** the tool graded
     nothing. It counted answers that arrived and never read their numbers,
     so it could not have seen a server answer differently under load than
