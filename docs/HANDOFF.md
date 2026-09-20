@@ -408,8 +408,22 @@ terms.
     remainder as the catalogue; it now requires a match for all 9,290
     entries inside `kStarRecords[]`. Falsified four ways; legs `same`,
     `stars` and `bary` re-run against both daemons afterwards, unchanged.
-- **Kinds 3 and 4 have no cross-test cell**, because the Astrolog client
-  asks no server for them; kind 4 is covered another way.
+- ~~**Kinds 3 and 4 have no cross-test cell.**~~ Half wrong, and measured
+  on 2026-09-20. **Kind 3 has had a live cell since the first run**: the
+  `hamburg` leg asks both servers for the eight Hamburg points by name and
+  both answer, 24 rows agreeing to 6e-4″ with distances matching to 1e-12
+  AU. The harness drives both servers with *our* reference client, so what
+  the Astrolog client does or does not send never constrained it -- the
+  sentence had carried their client's limitation across to a leg it does
+  not touch.
+  **Kind 4 cannot have one, and for a sharper reason than "their client
+  does not send it": their server does not serve it.** `astrolog-ephd`
+  advertises `caps kinds 47` (bits 0,1,2,3,5), with bit 4 clear; ours
+  advertises 63. A kind-4 request would draw ERROR 11, correctly. It stays
+  covered as a fixture -- the protocol owner's own element sets and
+  answers, vendored at `third_party/ephproto/v4/elements/` with its digest
+  pinned in `tests/test_ephproto4.cpp` -- which is the right shape for a
+  question only one implementation can answer.
 - ~~`/llms.txt` in both repositories, or one combined?~~ Settled
   2026-09-20 (JSON_API.md, "`/llms.txt`"): one per surface, and Astrolog
   exposes no agent tools to have one. It obliges them of nothing — if they

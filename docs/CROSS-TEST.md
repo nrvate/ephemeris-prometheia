@@ -183,8 +183,14 @@ their Kepler solvers, and any disagreement is a defect in one of them. That
 makes it the one leg in this plan that needs no external anchor. It is also
 the one where a disagreement is *informative* rather than ambiguous.
 
-It runs as a fixture rather than a live diagonal, since the Astrolog client
-does not send kind 4. The protocol owner generates element sets and answers
+It runs as a fixture rather than a live diagonal. The reason was recorded
+as "the Astrolog client does not send kind 4", which is true and is not the
+binding constraint: this harness drives both servers with our own client.
+The binding constraint, measured 2026-09-20, is that `astrolog-ephd` does
+not *serve* kind 4 -- it advertises `caps kinds 47`, bit 4 clear, where ours
+advertises 63 -- so a kind-4 request to it would draw ERROR 11, correctly.
+A fixture is the right shape for a question only one implementation can
+answer. The protocol owner generates element sets and answers
 from its implementation; this server is checked against them, numbers only.
 The first cases are the ones that are degrees apart under a wrong rule:
 
