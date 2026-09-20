@@ -18,8 +18,12 @@ Our server, when a cross-test needs it:
 The only untracked paths are `.claude-config/` and `.envrc`, which are
 never staged.
 The Astrolog exchange reached a close on both sides at their `a0fc9ad`;
-their spare `astrolog-ephd` on **:47392** is the 13:37 build (1739128
-bytes, sha256 `9635191d6ee5ec6c…`) and is not to be assumed alive later.
+their spare `astrolog-ephd` on **:47392** stays up overnight at the 13:37
+build (1739128 bytes, sha256 `9635191d6ee5ec6c…`), and they carry that
+identity in their own status so a rebuild is announced rather than
+silent. Read it from the running process anyway before trusting a row —
+that habit is what made the three builds of 2026-09-20 separable at all,
+and their undertaking is a courtesy, not a substitute.
 **:47391 is their production daemon and is never touched.**
 
 **Three decisions are the maintainer's and nothing proceeds without
