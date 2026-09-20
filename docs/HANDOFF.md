@@ -353,11 +353,17 @@ terms.
   at `--cache-mb 8`.
   - **Nothing runs it on a schedule**, same as `crossrun.py`: it needs a
     daemon, so it stays out of `tools/gate.sh`, which must stay seconds.
-  - **`tools/check/loadselftest.py`** (2026-09-20) falsifies all eight of
-    the load tool's assertions and requires the *right* one to fire — a
-    case passes only when the named assertion reds and no other does, since
-    "something went red" passes a gate whose bound was deleted. Falsified
-    against itself both ways. It found a real caveat on its first run:
+  - **`tools/check/loadselftest.py`** (2026-09-20) falsifies all nine of
+    the load tool's assertions in ten cases and requires the *right* one to
+    fire — a case passes only when the named assertion reds and no other
+    does, since "something went red" passes a gate whose bound was deleted.
+    Falsified against itself four ways. **It shipped as the overclaim it
+    exists to catch**: the first version exercised seven of the nine it
+    declared, so `canary-none-graded` and `failures` could each have been
+    deleted from `prometheia-load` unnoticed. Found by reading the case
+    table against the assertion table — a count, not a run. It now refuses
+    to start if an assertion has no case. It also found a real caveat on its
+    first run:
     `--memory-bound` measures growth *during* a run, so a server already at
     its cache plateau passes any bound, and it must be pointed at a fresh
     daemon (SERVER.md).

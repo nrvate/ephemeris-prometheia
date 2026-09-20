@@ -1008,19 +1008,35 @@ and `--threads 4`. The client ran on the same host.
     assertion reds on the same broken input and the selftest cannot tell
     which. The Astrolog side found exactly that in their own selftest the
     same day, by weakening a bound to a number nothing could exceed.
-  - Eight cases. **Five need no sabotage hook**, being induced by how the
+  - Ten cases. **Seven need no sabotage hook**, being induced by how the
     server is started and how the tool is invoked — `--cache-mb 0`, a bound
     below the real growth, no `--pid`, a server whose `/metrics` lacks the
-    counter, and the clean control. The three canary cases use
-    `prometheia-load --sabotage values|shape|identity`, which damages the
+    counter, a compute budget the baseline spends exactly, a server that is
+    not `prometheiad` at all, and the clean control. The three canary cases
+    use `prometheia-load --sabotage values|shape|identity`, which damages the
     client's own copy of an answer beside the grading it falsifies, inside
     the binary that ships rather than in a copy of the check.
-  - **Falsified against itself.** Deleting the bound assertion from
-    `prometheia-load` fails exactly one case, by name ("did not fire:
-    memory-over"). Making the cache check fire unconditionally fails the two
-    cases it should not have fired in — and one of those was *otherwise
-    reddening correctly on its own assertion*, so a selftest that asked only
-    whether something went red would have passed it.
+  - **It began as the same overclaim it exists to catch.** The first version
+    declared nine assertions and exercised seven: `canary-none-graded` and
+    `failures` had no case, so either could have been deleted from
+    `prometheia-load` and every case would still have passed, while the
+    docstring said it falsified *every* assertion the tool makes. Found by
+    reading the case table against the assertion table rather than by running
+    anything — a count, not a measurement. The script now refuses to run at
+    all if an assertion has no case, and names it.
+  - **Falsified against itself**, each fault failing exactly one case, by
+    name. Deleting the bound assertion: "did not fire: memory-over". Deleting
+    the silence guard: only "every canary is refused" fails — **and that run
+    still exited 1**, because the exit status still counts an ungraded
+    canary, so a selftest asking only whether something went red would have
+    passed a deleted assertion. Reporting the failure count as zero: only the
+    sham-server case fails. Making the cache check fire unconditionally fails
+    the two cases it should not have fired in, one of which was *otherwise
+    reddening correctly on its own assertion*. Adding a tenth assertion with
+    no case stops the script before it starts a daemon.
+    - This paragraph is the one layer that stays prose: falsifying the
+      falsifier means patching and rebuilding the binary, which nothing here
+      re-runs. The case table below it is the part that does.
   - It starts its own daemon per case and stops only what it started. It
     needs an ephemeris, so it is not in `tools/gate.sh`, which must stay
     seconds. **Nothing schedules it.**
