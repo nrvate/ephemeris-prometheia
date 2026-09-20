@@ -980,6 +980,13 @@ and `--threads 4`. The client ran on the same host.
     payload bytes, and per-entry and allocator overhead is the rest — and it
     plateaus. That also explains the 369 MB below, which had never been
     connected to the cap: 64 MB a loop x 4 loops x 1.4 is 358.
+  - **It measures growth during the run, so it says nothing about a server
+    that is already warm.** A cache at its plateau grows by nothing and
+    passes any bound. Point `--memory-bound` at a freshly started daemon, or
+    it reports a pass having measured nothing. This was not noticed when the
+    check was written; `loadselftest.py` found it on its first run, because
+    reusing one daemon across cases made "the bound is exceeded" pass with
+    the bound set to 1 MB.
   - **Sabotage-proven five ways**, each reddening only its own check: the
     bound set below the known growth (OVER, exit 1); `--cache-mb 0`, where
     the bound passes at 0.1 MB and only the pairing catches it (NOT CACHING,
@@ -990,6 +997,35 @@ and `--threads 4`. The client ran on the same host.
     22,390; 51,139 of 51,139), which is its own small confirmation: the
     canaries are the only repeated instants, and a fresh random instant
     always misses.
+- **The selftest, 2026-09-20 (`tools/check/loadselftest.py`).** Every fault
+  injection in this document was done by hand, once, and written up as prose;
+  nothing re-ran any of them. A falsification recorded as prose is a
+  measurement taken once. The script breaks one thing at a time and requires
+  **the right assertion** to catch it — a case passes only when the named
+  assertion fires and no other one does.
+  - That last clause is the whole check. A selftest asking only "did the run
+    go red" passes a gate whose bound has been deleted, because some other
+    assertion reds on the same broken input and the selftest cannot tell
+    which. The Astrolog side found exactly that in their own selftest the
+    same day, by weakening a bound to a number nothing could exceed.
+  - Eight cases. **Five need no sabotage hook**, being induced by how the
+    server is started and how the tool is invoked — `--cache-mb 0`, a bound
+    below the real growth, no `--pid`, a server whose `/metrics` lacks the
+    counter, and the clean control. The three canary cases use
+    `prometheia-load --sabotage values|shape|identity`, which damages the
+    client's own copy of an answer beside the grading it falsifies, inside
+    the binary that ships rather than in a copy of the check.
+  - **Falsified against itself.** Deleting the bound assertion from
+    `prometheia-load` fails exactly one case, by name ("did not fire:
+    memory-over"). Making the cache check fire unconditionally fails the two
+    cases it should not have fired in — and one of those was *otherwise
+    reddening correctly on its own assertion*, so a selftest that asked only
+    whether something went red would have passed it.
+  - It starts its own daemon per case and stops only what it started. It
+    needs an ephemeris, so it is not in `tools/gate.sh`, which must stay
+    seconds. **Nothing schedules it.**
+  - **It covers one tool.** The nine scripts under `tools/check/` still
+    carry their falsifications as prose, and this does not change that.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
   "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none

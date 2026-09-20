@@ -353,6 +353,18 @@ terms.
   at `--cache-mb 8`.
   - **Nothing runs it on a schedule**, same as `crossrun.py`: it needs a
     daemon, so it stays out of `tools/gate.sh`, which must stay seconds.
+  - **`tools/check/loadselftest.py`** (2026-09-20) falsifies all eight of
+    the load tool's assertions and requires the *right* one to fire — a
+    case passes only when the named assertion reds and no other does, since
+    "something went red" passes a gate whose bound was deleted. Falsified
+    against itself both ways. It found a real caveat on its first run:
+    `--memory-bound` measures growth *during* a run, so a server already at
+    its cache plateau passes any bound, and it must be pointed at a fresh
+    daemon (SERVER.md).
+  - **The hole this does not close.** Every fault injection described in
+    these documents was done by hand once and never re-run; nine scripts
+    under `tools/check/` still carry their falsifications as prose. One
+    tool now has a selftest. That is one leg, not the hole.
   - **What needed doing first:** the tool graded
     nothing. It counted answers that arrived and never read their numbers,
     so it could not have seen a server answer differently under load than

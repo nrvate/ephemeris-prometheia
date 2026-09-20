@@ -306,6 +306,22 @@ Every one of these has cost this project or the Astrolog project real time.
 - **A check that has never gone red is not known to work.** Fault-inject before
   trusting a green: `corrapplied.py` had two bugs that only a deliberately
   broken server revealed, one of which made a whole check vacuous.
+  - **And a falsification recorded as prose is a measurement taken once.**
+    Every "fault-injected four ways" in these documents was done by hand and
+    never repeated; nothing re-ran any of them, so they describe a build that
+    may be two months gone. `tools/check/loadselftest.py` (2026-09-20) is the
+    structural version for one tool, and the Astrolog side's
+    `ephsrv-soak.sh --selftest` is theirs. **Nine scripts under
+    `tools/check/` still carry prose**, so the hole is narrowed by one leg,
+    not closed — which is what their side said of theirs, and is worth
+    repeating rather than rounding up.
+  - **It is not enough to ask whether a broken input went red; the *named*
+    assertion has to be the one that caught it.** Otherwise a gate whose
+    bound has been deleted still passes, because a neighbouring check reds on
+    the same input. Both sides found this the same day: they by weakening a
+    bound to a number nothing could exceed, we by making the cache check fire
+    unconditionally, which failed two cases including one that was otherwise
+    reddening correctly on its own assertion.
 - **Anything that re-states the spec in a second place needs its own oracle,
   or it is a copy waiting to go stale.** A server is graded against Horizons
   and against the other server; nothing grades the *measuring* code against

@@ -57,6 +57,10 @@ constexpr const char* kUsage =
     "                     --pid; refuses to run if /metrics is unreadable,\n"
     "                     because the bound alone passes a server that\n"
     "                     caches nothing at all\n"
+    "  --sabotage WHAT    corrupt this client's own copy of a canary answer\n"
+    "                     before grading it, so the grading can be shown to\n"
+    "                     go red: values, shape or identity. For\n"
+    "                     tools/check/loadselftest.py; never for a real run\n"
     "  --chunk-rows N     the load asks for answers in chunks of N rows; the\n"
     "                     baseline always takes the server's own chunking, so\n"
     "                     this grades an answer against a differently chunked\n"
@@ -216,6 +220,20 @@ void note_failure(Stats& st, const std::string& what) {
 // was. The magnitude matters as much as the verdict: a last-bit difference
 // and an answer for the wrong body are both "not equal", and they are not the
 // same finding.
+// Damages one canary answer the way a broken server would, so that the
+// grading above can be shown to catch each kind. This lives beside grade()
+// and inside the binary that runs, rather than in a copy of the check: what
+// gets falsified has to be the code that ships.
+void sabotage(const std::string& what, Answer* a) {
+    if (what == "values" && !a->values.empty()) {
+        a->values[0] += 1e-6;
+    } else if (what == "shape") {
+        a->totalRows += 1;
+    } else if (what == "identity" && !a->resolved.empty()) {
+        a->resolved[0] = 499; // Mars, where the Sun was asked for
+    }
+}
+
 void grade(Stats& st, int canary, double jd, const Answer& got, const Answer& want) {
     std::string bad;
     double worst = 0.0;
@@ -281,7 +299,8 @@ std::string open_session(WsClient& ws, const std::string& host, int port) {
 
 void connection(int index, const std::string& host, int port, int rows, int chunk_rows, bool cached,
                 const std::vector<double>& canary_jd, const std::vector<Answer>& canary_want,
-                int canary_every, Clock::time_point deadline, Stats& st) {
+                int canary_every, const std::string& sabotage_what, Clock::time_point deadline,
+                Stats& st) {
     std::mt19937_64 rng(uint64_t(index) * 0x9E3779B97F4A7C15ull + 1);
     std::uniform_real_distribution<double> when(2415020.5, 2488069.5);
     WsClient ws;
@@ -332,6 +351,9 @@ void connection(int index, const std::string& host, int port, int rows, int chun
         local.push_back(std::chrono::duration<double, std::milli>(Clock::now() - t0).count());
         ++st.done;
         if (is_canary) {
+            if (!sabotage_what.empty()) {
+                sabotage(sabotage_what, &got);
+            }
             grade(st, canary, jd, got, canary_want[size_t(canary)]);
         }
         ++id;
@@ -395,6 +417,7 @@ int main(int argc, char** argv) {
     int port = eph::kDefaultPort, conns = 8, seconds = 30, rows = 1, report = 10;
     int canaries = 8, canary_every = 16, chunk_rows = 0;
     double memory_bound_mb = -1.0;
+    std::string sabotage_what;
     long pid = 0;
     bool cached = false;
     for (int i = 1; i < argc; ++i) {
@@ -426,6 +449,13 @@ int main(int argc, char** argv) {
             canaries = std::max(0, std::atoi(value()));
         } else if (arg == "--memory-bound") {
             memory_bound_mb = std::strtod(value(), nullptr);
+        } else if (arg == "--sabotage") {
+            sabotage_what = value();
+            if (sabotage_what != "values" && sabotage_what != "shape" &&
+                sabotage_what != "identity") {
+                std::fprintf(stderr, "--sabotage takes values, shape or identity\n");
+                return 2;
+            }
         } else if (arg == "--chunk-rows") {
             chunk_rows = std::max(0, std::atoi(value()));
         } else if (arg == "--canary-every") {
@@ -514,8 +544,8 @@ int main(int argc, char** argv) {
     threads.reserve(size_t(conns));
     for (int c = 0; c < conns; ++c) {
         threads.emplace_back(connection, c, host, port, rows, chunk_rows, cached,
-                             std::cref(canary_jd), std::cref(canary_want), canary_every, deadline,
-                             std::ref(st));
+                             std::cref(canary_jd), std::cref(canary_want), canary_every,
+                             std::cref(sabotage_what), deadline, std::ref(st));
     }
 
     int tick = 0;
