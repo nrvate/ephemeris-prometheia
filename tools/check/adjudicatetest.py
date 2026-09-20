@@ -24,12 +24,21 @@ checking one row cannot see. Half the cases are negative -- the evidence is
 absent, or contradicts, or belongs to another observer -- because those are
 the branches that turn a right server into a finding.
 
-Coverage is checked structurally rather than claimed. The script traces the
-three functions while the cases run and fails if any executable line was
-never reached, so a branch added to crosstest.py without a case here fails
-the gate instead of being discovered by a peer. (`loadselftest.py` shipped
-the day before declaring nine assertions and exercising seven; a docstring
-promising full coverage is a promise nothing keeps.)
+Coverage is checked structurally rather than claimed, and **the list of
+adjudicators is found in crosstest.py rather than kept here**. The script
+traces each one while the cases run and fails if any executable line was
+never reached, so a branch added without a case fails the gate instead of
+being discovered by a peer; and because the functions are discovered by
+name, a *fourth* adjudicator is covered the moment it exists rather than
+whenever someone remembers this file. A list here would have rotted toward
+green -- reporting three of four complete -- which is the failure this file
+exists to catch. (`loadselftest.py` shipped the day before declaring nine
+assertions and exercising seven, then kept its list in Python while the
+assertions were in C++; both were the same mistake at different distances.)
+
+An adjudicator crosstest.py defines and never calls decides nothing, so
+demanding cases for it would be a false green of the opposite kind: those
+are named and refused too.
 
     tools/check/adjudicatetest.py
 """
@@ -42,11 +51,26 @@ sys.path.insert(0, HERE)
 
 import crosstest  # noqa: E402
 
-ADJUDICATORS = {
-    "helio-light-time": crosstest.adjudicate_helio_light_time,
-    "coverage": crosstest.adjudicate_coverage,
-    "same": crosstest.adjudicate_same,
-}
+def adjudicators_in(module):
+    """Every adjudicate_* in crosstest.py, found rather than listed.
+
+    A list here would be a second copy of a decision made there: add a
+    fourth adjudicator and it would be graded by nothing, while the line
+    coverage below reported the other three as complete -- a check rotting
+    toward green, which is the failure this file exists to catch. Naming
+    them is also how the case table refers to them, so a case pointing at
+    an adjudicator that no longer exists fails on its name.
+    """
+    found = {name[len("adjudicate_"):].replace("_", "-"): fn
+             for name, fn in vars(module).items()
+             if name.startswith("adjudicate_") and callable(fn)
+             and getattr(fn, "__module__", None) == module.__name__}
+    if not found:
+        raise SystemExit("no adjudicate_* functions found in crosstest.py")
+    return found
+
+
+ADJUDICATORS = adjudicators_in(crosstest)
 
 
 def row(leg, verdict, obj=5, epoch=2451545.0, observer="geo", mask=0, note="", sep=0.0):
@@ -215,7 +239,35 @@ def executable_lines():
     return want
 
 
+def uncalled():
+    """Adjudicators crosstest.py defines and never runs.
+
+    Demanding cases for dead code would be its own kind of false green, and
+    an adjudicator nothing calls decides nothing. A miscount here fails
+    loudly rather than quietly, which is the direction a text scan is
+    allowed to be wrong in.
+    """
+    src = open(crosstest.__file__).read()
+    return [name for name, fn in ADJUDICATORS.items() if src.count(fn.__name__ + "(") < 2]
+
+
 def main():
+    # Dead first. An uncovered adjudicator that is also never called is both
+    # things at once, and "write cases for it" is the wrong instruction --
+    # the right one is "call it or delete it". Asking the more specific
+    # question first is the same rule the cases themselves follow: a run
+    # that goes red on the right input for the wrong reason has told you
+    # less than it appears to.
+    dead = uncalled()
+    if dead:
+        raise SystemExit("crosstest.py defines and never calls: " + ", ".join(dead))
+    uncovered = sorted(set(ADJUDICATORS) - {c[1] for c in CASES})
+    if uncovered:
+        raise SystemExit("crosstest.py has adjudicators no case drives: " + ", ".join(uncovered))
+    stray = sorted({c[1] for c in CASES} - set(ADJUDICATORS))
+    if stray:
+        raise SystemExit("cases name adjudicators crosstest.py does not have: " + ", ".join(stray))
+
     want = executable_lines()
     tracer = trace.Trace(count=1, trace=0)
     failed = tracer.runfunc(run_all)
@@ -236,7 +288,7 @@ def main():
     if failed or missing:
         return 1
     print(f"all {len(CASES)} cases pass, and every line of the {len(ADJUDICATORS)} "
-          f"adjudicators is reached")
+          f"adjudicators crosstest.py defines is reached")
     return 0
 
 

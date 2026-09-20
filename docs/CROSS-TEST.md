@@ -332,11 +332,22 @@ Every one of these has cost this project or the Astrolog project real time.
     - Every row's verdict is asserted, not just the row under test: an
       adjudicator that excuses its row and also touches its anchor is
       wrong in a way that reading one row cannot see.
-    - **Coverage is traced, not claimed.** The script runs the three
-      functions under `trace` and fails if any executable line was never
-      reached, naming the line. A branch added to `crosstest.py` with no
-      case here fails the gate rather than being found by a peer. Proven
-      by deleting a case: it named the three lines that went unreached.
+    - **Coverage is traced, not claimed, and the list of adjudicators is
+      found rather than kept.** The script discovers every `adjudicate_*`
+      in `crosstest.py`, runs each under `trace`, and fails if any
+      executable line was never reached, naming the line. A branch added
+      with no case fails the gate rather than being found by a peer;
+      proven by deleting a case, which named the three lines it orphaned.
+      A *fourth* adjudicator is covered the moment it exists — a list
+      here would have rotted toward green, reporting three of four as
+      complete, which is the failure this file exists to catch. An
+      adjudicator `crosstest.py` defines and never calls decides nothing,
+      so that is named and refused too, and named **first**: "write cases
+      for it" is the wrong instruction for dead code, and asking the more
+      specific question first is the same rule the cases follow. That
+      ordering was wrong when written — both injections reported "no case
+      drives it", the right input reaching the wrong check — and the
+      session's own lesson applied to the thing enforcing it.
     - It pinned one thing worth knowing: a topocentric row consults its
       geocentric row *after* that row has been adjudicated, so a
       geocentric gap the anchor excused carries the topocentric one with
