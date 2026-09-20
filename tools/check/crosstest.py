@@ -275,18 +275,40 @@ def leg_refusals(client, ours, theirs, a, b, table, verbose):
                         print(f"  {who:6s} {obs:8s} {kind_name:11s} mask {mask}: {what} ({note})")
 
 
+def corpus_rows(name, params):
+    """One corpus file's table, with its instant count asserted.
+
+    horizons-raw/ is fetched, not committed, so a partial fetch or a reply
+    that stopped short yields fewer instants -- and every leg built on it
+    then reports "N of N agree" about a corpus that was not built. The
+    request's own TLIST says how many instants were asked for, so the count
+    is checked rather than merely printed. A number a check reports is a
+    number the check should assert (the Astrolog side's farm-count finding,
+    2026-09-20: their soak named a file count three times and never counted
+    what landed on disk).
+    """
+    path = os.path.join(REPO, "horizons-raw", name + ".json")
+    with open(path) as f:
+        result = json.load(f)["result"]
+    cols, rows = gen.table(result)
+    want = len(params["TLIST"].split())
+    if len(rows) != want:
+        raise SystemExit(
+            f"{os.path.relpath(path, REPO)} holds {len(rows)} instants, not the {want} its "
+            f"own request asks for. Every row of every leg built on it would be a claim "
+            f"about a corpus that was not fetched. Re-fetch: tools/fetch/horizons_fetch.py")
+    return cols, rows
+
+
 def corpus(prefix="geo-", center="'500@399'"):
     """(name, body, [(jd_tt, ra, dec, delta)]) of every corpus request from one
     centre: the astrometric ICRF RA/Dec (Horizons quantity 1) and the
     light-time range in AU (quantity 20, `delta`) at each of its instants."""
-    raw = os.path.join(REPO, "horizons-raw")
     out = []
     for name, _, params in hf.requests():
         if not name.startswith(prefix) or params["CENTER"] != center:
             continue
-        with open(os.path.join(raw, name + ".json")) as f:
-            result = json.load(f)["result"]
-        cols, rows = gen.table(result)
+        cols, rows = corpus_rows(name, params)
         idx = {c: i for i, c in enumerate(cols)}
         pts = [(gen.num(r[idx["Date_________JDTT"]]), gen.num(r[idx["R.A.___(ICRF)"]]),
                 gen.num(r[idx["DEC____(ICRF)"]]),
@@ -468,15 +490,12 @@ def topo_corpus():
     """(name, body, site, [(jd_tt, ra, dec, tdb_minus_ut, last_hours)]) of every
     topocentric corpus request: astrometric ICRF RA/Dec and the Horizons
     columns that fix its Earth rotation."""
-    raw = os.path.join(REPO, "horizons-raw")
     out = []
     for name, _, params in hf.requests():
         if not name.startswith("topo-"):
             continue
         site = tuple(float(x) for x in params["SITE_COORD"].strip("'").split(","))
-        with open(os.path.join(raw, name + ".json")) as f:
-            result = json.load(f)["result"]
-        cols, rows = gen.table(result)
+        cols, rows = corpus_rows(name, params)
         idx = {c: i for i, c in enumerate(cols)}
         pts = [tuple(gen.num(r[idx[c]]) for c in ("Date_________JDTT", "R.A.___(ICRF)",
                                                   "DEC____(ICRF)", "TDB-UT", "L_Ap_Sid_Time"))
@@ -489,9 +508,7 @@ def leg_bary(client, ours, theirs, table, verbose):
     """The Sun from the barycentre, geometric (mask 0), ICRF, equatorial,
     against Horizons' vectors: the anchor for the barycentric observer,
     where the Sun is close enough that its position error shows directly."""
-    with open(os.path.join(REPO, "horizons-raw", "bary-sun.json")) as f:
-        result = json.load(f)["result"]
-    cols, rows = gen.table(result)
+    cols, rows = corpus_rows("bary-sun", next(p for n, _, p in hf.requests() if n == "bary-sun"))
     idx = {c: i for i, c in enumerate(cols)}
     print("\n== horizons-bary: the Sun from the barycentre, mask 0, ICRF, equatorial")
     for r in rows:
@@ -1326,17 +1343,44 @@ def _star_records():
     pat = re.compile(r'\s*\{\d+, \d+, (\d+), [^"]*"[^"]*", \d+, \d+, [^,]+, ([^,]+), ([^,]+), '
                      r'([^,]+), ([^,]+), ([^,]+), .*"([^"]*)"\},$')
     by_name, by_hip = {}, {}
+    # The pattern above is read against the entries it walks past, not
+    # trusted. A regex over a generated file rots toward green: change the
+    # record's layout and it stops matching, the star list shrinks, and the
+    # leg reports "40 of 40 agree" while testing a fifth of the catalogue.
+    # Counting the candidate lines inside kStarRecords[] and requiring a
+    # match for every one of them makes the same drift fail loudly instead.
+    entries = matched = 0
+    inside = False
     with open(os.path.join(REPO, "src", "star_catalog.inc")) as f:
         for line in f:
+            if line.startswith("constexpr StarRecord kStarRecords[]"):
+                inside = True
+                continue
+            if inside and line.startswith("};"):
+                inside = False
+                continue
+            if not inside or not line.lstrip().startswith("{"):
+                continue
+            entries += 1
             m = pat.match(line)
-            if m:
-                g = m.groups()
-                rec = {"hip": int(g[0]), "ra": float(g[1]), "dec": float(g[2]),
-                       "epoch": float(g[3]), "pmra": float(g[4]), "pmdec": float(g[5])}
-                by_hip.setdefault(rec["hip"], rec)
-                for n in g[6].split("|"):
-                    if n:
-                        by_name.setdefault(n, rec)
+            if not m:
+                continue
+            matched += 1
+            g = m.groups()
+            rec = {"hip": int(g[0]), "ra": float(g[1]), "dec": float(g[2]),
+                   "epoch": float(g[3]), "pmra": float(g[4]), "pmdec": float(g[5])}
+            by_hip.setdefault(rec["hip"], rec)
+            for n in g[6].split("|"):
+                if n:
+                    by_name.setdefault(n, rec)
+    if not entries:
+        raise SystemExit("src/star_catalog.inc: found no kStarRecords entries at all; "
+                         "the catalogue's layout has changed and this reader has not")
+    if matched != entries:
+        raise SystemExit(
+            f"src/star_catalog.inc holds {entries} star records and this reader parsed "
+            f"{matched} of them. The stars leg would run on the {matched} it understood and "
+            f"report them as the whole catalogue. Fix the pattern in _star_records().")
     return by_name, by_hip
 
 

@@ -360,6 +360,26 @@ Every one of these has cost this project or the Astrolog project real time.
     bound to a number nothing could exceed, we by making the cache check fire
     unconditionally, which failed two cases including one that was otherwise
     reddening correctly on its own assertion.
+- **A number a check reports is a number the check should assert.** The
+  Astrolog side's, 2026-09-20: a soak script named its farm size three
+  times and never counted what landed on disk, so it would have reported a
+  full run over a fraction of one. The same shape was here twice, in the
+  two places this file quotes row counts from. `crosstest.py`'s corpus
+  readers opened whatever `horizons-raw/` held — a gitignored directory, a
+  fetch anyone can interrupt — and a truncated corpus read out as "N of N
+  agree" with a smaller N that nothing compared to anything. Every
+  committed request carries its own `TLIST`, so the expected instant count
+  is derivable rather than a second copy, and `corpus_rows()` now refuses a
+  file holding fewer. `_star_records()` was the same defect over a
+  *committed* file: a regex walking `src/star_catalog.inc`, which on any
+  drift in the record layout would match fewer lines, quietly shrink the
+  star set, and report the remainder as the catalogue. It now counts the
+  entries inside `kStarRecords[]` and demands a match for every one — 9,290
+  of 9,290 — so the drift that used to shrink the leg fails it instead.
+  Falsified both ways in both readers (a truncated copy, a claim of one
+  more instant; a drifting record line, a renamed array), each with its own
+  message.
+
 - **Anything that re-states the spec in a second place needs its own oracle,
   or it is a copy waiting to go stale.** A server is graded against Horizons
   and against the other server; nothing grades the *measuring* code against
