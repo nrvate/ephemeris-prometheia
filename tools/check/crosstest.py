@@ -28,7 +28,12 @@ running daemons:
              geometric vectors, judged as a length (km)
   deflection from Jupiter's centre, each server's bending of the light
              (mask 3 against its own mask 1) against the textbook formula
-  points     orbit points (Moon and planets, mean and osculating) by
+  deflection-geo, deflection-topo
+             the same textbook referee at the observers both servers
+             advertise -- the Earth's centre, then two sites -- with each
+             body searched to its closest approach to the Sun, where the
+             term is large enough for a verdict to mean anything
+  points   orbit points (Moon and planets, mean and osculating) by
              direction and distance, mask 0, and the node of date asked in
              the J2000 frame (3.5a as amended); then the same points from
              the Sun, the barycentre and Mars's centre at masks 0 and 1, the
@@ -646,14 +651,25 @@ DEFLECT_SCAN_COUNT = 800  # ~4.4 years, so every body reaches conjunction
 DEFLECT_CONTROL_ELONG_DEG = 60.0
 
 
-def _elongation_scan(client, srv, body, verbose):
+# The two sites the topocentric observer is measured from: the pair that
+# exposed the frozen topocentric orbit points. One mid-latitude, one on the
+# equator at altitude -- so a site that never reaches the computation shows
+# as the same answer at both, which is how that defect read.
+DEFLECT_SITES = [("Zurich", "8.55,47.37,500"), ("Quito", "-78.47,-0.18,2850")]
+
+
+def _elongation_scan(client, srv, body, verbose, where=()):
     """(jd, elongation deg) rows for one body against the Sun, from one
     server's own mask-1 answers. The search runs on OUR server only: it picks
     *where to look*, and both servers are then asked the same instants, so a
-    bias in the scan cannot flatter either of them."""
+    bias in the scan cannot flatter either of them.
+
+    `where` places the observer, and is the same site flag the graded rows
+    carry: the elongation that decides where to look has to be the one the
+    graded observer sees."""
     args = ["--jd", repr(DEFLECT_SCAN_START), "--step", repr(DEFLECT_SCAN_STEP_DAYS * 86400.0),
             "--count", str(DEFLECT_SCAN_COUNT), "--icrs", "--eq", "--corrections", "1",
-            "--deltat", str(DELTA_T), "--obj", str(body), "--obj", "10"]
+            "--deltat", str(DELTA_T), "--obj", str(body), "--obj", "10"] + list(where)
     rep = ask(client, srv, args, verbose)
     out = []
     for r in range(DEFLECT_SCAN_COUNT):
@@ -665,30 +681,41 @@ def _elongation_scan(client, srv, body, verbose):
     return out
 
 
-def leg_deflection_geo(client, ours, theirs, wel_a, wel_b, table, verbose):
-    """Deflection at the GEOCENTRIC observer, where both servers claim the
-    term, against the same textbook formula the Jupiter leg uses.
+def _leg_deflection_at(client, ours, theirs, wel_a, wel_b, table, verbose,
+                       leg, observer, bit, where, probe=None):
+    """Deflection at one observer, against the same textbook formula the
+    Jupiter leg uses: each server's mask-3 answer against its own mask-1
+    answer bent by hand.
 
     The planet-centred leg found a 0.544" error because no anchor observes
-    from Jupiter. Geocentrically there is an anchor, but neither project had
+    from Jupiter. At the Earth there is an anchor, but neither project had
     used one: the `apparent` leg grades the two servers against each other,
     which cannot see a term they both get wrong, and Horizons' apparent place
     carries frame offsets that swamp a 1.75" effect. Asked for by the Astrolog
     session, 2026-09-20, as the one place a textbook referee says something
-    new about a term they do advertise."""
-    judged = {who: {1, 3} <= advertised(wel, 0)
+    new about a term they do advertise.
+
+    `bit` is the A.5 observer (0 geocentric, 1 topocentric) and `where` the
+    flags that place it. Every request in a row carries `where` -- the body,
+    the Sun and the elongation scan -- because the formula needs the
+    observer-to-body and observer-to-Sun vectors of ONE observer; mixing a
+    geocentric Sun into a topocentric row would test the mixture.
+
+    `probe`, if given, collects each server's mask-1 direction by
+    (who, body, jd), for the site-reach check below."""
+    judged = {who: {1, 3} <= advertised(wel, bit)
               for who, wel in (("ours", wel_a), ("theirs", wel_b))}
     if not any(judged.values()):
         table.asked(None, None)
-        print("\n== deflection-geo: FAIL, neither server lists masks 1 and 3 geocentrically")
-        table.add(leg="deflection-geo", observer="geo", verdict="unanswered",
-                  note="no server lists masks 1 and 3 from the Earth")
+        print(f"\n== {leg}: FAIL, neither server lists masks 1 and 3 at {observer}")
+        table.add(leg=leg, observer=observer, verdict="unanswered",
+                  note=f"no server lists masks 1 and 3 at {observer}")
         return
-    print("\n== deflection-geo: from the Earth, mask 3 against mask 1 + the textbook bending")
+    print(f"\n== {leg}: from {observer}, mask 3 against mask 1 + the textbook bending")
     print("   (searching each body's closest approach to the Sun, where the term is largest)")
     targets = []
     for b in DEFLECT_GEO_BODIES:
-        scan = _elongation_scan(client, ours, b, verbose)
+        scan = _elongation_scan(client, ours, b, verbose, where)
         near = [(e, jd) for jd, e in scan if e >= DEFLECT_MIN_ELONG_DEG]
         if not near:
             continue
@@ -701,7 +728,7 @@ def leg_deflection_geo(client, ours, theirs, wel_a, wel_b, table, verbose):
     worst = {}
     tested = 0
     for b, jd, elong in sorted(targets, key=lambda t: (t[0], t[1])):
-        args = ["--jd", repr(jd), "--icrs", "--eq", "--deltat", str(DELTA_T)]
+        args = ["--jd", repr(jd), "--icrs", "--eq", "--deltat", str(DELTA_T)] + list(where)
         got = {(who, m): ask(client, srv, args + ["--corrections", str(m), "--obj", str(b)],
                              verbose)
                for who, srv in (("ours", ours), ("theirs", theirs)) if judged[who]
@@ -709,7 +736,7 @@ def leg_deflection_geo(client, ours, theirs, wel_a, wel_b, table, verbose):
         sun = {who: ask(client, srv, args + ["--corrections", "0", "--obj", "10"], verbose).row(0)
                for who, srv in (("ours", ours), ("theirs", theirs)) if judged[who]}
         table.asked(got.get(("ours", 3)), got.get(("theirs", 3)))
-        base = dict(leg="deflection-geo", epoch_tt=jd, object=b, observer="geo", frame="ICRF",
+        base = dict(leg=leg, epoch_tt=jd, object=b, observer=observer, frame="ICRF",
                     plane="equator", mask=3, deltat=DELTA_T, tier=3,
                     anchor_source="textbook deflection (USNO Circular 179) on each server's "
                                   "own mask-1 answer")
@@ -721,6 +748,8 @@ def leg_deflection_geo(client, ours, theirs, wel_a, wel_b, table, verbose):
         res, term = {}, {}
         for who in [w for w, j in judged.items() if j]:
             p1 = vector(rows[(who, 1)])
+            if probe is not None:
+                probe[(who, b, jd)] = p1
             bent = textbook_deflection(p1, vector(sun[who]))
             # How big the term the row actually tested is: the angle the
             # textbook moved the mask-1 direction. A verdict is only worth as
@@ -747,6 +776,90 @@ def leg_deflection_geo(client, ours, theirs, wel_a, wel_b, table, verbose):
     print(f"  rows whose term exceeds the band (so actually testing something): {tested}")
     for who, w in sorted(worst.items()):
         print(f"  worst {who} vs textbook: {w:.6f}\"")
+
+
+def leg_deflection_geo(client, ours, theirs, wel_a, wel_b, table, verbose):
+    """The geocentric observer, A.5 value 0."""
+    _leg_deflection_at(client, ours, theirs, wel_a, wel_b, table, verbose,
+                       "deflection-geo", "geo", 0, [])
+
+
+# A body's diurnal parallax at these rows is arcseconds -- 0.8" for Saturn at
+# conjunction, 6" for Mercury -- so a site that reaches the computation moves
+# the answer thousands of times the deflection band. It can still be small for
+# one row (a body near the site's zenith or nadir shifts along the line of
+# sight), so what is graded is the LARGEST shift over the rows, not each one.
+DEFLECT_SITE_PARALLAX_MIN = 0.5  # arcsec
+
+
+def _deflection_site_reach(client, ours, theirs, table, verbose, seen):
+    """Did the site reach the computation at all?
+
+    Every row above grades a server against its own mask-1 answer, so a
+    server that silently ignored `--topo` would hand back geocentric
+    directions for both masks and the row would still read "agree". That is
+    not a hypothetical: the topocentric orbit points passed their comparison
+    for months while their position column never left the Earth's centre.
+    So measure the two things that verdict cannot see -- the shift from the
+    geocentric answer, and the shift between the two sites -- and grade them."""
+    srv = {"ours": ours, "theirs": theirs}
+    names = [n for n, _ in DEFLECT_SITES]
+    keys = sorted(set.intersection(*[set(seen[n]) for n in names]))
+    if not keys:
+        return
+    geo = {}
+    for who, b, jd in keys:
+        rep = ask(client, srv[who], ["--jd", repr(jd), "--icrs", "--eq", "--deltat", str(DELTA_T),
+                                     "--corrections", "1", "--obj", str(b)], verbose)
+        r = rep.row(0)
+        geo[(who, b, jd)] = None if r is None or math.isnan(r[0]) else vector(r)
+    whos = sorted({k[0] for k in keys})
+
+    def grade(observer, shift, source, note):
+        worst = {w: max([shift(k) for k in keys if k[0] == w and shift(k) is not None] or [0.0])
+                 for w in whos}
+        ok = {w: worst[w] >= DEFLECT_SITE_PARALLAX_MIN for w in whos}
+        verdict = ("agree" if all(ok.values()) else
+                   "finding" if not any(ok.values()) else
+                   "finding (ours)" if not ok.get("ours", True) else "finding (theirs)")
+        table.add(leg="deflection-topo", observer=observer, frame="ICRF", plane="equator",
+                  mask=1, deltat=DELTA_T, tier=3, anchor_source=source,
+                  sep_ours_anchor=worst.get("ours", ""), sep_theirs_anchor=worst.get("theirs", ""),
+                  band=DEFLECT_SITE_PARALLAX_MIN, verdict=verdict, note=note)
+        print(f"  {observer:24s} largest shift " +
+              "  ".join(f"{w} {worst[w]:.4f}\"" for w in whos) + f"   {verdict}")
+
+    print("\n== deflection-topo: did the site reach the computation?")
+    table.asked(None, None)
+    for name in names:
+        grade(f"topo {name} vs geo",
+              lambda k, n=name: (None if geo[k] is None else angle(seen[n][k], geo[k])),
+              "the same server's geocentric mask-1 answer at the same instant",
+              f"diurnal parallax at {name} over {len(keys) // len(whos)} rows; below the band "
+              "would mean the site never reached the computation")
+    grade("topo " + " vs ".join(names),
+          lambda k: angle(seen[names[0]][k], seen[names[1]][k]),
+          "the same server's own answer from the other site",
+          "the two sites' answers differ; equal answers would mean one fixed site, "
+          "which is how the frozen topocentric orbit points read")
+
+
+def leg_deflection_topo(client, ours, theirs, wel_a, wel_b, table, verbose):
+    """The topocentric observer, A.5 value 1, which both servers also
+    advertise and neither project had refereed. The honest expectation is
+    that it is the same code path as the geocentric one and therefore right;
+    the reason to measure it anyway is that the topocentric orbit points were
+    expected to be the same code path too, and their position column never
+    reached the site while their rate column did (CROSS-TEST.md). Two sites,
+    so a site that never reaches the computation reads as two equal answers
+    rather than as a pass."""
+    seen = {}
+    for name, site in DEFLECT_SITES:
+        seen[name] = {}
+        _leg_deflection_at(client, ours, theirs, wel_a, wel_b, table, verbose,
+                           "deflection-topo", f"topo {name}", 1, ["--topo", site], seen[name])
+    if all(seen.values()):
+        _deflection_site_reach(client, ours, theirs, table, verbose, seen)
 
 
 # Orbit points (kind 1), geometric (mask 0) in the frame of date: the portable
@@ -1868,7 +1981,10 @@ def main():
     ap.add_argument("--theirs", default="127.0.0.1:47391")
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
-    ap.add_argument("--legs", default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,deflection,deflection-geo,points,rates,sidereal,sidsweep,sidinstant,stars")
+    ap.add_argument("--legs",
+                    default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,"
+                            "deflection,deflection-geo,deflection-topo,points,rates,"
+                            "sidereal,sidsweep,sidinstant,stars")
     ap.add_argument("--out", help="write the leg table (TSV) here")
     ap.add_argument("--astrolog", default="/nvmraid/shares/Astrolog", help="the Astrolog tree, for its commit")
     ap.add_argument("--astrolog-bin", default="/nvmraid/shares/Astrolog/astrolog-ephd",
@@ -1922,6 +2038,8 @@ def main():
         leg_deflection(client, ours, theirs, a, b, table, args.verbose)
     if "deflection-geo" in legs:
         leg_deflection_geo(client, ours, theirs, a, b, table, args.verbose)
+    if "deflection-topo" in legs:
+        leg_deflection_topo(client, ours, theirs, a, b, table, args.verbose)
     if "bary" in legs:
         leg_bary(client, ours, theirs, table, args.verbose)
     if "topo" in legs:
