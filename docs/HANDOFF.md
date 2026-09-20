@@ -8,8 +8,15 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Resume here (state at 2026-09-20 13:57)
 
-`6216e9c` on `initial`, pushed, gate green, tree clean. Nothing is in
-flight: no background work but `prometheiad` on :47190, no scheduled jobs.
+`6abf1a9` on `initial`, pushed, gate green, tree clean. Nothing is in
+flight: no daemon of ours running, no scheduled jobs, no background work.
+Our server, when a cross-test needs it:
+
+    ./build/prometheiad --ephemeris ephe/linux_p1550p2650.440 \
+        --port 47190 --log-level info
+
+The only untracked paths are `.claude-config/` and `.envrc`, which are
+never staged.
 The Astrolog exchange reached a close on both sides at their `a0fc9ad`;
 their spare `astrolog-ephd` on **:47392** is the 13:37 build (1739128
 bytes, sha256 `9635191d6ee5ec6c…`) and is not to be assumed alive later.
