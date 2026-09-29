@@ -63,8 +63,25 @@ over 30,000 years. Inside DE440's span JPL recommends DE440.
   print quantum, and 0.8 m; they were 8.3 µas and 3.8 m before. The Moon
   is ≤ 8 µas at five epochs and 56–76 µas at −3000, 5000 and 9000. A JD
   held as a double is quantized to 10–80 µs at these epochs (5–43 µas on
-  the Moon), but at −3000 the quantum is only 5 µas. **The Moon's 56–76
-  µas at the far epochs, about 0.1 m, is not explained.** The ext-geo requests are declared in
+  the Moon), but at −3000 the quantum is only 5 µas.
+
+  **The Moon's 56–76 µas is Horizons' precision, not ours** (measured
+  2026-09-29). Peeled layer by layer against Horizons vectors asked in
+  TDB, so that neither side converts a time:
+  - the raw DE441 Moon matches Horizons' geometric vectors at 0.00 µas;
+  - the engine's geometric Moon also matches, at 0.00 µas;
+  - the light-time-corrected Moon differs by 62, 47 and 60 µas at −3000,
+    5000 and 9000, and the difference lies wholly along the barycentric
+    velocity. It is an emission-time difference of −3.1 to +6.3 µs.
+
+  Holding the emission instant as a double of ET seconds past J2000,
+  which is SPICE's convention, reproduces Horizons to ≤ 0.22 µas at every
+  epoch. That representation quantizes the instant to half an ulp,
+  2–30 µs here, and the Moon's ~30 km/s barycentric motion makes that up
+  to ~0.2 m. Ours compensates the rounding of t − τ exactly (a TwoSum
+  error term times the velocity, in `retarded()`), so ours is the more
+  precise answer. Near J2000 the ulp is under 2 µs, which is why the
+  residual only appears far out. The ext-geo requests are declared in
   `tools/fetch/horizons_fetch.py`.
 - **Against DE440 where both run** (61 epochs 1550–2650, astrometric
   ICRF): the Sun and every planet agree to ≤ 0.013 mas and a few metres.

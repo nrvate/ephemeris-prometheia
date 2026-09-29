@@ -196,6 +196,12 @@ def requests():
     for name, number in SMALL_BODIES[:3]:
         out.append((f"sbext-helio-{name}", "small body heliocentric vectors, millennia out (TDB)",
                     vectors(f"{number};", "500@10", SBEXT_EPOCHS_TDB)))
+    # The Moon's light-time-corrected (astrometric) vector asked in TDB:
+    # grades the light-time solution with no time-scale conversion on either
+    # side (docs/DE.md). Observer tables take only UT or TT.
+    out.append(("tdblt-moon", "geocentric light-time-corrected Moon vectors (TDB)",
+                dict(vectors("301", "500@399", [2451545.0] + EXT_EPOCHS_TT),
+                     VEC_CORR="'LT'", TIME_TYPE="'TDB'")))
     # Horizons' own TDB-TT, read off one geocentric Moon vector asked at the
     # same numbers as TDB and as TT: the difference is the velocity times
     # TDB-TT (docs/TIME.md, "TDB"). The DE441-era epochs plus J2000.

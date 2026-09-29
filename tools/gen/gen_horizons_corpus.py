@@ -77,7 +77,7 @@ def main():
 
     obs_rows, vec_rows, ext_rows, sbext_rows, prov = [], [], [], [], []
     for name, purpose, params in hf.requests():
-        if name.startswith("tdbtt-"):
+        if name.startswith("tdbtt-") or name.startswith("tdblt-"):
             continue  # a measurement of Horizons' TDB-TT (docs/TIME.md), not a fixture
         if name.startswith("bary-"):
             continue  # a cross-test anchor (tools/check/crosstest.py), not an engine test

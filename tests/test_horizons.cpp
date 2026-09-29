@@ -360,7 +360,9 @@ TEST_CASE("horizons_astrometric_de441_era") {
         // Measured on Horizons' TDB (8 epochs, JD 625295..5008295): Sun and
         // planets <= 3.4 uas, the Horizons RA/Dec print's 3.6 uas quantum, and
         // 0.8 m; the Moon <= 8 uas at five epochs and 56-76 uas at -3000, 5000
-        // and 9000, not explained (docs/DE.md), and 0.15 m.
+        // and 9000, and 0.15 m. The far-epoch Moon is Horizons' own precision:
+        // it holds the emission instant as a double of ET seconds, 2-30 us
+        // there, which emulated reproduces it to 0.22 uas (docs/DE.md).
         CHECK(sep_uas < (moon_row ? 100.0 : 5.0));
         CHECK(std::fabs(dr_km) < (moon_row ? 0.0004 : 0.0015));
         (moon_row ? moon_sep : planet_sep).add(sep_uas, h.request, h.jd_tt);
