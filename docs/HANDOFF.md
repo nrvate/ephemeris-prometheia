@@ -1,4 +1,4 @@
-# Handoff — where the work stands (2026-09-20)
+# Handoff — where the work stands (2026-09-29, evening)
 
 A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
@@ -8,8 +8,9 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Resume here (state at 2026-09-29, evening)
 
-`initial` = `origin/initial`, gate green; **v0.7.1 published**
-(library 0.7.1, C ABI 6; `prometheiad` 0.9.0). Start our daemon when a
+`initial` = `origin/initial`, gate green, `tools/scheduled.sh` green;
+**v0.7.3 published** (library 0.7.3, C ABI 6; `prometheiad` 0.11.0). Nothing
+is open with Astrolog and our queue is empty. Start our daemon when a
 cross-test needs it, and stop it by the pid you started:
 
     ./build/prometheiad --ephemeris ephe/linux_p1550p2650.440 \
@@ -18,99 +19,65 @@ cross-test needs it, and stop it by the pid you started:
 Untracked `.claude-config/` and `.envrc` are never staged. Astrolog's spare
 is **:47392** (read its identity from `/proc` before trusting a row);
 **:47391 is their production daemon and is never touched.** The channel to
-the Astrolog session (now named `Astrolog`) is open by the maintainer's
-word; say what matters at milestones, don't ping-pong.
+the Astrolog session (named `Astrolog`) is open by the maintainer's word:
+say what matters at milestones, don't ping-pong, and never cite a commit
+hash in the same tool batch as the commit.
 
 **Focus: solar-system objects.** Fixed stars are parked
 ([STARS_BACKLOG.md](STARS_BACKLOG.md)); don't raise them.
 
-**What 2026-09-29 settled** (details in CROSS-TEST.md and CHANGELOG 0.7.1):
-- A star's distance rate in closed form; `PROMETHEIA_ERROR_COVERAGE`;
-  protocol v4 re-pinned at the site drop and the rate-bound reading
-  (|distance-rate error| / max(1 AU, r)); we meet the A.3 default under it
-  and send no `0x0013`, deliberately.
-- ΔT is now seen arriving by all 18 cross-test legs, and `legtest.py`
-  holds each leg's anchor to a sabotage.
-- Astrolog now differences its body rates from its own positions: record
-  x takes their `rates` findings 84 → 5 (the five are a parked star).
+**Data on this machine.** DE440 in `ephe/`. DE441 is in `/nvm/work/ephe/`,
+linked into `ephe/`. SB441-N16 (full and the 1550–2650 cut) is in `ephe/`.
+All are fetched and verified by `tools/fetch/de_fetch.py`
+(`--only de440|de441|sb441`, `--verify`). The TDB series is generated from
+the pinned ERFA `dtdb.c` in `erfa-raw/` by `tools/gen/gen_tdb_series.py`.
+The MCP server config (user scope) serves DE440 then DE441.
 
-**DE441 and the precession default (2026-09-29, the maintainer's go-ahead
-for both):** DE441 is fetched to `/nvm/work/ephe/` (pinned in
-`tools/fetch/de_fetch.py`, linked into `ephe/`) and stands behind DE440 via
-`add_ephemeris`, DE440 answering 1550–2650 to the bit as before
-([DE.md](DE.md), "DE441"). Precession now defaults to Vondrák 2011
-everywhere — on the wire too, §3.5a and A.20 saying so since Astrolog
-`b6f1387` (registries `f7a12c75…`, vendored) — moving
-old-default answers by ≤ 0.01″ ([FRAMES.md](FRAMES.md)). Against swetest
-the equator of date now agrees to ≤ 1.8 mas over 1560–2640; the ecliptic of
-date differs by swetest's ε_A-series obliquity (ours is the pole angle): 16 mas
-at 2640, up to 65″ over DE441's span (a27b515). §3.5a now names the pole
-angle (Astrolog `d0286de`). Their fork follows in its release after ts.16;
-until then it is a known difference (CROSS-TEST.md, their S8). Measure it
-closing when they say it has landed. Beyond DE440 we agree with Horizons
-to ≤ 8.3 µas, and the Moon to 124 µas at year 9000, a ~0.2 ms time offset
-(0645170, 055cb29, DE.md). JSON rows now carry `delta_t_s` and
-`delta_t_basis` (6ad20b7). The MCP server config serves DE441 too
-(maintainer, 2026-09-29).
+**Settled on 2026-09-29, in release order** (CHANGELOG 0.7.1–0.7.3):
+- **0.7.1:**
+  - star distance rates in closed form;
+  - `PROMETHEIA_ERROR_COVERAGE`;
+  - ΔT and the epoch seen arriving by every leg;
+  - `legtest.py`;
+  - the §3.5a rate-bound reading (we meet the A.3 default and send no
+    `0x0013`, deliberately).
+- **0.7.2:**
+  - DE441 behind DE440 (`add_ephemeris`), DE440 answering 1550–2650 to the
+    bit;
+  - Vondrák 2011 precession everywhere, with the mean obliquity the pole
+    angle (§3.5a, Astrolog `d0286de`);
+  - JSON rows carry `delta_t_s`, `delta_t_basis`, `ut1_minus_utc_s`;
+  - future UTC is TAI − 37 s (maintainer);
+  - `capabilities.dates`;
+  - A.3 `0x000A` coverage, agreed and shipped both sides.
+- **0.7.3:**
+  - TDB−TT is the full Fairhead & Bretagnon series (787 terms public, 136 on
+    one-day nodes in the engine, 1.55 µs, old speed);
+  - a catalog body more than 100 years from its element epoch needs an
+    asteroid perturber kernel (maintainer), provisioned by
+    `de_fetch.py --only sb441`;
+  - small bodies stated against Horizons (≤ 0.9″ over 1600–2500 with the
+    kernel).
+- **The cross-test** (records z, aa; CROSS-TEST.md):
+  - Astrolog's ts.17/ts.18 closed their S8 (obliquity) and S9 (nutation);
+  - `DATE_FRAME_BAND` is 0.1 mas;
+  - new legs: `hypotheticals` (every shared kind 3 token; `neptune-leverrier`
+    re-proved each run as Hoyt's vs Le Verrier's print) and sidereal orbit
+    points (after their gate found Swiss's sidereal-node bug, their G30);
+  - their cross-engine gate (`tools/ephsrv-prometheia.sh`, their side) passes
+    69/69 against our 0.7.3, and their suite 171/171.
+- **Every validation residual is explained** (DE.md, ENGINE.md):
+  - the Moon's ~1 mas against swetest is swetest reading TT as TDB;
+  - the Moon's 56–76 µas against Horizons at −3000/5000/9000 is Horizons
+    holding the emission instant as a double of ET seconds (emulated to
+    0.22 µas);
+  - swetest's ecliptic of date uses the ε_A series, where we use the pole
+    angle.
 
-**Record z (f4cbcba), against their ts.16:** no findings against them. Their
-Hamburg rows all moved toward ours. The one finding was our `apparent` band
-omitting the date-frame models: their truncated nutation, 1 mas at 2100.
-The band now carries a measured 1.7 mas (CROSS-TEST.md). Future UTC stays
-TAI − 37 s (maintainer), disclosed as `ut1_minus_utc_s` (0447aeb).
-
-**Record aa, against their ts.17:** S8 (obliquity) and S9 (nutation) are closed.
-The frame models agree to 0.06 mas, and `DATE_FRAME_BAND` is now 0.1 mas.
-There are no findings against either side. Coverage (A.3 0x000A) is shipped
-(be156f8); they will send theirs once they can list their files' spans.
-
-**The `hypotheticals` leg (652a175, 8da1500)** compares every kind 3 token both
-servers advertise at apparent place. The Hamburg points agree to 0.012 mas.
-`neptune-leverrier` differs by 100–301″ because theirs is Hoyt's 1980
-transcription and ours Le Verrier's own print. Our engine on their numbers
-matches them to 0.055 mas, and the leg re-proves this each run from
-`tools/check/definitions/`.
-
-**v0.7.2 cut 2026-09-29** (maintainer): library 0.7.2 (C ABI 6), prometheiad
-0.10.0; DE441 behind DE440, Vondrák default, JSON ΔT disclosure, coverage.
-
-**After 0.7.2, released as 0.7.3 (2026-09-29):**
-- The Moon's ~1 mas against swetest is its TT-for-TDB argument (903a553).
-- TDB−TT is the full Fairhead & Bretagnon series (df1d8b5, maintainer): 787 terms
-  for the public function, and 136 on one-day nodes in the engine (1.55 µs,
-  old speed). Horizons uses a one-term formula. Graded on Horizons' TDB, the
-  DE441-era planets agree to 3.4 µas. The Moon's 56–76 µas at −3000, 5000
-  and 9000 is Horizons' own precision: it holds the emission instant as a
-  double of ET seconds (SPICE's convention), and emulating that reproduces
-  it to 0.22 µas (DE.md).
-- The `sidereal` leg now holds orbit points (127fe07), after Astrolog's gate
-  found Swiss's sidereal-node nutation bug (their ts.18).
-- Small bodies far from their element epoch (8c5c5b4). With JPL's perturbers,
-  ≤ 0.9″ against Horizons over 1600–2500, which is all Horizons serves; without
-  them 75″; arcminutes over millennia. Refusals outside the kernel now name its
-  span. The check runs in `scheduled.sh`, not the gate. The C API gained
-`prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
-
-**Astrolog's rates are done:** bodies and orbit points both differenced
-from their own positions (their `218b00e`, `418841e`); record y has their
-sweep within their advertised 3e-5 °/day and 1e-9 everywhere it reached,
-and every leg sees ΔT and the epoch arrive. Only parked stars keep library
-rates there. Re-run `tools/check/crossrun.py --record` whenever they send a
-new build identity.
-
-**Hypothetical bodies:** Astrolog routes all 30 stock element sets through
-our `prometheia_calc_elements`. Under light time an equinox of date means
-the emission instant (§3.5a, agreed with them); ours satisfies
-B(t−τ) − E(t) to 1e-11″ on every set refereed (CROSS-TEST.md, record y).
-Open on their side only: Swiss's Vulcan (0.024″ with speeds) and set 26's
-56,000 km distance gap. They report (2026-09-29, their fork `9ed27ec`) ≤ 0.0005″
-against our kind 4 on every stock set but set 26's 1.457″ fixed-M reading —
-not yet measured here: wait for the build identity they will send.
-
-**Open, unassigned, needing no decision** — full detail in "Open items":
-none from the 2026-09-20 list. Closed 2026-09-29: `--deltat` (seen by all
-18 legs), `--jd` (seen by 17; `surfaces` grades no epoch), the legs'
-selftest (`legtest.py`), and v0.7.1 (published).
+**Candidates for next** (none started, none promised):
+- cross-test legs at DE441 epochs, once Astrolog serves beyond ~2400 (their
+  bundled files refuse outside it);
+- the parked items below.
 
 **The day's lesson, if only one survives:** four times in a week a claim
 here or in Astrolog was bounded by an axis nobody varied — a floor exact
@@ -159,6 +126,30 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
 
 ## Released
 
+- **v0.7.3**, published 2026-09-29
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.7.3).
+  - The library and tools are 0.7.3 (C ABI 6, unchanged); `prometheiad` is
+    0.11.0.
+  - New:
+    - the full Fairhead & Bretagnon TDB−TT;
+    - catalog bodies need the perturber kernel past a century, and
+      `de_fetch.py --only sb441` provisions it;
+    - small-body accuracy stated against Horizons.
+  - Moves:
+    - positions, by ≤ 5 µas within 1600–2200;
+    - the dataset id (`…#c029261c`);
+    - the kernel cut's hash (e7b67e32…, same records).
+- **v0.7.2**, published 2026-09-29
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.7.2).
+  - The library and tools are 0.7.2 (C ABI 6, `add_ephemeris` appended);
+    `prometheiad` is 0.10.0.
+  - New:
+    - DE441 behind DE440;
+    - the Vondrák 2011 default;
+    - JSON ΔT and UT1−UTC disclosure;
+    - `capabilities.dates`;
+    - A.3 coverage.
+  - Moves: date-frame answers by ≤ 0.01″, and the dataset id.
 - **v0.7.1**, published 2026-09-29
   (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.7.1).
   - The library and tools are 0.7.1 (C ABI 6, one status appended);
@@ -800,40 +791,11 @@ unlisted correction masks (both §3.5a parts approved).
 ## Parked (maintainer go-ahead required before starting)
 
 Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
+Settled 2026-09-29, recorded in STARS_BACKLOG.md and CROSS-TEST.md:
+- Vega's radial velocity (kept at −13.5 km/s);
+- the analytic star rate (done);
+- what we advertise for rates (the §3.5a reading; no `0x0013`).
 
-- **Vega's radial velocity — done 2026-09-29: kept at −13.5 (SIMBAD
-  re-queried, unchanged), −20.6 recorded as the 2018 value.** Ours is −13.5 km/s (SIMBAD, quality C; the
-  BSC's own field says −14), theirs is −20.6 from `sefstars.txt`
-  (CROSS-TEST.md, "Vega: one database at two vintages"). Not two
-  catalogues: that file cites SIMBAD too, last updated from it in 2018,
-  so it is one database read at two times and the resolution is a
-  re-query rather than an argument. −20.6 is a real published value
-  (Vega is a pole-on rapid rotator with a wide literature spread).
-  Changing ours changes a published catalogue value, so it is not a
-  thing a cross-test decides; parked on their side for the same reason.
-- **The analytic star rate — done 2026-09-29** (ENGINE.md, "Rates").
-  Diagnosed at `1dc0767`: a fixed star's
-  reported distance rate misses a difference of its own positions by one
-  f64 ulp of that position over the engine's `kSpeedStepDays` stencil
-  (2/4096 d, 42 s), not by a missing term. Predicted across five stars
-  over a hundredfold in distance, each within 3×; a *smaller* step makes
-  it worse; the longitude channel is the same error divided by r and only
-  looks clean. The fix is to compute a star's rate in closed form, since
-  a star is a straight line. **It changes a value on the wire**, which is
-  why it is here and not done.
-- **What we advertise for rates — decided 2026-09-29: measure, then
-  advertise; next.** `prometheiad` sends no A.3 `0x0013`
-  record at all, so the registry default (1e-5 °/day, **1e-9 AU/day**) is
-  what a client is entitled to assume, and the sweep's 60 Polaris rows
-  all exceed the AU figure — worst 2.4722e-05, four decades (CROSS-TEST.md,
-  "The ΔT axis becomes part of the sweep"). The longitude side is fine at
-  5.2e-10. This is **not** the same decision as the analytic star rate:
-  one fixes the number, the other fixes the promise, and either alone
-  leaves the other wrong. Astrolog holds the mirror-image question (their
-  `4e-3`, also with their maintainer), and the standing joint adjudication
-  is that **no honest absolute number exists for this column while a
-  tolerance in AU/day is applied to a quantity whose ulp is 3.7e-9 AU** — so
-  neither side widens a bound alone.
 - The `deadlineMs` strategy switch: parsed and advisory today, and
   documented as unimplemented in SERVER.md.
 - Nightly or automated catalogue release builds: an idea only.

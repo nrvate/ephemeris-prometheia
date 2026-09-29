@@ -50,7 +50,7 @@ releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list:
   Details: [docs/DE.md](docs/DE.md), [docs/SPK.md](docs/SPK.md).
 - **Time scales** — exact proleptic-Gregorian calendar ↔ JD; UTC ↔ TAI ↔
   TT with the USNO leap-second table and correct `23:59:60` labeling in
-  both directions; TT ↔ TDB (published truncated series, ~10 µs class);
+  both directions; TT ↔ TDB (the full Fairhead & Bretagnon series, ns-class near J2000);
   Delta T (TT−UT1) pluggable, defaulting to observed USNO values (1657 to
   the latest month, refreshed each release), the Stephenson–Morrison–Hohenkerk
   eclipse reconstruction before 1657 and a tidal trend after. Sources and
@@ -76,7 +76,11 @@ releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list:
   `sigma_arcsec` propagated from the SBDB element sigmas, and resolve
   by designation or proper name through `Engine::lookup`. Sidereal
   zodiacs (Fagan/Bradley, Lahiri, user-anchored ayanamshas) shift
-  ecliptic longitudes by the anchor + IAU 2006 precession (+ nutation).
+  ecliptic longitudes by the anchor + the precession model's general
+  precession (Vondrák 2011 by default; + nutation). Without an asteroid
+  perturber kernel a catalog body is served within 100 years of its
+  element epoch; `tools/fetch/de_fetch.py --only sb441` provisions the kernel
+  ([docs/VALIDATION.md](docs/VALIDATION.md), "Small bodies").
   Against swetest on the same DE440: Ceres 0.19″ (the source-elements
   difference; our integration 0.001″), ayanamshas 0.0026″ over
   1800–2200, sidereal positions 0.0034″. Details:
@@ -159,8 +163,9 @@ asteroid perturbers, uncertainties matching JPL's from on-demand
 covariances, see [docs/VALIDATION.md](docs/VALIDATION.md); full-catalog
 benchmark); M6 done (`prometheiad`, serving Astrolog's binary ephemeris
 protocol over WebSocket, [docs/SERVER.md](docs/SERVER.md)), followed by
-protocol version 4 end to end, with the optional Vondrák 2011 long-term
-precession ([docs/FRAMES.md](docs/FRAMES.md)).
+protocol version 4 end to end; Vondrák 2011 long-term precession is the
+default since 0.7.2 ([docs/FRAMES.md](docs/FRAMES.md)), and DE441 can stand
+behind DE440 for −13000..17000.
 
 Where the work stands now, and what is next:
 [docs/HANDOFF.md](docs/HANDOFF.md).
