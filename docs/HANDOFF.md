@@ -37,8 +37,12 @@ and is never touched.**
    the same day; under it we meet the A.3 default everywhere the sweep
    reached, so **we send no `0x0013`, deliberately** (CROSS-TEST.md, "In
    §3.5a and vendored").
-3. **Vega's radial velocity: keep −13.5 km/s** (current SIMBAD), re-confirm
-   with one paced query, and record −20.6 as the 2018 value.
+3. **Vega's radial velocity: kept at −13.5 km/s**, re-confirmed against
+   SIMBAD on 2026-09-29 (STARS.md); −20.6 recorded as the 2018 value.
+
+**Fixed stars are on the back burner** (maintainer, 2026-09-29: "we barely
+use Stars"): every open star item is in [STARS_BACKLOG.md](STARS_BACKLOG.md),
+and effort goes to solar-system objects.
 
 Channel to the Astrolog session reopened by the maintainer on 2026-09-29
 (it is `zero-adaptive-scott` now); their current goal is Prometheia as
@@ -536,9 +540,9 @@ terms.
     have selftests (`prometheia-load`, `corrapplied.py`, `crosstest.py`'s
     adjudicators, `ratesweep.py`, `ephproto4_registries.py`, `stars_fk5.py`,
     `ephproto4_fixtures.py`, `crossrun.py`), which is every tool under
-    `tools/check/` that accuses; `crosstest.py`'s legs, as opposed to its
-    adjudicators, still carry theirs as prose. That is eight legs, not the
-    hole.
+    `tools/check/` that accuses; `crosstest.py`'s legs have
+    `tools/check/legtest.py` since 2026-09-29 (CROSS-TEST.md, "The legs'
+    own selftest").
   - **`tools/check/adjudicatetest.py`** (2026-09-20) is the second, and
     **the first falsification in this repo that runs on every commit**:
     `crosstest.py`'s three `adjudicate_*` functions are pure functions of
@@ -738,8 +742,8 @@ unlisted correction masks (both §3.5a parts approved).
 
 Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
 
-- **Vega's radial velocity — decided 2026-09-29: keep −13.5, re-query
-  once, record −20.6 as the 2018 value (not yet done).** Ours is −13.5 km/s (SIMBAD, quality C; the
+- **Vega's radial velocity — done 2026-09-29: kept at −13.5 (SIMBAD
+  re-queried, unchanged), −20.6 recorded as the 2018 value.** Ours is −13.5 km/s (SIMBAD, quality C; the
   BSC's own field says −14), theirs is −20.6 from `sefstars.txt`
   (CROSS-TEST.md, "Vega: one database at two vintages"). Not two
   catalogues: that file cites SIMBAD too, last updated from it in 2018,

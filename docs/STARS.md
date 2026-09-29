@@ -155,6 +155,15 @@ the strength of it, and nothing there either. A radial velocity reaches
 the wire only through the distance rate — it moves no position — so
 nothing else in this catalog turns on it.
 
+**Re-confirmed 2026-09-29 and kept** (maintainer's decision): one paced
+re-query of the pinned SIMBAD source through `tools/fetch/stars_fetch.py`
+returns HIP 91262 at −13.5 ± 0.4 km/s, quality C, identical to the pin.
+−20.6 is recorded as SIMBAD's value as of 2018 (per `sefstars.txt`'s own
+header), not adopted. The same re-query shows SIMBAD has moved since this
+catalog's pin (2026-09-17): 250 radial velocities changed and 52 stars
+gained one. None is adopted; a refresh is a deliberate regeneration
+("Re-creating the data"), not a side effect of a check.
+
 ## Lookup
 
 `stars::lookup(query, max, prefix)` returns every object answering to a query,
