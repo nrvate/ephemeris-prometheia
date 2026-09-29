@@ -462,8 +462,9 @@ not indexed (address those by their NAIF IDs).
     them.
 - **Provenance:** catalog answers name the overlay
   ("… + EPM1 catalog(s) […]").
-- Costs of the query epoch outside the planetary ephemeris's coverage,
-  or a body absent everywhere, are errors — never extrapolations.
+- A query epoch outside the planetary ephemeris's coverage (or the
+  perturber kernel's) is an error, `ErrorCode::CoverageError`, and a body
+  absent everywhere is `NotFound` — never extrapolations.
 
 ## Performance
 

@@ -626,9 +626,10 @@ private:
     static constexpr double kBlockDays = 365.25;
     static constexpr int kBlockSamples = 128;
 
-    void fail(std::string msg) {
+    void fail(ErrorCode code, std::string msg) {
         if (ok_) {
             ok_ = false;
+            error_code_ = code;
             error_ = std::move(msg);
         }
     }
@@ -657,8 +658,9 @@ private:
             }
         }
         if (ids_.empty()) {
-            fail("the ephemeris carries none of the perturbing masses at JD " + std::to_string(t) +
-                 " (outside its coverage?)");
+            fail(ErrorCode::CoverageError,
+                 "the ephemeris carries none of the perturbing masses at JD " + std::to_string(t) +
+                     " (outside its coverage?)");
             return;
         }
         lo_ = hi_ = t; // no samples yet; extend() seeds both directions
@@ -686,7 +688,7 @@ private:
                 double st[6];
                 auto r = sources_[b]->barycentric(ids_[b], tt, st);
                 if (!r) {
-                    fail(r.error().message);
+                    fail(r.error().code, r.error().message);
                     return;
                 }
                 TrajSample& p = block[size_t(i) * nb + b];
@@ -814,6 +816,7 @@ private:
     long sun_index_ = -1;
     bool built_ = false;
     std::string error_;
+    ErrorCode error_code_ = ErrorCode::Ok;
     double lo_ = 0.0, hi_ = 0.0;
     std::vector<int> ids_;         // NAIF ids of the masses, table order
     std::vector<Source*> sources_; // where each mass's states come from
@@ -827,6 +830,7 @@ private:
 
 public:
     const std::string& error() const { return error_; }
+    ErrorCode error_code() const { return error_code_; }
 };
 
 // ---------------------------------------------------------------------------
@@ -1323,7 +1327,7 @@ struct Engine::Impl {
         }
         const State s = slot.memo->at(jd_tdb);
         if (!perturbers.ok())
-            return make_error(ErrorCode::ArgumentError, perturbers.error());
+            return make_error(perturbers.error_code(), perturbers.error());
         if (!std::isfinite(s.pos.x) || !std::isfinite(s.vel.x) ||
             jd_tdb < slot.memo->coverage_lo() || jd_tdb > slot.memo->coverage_hi())
             return make_error(ErrorCode::ArgumentError,
@@ -2279,7 +2283,7 @@ struct Engine::Impl {
                                          [](double t, const ApsisPassage& p) { return t < p.t; });
         const long k = long(it - v.begin()) - 1; // v[k].t <= jd_tdb < v[k+1].t
         if (k < 2 || k + 3 >= long(v.size()))
-            return make_error(ErrorCode::ArgumentError,
+            return make_error(ErrorCode::CoverageError,
                               "too near the ephemeris's coverage limits: the interpolation "
                               "needs three apsis passages on each side");
         // Nodes k-2 .. k+3.

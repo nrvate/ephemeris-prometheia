@@ -49,9 +49,11 @@ typedef enum prometheia_status {
     PROMETHEIA_ERROR_IO = 1,         /* a file could not be opened or read */
     PROMETHEIA_ERROR_FORMAT = 2,     /* not a recognised or valid file */
     PROMETHEIA_ERROR_CORRUPTION = 3, /* checksum mismatch or truncation */
-    PROMETHEIA_ERROR_ARGUMENT = 4,   /* invalid input, including time coverage */
+    PROMETHEIA_ERROR_ARGUMENT = 4,   /* invalid input */
     PROMETHEIA_ERROR_NOT_FOUND = 5,  /* body or name not answered */
-    PROMETHEIA_ERROR_INTERNAL = 6    /* allocation failure or internal fault */
+    PROMETHEIA_ERROR_INTERNAL = 6,   /* allocation failure or internal fault */
+    PROMETHEIA_ERROR_COVERAGE = 7    /* an instant outside the loaded data's time
+                                        span (after 0.7.0; ARGUMENT before) */
 } prometheia_status;
 
 #define PROMETHEIA_ERROR_MESSAGE_SIZE 256

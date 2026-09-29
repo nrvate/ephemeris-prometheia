@@ -54,6 +54,8 @@ prometheia_status to_status(ErrorCode code) {
         return PROMETHEIA_ERROR_ARGUMENT;
     case ErrorCode::NotFound:
         return PROMETHEIA_ERROR_NOT_FOUND;
+    case ErrorCode::CoverageError:
+        return PROMETHEIA_ERROR_COVERAGE;
     }
     return PROMETHEIA_ERROR_INTERNAL;
 }

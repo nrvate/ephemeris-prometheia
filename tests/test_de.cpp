@@ -319,10 +319,10 @@ TEST_CASE("de_synthetic_errors") {
         double out[6];
         auto below = f.state(Body::Mercury, kSynSS - 0.5, out);
         CHECK(!below.ok());
-        CHECK(below.error().code == ErrorCode::ArgumentError);
+        CHECK(below.error().code == ErrorCode::CoverageError);
         auto above = f.state(Body::Mercury, kSynSS + 96.0 + 0.5, out);
         CHECK(!above.ok());
-        CHECK(above.error().code == ErrorCode::ArgumentError);
+        CHECK(above.error().code == ErrorCode::CoverageError);
         auto nonfinite = f.state(Body::Mercury, std::nan(""), out);
         CHECK(!nonfinite.ok());
         CHECK(nonfinite.error().code == ErrorCode::ArgumentError);
@@ -452,7 +452,7 @@ TEST_CASE("de_relative_state_composition") {
     CHECK(bad.error().code == ErrorCode::ArgumentError);
     auto outside = f.relative_state(Target::Sun, Target::Sun, kSynSS - 1.0, out);
     CHECK(!outside.ok());
-    CHECK(outside.error().code == ErrorCode::ArgumentError);
+    CHECK(outside.error().code == ErrorCode::CoverageError);
 }
 
 // ---------------------------------------------------------------------------

@@ -707,7 +707,7 @@ Json kind_word(const ResolvedObject& obj) {
 
 std::string error_code(const Error& e) {
     const std::string& m = e.message;
-    if (m.find("coverage") != std::string::npos)
+    if (e.code == ErrorCode::CoverageError)
         return "outside-coverage";
     if (m.find("numerical failure") != std::string::npos ||
         m.find("integration failed") != std::string::npos)

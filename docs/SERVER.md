@@ -315,7 +315,9 @@ does with them:
   through the catalogs' name index; no match is per-object error 1.
 - **Per-object errors** (A.17). One object failing never fails the request.
   The code is classified from the engine's error *type* first, and message
-  text is consulted only for types that carry no client text. `errText` is a
+  text is consulted only for types that carry no client text. Coverage (3)
+  has its own type, `CoverageError`, since 2026-09-29; before, it was read
+  off the words "coverage" and "perturbing masses". `errText` is a
   fixed sentence per code (§3.8), except for the reasons the server writes
   itself, which are content-free.
 

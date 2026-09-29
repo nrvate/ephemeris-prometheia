@@ -240,7 +240,7 @@ Result<void> SpkFile::segment_state_et(size_t index, double et, double out[6]) c
         return make_error(ErrorCode::ArgumentError, "epoch is not finite");
     }
     if (et < seg.start_et || et > seg.end_et) {
-        return make_error(ErrorCode::ArgumentError, "epoch outside segment coverage for target " +
+        return make_error(ErrorCode::CoverageError, "epoch outside segment coverage for target " +
                                                         std::to_string(seg.target));
     }
 
@@ -519,7 +519,7 @@ Result<void> SpkFile::state_to_root(int body, double et, std::vector<int>& chain
                 listed = true;
             }
             if (listed) {
-                return make_error(ErrorCode::ArgumentError,
+                return make_error(ErrorCode::CoverageError,
                                   "epoch outside SPK coverage for body " + std::to_string(current));
             }
             return {};

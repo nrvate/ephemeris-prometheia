@@ -384,10 +384,10 @@ TEST_CASE("spk_synthetic_errors") {
     { // coverage
         auto r = f.segment_state(0, jd_of(kInit - kDay), out);
         CHECK(!r.ok());
-        CHECK(r.error().code == ErrorCode::ArgumentError);
+        CHECK(r.error().code == ErrorCode::CoverageError);
         auto chained = f.state(naif::kMoon, naif::kSolarSystemBary, jd_of(kInit - kDay), out);
         CHECK(!chained.ok());
-        CHECK(chained.error().code == ErrorCode::ArgumentError);
+        CHECK(chained.error().code == ErrorCode::CoverageError);
         auto nan = f.state(naif::kMoon, naif::kEarth, std::nan(""), out);
         CHECK(!nan.ok());
         CHECK(nan.error().code == ErrorCode::ArgumentError);

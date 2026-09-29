@@ -115,9 +115,10 @@ printf("%s\n", r.source);    /* the element set's name */
   | `PROMETHEIA_ERROR_IO` | file cannot be opened or read |
   | `PROMETHEIA_ERROR_FORMAT` | not a recognised or valid ephemeris/catalog |
   | `PROMETHEIA_ERROR_CORRUPTION` | checksum mismatch or truncation |
-  | `PROMETHEIA_ERROR_ARGUMENT` | invalid input: `NULL`, out-of-range option, non-finite time, time outside the ephemeris, the observer as the body |
+  | `PROMETHEIA_ERROR_ARGUMENT` | invalid input: `NULL`, out-of-range option, non-finite time, the observer as the body |
   | `PROMETHEIA_ERROR_NOT_FOUND` | no ephemeris or catalog answers the body or name |
   | `PROMETHEIA_ERROR_INTERNAL` | allocation failure or other internal fault (no C++ exception ever crosses the interface) |
+  | `PROMETHEIA_ERROR_COVERAGE` | an instant outside the loaded data's time span: the ephemeris, the perturber kernel, or the natural apsides' three passages on each side. Appended after 0.7.0 (2026-09-29, announced to the Astrolog side first); those inputs returned `PROMETHEIA_ERROR_ARGUMENT` before, and the message text is unchanged |
 - **Outputs on failure** are zeroed (`*result`, `*utc`, `*body`, `*jd_tt`),
   and `*out` from open is set to `NULL`.
 - **Options.** Start from `prometheia_options_init()`, not from a zeroed

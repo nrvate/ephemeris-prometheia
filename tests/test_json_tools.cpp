@@ -66,6 +66,18 @@ TEST_CASE("json_times_and_names") {
     CHECK(out["results"][2]["error"]["code"] == "invalid-arguments");
 }
 
+TEST_CASE("json_outside_coverage_is_named") {
+    // An instant the ephemeris does not span is its own per-object error,
+    // classified by the engine's error type (CoverageError), not its words.
+    synth::TempFile tf("json-coverage");
+    Engine e = synth::open_synthetic(tf);
+    const Json out =
+        run(e, "positions",
+            {{"time", {{"jd_tt", 2451545.0 + 100.0 * 365.25}}}, {"objects", {"Jupiter"}}});
+    REQUIRE(out["results"].size() == 1);
+    CHECK(out["results"][0]["error"]["code"] == "outside-coverage");
+}
+
 TEST_CASE("json_clock_times_before_1972_are_ut1") {
     // A clock time before 1972 is read as UT1 and given back as "ut1"
     // (maintainer, 2026-09-19): agents ask for birth charts by clock time.

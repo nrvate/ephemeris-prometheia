@@ -289,11 +289,9 @@ eph::ObjErr obj_err_of(const Error& e) {
     case ErrorCode::FormatError:
     case ErrorCode::CorruptionError:
         return eph::kOErrDataMissing;
+    case ErrorCode::CoverageError:
+        return eph::kOErrCoverage;
     case ErrorCode::ArgumentError:
-        if (m.find("coverage") != std::string::npos ||
-            m.find("perturbing masses") != std::string::npos) {
-            return eph::kOErrCoverage;
-        }
         return eph::kOErrUnsupported;
     default:
         return eph::kOErrInternal;

@@ -20,6 +20,14 @@ documented, not that it is frozen.
   distances to the difference's own floor. **Moves a value on the wire:**
   the star distance-rate column, and the radial part of a star's velocity
   vector. Positions and angular rates are unchanged. The C ABI is unchanged.
+- **A coverage error has its own status**, `PROMETHEIA_ERROR_COVERAGE`
+  (7) in the C API and `ErrorCode::CoverageError` in C++ (docs/C_API.md).
+  An instant outside the ephemeris, the perturber kernel or the natural
+  apsides' passages returned `PROMETHEIA_ERROR_ARGUMENT` (4); callers that
+  matched the message text still can, since it is unchanged. The C ABI stays
+  6 (no layout changed). Announced to the Astrolog side, whose plugin maps 7
+  from their `aa83946`, before it landed. `prometheiad` and
+  `prometheia-json` now classify coverage by the error's type, not its words.
 - **Protocol v4 re-pinned to Astrolog `7cbf0d8`, the site drop**
   (third_party/README.md). `prometheiad` now answers a REQUEST whose site
   height is at or below the WGS-84 polar radius with ERROR 1 (malformed),

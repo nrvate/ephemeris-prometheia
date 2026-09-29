@@ -14,6 +14,7 @@ enum class ErrorCode {
     CorruptionError, // checksum mismatch or truncation mid-structure
     ArgumentError,   // caller passed invalid input (unsorted, non-finite, ...)
     NotFound,        // requested body is not in the catalog
+    CoverageError,   // an instant outside the loaded data's time span
 };
 
 struct Error {

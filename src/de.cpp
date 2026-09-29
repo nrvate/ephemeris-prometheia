@@ -326,7 +326,7 @@ Result<void> DeFile::state(Body body, double jed, double out[6]) const {
         return make_error(ErrorCode::ArgumentError, "jed is not finite");
     }
     if (jed < header_.start_jed || jed > header_.end_jed) {
-        return make_error(ErrorCode::ArgumentError, "jed " + std::to_string(jed) +
+        return make_error(ErrorCode::CoverageError, "jed " + std::to_string(jed) +
                                                         " outside coverage [" +
                                                         std::to_string(header_.start_jed) + ", " +
                                                         std::to_string(header_.end_jed) + "]");

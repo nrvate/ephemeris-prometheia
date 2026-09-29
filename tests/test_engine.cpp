@@ -404,7 +404,9 @@ TEST_CASE("engine_synthetic_centers_and_errors") {
     o.center = Center::Geocentric;
     CHECK(e.calc(body::kMars, jd_tt, o).error().code == ErrorCode::NotFound);
     CHECK(e.calc(body::kJupiter, NAN, o).error().code == ErrorCode::ArgumentError);
-    CHECK(!e.calc(body::kJupiter, jd_tt + 100.0 * 365.25, o).ok()); // outside coverage
+    const auto outside = e.calc(body::kJupiter, jd_tt + 100.0 * 365.25, o);
+    REQUIRE(!outside.ok());
+    CHECK(outside.error().code == ErrorCode::CoverageError);
 
     Engine closed;
     CHECK(closed.calc(body::kSun, jd_tt).error().code == ErrorCode::ArgumentError);

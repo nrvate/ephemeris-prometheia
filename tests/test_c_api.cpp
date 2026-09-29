@@ -304,7 +304,7 @@ TEST_CASE("c_api_calc_errors") {
     expect(499, kJ2000, nullptr, PROMETHEIA_ERROR_NOT_FOUND); // not in the kernel
     expect(399, kJ2000, nullptr, PROMETHEIA_ERROR_ARGUMENT);  // the observer
     expect(10, std::nan(""), nullptr, PROMETHEIA_ERROR_ARGUMENT);
-    expect(10, 2451545.0 + 100.0 * 365.25, nullptr, PROMETHEIA_ERROR_ARGUMENT); // coverage
+    expect(10, 2451545.0 + 100.0 * 365.25, nullptr, PROMETHEIA_ERROR_COVERAGE); // coverage
 
     prometheia_options o;
     const auto bad = [&](void (*mutate)(prometheia_options&)) {
