@@ -62,7 +62,14 @@ TAI − 37 s (maintainer), disclosed as `ut1_minus_utc_s` (0447aeb).
 **Record aa, against their ts.17:** S8 (obliquity) and S9 (nutation) are closed.
 The frame models agree to 0.06 mas, and `DATE_FRAME_BAND` is now 0.1 mas.
 There are no findings against either side. Coverage (A.3 0x000A) is shipped
-(be156f8); they will send theirs once they can list their files' spans. The C API gained
+(be156f8); they will send theirs once they can list their files' spans.
+
+**The `hypotheticals` leg (652a175, 8da1500)** compares every kind 3 token both
+servers advertise at apparent place. The Hamburg points agree to 0.012 mas.
+`neptune-leverrier` differs by 100–301″ because theirs is Hoyt's 1980
+transcription and ours Le Verrier's own print. Our engine on their numbers
+matches them to 0.055 mas, and the leg re-proves this each run from
+`tools/check/definitions/`. The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
