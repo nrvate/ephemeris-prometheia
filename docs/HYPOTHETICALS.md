@@ -213,9 +213,12 @@ equinox of 1 January 1847", with no inclination. Transcribed as follows:
 
 The source gives no hour for the epoch. 0h is taken, and half a day either
 way is 8″ of this body's motion. His own derived position at the epoch is
-326°32′ and 33.06; the transcription gives 326°31.3′ and 33.080. That
-residual is a little larger than the rounding of the printed elements
-explains. It is recorded, not tuned away: this is his orbit as printed.
+326°32′ and 33.06; the transcription gives 326°31.3′ and 33.080. An exact
+Kepler solution of his printed elements gives 326°31.30′ and 33.0804, the
+transcription's values to the digit (2026-09-29). So the residual lies
+between his printed elements and his own printed position, not in the
+transcription. It is recorded, not tuned away: this is his orbit as
+printed.
 
 **Not planned.** Adams's and Lowell's predicted planets and Transpluto
 will not ship. The maintainer judged them historical curiosities nobody
