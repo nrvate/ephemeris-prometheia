@@ -68,6 +68,7 @@ Usage:
 
 import argparse
 import datetime
+import inspect
 import json
 import math
 import re
@@ -116,6 +117,14 @@ AU_KM = 149597870.7
 # published gives a band for it.
 RANGE_BAND_OURS_KM = 0.005
 DELTA_T = 69.2  # sent explicitly; a TT request does not use it, a UT1 one would
+
+# Sabotage, for tools/check/legtest.py only: each name perturbs one REFERENCE
+# this harness computes itself -- never a server's answer -- so the leg that
+# grades against it must go red and no other leg may. It is refused unless
+# both endpoints are our own server (--self-compare), so a sabotaged harness
+# can never grade another project's server.
+SABOTAGES = {"deflection-gm", "topo-deltat", "horizons-range", "bary-sun"}
+SABOTAGE = os.environ.get("PROMETHEIA_XTEST_SABOTAGE", "")
 
 HAMBURG = ["cupido", "hades", "zeus", "kronos", "apollon", "admetos", "vulcanus", "poseidon"]
 HAMBURG_EPOCHS = [2415020.0, 2451545.0, 2488070.0]
@@ -193,8 +202,70 @@ def fmt(v):
     return str(v)
 
 
+# Delta T arrival (2026-09-29). Every numeric leg sends `--deltat` so that
+# neither server's own model enters, and until now no leg could tell whether
+# it arrived: tools/check/blindspots.py measured `--deltat` blind in 18 of 18
+# legs. So every request that sends one value also asks for the delta T
+# column (A.10 bit 8, "the value the server used") wherever the server's
+# WELCOME advertises it, and each row must report exactly the value sent. A
+# server that drops the field reports its own model instead, which the
+# `deltat-arrival` rows then grade -- per leg and server, non-comparative, so
+# it goes red even with the same server on both endpoints.
+DELTAT_COLUMN = 8
+_deltat = {"columns": {}, "who": {}, "seen": {}, "bad": {}, "uncheckable": set()}
+
+
+def _calling_leg():
+    """The leg_* function this request is being made for."""
+    for frame in inspect.stack()[2:]:
+        if frame.function.startswith("leg_"):
+            return frame.function[4:].replace("_", "-")
+    return None
+
+
 def ask(client, srv, args, verbose):
-    return wirelib.run(client, srv[0], srv[1], args, verbose)
+    args = list(args)
+    intended = None
+    if (args.count("--deltat") == 1 and "--segments" not in args
+            and "--columns" not in args):
+        leg = _calling_leg()
+        if leg is not None and _deltat["columns"].get(srv, 0) & DELTAT_COLUMN:
+            intended = float(args[args.index("--deltat") + 1])
+            args += ["--columns", str(DELTAT_COLUMN)]
+        elif leg is not None:
+            _deltat["uncheckable"].add((leg, srv))
+    rep = wirelib.run(client, srv[0], srv[1], args, verbose)
+    if intended is not None:
+        key = (leg, srv)
+        for v in rep.rows.values():
+            if any(math.isnan(x) for x in v[:6]):
+                continue  # a failed row carries no delta T
+            _deltat["seen"][key] = _deltat["seen"].get(key, 0) + 1
+            got = v[6] if len(v) > 6 else float("nan")
+            if not abs(got - intended) <= 1e-9:
+                _deltat["bad"].setdefault(key, []).append(got)
+    return rep
+
+
+def deltat_arrival_rows(table):
+    """One row per (leg, server) that sent a delta T: did it arrive?"""
+    table.asked(None, None)
+    for key in sorted(_deltat["seen"], key=str):
+        leg, srv = key
+        who = _deltat["who"].get(srv, "?")
+        bad = _deltat["bad"].get(key, [])
+        n = _deltat["seen"][key]
+        table.add(leg="deltat-arrival", object=leg, observer=who, deltat="as sent",
+                  verdict=("agree" if not bad else
+                           "finding (theirs)" if who == "theirs" else "finding"),
+                  note=(f"{n} row(s) sent a deltaTSec; the delta T column "
+                        + ("reported it on every one" if not bad else
+                           f"reported another value on {len(bad)}, e.g. {bad[0]!r}")))
+    for leg, srv in sorted(_deltat["uncheckable"] - set(_deltat["seen"]), key=str):
+        table.add(leg="deltat-arrival", object=leg, observer=_deltat["who"].get(srv, "?"),
+                  deltat="as sent", verdict="expected-difference",
+                  note="the server advertises no delta T column (A.10 bit 8): arrival "
+                       "cannot be checked here")
 
 
 def leg_surfaces(client, ours, theirs, table, verbose):
@@ -390,6 +461,8 @@ def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observe
                     # range. Horizons' delta is the light-time range, which is
                     # what mask 1 answers.
                     rng = ranges.get((body, jd))
+                    if rng is not None and SABOTAGE == "horizons-range":
+                        rng += 0.010 / AU_KM  # ten metres, twice the band
                     if rng is not None:
                         ko, kt = abs(va[2] - rng) * AU_KM, abs(vb[2] - rng) * AU_KM
                         row["note"] = f"range vs Horizons: ours {ko:.4f} km, theirs {kt:.3f} km"
@@ -514,6 +587,8 @@ def leg_bary(client, ours, theirs, table, verbose):
     for r in rows:
         jd = gen.num(r[idx["JDTDB"]])  # the corpus instant; TDB - TT moves the Sun < 1 cm
         x, y, z = (gen.num(r[idx[c]]) for c in ("X", "Y", "Z"))
+        if SABOTAGE == "bary-sun":
+            x += 10.0 / AU_KM  # ten kilometres, past both bands
         dist = math.sqrt(x * x + y * y + z * z)
         anc = (math.degrees(math.atan2(y, x)) % 360.0, math.degrees(math.asin(z / dist)))
         args = ["--jd", repr(jd), "--icrs", "--eq", "--corrections", "0", "--bary", "--obj", "10",
@@ -545,6 +620,8 @@ def leg_bary(client, ours, theirs, table, verbose):
 
 # 2GM/c^2 of the Sun in AU (IAU 2015 nominal GM), for the textbook deflection.
 SUN_2GM_C2_AU = 2.0 * 1.3271244e20 / 299792458.0 ** 2 / 1000.0 / AU_KM
+if SABOTAGE == "deflection-gm":
+    SUN_2GM_C2_AU *= 1.01  # 1% on the textbook GM
 DEFLECTION_BAND = 0.0002  # arcsec: retardation choices, not models, beyond this
 
 
@@ -914,6 +991,18 @@ ARRIVAL_OBSERVERS = [("geo", 0, [], None), ("helio", 2, ["--helio"], None),
 ARRIVAL_DISTINCT = [("bary", "helio"), ("centre Jupiter", "centre Mars")]
 # And the pair that must agree: two spellings of one place.
 ARRIVAL_SAME = [("centre Sun", "helio")]
+# Delta T's use, not only its arrival (2026-09-29). A TT request brings delta
+# T into nothing but a topocentric observer's Earth rotation, so the Moon from
+# Zurich is asked at two values ON ONE CONNECTION (the client's repeated
+# --deltat) and each again on a fresh one. The two must differ -- 100 s of
+# rotation moves the topocentric Moon ~13" -- and each must equal its fresh
+# twin: a server keeping per-connection state keyed on the instant and site
+# answers the second with the first's rotation, which is the Astrolog
+# server's stale observer of 2026-09-20, and separate connections never see.
+DELTAT_USE = (0.0, 100.0)
+DELTAT_USE_SITE = ["--topo", "8.55,47.37,500"]
+DELTAT_MOVE_FLOOR = 1.0
+DELTAT_FRESH_BAND = 1e-6
 
 
 def _shift_row(table, leg, observer, keys, whos, shift, band, want, source, note):
@@ -991,6 +1080,50 @@ def leg_arrival(client, ours, theirs, wel_a, wel_b, table, verbose):
              "the same server's answer at the other spelling of the same place",
              "a heliocentric observer and an observer at the Sun's centre are the same "
              "place, and at mask 0 nothing separates them")
+    _deltat_use_rows(client, srv, wel, table, verbose)
+
+
+def _deltat_use_rows(client, srv, wel, table, verbose):
+    """Delta T moves a topocentric answer, and one connection = a fresh one."""
+    moves, stale = {}, {}
+    for who in ("ours", "theirs"):
+        if ARRIVAL_MASK not in advertised(wel[who], 1):
+            continue
+        for jd in ARRIVAL_EPOCHS:
+            base = (["--jd", repr(jd), "--icrs", "--eq", "--corrections", str(ARRIVAL_MASK),
+                     "--obj", "301"] + DELTAT_USE_SITE)
+            both = sum((["--deltat", repr(d)] for d in DELTAT_USE), [])
+            conn = {dt: rep.row(0) for dt, rep in
+                    wirelib.run_many(client, srv[who][0], srv[who][1], base + both, verbose)}
+            fresh = {d: ask(client, srv[who], base + ["--deltat", repr(d)], verbose).row(0)
+                     for d in DELTAT_USE}
+            ok = [d for d in DELTAT_USE if conn.get(d) and fresh.get(d)
+                  and not math.isnan(conn[d][0]) and not math.isnan(fresh[d][0])]
+            if len(ok) == len(DELTAT_USE):
+                a, b = DELTAT_USE
+                moves.setdefault(who, []).append(angle(vector(conn[a]), vector(conn[b])))
+                stale.setdefault(who, []).extend(
+                    angle(vector(conn[d]), vector(fresh[d])) for d in DELTAT_USE)
+
+    def row(name, vals, band, want, note):
+        worst = {w: max(v) for w, v in vals.items()}
+        good = {w: (x >= band if want == "at least" else x <= band) for w, x in worst.items()}
+        verdict = ("unanswered" if not good else "agree" if all(good.values()) else
+                   "finding" if not any(good.values()) else
+                   "finding (ours)" if not good.get("ours", True) else "finding (theirs)")
+        table.add(leg="arrival", observer=name, frame="ICRF", plane="equator",
+                  mask=ARRIVAL_MASK, deltat="0 and 100", tier=3,
+                  sep_ours_anchor=worst.get("ours", ""), sep_theirs_anchor=worst.get("theirs", ""),
+                  band=band, verdict=verdict, note=note)
+        shown = "  ".join(f"{w} {worst[w]:.6f}\"" for w in sorted(worst))
+        print(f"  {name:34s} {want:8s} {band:<8g} {shown}   {verdict}")
+
+    row("topo Moon, delta T 0 vs 100", moves, DELTAT_MOVE_FLOOR, "at least",
+        "100 s of Earth rotation moves a topocentric Moon ~13\"; equal answers mean delta T "
+        "reached the request and not the rotation")
+    row("delta T on one connection vs fresh", stale, DELTAT_FRESH_BAND, "at most",
+        "two delta T values down one connection must each answer as on a fresh one; "
+        "otherwise the second got the first's Earth rotation (a stale observer)")
 
 
 # Orbit points (kind 1), geometric (mask 0) in the frame of date: the portable
@@ -1851,6 +1984,8 @@ def delta_t_from_sidereal_time(ut1_tool, lines):
     text = "".join(f"{a!r} {b!r} {c!r} {d!r}\n" for a, b, c, d in lines)
     done = subprocess.run([ut1_tool], input=text, capture_output=True, text=True, check=True)
     out = [float(v) for v in done.stdout.split()]
+    if SABOTAGE == "topo-deltat":
+        out = [v + 1.0 for v in out]  # one second of Earth rotation
     if len(out) != len(lines):
         sys.exit(f"prometheia-ut1 answered {len(out)} of {len(lines)} rows")
     return out
@@ -2155,6 +2290,13 @@ def main():
                          "-- an anchor, a shift from the server's own other answer, a "
                          "refusal it expects -- can go red. Never a cross-test.")
     args = ap.parse_args()
+    if SABOTAGE:
+        if SABOTAGE not in SABOTAGES:
+            sys.exit(f"unknown sabotage {SABOTAGE!r}: one of {sorted(SABOTAGES)}")
+        if not args.self_compare:
+            sys.exit("PROMETHEIA_XTEST_SABOTAGE is only for --self-compare: a sabotaged "
+                     "harness must never grade another project's server")
+        print(f"SABOTAGE {SABOTAGE}: a reference is deliberately wrong in this run")
 
     client = shutil.which(args.client) or args.client
     ours, theirs = endpoint(args.ours), endpoint(args.theirs)
@@ -2171,6 +2313,12 @@ def main():
         # after that is meaningless.
         sys.exit(f"both endpoints answered as {a.server} with the same dataset: "
                  "one of them is not the server it should be")
+    # Which servers can report the delta T they used (ask(), above). Theirs
+    # first, so a self-compare run labels its one server "ours".
+    _deltat["columns"][theirs] = b.caps.get("columns", 0)
+    _deltat["columns"][ours] = a.caps.get("columns", 0)
+    _deltat["who"][theirs] = "theirs"
+    _deltat["who"][ours] = "ours"
     if args.self_compare:
         print("SELF-COMPARE: both endpoints are the same server. Every cross-server "
               "verdict below is trivially 'agree' and means nothing; what is being "
@@ -2220,6 +2368,7 @@ def main():
     # alone reported four findings the harness had never asked an anchor
     # about. A verdict a run cannot support is the mis-attribution this
     # harness exists to avoid.
+    deltat_arrival_rows(table)
     adjudicate_helio_light_time(table)
     adjudicate_same(table)
     adjudicate_coverage(table)  # last: an anchor refused for coverage still adjudicates nothing

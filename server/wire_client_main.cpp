@@ -40,8 +40,12 @@ constexpr const char* kUsage =
     "                      M = m (mean, default), o (osculating) or 0..4 (A.14)\n"
     "  --jd JD             first row, TT (default 2451545.0)\n"
     "  --ut                rows are UT1 (server's delta T)\n"
-    "  --deltat SEC        send TT-UT1 explicitly (one value), so the server's own\n"
-    "                      delta T model enters nothing\n"
+    "  --deltat SEC        send TT-UT1 explicitly, so the server's own delta T\n"
+    "                      model enters nothing. Repeatable: each value is its own\n"
+    "                      REQUEST, one after another on the same connection,\n"
+    "                      each answer headed '# deltat SEC'\n"
+    "  --columns MASK      extra columns (A.10), 0..15: 1 sigma, 2 ayanamsa,\n"
+    "                      4 light time, 8 delta T (the value the server used)\n"
     "  --step SECONDS      between rows (default 86400)\n"
     "  --count N           rows (default 1)\n"
     "  --helio | --bary    the observer (default geocentric); --helio asks for light\n"
@@ -103,6 +107,7 @@ int main(int argc, char** argv) {
     req.start.jd1 = 2451545.0; // the documented --jd default; the codec's own is JD 0
     eph::Profile& pf = req.profiles.emplace_back();
     double step_seconds = 86400.0;
+    std::vector<double> deltats; // one REQUEST each; none sends the canonical NaN
     double target_arcsec = 0.1;
     int cancel_after_ms = -1;
     int timeout_ms = 10000;
@@ -211,7 +216,14 @@ int main(int argc, char** argv) {
         } else if (arg == "--jd") {
             req.start.jd1 = std::strtod(value(), nullptr);
         } else if (arg == "--deltat") {
-            req.deltaTSec = std::strtod(value(), nullptr);
+            deltats.push_back(std::strtod(value(), nullptr));
+        } else if (arg == "--columns") {
+            const long c = std::strtol(value(), nullptr, 0);
+            if (c < 0 || c > long(eph::kColMask)) {
+                std::fprintf(stderr, "--columns must be 0..%u\n%s", eph::kColMask, kUsage);
+                return 2;
+            }
+            pf.columns = uint32_t(c);
         } else if (arg == "--ut") {
             req.timeScale = eph::kTimeUT1;
         } else if (arg == "--step") {
@@ -353,200 +365,220 @@ int main(int argc, char** argv) {
         !r) {
         return fail(r.error());
     }
-    std::vector<uint8_t> payload;
-    eph::EncodeRequest(&payload, req);
-    std::printf("# request %u\n", request_id);
-    if (auto r = ws.send(message(eph::kMsgRequest, request_id, payload.data(), payload.size()));
-        !r) {
-        return fail(r.error());
-    }
-    if (cancel_after_ms >= 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(cancel_after_ms));
-        // A request already answered completely earns silence (3.4); one
-        // still computing earns ERROR 10.
-        if (auto r = ws.send(message(eph::kMsgCancel, request_id, nullptr, 0)); !r) {
+    // Sends one REQUEST and prints its answer; 0, or the exit status to stop with.
+    const auto ask = [&](const eph::Request& req, uint32_t rid) -> int {
+        std::vector<uint8_t> payload;
+        eph::EncodeRequest(&payload, req);
+        std::printf("# request %u\n", rid);
+        if (auto r = ws.send(message(eph::kMsgRequest, rid, payload.data(), payload.size())); !r) {
             return fail(r.error());
         }
-    }
+        if (cancel_after_ms >= 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(cancel_after_ms));
+            // A request already answered completely earns silence (3.4); one
+            // still computing earns ERROR 10.
+            if (auto r = ws.send(message(eph::kMsgCancel, rid, nullptr, 0)); !r) {
+                return fail(r.error());
+            }
+        }
 
-    const auto n_obj = uint32_t(req.objs.size());
-    std::vector<double> cols;
-    std::vector<eph::Meta> meta;
-    uint32_t rows_seen = 0, chunk_expected = 0;
-    int n_cols = 6;
-    for (;;) {
-        auto msg = ws.receive(timeout_ms);
-        if (!msg) {
-            return fail(msg.error());
-        }
-        const std::vector<uint8_t>& m = msg.value();
-        eph::Envelope env{};
-        std::string why;
-        if (m.size() < eph::kEnvelopeSize ||
-            eph::ParseEnvelope(m.data(), m.size(), &env, &why) != eph::kOk) {
-            std::fprintf(stderr, "malformed message from the server (%s)\n", why.c_str());
-            return 1;
-        }
-        const uint8_t* p = m.data() + eph::kEnvelopeSize;
-        if (env.type == eph::kMsgWelcome) {
-            eph::Welcome w;
-            if (eph::ParseWelcome(p, env.payloadLen, &w, &why) == eph::kOk) {
-                std::printf("# WELCOME %s protocol %u engine \"%s\" dataset %s maxCells %u\n",
-                            w.serverName.c_str(), w.protoSession, w.engine.c_str(),
-                            w.datasetId.c_str(), w.maxCells);
-                // A.3 0x0004, one line per entry: what the server says it can
-                // honour, for which observers, then 0x0014's additions per
-                // object kind. A checker compares the corrApplied it reports
-                // against these.
-                eph::Capabilities caps;
-                if (eph::ParseCapabilities(w.caps_, &caps, &why) == eph::kOk) {
-                    for (const auto& e : caps.corrMasks) {
-                        std::printf("# corrmask observers %u corrections %u\n", e.first, e.second);
-                    }
-                    // A.3 0x0014: masks added per (observer, kind), on top of
-                    // the 0x0004 lines above (which hold for every kind).
-                    for (const auto& e : caps.corrByKind) {
-                        std::printf("# corrkind observers %u kinds %u corrections %u\n",
-                                    e.observers, e.kinds, e.mask);
-                    }
-                    // One line of the rest, for tools comparing two servers'
-                    // surfaces side by side.
-                    const auto list = [](const std::vector<std::string>& v) {
-                        std::string out;
-                        for (const std::string& x : v) {
-                            out += (out.empty() ? "" : ",") + x;
-                        }
-                        return out.empty() ? std::string("-") : out;
-                    };
-                    std::printf("# caps kinds %u observers %u planes %u forms %u frames %u "
-                                "orbitpoints %u orbitmethods %u columns %u timescales %u "
-                                "segments %d segkinds %u lookup %u zodiacs %s hypotheticals %s\n",
-                                caps.kinds, caps.observers, caps.planes, caps.forms, caps.frames,
-                                caps.orbitPoints, caps.orbitMethods, caps.columns, caps.timeScales,
-                                caps.fSegments ? 1 : 0, caps.segKinds, unsigned(caps.lookupMax),
-                                list(caps.zodiacs).c_str(), list(caps.hypotheticals).c_str());
-                    // A.3 0x0013, the server's own bound on how far its rate
-                    // columns may sit from a central difference of its
-                    // positions. Absent means the registry's default, which
-                    // is why the two cases are printed differently: a checker
-                    // must not read silence as a promise of zero.
-                    if (caps.fRatesBound)
-                        std::printf("# ratesbound %.9g %.9g\n", double(caps.ratesDegPerDay),
-                                    double(caps.ratesAuPerDay));
-                    else
-                        std::printf("# ratesbound - -\n");
-                }
+        const auto n_obj = uint32_t(req.objs.size());
+        std::vector<double> cols;
+        std::vector<eph::Meta> meta;
+        uint32_t rows_seen = 0, chunk_expected = 0;
+        int n_cols = 6;
+        for (;;) {
+            auto msg = ws.receive(timeout_ms);
+            if (!msg) {
+                return fail(msg.error());
             }
-            continue;
-        }
-        if (env.type == eph::kMsgError) {
-            eph::Error e;
-            if (eph::ParseError(p, env.payloadLen, &e, &why) == eph::kOk) {
-                if (e.code == eph::kErrCancelled && cancel_after_ms >= 0) {
-                    std::printf("# cancelled before the answer was whole\n");
-                    return 0;
-                }
-                std::fprintf(stderr, "ERROR %u: %s\n", e.code, e.text.c_str());
-            }
-            return 2;
-        }
-        if (env.requestId != request_id) {
-            continue;
-        }
-        if (req.representation == 1) {
-            if (env.type != eph::kMsgSegData) {
-                continue;
-            }
-            eph::SegDataChunk s;
-            if (eph::ParseSegData(p, env.payloadLen, &s, &why) != eph::kOk) {
-                std::fprintf(stderr, "bad SEGDATA chunk: %s\n", why.c_str());
+            const std::vector<uint8_t>& m = msg.value();
+            eph::Envelope env{};
+            std::string why;
+            if (m.size() < eph::kEnvelopeSize ||
+                eph::ParseEnvelope(m.data(), m.size(), &env, &why) != eph::kOk) {
+                std::fprintf(stderr, "malformed message from the server (%s)\n", why.c_str());
                 return 1;
             }
-            for (const eph::Meta& mm : s.meta) {
-                std::printf("# object %ld name \"%s\" segments %d corr %u err %u \"%s\"\n",
-                            long(&mm - s.meta.data()), mm.name.c_str(), mm.rowsOk, mm.corrApplied,
+            const uint8_t* p = m.data() + eph::kEnvelopeSize;
+            if (env.type == eph::kMsgWelcome) {
+                eph::Welcome w;
+                if (eph::ParseWelcome(p, env.payloadLen, &w, &why) == eph::kOk) {
+                    std::printf("# WELCOME %s protocol %u engine \"%s\" dataset %s maxCells %u\n",
+                                w.serverName.c_str(), w.protoSession, w.engine.c_str(),
+                                w.datasetId.c_str(), w.maxCells);
+                    // A.3 0x0004, one line per entry: what the server says it can
+                    // honour, for which observers, then 0x0014's additions per
+                    // object kind. A checker compares the corrApplied it reports
+                    // against these.
+                    eph::Capabilities caps;
+                    if (eph::ParseCapabilities(w.caps_, &caps, &why) == eph::kOk) {
+                        for (const auto& e : caps.corrMasks) {
+                            std::printf("# corrmask observers %u corrections %u\n", e.first,
+                                        e.second);
+                        }
+                        // A.3 0x0014: masks added per (observer, kind), on top of
+                        // the 0x0004 lines above (which hold for every kind).
+                        for (const auto& e : caps.corrByKind) {
+                            std::printf("# corrkind observers %u kinds %u corrections %u\n",
+                                        e.observers, e.kinds, e.mask);
+                        }
+                        // One line of the rest, for tools comparing two servers'
+                        // surfaces side by side.
+                        const auto list = [](const std::vector<std::string>& v) {
+                            std::string out;
+                            for (const std::string& x : v) {
+                                out += (out.empty() ? "" : ",") + x;
+                            }
+                            return out.empty() ? std::string("-") : out;
+                        };
+                        std::printf(
+                            "# caps kinds %u observers %u planes %u forms %u frames %u "
+                            "orbitpoints %u orbitmethods %u columns %u timescales %u "
+                            "segments %d segkinds %u lookup %u zodiacs %s hypotheticals %s\n",
+                            caps.kinds, caps.observers, caps.planes, caps.forms, caps.frames,
+                            caps.orbitPoints, caps.orbitMethods, caps.columns, caps.timeScales,
+                            caps.fSegments ? 1 : 0, caps.segKinds, unsigned(caps.lookupMax),
+                            list(caps.zodiacs).c_str(), list(caps.hypotheticals).c_str());
+                        // A.3 0x0013, the server's own bound on how far its rate
+                        // columns may sit from a central difference of its
+                        // positions. Absent means the registry's default, which
+                        // is why the two cases are printed differently: a checker
+                        // must not read silence as a promise of zero.
+                        if (caps.fRatesBound)
+                            std::printf("# ratesbound %.9g %.9g\n", double(caps.ratesDegPerDay),
+                                        double(caps.ratesAuPerDay));
+                        else
+                            std::printf("# ratesbound - -\n");
+                    }
+                }
+                continue;
+            }
+            if (env.type == eph::kMsgError) {
+                eph::Error e;
+                if (eph::ParseError(p, env.payloadLen, &e, &why) == eph::kOk) {
+                    if (e.code == eph::kErrCancelled && cancel_after_ms >= 0) {
+                        std::printf("# cancelled before the answer was whole\n");
+                        return 0;
+                    }
+                    std::fprintf(stderr, "ERROR %u: %s\n", e.code, e.text.c_str());
+                }
+                return 2;
+            }
+            if (env.requestId != rid) {
+                continue;
+            }
+            if (req.representation == 1) {
+                if (env.type != eph::kMsgSegData) {
+                    continue;
+                }
+                eph::SegDataChunk s;
+                if (eph::ParseSegData(p, env.payloadLen, &s, &why) != eph::kOk) {
+                    std::fprintf(stderr, "bad SEGDATA chunk: %s\n", why.c_str());
+                    return 1;
+                }
+                for (const eph::Meta& mm : s.meta) {
+                    std::printf("# object %ld name \"%s\" segments %d corr %u err %u \"%s\"\n",
+                                long(&mm - s.meta.data()), mm.name.c_str(), mm.rowsOk,
+                                mm.corrApplied, mm.errCode, mm.errText.c_str());
+                }
+                for (const eph::AyanSeries& series : s.ayan) {
+                    float worst = 0.0f;
+                    double from = 0.0, to = 0.0;
+                    for (const eph::AyanSeg& g : series.segs) {
+                        worst = std::max(worst, g.errArcsec);
+                        from = std::min(from == 0.0 ? g.mid.jd1 - g.halfSpanDays : from,
+                                        g.mid.jd1 - g.halfSpanDays);
+                        to = std::max(to, g.mid.jd1 + g.halfSpanDays);
+                    }
+                    std::printf(
+                        "# ayanamsa profile %u: %zu segments, JD %.1f..%.1f, worst %.4g\"\n",
+                        series.profile, series.segs.size(), from, to, worst);
+                }
+                for (uint32_t i = 0; i < s.nObjChunk; ++i) {
+                    const std::vector<eph::Segment>& segs = s.segs[i];
+                    float worst = 0.0f, worst_rate = 0.0f;
+                    double from = 0.0, to = 0.0;
+                    int max_deg = 0;
+                    for (const eph::Segment& g : segs) {
+                        worst = std::max(worst, g.errArcsec);
+                        worst_rate = std::max(worst_rate, g.errRateArcsecPerDay);
+                        max_deg = std::max(max_deg, int(g.degree));
+                        from = std::min(from == 0.0 ? g.mid.jd1 - g.halfSpanDays : from,
+                                        g.mid.jd1 - g.halfSpanDays);
+                        to = std::max(to, g.mid.jd1 + g.halfSpanDays);
+                    }
+                    std::printf("seg %u %zu segments JD %.1f..%.1f degree<=%d err<=%.4g\" "
+                                "rate<=%.4g\"/day\n",
+                                s.iObj + i, segs.size(), from, to, max_deg, worst, worst_rate);
+                }
+                if (s.flags & eph::kChunkLast) {
+                    return 0;
+                }
+                continue;
+            }
+            if (env.type != eph::kMsgData) {
+                continue;
+            }
+            eph::DataChunk d;
+            if (eph::ParseData(p, env.payloadLen, &d, &why) != eph::kOk) {
+                std::fprintf(stderr, "bad DATA chunk: %s\n", why.c_str());
+                return 1;
+            }
+            if (d.chunkIndex != chunk_expected || d.iTime != rows_seen ||
+                d.iTime + d.nRows > req.nTime) {
+                std::fprintf(stderr, "out-of-order or mismatched DATA chunk\n");
+                return 1;
+            }
+            n_cols = d.Cols();
+            if (cols.empty()) {
+                cols.assign(size_t(n_obj) * req.nTime * n_cols, NAN);
+            }
+            for (const eph::Meta& mm : d.meta) {
+                std::printf("# object %ld name \"%s\" rowsOk %d corr %u err %u \"%s\"\n",
+                            long(&mm - d.meta.data()), mm.name.c_str(), mm.rowsOk, mm.corrApplied,
                             mm.errCode, mm.errText.c_str());
             }
-            for (const eph::AyanSeries& series : s.ayan) {
-                float worst = 0.0f;
-                double from = 0.0, to = 0.0;
-                for (const eph::AyanSeg& g : series.segs) {
-                    worst = std::max(worst, g.errArcsec);
-                    from = std::min(from == 0.0 ? g.mid.jd1 - g.halfSpanDays : from,
-                                    g.mid.jd1 - g.halfSpanDays);
-                    to = std::max(to, g.mid.jd1 + g.halfSpanDays);
+            for (uint32_t o = 0; o < n_obj; ++o) {
+                for (uint32_t r = 0; r < d.nRows; ++r) {
+                    for (int k = 0; k < n_cols; ++k) {
+                        const size_t at = (size_t(o) * d.totalRows + d.iTime + r) * n_cols + k;
+                        cols[at] = d.values[(size_t(o) * d.nRows + r) * n_cols + k];
+                    }
                 }
-                std::printf("# ayanamsa profile %u: %zu segments, JD %.1f..%.1f, worst %.4g\"\n",
-                            series.profile, series.segs.size(), from, to, worst);
             }
-            for (uint32_t i = 0; i < s.nObjChunk; ++i) {
-                const std::vector<eph::Segment>& segs = s.segs[i];
-                float worst = 0.0f, worst_rate = 0.0f;
-                double from = 0.0, to = 0.0;
-                int max_deg = 0;
-                for (const eph::Segment& g : segs) {
-                    worst = std::max(worst, g.errArcsec);
-                    worst_rate = std::max(worst_rate, g.errRateArcsecPerDay);
-                    max_deg = std::max(max_deg, int(g.degree));
-                    from = std::min(from == 0.0 ? g.mid.jd1 - g.halfSpanDays : from,
-                                    g.mid.jd1 - g.halfSpanDays);
-                    to = std::max(to, g.mid.jd1 + g.halfSpanDays);
-                }
-                std::printf("seg %u %zu segments JD %.1f..%.1f degree<=%d err<=%.4g\" "
-                            "rate<=%.4g\"/day\n",
-                            s.iObj + i, segs.size(), from, to, max_deg, worst, worst_rate);
+            rows_seen += d.nRows;
+            ++chunk_expected;
+            if (d.flags & eph::kChunkLast) {
+                break;
             }
-            if (s.flags & eph::kChunkLast) {
-                return 0;
-            }
-            continue;
-        }
-        if (env.type != eph::kMsgData) {
-            continue;
-        }
-        eph::DataChunk d;
-        if (eph::ParseData(p, env.payloadLen, &d, &why) != eph::kOk) {
-            std::fprintf(stderr, "bad DATA chunk: %s\n", why.c_str());
-            return 1;
-        }
-        if (d.chunkIndex != chunk_expected || d.iTime != rows_seen ||
-            d.iTime + d.nRows > req.nTime) {
-            std::fprintf(stderr, "out-of-order or mismatched DATA chunk\n");
-            return 1;
-        }
-        n_cols = d.Cols();
-        if (cols.empty()) {
-            cols.assign(size_t(n_obj) * req.nTime * n_cols, NAN);
-        }
-        for (const eph::Meta& mm : d.meta) {
-            std::printf("# object %ld name \"%s\" rowsOk %d corr %u err %u \"%s\"\n",
-                        long(&mm - d.meta.data()), mm.name.c_str(), mm.rowsOk, mm.corrApplied,
-                        mm.errCode, mm.errText.c_str());
         }
         for (uint32_t o = 0; o < n_obj; ++o) {
-            for (uint32_t r = 0; r < d.nRows; ++r) {
-                for (int k = 0; k < n_cols; ++k) {
-                    const size_t at = (size_t(o) * d.totalRows + d.iTime + r) * n_cols + k;
-                    cols[at] = d.values[(size_t(o) * d.nRows + r) * n_cols + k];
+            for (uint32_t r = 0; r < req.nTime; ++r) {
+                const double* v = &cols[(size_t(o) * req.nTime + r) * n_cols];
+                std::printf("%u %u %.17g %.17g %.17g %.17g %.17g %.17g", o, r, v[0], v[1], v[2],
+                            v[3], v[4], v[5]);
+                for (int k = 6; k < n_cols; ++k) {
+                    std::printf(" %.17g", v[k]);
                 }
+                std::printf("\n");
             }
         }
-        rows_seen += d.nRows;
-        ++chunk_expected;
-        if (d.flags & eph::kChunkLast) {
-            break;
-        }
-    }
-    for (uint32_t o = 0; o < n_obj; ++o) {
-        for (uint32_t r = 0; r < req.nTime; ++r) {
-            const double* v = &cols[(size_t(o) * req.nTime + r) * n_cols];
-            std::printf("%u %u %.17g %.17g %.17g %.17g %.17g %.17g", o, r, v[0], v[1], v[2], v[3],
-                        v[4], v[5]);
-            for (int k = 6; k < n_cols; ++k) {
-                std::printf(" %.17g", v[k]);
-            }
-            std::printf("\n");
-        }
+        return 0;
+    };
+    // One REQUEST per delta T asked for, on this one connection and in order:
+    // a server that keeps per-connection state keyed on the instant and site
+    // (the Astrolog server's stale observer, 2026-09-20) answers the second
+    // with the first's Earth rotation, which separate connections never show.
+    if (deltats.empty())
+        deltats.push_back(req.deltaTSec); // the codec's default: the server's model
+    for (size_t q = 0; q < deltats.size(); ++q) {
+        req.deltaTSec = deltats[q];
+        if (deltats.size() > 1)
+            std::printf("# deltat %.17g\n", deltats[q]);
+        const int status = ask(req, request_id + uint32_t(q));
+        if (status != 0)
+            return status;
     }
     return 0;
 }

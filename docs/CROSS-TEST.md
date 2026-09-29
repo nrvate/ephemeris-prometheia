@@ -318,10 +318,10 @@ Every one of these has cost this project or the Astrolog project real time.
     may be two months gone. `tools/check/loadselftest.py` (2026-09-20) is the
     structural version for one tool, and the Astrolog side's
     `ephsrv-soak.sh --selftest` is theirs. **Every checker under
-    `tools/check/` now has one**; what still carries its falsification as
-    prose is `crosstest.py`'s legs, as opposed to its adjudicators, so the
-    hole is narrowed by eight legs, not closed — which is what their side said of theirs,
-    and is worth repeating rather than rounding up.
+    `tools/check/` now has one**, and since 2026-09-29 so do `crosstest.py`'s
+    legs for every reference the harness computes itself ("The legs' own
+    selftest", below); the legs graded only against the other server have
+    their reach measured by `blindspots.py` instead.
   - **The adjudicators are the second leg, and the only one that re-runs
     on every commit** (`tools/check/adjudicatetest.py`, 2026-09-20). The
     three `adjudicate_*` functions decide what a disagreement *means* —
@@ -2134,6 +2134,30 @@ rates kept from Swiss), and ours misses by 8.4e-7 at both ΔT. Reported to
 them the same day. The Astrolog side has parked fixed-star work, so their
 advertised 4e-3 AU/day still does not cover topocentric star rows (their
 §2.11a); say so beside any comparison published before that changes.
+
+### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
+
+The fault injections written up above — "1% on the textbook GM reds four
+rows", "a 1 s ΔT error turns 12 rows into findings", "a 1 mm range band
+gives 68 findings" — were each done by hand once. `legtest.py` re-runs
+them: with our daemon on both endpoints (`--self-compare`, so only a leg's
+graded reference can go red), `PROMETHEIA_XTEST_SABOTAGE` perturbs one
+reference the harness computes itself, and a case passes only when the red
+rows are **exactly** the target leg's.
+
+| sabotage | reference | red |
+|---|---|---|
+| none (control) | — | nothing |
+| `deflection-gm` | the textbook solar GM, +1% | `deflection-geo`, 4 rows |
+| `topo-deltat` | ΔT recovered from Horizons' sidereal time, +1 s | `horizons-topo`, 26 rows |
+| `horizons-range` | Horizons' light-time range, +10 m | `horizons`, 80 rows |
+| `bary-sun` | Horizons' barycentric Sun, +10 km | `horizons-bary`, 8 rows |
+
+A seventh case holds the rule that makes this safe: the harness refuses a
+sabotage unless both endpoints are our own server, so a deliberately wrong
+reference can never grade another project's server. Meta-falsified: a
+sabotage that no longer reaches its reference fails exactly its own case.
+It needs our daemon, so `tools/scheduled.sh` runs it beside `blindspots.py`.
 
 ### What it leaves behind
 

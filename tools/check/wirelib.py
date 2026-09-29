@@ -83,16 +83,12 @@ def _caps(text):
     return out
 
 
-def run(client, host, port, args, verbose=False, timeout=120):
-    """Run the client once against host:port with the given extra arguments."""
-    cmd = [client, "--host", host, "--port", str(port)] + list(args)
-    if verbose:
-        print("    $ " + " ".join(cmd), file=sys.stderr)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    rep = Reply()
-    rep.returncode = done.returncode
-    rep.stderr = done.stderr.strip()
-    for line in done.stdout.splitlines():
+DELTAT_RE = re.compile(r"^# deltat (\S+)$")
+
+
+def _parse(lines, rep):
+    """Fill `rep` from the client's printed lines."""
+    for line in lines:
         m = WELCOME_RE.match(line)
         if m:
             rep.server, rep.engine, rep.dataset = m.group(1), m.group(3), m.group(4)
@@ -126,7 +122,48 @@ def run(client, host, port, args, verbose=False, timeout=120):
         m = ROW_RE.match(line)
         if m:
             rep.rows[(int(m.group(1)), int(m.group(2)))] = [float(v) for v in m.group(3).split()]
+
+
+def _exec(client, host, port, args, verbose, timeout):
+    cmd = [client, "--host", host, "--port", str(port)] + list(args)
+    if verbose:
+        print("    $ " + " ".join(cmd), file=sys.stderr)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def run(client, host, port, args, verbose=False, timeout=120):
+    """Run the client once against host:port with the given extra arguments."""
+    done = _exec(client, host, port, args, verbose, timeout)
+    rep = Reply()
+    rep.returncode = done.returncode
+    rep.stderr = done.stderr.strip()
+    _parse(done.stdout.splitlines(), rep)
     if verbose:
         # The join to the server's log: prometheiad logs this as req=<id>.
         print(f"      -> {rep.server} req={rep.request_id} exit {rep.returncode}", file=sys.stderr)
     return rep
+
+
+def run_many(client, host, port, args, verbose=False, timeout=120):
+    """Run the client once with several `--deltat` values, which it sends as
+    one REQUEST each on the same connection. Returns [(delta T, Reply)] in
+    order; the WELCOME, which arrives once, is copied to every Reply."""
+    done = _exec(client, host, port, args, verbose, timeout)
+    parts = []
+    for line in done.stdout.splitlines():
+        m = DELTAT_RE.match(line)
+        if m:
+            parts.append((float(m.group(1)), []))
+        elif parts:
+            parts[-1][1].append(line)
+    out = []
+    for dt, lines in parts:
+        rep = Reply()
+        rep.returncode = done.returncode
+        rep.stderr = done.stderr.strip()
+        _parse(lines, rep)
+        out.append((dt, rep))
+    for _, rep in out[1:]:
+        rep.server, rep.engine, rep.dataset = out[0][1].server, out[0][1].engine, out[0][1].dataset
+        rep.caps = out[0][1].caps
+    return out

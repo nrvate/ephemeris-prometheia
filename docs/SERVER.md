@@ -64,6 +64,12 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
   `--helio/--bary/--center NAIF/--eq/--j2000/--icrs/--sid/--topo` shape the
   profile, and `--corrections MASK` asks for a chosen subset of the three
   correction terms (`--no-corrections` is `--corrections 0`).
+  `--deltat SEC` sends ΔT explicitly and is repeatable: each value is its
+  own REQUEST, in order on the same connection, headed `# deltat SEC`
+  (2026-09-29, for the stale-observer shape one connection shows and
+  separate ones never do). `--columns MASK` asks for A.10's extra columns;
+  bit 8 is the ΔT the server used, which is how the cross-test sees ΔT
+  arrive.
   `--token`, `--tls`, `--ca`, `--sni` and `--insecure` cover the options
   below; `--segments --target ARCSEC` asks for SEGDATA instead of samples
   (rectangular form; the ayanamsa series rides a `--sid` profile),
@@ -1155,9 +1161,10 @@ and `--threads 4`. The client ran on the same host.
     `fakefixtures.py` builds. `crossrun.py` has `crossruntest.py`, which drives it
     with scripted steps and two sockets in place of the daemons.
     Named rather than counted, because a number here drifts and a list does
-    not: what still carries its falsification as prose is `crosstest.py`'s
-    legs — as opposed to its adjudicators — and nothing else under
-    `tools/check/`.
+    not: `crosstest.py`'s legs have `legtest.py` (2026-09-29), which
+    sabotages each reference the harness computes and requires exactly that
+    leg to red, so nothing under `tools/check/` carries its falsification as
+    prose alone.
 - **The same tool against another implementation, 2026-09-20.** Pointed at
   `astrolog-ephd` with the Astrolog session's consent (CROSS-TEST.md,
   "Pointed at `astrolog-ephd`"): 2,463 canary answers graded, none

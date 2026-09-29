@@ -171,6 +171,9 @@ if [[ -f "$ephemeris" ]] && [[ -x "$repo/build/prometheiad" ]]; then
             # on 2026-09-20: a rule existing is not a rule running.
             step "leg reach (blindspots)" python3 "$repo/tools/check/blindspots.py" \
                 --port "$port"
+            # crosstest.py's legs against sabotaged references: each must red
+            # its own leg and only that one (tools/check/legtest.py).
+            step "leg selftest" python3 "$repo/tools/check/legtest.py" --port "$port"
             step "soak and memory bound" "$repo/build/prometheia-load" --port "$port" \
                 --pid "$daemon" --seconds 60 --conns 8 --rows 10 --memory-bound 64
         else

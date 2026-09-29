@@ -76,6 +76,7 @@ TOOLS = {
     "starstest.py": ("scheduled", ""),
     "loadselftest.py": ("scheduled", ""),
     "blindspots.py": ("scheduled", ""),
+    "legtest.py": ("scheduled", ""),
     # Against Astrolog's conformance set, when their tree is here (it was all
     # along; the reason once given for running it by nothing said otherwise).
     "ephproto4_fixtures.py": ("scheduled", ""),
