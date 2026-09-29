@@ -217,7 +217,7 @@ digits cut):
         "zodiac": {"token": "lahiri", "plane": "date",
                    "doc": "docs/FRAMES.md (zodiacs) and docs/ENGINE.md (ayanamshas)"},
         "precession": "vondrak2011",
-        "accuracy": {"statement": "JPL planetary ephemeris; positions agree with JPL Horizons to 6 µas",
+        "accuracy": {"statement": "JPL planetary ephemeris; positions agree with JPL Horizons to 6 µas over 1800-2100 and 8.3 µas outside DE440's span (-3000 to 9000)",
                      "doc": "docs/VALIDATION.md"}
       },
       "error": null

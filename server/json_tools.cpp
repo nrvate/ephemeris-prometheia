@@ -712,7 +712,8 @@ Json accuracy(const ResolvedObject& obj) {
                  "element epoch against JPL Horizons (0.005\" with JPL's asteroid "
                  "perturbers); sigma_arcsec where the catalog carries a covariance"},
                 {"doc", "docs/VALIDATION.md"}};
-    return {{"statement", "JPL planetary ephemeris; positions agree with JPL Horizons to 6 µas"},
+    return {{"statement", "JPL planetary ephemeris; positions agree with JPL Horizons to 6 µas "
+                          "over 1800-2100 and 8.3 µas outside DE440's span (-3000 to 9000)"},
             {"doc", "docs/VALIDATION.md"}};
 }
 
