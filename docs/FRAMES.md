@@ -203,8 +203,15 @@ test the IAU 2006 chain ask for it explicitly.
   - orthonormal to 1e-14 across ±200 millennia;
   - against swetest (whose default long-term precession is this model) on
     DE440 over 1800–2100: apparent ecliptic of date 2.5 → 1.7 mas,
-    equator of date 3.1 → 1.9 mas with the option selected; the remaining
-    ~2 mas are SWE conventions outside precession.
+    equator of date 3.1 → 1.9 mas against IAU 2006. Swept 1560–2640 the
+    equator of date stays ≤ 1.8 mas; the ecliptic of date grows to 4.7 mas
+    at 1560 and 16 mas at 2640 because swetest's mean obliquity is the ε_A
+    series (to its 0.0001″ print, `swetest_mean_obliquity_is_the_epsilon_a_series`)
+    where ours is the pole angle above. The pole angle minus the series:
+    −46″ at −13000, −17.6″ at −5000, −1.0″ at −1000, −0.2″ at year 0,
+    ≤ 0.02″ over 1000–2650, +0.25″ at 4000, +3.6″ at 7000, +23″ at 10000,
+    +65″ at 15000. We keep the pole angle: it is the obliquity the model's
+    own ecliptic pole implies, where the series is a fit to it.
 
 ## Sidereal planes (protocol v4 A.8)
 

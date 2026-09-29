@@ -587,9 +587,9 @@ sexagesimal output resolved to 0.0001″:
 | geometric, J2000 | 0.0001″ | 0.0007″ |
 | barycentric geometric, J2000 | 0.0002″ | 0.0001″ |
 | heliocentric geometric, J2000 | 0.0001″ | 0.0001″ |
-| apparent, true ecliptic of date | 0.0024″ | 0.0025″ |
-| apparent, true equator of date | 0.0031″ | 0.0031″ |
-| topocentric apparent (SWE's ΔT) | 0.0027″ | 0.134″ |
+| apparent, true ecliptic of date | 0.0017″ | 0.0013″ |
+| apparent, true equator of date | 0.0018″ | 0.0019″ |
+| topocentric apparent (SWE's ΔT) | 0.0020″ | 0.134″ |
 
 Distances agree to ≤ 5.5 × 10⁻¹⁰ AU (SWE prints 10⁻⁹ AU), topocentric to
 2.2 × 10⁻⁹ AU. Rates match differenced SWE positions to 2 × 10⁻⁶ °/day
@@ -598,10 +598,20 @@ Distances agree to ≤ 5.5 × 10⁻¹⁰ AU (SWE prints 10⁻⁹ AU), topocentri
 Understood differences — ours follows the published definitions in each
 case:
 
-- **Date frames, ~2–6 mas:** SWE's default precession is not IAU 2006
-  (it uses a long-term model); the residual is uniform across bodies and
-  grows away from J2000 (6 mas at 1600). The J2000-frame rows show the
-  correction pipeline itself agrees at the print resolution.
+- **Date frames, ≤ 2 mas on the equator, to 17 mas on the ecliptic:**
+  both use Vondrák 2011 precession (our default since 2026-09-29; under
+  IAU 2006 these rows read 2.4–3.1 mas). Swept 1560–2640 on the Sun, Moon,
+  Mars and Jupiter, the equator of date agrees to ≤ 1.8 mas throughout. The
+  ecliptic of date parts by 4.7 mas at 1560 and 16 mas at 2640, and that
+  is the obliquity alone: SWE's printed mean obliquity is the paper's
+  separately fitted ε_A series to its 0.0001″ print, ours is the angle
+  between the model's own two poles, which puts the ecliptic pole of date
+  at latitude 90° exactly ([FRAMES.md](FRAMES.md);
+  `swetest_mean_obliquity_is_the_epsilon_a_series`). The two fits drift
+  apart outside DE440's span — 46″ at −13000, 65″ at +15000 — so across
+  DE441's range an ecliptic of date built on the series differs from ours
+  by up to that. Of the ~1.5 mas left at J2000 itself, SWE's nutation
+  angles account for ≤ 0.5 mas; the rest is not attributed.
 - **Topocentric Moon, ≤ 0.13″:** SWE's site is offset from ours by about
   the nutation angle at the poles (±0.27 km in the Moon distance at
   latitude ±90°), i.e. it rotates the site about the mean rather than the

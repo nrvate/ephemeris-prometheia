@@ -362,6 +362,40 @@ TEST_CASE("ltp_long_range_is_a_rotation") {
     }
 }
 
+TEST_CASE("swetest_mean_obliquity_is_the_epsilon_a_series") {
+    // Why our ecliptic of date differs from swetest's under the same
+    // precession model (docs/FRAMES.md): the mean obliquity swetest prints
+    // (-p0, the "Epsilon (t/m)" line's mean value; version 2.10.03-ts.14,
+    // DE440, input TT) is the separately fitted epsilon_A series to its
+    // 0.0001" print, while ours is the angle between the model's two poles.
+    // The two part by 4.7 mas at 1560 and 16.6 mas at 2640, which is the
+    // whole of the ecliptic-of-date residual against swetest there.
+    struct Row {
+        double jd_tt, mean_arcsec;
+    };
+    static const Row kSwe[] = {
+        {2290835.0, 84587.3147}, // 1560
+        {2341970.0, 84521.8610}, // 1700
+        {2415020.0, 84428.2406}, // 1900
+        {2488070.0, 84334.5711}, // 2100
+        {2597645.0, 84194.1835}, // 2400
+        {2685305.0, 84082.1644}, // 2640
+    };
+    double worst_series = 0.0, worst_angle = 0.0;
+    for (const Row& r : kSwe) {
+        worst_series =
+            std::max(worst_series,
+                     std::fabs(ltp_obliquity_series(r.jd_tt) * 206264.80624709636 - r.mean_arcsec));
+        worst_angle =
+            std::max(worst_angle,
+                     std::fabs(ltp_mean_obliquity(r.jd_tt) * 206264.80624709636 - r.mean_arcsec));
+    }
+    std::printf("  swetest mean obliquity: epsilon_A series %.5f\", pole angle %.5f\"\n",
+                worst_series, worst_angle);
+    CHECK(worst_series < 0.00006); // the print's half-unit
+    CHECK(worst_angle > 0.015);    // 2640: the pole angle is not what swetest prints
+}
+
 TEST_CASE("nutation_rates_and_taylor_step") {
     // The analytic rates reproduce the series itself: the value equals
     // nutation(), the first and second derivatives match central

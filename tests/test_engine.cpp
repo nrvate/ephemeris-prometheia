@@ -878,11 +878,12 @@ TEST_CASE("de440_engine_matches_swetest") {
                                 Mode(m) == Mode::Topocentric;
         // J2000-frame modes isolate the correction pipeline: SWE prints
         // 0.0001" and the Moon carries ~1 mas of unexplained difference.
-        // Date frames add SWE's non-IAU-2006 long-term precession (~2 mas
-        // over 1800-2100). SWE rotates the topocentric site with the mean
-        // pole, ~0.1" at the Moon (docs/ENGINE.md).
-        CHECK(w.planets_as < (date_frame ? 0.005 : 0.0005));
-        CHECK(w.moon_as < (Mode(m) == Mode::Topocentric ? 0.25 : (date_frame ? 0.005 : 0.003)));
+        // Date frames (both Vondrak 2011) add SWE's epsilon_A-series
+        // obliquity and nutation details, <= 2 mas over 1800-2100. SWE
+        // rotates the topocentric site with the mean pole, ~0.1" at the
+        // Moon (docs/ENGINE.md).
+        CHECK(w.planets_as < (date_frame ? 0.0025 : 0.0005));
+        CHECK(w.moon_as < (Mode(m) == Mode::Topocentric ? 0.25 : (date_frame ? 0.0025 : 0.003)));
         CHECK(w.dist_au < 2e-9);
         CHECK(w.moon_dist_au < (Mode(m) == Mode::Topocentric ? 5e-9 : 2e-9));
     }
@@ -890,11 +891,12 @@ TEST_CASE("de440_engine_matches_swetest") {
 
 TEST_CASE("de440_vondrak_precession_matches_swetest") {
     // The Swiss Ephemeris' default long-term precession is Vondrak et al.
-    // (2011). Selecting it here shrinks our date-frame residuals against its
-    // output over 1800-2100 (ecliptic of date 2.5 -> 1.7 mas, equator of
-    // date 3.1 -> 1.9 mas); the ~2 mas that remain, and the ayanamshas'
-    // 2.6 mas, are SWE conventions beyond precession (obliquity/nutation
-    // details), not the precession model.
+    // (2011), as is ours. Against IAU 2006 it shrinks our date-frame
+    // residuals against its output over 1800-2100 (ecliptic of date 2.5 ->
+    // 1.7 mas, equator of date 3.1 -> 1.9 mas); what remains is SWE's
+    // epsilon_A-series obliquity (test_frames,
+    // swetest_mean_obliquity_is_the_epsilon_a_series) and <= 0.5 mas of
+    // nutation, not the precession model.
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;
     auto opened = Engine::open(kDe440Path);

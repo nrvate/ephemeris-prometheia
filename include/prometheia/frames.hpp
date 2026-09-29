@@ -110,9 +110,10 @@ void true_ecliptic_of_date_matrix(double jd_tt, double m[9]);
 
 // --- Long-term precession (Vondrak, Capitaine & Wallace 2011) ---------
 //
-// Which precession model a date frame uses. IAU 2006 is the default and
-// the standard near the present; Vondrak 2011 for epochs centuries or more
-// from J2000.
+// Which precession model a date frame uses. The frames functions that take
+// no model are IAU 2006's, the standard near the present; the Engine's
+// default is Vondrak 2011 (CalcOptions::precession), which also holds for
+// epochs centuries or more from J2000.
 enum class PrecessionModel { IAU2006 = 0, Vondrak2011 = 1 };
 
 // The model-selecting forms of the precession-dependent quantities: the
