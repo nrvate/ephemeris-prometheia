@@ -350,8 +350,8 @@ terms.
 
 - The ephemeris protocol is theirs. We are the §3 counterpart with a
   vendored, pinned copy (`third_party/ephproto/v4`,
-  header from `qt` `114f2a5` (the floats drop), conformance set `cdbd7438…`,
-  105/105 on both readers, judgements 7/7).
+  header from `qt` `7cbf0d8` (the site drop, vendored 2026-09-29),
+  conformance set `07438c7f…`, 109/109 on both readers, judgements 7/7).
 - Changes arrive as named drops, reviewed from the text first:
   - kind 4;
   - per-kind correction masks;
@@ -512,8 +512,8 @@ terms.
     now says, in the gate, that every tool under `tools/check/` is either
     invoked by a runner or carries a reason why nothing invokes it — and a
     mention in a comment is not an invocation, which matters because the
-    gate names five tools it does not run. Two tools are run by nothing:
-    `stars_fk5.py` and `ephproto4_fixtures.py`, both by hand, both with the
+    gate names five tools it does not run. Two tools were run by nothing:
+    `stars_fk5.py` and `ephproto4_fixtures.py` (scheduled since 2026-09-29), both by hand, both with the
     reason printed on every run.
   - **The hole this does not close.** Every fault injection described in
     these documents was done by hand once and never re-run. Eight tools now

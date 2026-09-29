@@ -226,6 +226,11 @@ def parse_profile(r, request_id_unused=None):
             raise Malformed("site longitude out of [-180, 180]")
         if not -90.0 <= site[1] <= 90.0:
             raise Malformed("site latitude out of [-90, 90]")
+        # The site drop (Astrolog 7cbf0d8): a height at or below the WGS-84
+        # polar radius puts the observer on the far side of the centre. No
+        # upper bound. Stated in the header, not yet in section 3's text.
+        if not site[2] > -6356752.0:
+            raise Malformed("site height at or below the centre of the Earth")
     if columns & ~0x0F:
         raise Unsupported(f"column bits {columns:#010x} are not in A.10")
     if zodiac and zodiac not in ZODIACS:

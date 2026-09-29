@@ -927,6 +927,23 @@ inline void ReadProfile(Reader &r, Verdict &v, Profile *pf) {
   if (pf->observer == kObsTopo) {
     if (std::fabs(pf->siteLonEastDeg) > 180.0 || std::fabs(pf->siteLatDeg) > 90.0)
       v.Malformed("site longitude or latitude out of range");
+    // 3.4, the site drop: a topocentric observer has to be somewhere. The
+    // height was bounded by nothing at all, so a site 563 million kilometres
+    // below the Earth's centre was a well-formed request -- and BOTH servers
+    // answered it with a non-canonical NaN beside finite rates and rowsOk
+    // counting it a success. Found by Ephemeris Prometheia's fuzzer, using
+    // this codec as its output oracle.
+    //
+    // "Finite" alone would NOT have caught it -- that height is perfectly
+    // finite -- so the bound has to be physical, which makes it a statement
+    // about what a topocentric observer is rather than a codec rule. The
+    // WGS-84 polar radius is the loosest defensible floor: below it the
+    // observer is on the far side of the centre and "topocentric" has stopped
+    // meaning anything. Deliberately NO upper bound -- a balloon, an aircraft
+    // and a spacecraft are all legitimate, and a protocol should not
+    // adjudicate how high an observer may be.
+    if (pf->siteHeightM <= -6356752.0)
+      v.Malformed("site height is at or below the centre of the Earth");
   } else if (pf->siteLonEastDeg != 0.0 || pf->siteLatDeg != 0.0 || pf->siteHeightM != 0.0) {
     v.Malformed("site set without a topocentric observer");
   }

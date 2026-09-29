@@ -104,6 +104,23 @@ else
     skipped+=("stars_fk5 selftest: needs .venv-oracle (pyerfa) and stars-raw/")
 fi
 
+# The protocol pin against its owner's tree. The vendored ephproto.h and the
+# conformance set are compared only when PROMETHEIA_ASTROLOG names an Astrolog
+# checkout, and nothing set it: the site drop (their 7cbf0d8) sat unvendored
+# for eleven days behind a SKIP. Their working tree moves under us, so a red
+# here means "review the drop", not "we are broken".
+astrolog="${PROMETHEIA_ASTROLOG:-/nvmraid/shares/Astrolog}"
+if [[ -f "$astrolog/ephsrv/ephproto.h" ]]; then
+    step "protocol pin vs Astrolog" env PROMETHEIA_ASTROLOG="$astrolog" \
+        "$repo/build/test_server" -tc=server_ephproto_matches_astrolog
+    step "conformance fixtures (codec)" env PROMETHEIA_ASTROLOG="$astrolog" \
+        "$repo/build/test_ephproto4"
+    step "conformance fixtures (independent reader)" python3 \
+        "$repo/tools/check/ephproto4_fixtures.py" --dir "$astrolog/ephsrv/conformance"
+else
+    skipped+=("protocol pin: no Astrolog tree at $astrolog (set PROMETHEIA_ASTROLOG)")
+fi
+
 # prometheia-load's assertions, each against a daemon started for that case.
 if [[ -f "$ephemeris" ]]; then
     step "load selftest" python3 "$repo/tools/check/loadselftest.py" --ephemeris "$ephemeris"

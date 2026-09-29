@@ -20,6 +20,13 @@ documented, not that it is frozen.
   distances to the difference's own floor. **Moves a value on the wire:**
   the star distance-rate column, and the radial part of a star's velocity
   vector. Positions and angular rates are unchanged. The C ABI is unchanged.
+- **Protocol v4 re-pinned to Astrolog `7cbf0d8`, the site drop**
+  (third_party/README.md). `prometheiad` now answers a REQUEST whose site
+  height is at or below the WGS-84 polar radius with ERROR 1 (malformed),
+  where it failed that object's rows. Conformance set 109/109 on both
+  readers. The drop was eleven days old: the drift check only runs with
+  `$PROMETHEIA_ASTROLOG` set, and nothing set it; `tools/scheduled.sh` now
+  does.
 
 ## 0.7.0 — 2026-09-19
 

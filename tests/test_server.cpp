@@ -678,20 +678,31 @@ TEST_CASE("server_profiles") {
         pf.siderealPlane = eph::kSidPlaneInvariable;
         CHECK(one(pf).cols[0] == engine(o).pos.lon_deg);
     }
-    SUBCASE("a site no formula can place fails its rows, as canonical NaN") {
-        // The fuzzer's input: a legal REQUEST (the protocol bounds a site's
-        // latitude and longitude only) whose height puts the observer
-        // thousands of AU below the ground. It once came back as rowsOk 1
-        // with -NaN coordinates, which 3.1 forbids twice over.
+    SUBCASE("a site at or below the Earth's centre is malformed") {
+        // The fuzzer's input: a site whose height put the observer thousands
+        // of AU below the ground came back as rowsOk 1 with -NaN
+        // coordinates. The site drop (Astrolog 7cbf0d8) then bounded the
+        // height at the WGS-84 polar radius, so the codec refuses it as
+        // malformed before anything is computed; just above it, it answers.
+        const auto error_for = [&](double height_m) {
+            eph::Request req = base_request(jd, 1);
+            req.profiles[0].observer = eph::kObsTopo;
+            req.profiles[0].siteHeightM = height_m;
+            req.objs = {body_obj(5)};
+            static uint32_t rid = 300;
+            CHECK(s.on_message(request(req, ++rid), true));
+            return error_of(drain(s)[0]).code;
+        };
+        CHECK(error_for(-563224831328256.0) == eph::kErrMalformed);
+        CHECK(error_for(-6356752.0) == eph::kErrMalformed);
         eph::Profile pf;
         pf.observer = eph::kObsTopo;
-        pf.siteHeightM = -563224831328256.0;
+        pf.siteHeightM = -6356751.0;
         const Data d = one(pf);
         REQUIRE(d.meta.size() == 1);
-        CHECK(d.meta[0].rowsOk == 0);
-        CHECK(d.meta[0].errCode != eph::kOErrNone);
+        CHECK(d.meta[0].rowsOk == 1);
         for (double v : d.cols)
-            CHECK(std::bit_cast<uint64_t>(v) == 0x7FF8000000000000ull);
+            CHECK(std::isfinite(v));
     }
     SUBCASE("an observer equal to the object is a per-object error") {
         eph::Profile pf;

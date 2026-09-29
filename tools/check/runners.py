@@ -76,6 +76,9 @@ TOOLS = {
     "starstest.py": ("scheduled", ""),
     "loadselftest.py": ("scheduled", ""),
     "blindspots.py": ("scheduled", ""),
+    # Against Astrolog's conformance set, when their tree is here (it was all
+    # along; the reason once given for running it by nothing said otherwise).
+    "ephproto4_fixtures.py": ("scheduled", ""),
 
     # scheduled.sh does invoke crossrun.py, behind --with-cross: the status
     # names the runner because the runner's code names it, and the flag is
@@ -92,10 +95,6 @@ TOOLS = {
                      "needs a live server AND stars-raw/ with pyerfa; starstest.py grades "
                      "its assertions against a mutated catalogue, which is not the same as "
                      "comparing a server with the FK5. Run by hand before a release"),
-    "ephproto4_fixtures.py": ("graded-only",
-                              "needs Astrolog's conformance directory, which is not in this "
-                              "tree and is not on this machine; fixturestest.py grades its "
-                              "assertions against a set fakefixtures.py builds"),
 
     # Imported, never invoked.
     "assertlib.py": ("library", "the assertion register and the selftest driver"),

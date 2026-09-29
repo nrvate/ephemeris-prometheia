@@ -606,6 +606,14 @@ capability set whole instead of intersecting it with the request's mask,
 and no further round is owed on §3 — the remaining work here is our
 migration, below.
 
+**The site drop, vendored 2026-09-29:** 109/109 at Astrolog `qt` `7cbf0d8`
+(`set-sha256 07438c7f…`): a site height at or below the WGS-84 polar radius
+is malformed. It landed there on 2026-09-18 and sat unvendored for eleven
+days, because the drift check SKIPs without `$PROMETHEIA_ASTROLOG` and
+nothing set it; `tools/scheduled.sh` now does. The independent reader was
+taught the rule from the header's own statement, since §3's text does not
+yet carry it.
+
 **The floats drop, 2026-09-18:** 105/105 at Astrolog `qt` `114f2a5`
 (`set-sha256 cdbd7438…`). The independent reader was taught the DATA float
 rule from the spec text: finite values, or a whole failed row of the
@@ -918,7 +926,11 @@ every field.
       on the wire);
     - the server fails a row whole, as the canonical NaN, if any value in
       it is not finite.
-  - Regression tests replay the fuzzer's request.
+  - Regression tests replay the fuzzer's request. Since the protocol's
+    site drop (Astrolog `7cbf0d8`, vendored here 2026-09-29) the codec
+    refuses a height at or below the WGS-84 polar radius as malformed
+    (ERROR 1), so that request no longer reaches the engine, and the test
+    asserts the ERROR; the engine's own refusal stays for C and C++ callers.
   - The session fuzzer then ran 340,000 inputs against the fixed server
     and the stricter codec, with no failure.
 
@@ -1198,10 +1210,12 @@ against a mutated catalogue and a scripted client: that grades the tool, it
 does not compare a server with the FK5.
 
 What the first run says, and it is printed every time rather than hidden:
-**two tools are run by nothing.** `stars_fk5.py` needs a live server *and*
-`stars-raw/` with pyerfa, and is run by hand before a release;
-`ephproto4_fixtures.py` needs Astrolog's conformance directory, which is not
-in this tree and is not on this machine. Three more — `crosstest.py`,
+**one tool is run by nothing.** `stars_fk5.py` needs a live server *and*
+`stars-raw/` with pyerfa, and is run by hand before a release.
+`ephproto4_fixtures.py` was a second, excused as needing Astrolog's
+conformance directory, "not on this machine" — which was false, and the
+drift it would have caught went unseen for eleven days; `tools/scheduled.sh`
+runs it now (2026-09-29). Three more — `crosstest.py`,
 `corrapplied.py`, `ratesweep.py` — are reached only through `crossrun.py`,
 which `tools/scheduled.sh` runs behind `--with-cross`, opt-in because each
 reads another project's server.
@@ -1224,7 +1238,10 @@ needs no daemon but spends fourteen seconds where the gate spends two
 (`ratestest.py` makes the same promise for `ratesweep.py` in under two, so
 it runs in the gate itself); then `crossruntest.py` and `starstest.py`,
 which need no daemon either but do need the built binaries and
-`stars-raw/` with pyerfa; then `loadselftest.py`; then a 60 s soak and the
+`stars-raw/` with pyerfa; then, when an Astrolog tree is present
+(`$PROMETHEIA_ASTROLOG`, default `/nvmraid/shares/Astrolog`), the protocol
+pin against its `ephproto.h` and both readers of its conformance set; then
+`loadselftest.py`; then a 60 s soak and the
 memory bound against a daemon it starts and stops itself. Measured
 2026-09-20 at `6d669b2`: 27 + 14 + 2 + 4 + 178 + 61 s, all green.
 
