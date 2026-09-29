@@ -226,6 +226,21 @@ times the mean anomaly the row accumulates, with 20% headroom, over a
 roundoff floor. Nudging the Earth mass ratio by 1.5 × 10⁻⁷ fails it by four
 orders of magnitude.
 
+**The mean obliquity of date, a known difference until their fork follows
+(2026-09-29; their ledger S8).** Both sides precess by Vondrák 2011, and
+§3.5a (Astrolog `d0286de`) now defines the mean obliquity as the angle
+between the model's two poles, which is ours. Their server's obliquity is
+the paper's fitted ε_A series. Measured as swetest's printed output
+(`swetest_mean_obliquity_is_the_epsilon_a_series`), not read from any code.
+So every **ecliptic-of-date** row differs by the pole angle minus the
+series: 4.7 mas at 1560, 16.6 mas at 2640, 0.2″ at year 0, 1.0″ at −1000,
+17.6″ at −5000, 46″ at −13000, 3.6″ at 7000 and 65″ at 15000. That is
+mostly in latitude (the ecliptic tilts about the equinox). Equator-of-date
+and J2000/ICRF rows are untouched. Within 1550–2650 the difference is
+below every leg's tolerance. Outside it, a row that differs by about this
+amount is this item, not a finding, until the fork's release after ts.16
+lands and is measured closing it.
+
 ## The bisection ladder
 
 When a number disagrees, add one thing at a time. Each rung isolates exactly

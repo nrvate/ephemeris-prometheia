@@ -610,8 +610,12 @@ case:
   `swetest_mean_obliquity_is_the_epsilon_a_series`). The two fits drift
   apart outside DE440's span — 46″ at −13000, 65″ at +15000 — so across
   DE441's range an ecliptic of date built on the series differs from ours
-  by up to that. Of the ~1.5 mas left at J2000 itself, SWE's nutation
-  angles account for ≤ 0.5 mas; the rest is not attributed.
+  by up to that. The ~1.5 mas left at J2000 itself is attributed: the
+  Moon's ~0.9 mas, present in every frame down to ICRF (the J2000 rows'
+  Moon difference above), plus SWE's nutation angles, which differ from
+  our full IAU 2000A by ≤ 0.5 mas. Planets at J2000 are ≤ 0.5 mas in
+  ecliptic of date. On the equator, SWE prints RA to 0.0001 s, which is
+  1.5 mas, so a residual under ~0.8 mas there is its rounding.
 - **Topocentric Moon, ≤ 0.13″:** SWE's site is offset from ours by about
   the nutation angle at the poles (±0.27 km in the Moon distance at
   latitude ±90°), i.e. it rotates the site about the mean rather than the

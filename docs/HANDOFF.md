@@ -44,8 +44,10 @@ everywhere — on the wire too, §3.5a and A.20 saying so since Astrolog
 old-default answers by ≤ 0.01″ ([FRAMES.md](FRAMES.md)). Against swetest
 the equator of date now agrees to ≤ 1.8 mas over 1560–2640; the ecliptic of
 date differs by swetest's ε_A-series obliquity (ours is the pole angle): 16 mas
-at 2640, up to 65″ over DE441's span (a27b515). A §3.5a sentence naming the
-pole angle is proposed to Astrolog; their answer is pending. The C API gained
+at 2640, up to 65″ over DE441's span (a27b515). §3.5a now names the pole
+angle (Astrolog `d0286de`). Their fork follows in its release after ts.16;
+until then it is a known difference (CROSS-TEST.md, their S8). Measure it
+closing when they say it has landed. The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
