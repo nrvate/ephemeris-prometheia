@@ -82,7 +82,11 @@ matches them to 0.055 mas, and the leg re-proves this each run from
   DE441-era planets agree to 3.4 µas. **Open:** the Moon's 56–76 µas at
   −3000, 5000 and 9000 (DE.md).
 - The `sidereal` leg now holds orbit points (127fe07), after Astrolog's gate
-  found Swiss's sidereal-node nutation bug (their ts.18). The C API gained
+  found Swiss's sidereal-node nutation bug (their ts.18).
+- Small bodies far from their element epoch (8c5c5b4). With JPL's perturbers,
+  ≤ 0.9″ against Horizons over 1600–2500, which is all Horizons serves; without
+  them 75″; arcminutes over millennia. Refusals outside the kernel now name its
+  span. The check runs in `scheduled.sh`, not the gate. The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
