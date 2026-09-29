@@ -34,14 +34,19 @@ word; say what matters at milestones, don't ping-pong.
 - Astrolog now differences its body rates from its own positions: record
   x takes their `rates` findings 84 → 5 (the five are a parked star).
 
-**Waiting on Astrolog:** their osculating orbit points go the same way
-(33 topocentric Jupiter/Saturn rows over their new 5e-5 °/day bound);
-when the new build's identity arrives, re-run
-`tools/check/crossrun.py --record` and `ratesweep.py --server
-127.0.0.1:47392 --out docs/crosstest/<date>-ratesweep-theirs.tsv`, and send
-them the diff. They also route all 30 stock hypothetical element sets
-through our `prometheia_calc_elements`; their 80,000 AU set differs from
-Swiss by arcseconds, and ours is converged (τ to 5e-9 s).
+**Astrolog's rates are done:** bodies and orbit points both differenced
+from their own positions (their `218b00e`, `418841e`); record y has their
+sweep within their advertised 3e-5 °/day and 1e-9 everywhere it reached,
+and every leg sees ΔT and the epoch arrive. Only parked stars keep library
+rates there. Re-run `tools/check/crossrun.py --record` whenever they send a
+new build identity.
+
+**Hypothetical bodies:** Astrolog routes all 30 stock element sets through
+our `prometheia_calc_elements`. Under light time an equinox of date means
+the emission instant (§3.5a, agreed with them); ours satisfies
+B(t−τ) − E(t) to 1e-11″ on every set refereed (CROSS-TEST.md, record y).
+Open on their side only: Swiss's Vulcan (0.024″ with speeds) and set 26's
+56,000 km distance gap.
 
 **Open, unassigned, needing no decision** — full detail in "Open items":
 none from the 2026-09-20 list. Closed 2026-09-29: `--deltat` (seen by all
