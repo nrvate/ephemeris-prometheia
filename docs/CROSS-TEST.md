@@ -2291,12 +2291,37 @@ sweeps pass their advertisements, and corrapplied passes on both sides.
   adjudication needs, the row agrees and nothing else moves. S8's
   obliquity is ~0 at these epochs (under 0.1 mas), so it is not part of
   this.
-- **Their nutation is IAU 2000B, and it is their S9** (Astrolog `3336574`).
+- **Their nutation was IAU 2000B, their S9** (Astrolog `3336574`; closed by ts.17, record aa).
   §3.5a names IAU 2000A "or the server's advertised equivalent", and they
   advertise none. By their measurement, full 2000A costs them 14× per row
   for 0.97 mas. Their maintainer chooses between three options: state
   2000B as the equivalent with its 1 mas bound, move to 2000A, or move to
   2000A with a per-instant memo. `DATE_FRAME_BAND` stays until they say.
+
+### Record aa, 2026-09-29 (`docs/crosstest/2026-09-29aa.tsv`): their ts.17, S8 and S9 closed
+
+Their :47392 was pid 2228443, sha256 `00c25a7326cd8825…`, 1766576 bytes,
+binary mtime 14:41:48, engine 2.10.03-ts.17, Astrolog `0e6fa3f`. That build
+runs full IAU 2000A nutation, interpolated on quarter-day nodes (their S9),
+and takes the mean obliquity as the pole angle (their S8). Verdicts: agree
+2737, expected-difference 445, finding (theirs) 20 (the parked rates 5 and
+sidinstant 15), unadjudicated 1, unanswered 9, and no finding against
+either side. Both rate sweeps stay within their advertisements.
+
+- **The frame models now agree to 0.06 mas.** This is measured as (ours −
+  theirs) in the true ecliptic of date minus the same in ICRF, which
+  cancels their refit and leaves only the frame models. Over the
+  `apparent` leg's epochs and the geocentric and barycentric observers the
+  worst is 0.060 mas, against ~1 mas at 2100 and 1.67 mas at 1800 before.
+  The measurement reports an injected 1 mas as 1.06.
+  `DATE_FRAME_BAND` falls from 1.7 to 0.1 mas. Under it every
+  `apparent` row still agrees, the closest 0.11 mas inside its band.
+- **S8 is closed within their span.** Their files answer only a modern
+  span (errCode 3 at year 0, 1500, 2700 and beyond), so the arcsecond
+  epochs cannot be reached on their server. At 2390, where the series
+  obliquity would have put 5.0 mas between us, the frame term is
+  ≤ 0.13 mas (Sun, Mars, Jupiter). Their own figures for the pole angle
+  minus the series match ours at every epoch they quote.
 
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 

@@ -105,13 +105,15 @@ REFIT_KM = {10: 1.5, 199: 0.7, 299: 0.75, 399: 0.75, 4: 1.0, 5: 2.5, 6: 6.5, 7: 
 # From a planet's centre, that planet's own position error adds.
 OBSERVER_KM = {"jupiter": REFIT_KM[5]}
 # The true ecliptic of date adds the two sides' frame models on top of the
-# refit: our full IAU 2000A nutation against Swiss's truncated default (their
-# nutation in longitude is 1.0 mas off ours at 2100, 0.5 at 1800 and J2000),
-# and the precession details. Measured as our apparent places against
-# swetest's on the SAME DE440 (so no ephemeris difference remains), the Sun
-# and planets at this leg's eight epochs: worst 1.67 mas, at 1800 (2026-09-29,
-# docs/CROSS-TEST.md, record z). Rounded up to the next 0.1 mas.
-DATE_FRAME_BAND = 0.0017
+# refit. Until their ts.17 that was Swiss's truncated IAU 2000B nutation (1.0
+# mas off our full 2000A at 2100) and the precession details: 1.67 mas, our
+# apparent places against swetest's on the same DE440 (record z). Their ts.17
+# (2026-09-29) runs full 2000A and the pole-angle obliquity. Measured against
+# it as (ours - theirs) in the date frame minus the same in ICRF, which leaves
+# only the frame models: worst 0.060 mas over this leg's epochs and observers
+# (0.13 mas to 2390, where the old obliquity would have shown 5 mas; the
+# measurement reports an injected 1 mas as 1.06). Rounded up to 0.1 mas.
+DATE_FRAME_BAND = 0.0001
 HAMBURG_BAND = 0.002  # same elements; the J1900 precession models differ sub-mas
 # The Sun from the barycentre, as a length: ours is DE440, the same fit as
 # Horizons' DE441 over the corpus (measured 3e-7 km); theirs is the refit's
