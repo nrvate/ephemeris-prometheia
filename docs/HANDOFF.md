@@ -72,7 +72,17 @@ matches them to 0.055 mas, and the leg re-proves this each run from
 `tools/check/definitions/`.
 
 **v0.7.2 cut 2026-09-29** (maintainer): library 0.7.2 (C ABI 6), prometheiad
-0.10.0; DE441 behind DE440, Vondrák default, JSON ΔT disclosure, coverage. The C API gained
+0.10.0; DE441 behind DE440, Vondrák default, JSON ΔT disclosure, coverage.
+
+**After 0.7.2 (unreleased):**
+- The Moon's ~1 mas against swetest is its TT-for-TDB argument (903a553).
+- TDB−TT is the full Fairhead & Bretagnon series (df1d8b5, maintainer): 787 terms
+  for the public function, and 136 on one-day nodes in the engine (1.55 µs,
+  old speed). Horizons uses a one-term formula. Graded on Horizons' TDB, the
+  DE441-era planets agree to 3.4 µas. **Open:** the Moon's 56–76 µas at
+  −3000, 5000 and 9000 (DE.md).
+- The `sidereal` leg now holds orbit points (127fe07), after Astrolog's gate
+  found Swiss's sidereal-node nutation bug (their ts.18). The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
