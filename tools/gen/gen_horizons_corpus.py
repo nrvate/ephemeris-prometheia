@@ -75,7 +75,7 @@ def main():
     with open(os.path.join(args.raw_dir, "manifest.json")) as f:
         manifest = json.load(f)
 
-    obs_rows, vec_rows, ext_rows, prov = [], [], [], []
+    obs_rows, vec_rows, ext_rows, sbext_rows, prov = [], [], [], [], []
     for name, purpose, params in hf.requests():
         if name.startswith("tdbtt-"):
             continue  # a measurement of Horizons' TDB-TT (docs/TIME.md), not a fixture
@@ -112,6 +112,15 @@ def main():
                         ("Date_________JDTT", "R.A.___(ICRF)", "DEC____(ICRF)", "delta")]
                 ext_rows.append(f'    {{"{name}", {body}, ' + ", ".join(fmt(v) for v in vals)
                                 + "},")
+            continue
+
+        if name.startswith("sbext-"):
+            # Centuries from the element epoch: a table of its own, so the
+            # +-100 yr gates on kHorizonsVec never see these rows.
+            for r in rows:
+                vals = [num(r[idx[c]]) for c in ("JDTDB", "X", "Y", "Z", "VX", "VY", "VZ")]
+                sbext_rows.append(f'    {{"{name}", {body}, ' + ", ".join(fmt(v) for v in vals)
+                                  + "},")
             continue
 
         if params["EPHEM_TYPE"] == "'VECTORS'":
@@ -175,7 +184,13 @@ def main():
         "// Beyond DE440 (ext-geo-*, DE441 era): geocentric astrometric ICRF, TT.",
         "// Columns: request, body, JD(TT), RA/Dec ICRF deg, light-time range AU.",
         "const HorizonsExt kHorizonsExt[] = {",
-    ] + ext_rows + ["};", ""]
+    ] + ext_rows + [
+        "};",
+        "",
+        "// Small bodies centuries from their element epoch (sbext-helio-*, 1600-2499,",
+        "// the span Horizons serves them): heliocentric geometric vectors, as kHorizonsVec.",
+        "const HorizonsVec kHorizonsSbExt[] = {",
+    ] + sbext_rows + ["};", ""]
     text = "\n".join(lines)
 
     def data(t):
@@ -189,7 +204,7 @@ def main():
     with open(OUT, "w") as f:
         f.write(text)
     print(f"tests/horizons_corpus.inc: {len(obs_rows)} observer rows, {len(vec_rows)} vector rows, "
-          f"{len(ext_rows)} extended-span rows")
+          f"{len(ext_rows)} extended-span rows, {len(sbext_rows)} small-body long-span rows")
     return 0
 
 

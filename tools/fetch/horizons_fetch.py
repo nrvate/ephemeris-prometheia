@@ -63,6 +63,8 @@ TOPO_EPOCHS_TT = [
 SMALL_EPOCH = 2461200.5
 SMALL_OFFSETS_YR = [-100, -50, -25, -10, 0, 10, 25, 50, 100]
 SMALL_EPOCHS_TT = [SMALL_EPOCH + y * 365.25 for y in SMALL_OFFSETS_YR]
+SBEXT_YEARS = [1600, 1700, 1800, 1900, 2100, 2200, 2300, 2400, 2499]
+SBEXT_EPOCHS_TDB = [2451545.0 + 365.25 * (y - 2000) for y in SBEXT_YEARS]
 
 # Outside DE440's span (1550-2650), where Horizons and this engine both answer
 # from DE441: Julian years -3000, -1000, 0, 1000, 1500, 2700, 5000 and 9000
@@ -186,6 +188,14 @@ def requests():
     for name, cmd in PLANETS:
         out.append((f"ext-geo-{name}", "geocentric astrometric outside DE440 (DE441 era)",
                     observer(cmd, "500@399", EXT_EPOCHS_TT, "1,20")))
+    # Small bodies centuries from their element epoch, out to the span
+    # Horizons itself serves them (it refuses a numbered asteroid before
+    # 1599-12-11): heliocentric geometric vectors from Horizons' own
+    # integration, the referee for how an integrated asteroid degrades
+    # (docs/VALIDATION.md, "Small bodies").
+    for name, number in SMALL_BODIES[:3]:
+        out.append((f"sbext-helio-{name}", "small body heliocentric vectors, millennia out (TDB)",
+                    vectors(f"{number};", "500@10", SBEXT_EPOCHS_TDB)))
     # Horizons' own TDB-TT, read off one geocentric Moon vector asked at the
     # same numbers as TDB and as TT: the difference is the velocity times
     # TDB-TT (docs/TIME.md, "TDB"). The DE441-era epochs plus J2000.

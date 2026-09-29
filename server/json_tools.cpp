@@ -708,9 +708,11 @@ Json accuracy(const ResolvedObject& obj) {
     }
     if (obj.naif_id >= 1000 || (obj.naif_id >= 2000000 && obj.naif_id < 3000000))
         return {{"statement",
-                 "integrated from JPL SBDB elements: 0.04\" rms within 10 years of the "
-                 "element epoch against JPL Horizons (0.005\" with JPL's asteroid "
-                 "perturbers); sigma_arcsec where the catalog carries a covariance"},
+                 "integrated from JPL SBDB elements: against JPL Horizons 0.04\" rms within "
+                 "10 years of the element epoch (0.005\" with JPL's asteroid perturbers) and "
+                 "up to 0.9\" over 1600-2500 with them, 75\" without; outside 1600-2500 JPL "
+                 "publishes no reference and the error grows to arcminutes over millennia; "
+                 "sigma_arcsec where the catalog carries a covariance"},
                 {"doc", "docs/VALIDATION.md"}};
     return {{"statement", "JPL planetary ephemeris; positions agree with JPL Horizons to 6 µas "
                           "over 1800-2100 and 8.3 µas outside DE440's span (-3000 to 9000)"},

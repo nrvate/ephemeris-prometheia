@@ -522,6 +522,42 @@ TEST_CASE("horizons_sigma_calibration") {
 }
 
 // Report only (seconds: +-100-year integrations and the sigma tracks).
+// Ceres, Pallas and Vesta out to the span Horizons itself serves a numbered
+// asteroid (it refuses one before 1599-12-11), about four centuries either
+// side of the element epoch, with JPL's 16 perturbers: heliocentric
+// geometric against Horizons' own integration (docs/VALIDATION.md, "Small
+// bodies"). Measured 2026-09-29: <= 0.90" (Ceres at 1600) and 342 km.
+// Integrating centuries takes seconds, so tools/scheduled.sh runs it, not
+// the gate.
+TEST_CASE("horizons_small_bodies_centuries" * doctest::skip()) {
+    Engine* e = engine_sb441();
+    if (!e)
+        return;
+    double worst = 0.0, worst_km = 0.0;
+    for (const HorizonsVec& h : kHorizonsSbExt) {
+        CalcOptions o = CalcOptions::geometric();
+        o.center = Center::Heliocentric;
+        o.frame = Frame::ICRF;
+        o.coords = Coords::Equatorial;
+        o.speed = false;
+        o.sigma = false;
+        auto r = e->calc(h.body, time::tt_from_tdb(h.jd_tdb), o);
+        REQUIRE(r.ok());
+        const double ra = std::atan2(h.y, h.x) / kDeg,
+                     dec = std::atan2(h.z, std::hypot(h.x, h.y)) / kDeg;
+        const double sep = separation_arcsec(r.value().pos.lon_deg, r.value().pos.lat_deg, ra, dec);
+        const double km =
+            (r.value().pos.dist_au - std::sqrt(h.x * h.x + h.y * h.y + h.z * h.z)) * kAuM / 1000.0;
+        std::printf("  %-20s JD %10.1f  %7.3f\"  %+8.0f km\n", h.request, h.jd_tdb, sep, km);
+        worst = std::max(worst, sep);
+        worst_km = std::max(worst_km, std::fabs(km));
+    }
+    std::printf("  worst %.3f\" and %.0f km over %zu rows\n", worst, worst_km,
+                sizeof(kHorizonsSbExt) / sizeof(kHorizonsSbExt[0]));
+    CHECK(worst < 1.2);
+    CHECK(worst_km < 500.0);
+}
+
 TEST_CASE("horizons_small_bodies_long_arc_report" * doctest::skip()) {
     Engine* e = engine();
     if (!e)

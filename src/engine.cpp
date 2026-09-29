@@ -508,7 +508,13 @@ public:
                 std::find(bodies_.begin(), bodies_.end(), int(kSpkidNumberedBase + num)) ==
                     bodies_.end())
                 bodies_.push_back(int(kSpkidNumberedBase + num));
+            first_et_ = std::min(first_et_, seg.start_et);
+            last_et_ = std::max(last_et_, seg.end_et);
         }
+    }
+
+    std::pair<double, double> span() const override {
+        return {2451545.0 + first_et_ / 86400.0, 2451545.0 + last_et_ / 86400.0};
     }
 
     // SBDB SPK-IDs of the bodies the kernel carries.
@@ -523,8 +529,20 @@ public:
             return make_error(ErrorCode::NotFound,
                               "body " + std::to_string(id) + " is not in " + description);
         const int kid = int(id - kSpkidNumberedBase + kOldSpkidNumberedBase);
-        if (auto r = file_.state(kid, body::kSun, jd_tdb, out); !r)
-            return r;
+        if (auto r = file_.state(kid, body::kSun, jd_tdb, out); !r) {
+            if (r.error().code != ErrorCode::CoverageError)
+                return r;
+            // Say what the kernel covers, not which of its bodies ran out:
+            // the small-body integration needs every mass at every step.
+            const auto [a, b] = span();
+            char buf[200];
+            std::snprintf(buf, sizeof buf,
+                          "the small-body integration needs JD %.1f, outside the asteroid "
+                          "perturber kernel's span, JD %.1f to %.1f (years %.0f to %.0f)",
+                          jd_tdb, a, b, 2000.0 + (a - 2451545.0) / 365.25,
+                          2000.0 + (b - 2451545.0) / 365.25);
+            return make_error(ErrorCode::CoverageError, buf);
+        }
         double sun[6];
         if (auto r = main_->barycentric(body::kSun, jd_tdb, sun); !r)
             return r;
@@ -539,6 +557,8 @@ private:
     spk::SpkFile file_;
     Source* main_;
     std::vector<int> bodies_;
+    double first_et_ = std::numeric_limits<double>::infinity();
+    double last_et_ = -std::numeric_limits<double>::infinity();
 };
 
 // ---------------------------------------------------------------------------

@@ -121,6 +121,15 @@ else
     skipped+=("protocol pin: no Astrolog tree at $astrolog (set PROMETHEIA_ASTROLOG)")
 fi
 
+# Small bodies against Horizons four centuries from their element epoch, the
+# span Horizons itself serves them: seconds of integration, so not the gate.
+if [[ -f "$repo/ephe/sb441-n16.bsp" && -f "$ephemeris" ]]; then
+    step "small bodies over centuries" "$repo/build/test_horizons" \
+        -tc=horizons_small_bodies_centuries --no-skip
+else
+    skipped+=("small bodies over centuries: needs ephe/sb441-n16.bsp")
+fi
+
 # prometheia-load's assertions, each against a daemon started for that case.
 if [[ -f "$ephemeris" ]]; then
     step "load selftest" python3 "$repo/tools/check/loadselftest.py" --ephemeris "$ephemeris"

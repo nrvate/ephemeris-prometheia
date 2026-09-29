@@ -13,6 +13,13 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Small bodies far from their element epoch, measured and stated**
+  (docs/VALIDATION.md, "Centuries and millennia"). With JPL's perturbers,
+  Ceres, Pallas and Vesta stay within 0.9″ of Horizons over 1600–2500, the
+  span Horizons itself serves; without them, 75″. The JSON accuracy
+  statement now says so. An instant outside the perturber kernel is
+  refused with a message naming the kernel's span, where it named whichever
+  of its bodies ran out.
 - **TDB−TT is the full Fairhead & Bretagnon series** (787 terms, from ERFA's
   BSD-3 table; docs/TIME.md, "TDB"), where it was the seven-term Circular 179
   series. The full series follows the decline of Earth's eccentricity:

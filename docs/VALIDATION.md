@@ -116,6 +116,35 @@ within 5 km there. The gate `horizons_small_bodies_sb441` (0.13 s) runs when
 `ephe/sb441-n16.bsp` (or `$PROMETHEIA_SB441`) is present and SKIPs
 otherwise; the long-arc report prints both columns.
 
+**Centuries and millennia from the element epoch (measured 2026-09-29).**
+With DE441 behind DE440 the engine can integrate a catalog body as far as
+the planets reach, and SB441-N16 itself spans −7999 to 9000. Horizons
+refuses a numbered asteroid before 1599-12-11, so JPL publishes no
+reference outside roughly 1600–2500. Ceres, Pallas and Vesta, heliocentric
+geometric, against Horizons at 1600–2499
+(`horizons_small_bodies_centuries`, run by `tools/scheduled.sh`):
+
+| configuration | worst over 1600–2499 | at 1800 / 2200 |
+|---|---:|---:|
+| with the SB441-N16 perturbers | **0.90″** (Ceres, 1600), 342 km | ≤ 0.17″ / ≤ 0.12″ |
+| no perturber kernel | 75″ (Pallas, 1700), 28,700 km | 17″ / 6″ |
+| the kernel's own trajectories (2021 solutions) | 2.2″ | 0.34″ / 0.43″ |
+
+Beyond JPL's window, our integration against the kernel's own trajectory,
+which has its own drift, is the only yardstick. Ceres, Pallas and Vesta
+differ from it by 3.6–9.2″ at 1000, 1.4–29″ at year 0, 19–140″ at −3000
+and 0.3–19″ at 5000. Without a perturber kernel they differ by 12–67″,
+13–99″, 27–384″ and 16–52″ at those years. Over millennia the error grows
+to arcminutes, not degrees, because the perturbations are largely
+periodic.
+
+**Where the integration refuses:** with a kernel loaded, an instant outside
+its span is a coverage error naming the kernel's span (per-object errCode
+3, JSON `outside-coverage`). The trimmed `sb441-n16-de440span.bsp` covers
+1550–2650 and the full kernel −7999 to 9000. Without a kernel, nothing
+refuses short of the planets' own coverage, so the accuracy statement says
+how the answer degrades.
+
 - **Frame fix at the element epoch:** the first measurement showed 40–100 km
   here. SBDB elements are in **JPL's J2000 ecliptic**: the ICRF rotated by the
   IAU 1976 obliquity 84381.448″, with no frame bias. The engine had seeded them
