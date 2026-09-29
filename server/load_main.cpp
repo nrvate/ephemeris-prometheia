@@ -376,7 +376,7 @@ std::string open_session(WsClient& ws, const std::string& host, int port) {
         return "connect: " + r.error().message;
     }
     eph::Hello hello;
-    hello.clientName = "prometheia-load/0.7.1";
+    hello.clientName = "prometheia-load/0.7.2";
     std::vector<uint8_t> payload;
     eph::EncodeHello(&payload, hello);
     if (auto r = ws.send(frame(eph::kMsgHello, 0, payload)); !r) {

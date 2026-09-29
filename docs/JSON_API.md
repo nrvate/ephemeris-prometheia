@@ -195,12 +195,14 @@ digits cut):
 
 ```json
 {
-  "engine": "Prometheia 0.7.1, JPL DE440 binary",
-  "dataset": "Prometheia 0.7.1, JPL DE440 binary/linux_p1550p2650.440/-#2cc1eee3",
+  "engine": "Prometheia 0.7.2, JPL DE440 binary",
+  "dataset": "Prometheia 0.7.2, JPL DE440 binary/linux_p1550p2650.440/-#395d0135",
   "results": [
     {
       "object": {"asked": "Mars", "kind": "body", "naif": 4, "resolved": "Mars"},
-      "rows": [{"time": {"jd_tt": 2448058.0214952, "utc": "1990-06-15T12:30:00.000Z"},
+      "rows": [{"time": {"jd_tt": 2448058.0214952, "utc": "1990-06-15T12:30:00.000Z",
+                         "delta_t_s": 57.1974216, "delta_t_basis": "observed: USNO",
+                         "ut1_minus_utc_s": -0.0134216},
                 "longitude_deg": 347.3272534, "latitude_deg": -1.9861654,
                 "distance_au": 1.2789454, "light_time_days": 0.0073866,
                 "ayanamsa_deg": 23.7272979,

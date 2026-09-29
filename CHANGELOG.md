@@ -11,8 +11,29 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.7.2 — 2026-09-29
 
+The library and tools are 0.7.2. The C ABI stays 6: one function is appended,
+`prometheia_engine_add_ephemeris`, and nothing moved; it was announced to the
+Astrolog side before it landed. `prometheiad` is 0.10.0, because its answers
+change: the default precession, and a WELCOME that states its coverage.
+**What moves for anyone pinning values:**
+- every date-frame answer that took the old IAU 2006 default, by up to
+  0.01″ (≤ 2 mas over 1800–2200);
+- the dataset id's digest, which carries the engine version (`…#395d0135`
+  for DE440 alone);
+- JSON rows, which gain three `time` fields.
+
+The USNO ΔT and leap-second tables were not re-fetched: 0.7.1 refreshed
+them the same day (observed through 2026-04).
+
+- **Validated beyond DE440's span.** Against JPL Horizons, which also
+  answers from DE441, 10 bodies at −3000 to 9000 agree to ≤ 8.3 µas (the
+  Moon to 124 µas at 9000, a 0.2 ms time-argument offset) (docs/DE.md).
+  The JSON accuracy statement now names the spans it was measured over.
+- **Protocol v4 re-pinned** to Astrolog's coverage drop: `ephproto.h`
+  `91c2fa6a…` with `Capabilities::coverage`, registries `5fed5d64…`, and
+  110/110 conformance fixtures through both readers.
 - **Every JSON row says what its ΔT rests on** (docs/JSON_API.md, "Time"):
   `time` gains `delta_t_s` and `delta_t_basis` (observed, reconstructed,
   before the eclipse record, or predicted). With DE441 a clock time reaches

@@ -69,7 +69,10 @@ servers advertise at apparent place. The Hamburg points agree to 0.012 mas.
 `neptune-leverrier` differs by 100–301″ because theirs is Hoyt's 1980
 transcription and ours Le Verrier's own print. Our engine on their numbers
 matches them to 0.055 mas, and the leg re-proves this each run from
-`tools/check/definitions/`. The C API gained
+`tools/check/definitions/`.
+
+**v0.7.2 cut 2026-09-29** (maintainer): library 0.7.2 (C ABI 6), prometheiad
+0.10.0; DE441 behind DE440, Vondrák default, JSON ΔT disclosure, coverage. The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
