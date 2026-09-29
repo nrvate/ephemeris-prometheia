@@ -44,6 +44,17 @@ over 30,000 years. Inside DE440's span JPL recommends DE440.
   largest value rather than absolutely. The gate checks every 20th point
   (`de441_real_matches_jpl_testpo_sampled`); all of them run with
   `-tc=de441_real_matches_jpl_testpo_all --no-skip`.
+- **Against JPL Horizons outside DE440's span** (which Horizons also
+  answers from DE441; `horizons_astrometric_de441_era`, 10 bodies at
+  Julian years −3000, −1000, 0, 1000, 1500, 2700, 5000 and 9000, TT,
+  geocentric astrometric ICRF): the Sun and planets agree to ≤ 8.3 µas,
+  at Horizons' 3.6 µas print quantum, and 3.8 m in range. The Moon agrees
+  to 3–31 µas through year 5000 and 124 µas at 9000, and 0.15 m. The
+  Moon's residual is along-track, with a sign that varies by epoch;
+  as a timing offset it is 10–50 µs, 0.2 ms at 9000. A difference in
+  the TDB−TT series at extreme epochs would fit, but that is an
+  estimate, not investigated. The ext-geo requests are declared in
+  `tools/fetch/horizons_fetch.py`.
 - **Against DE440 where both run** (61 epochs 1550–2650, astrometric
   ICRF): the Sun and every planet agree to ≤ 0.013 mas and a few metres.
   **The Moon does not**: 0.36″ at 1550, 0.08″ at 1700, 0.003″ at 1900,

@@ -75,7 +75,7 @@ def main():
     with open(os.path.join(args.raw_dir, "manifest.json")) as f:
         manifest = json.load(f)
 
-    obs_rows, vec_rows, prov = [], [], []
+    obs_rows, vec_rows, ext_rows, prov = [], [], [], []
     for name, purpose, params in hf.requests():
         if name.startswith("bary-"):
             continue  # a cross-test anchor (tools/check/crosstest.py), not an engine test
@@ -102,6 +102,15 @@ def main():
         body = body_of(name, command)
         cols, rows = table(result)
         idx = {c: i for i, c in enumerate(cols)}
+
+        if name.startswith("ext-"):
+            # Outside DE440's span: a separate table, for the DE441-gated test only.
+            for r in rows:
+                vals = [num(r[idx[c]]) for c in
+                        ("Date_________JDTT", "R.A.___(ICRF)", "DEC____(ICRF)", "delta")]
+                ext_rows.append(f'    {{"{name}", {body}, ' + ", ".join(fmt(v) for v in vals)
+                                + "},")
+            continue
 
         if params["EPHEM_TYPE"] == "'VECTORS'":
             for r in rows:
@@ -158,7 +167,13 @@ def main():
         "",
         "// Vector tables: heliocentric geometric state, ICRF, AU and AU/day, at JD(TDB).",
         "const HorizonsVec kHorizonsVec[] = {",
-    ] + vec_rows + ["};", ""]
+    ] + vec_rows + [
+        "};",
+        "",
+        "// Beyond DE440 (ext-geo-*, DE441 era): geocentric astrometric ICRF, TT.",
+        "// Columns: request, body, JD(TT), RA/Dec ICRF deg, light-time range AU.",
+        "const HorizonsExt kHorizonsExt[] = {",
+    ] + ext_rows + ["};", ""]
     text = "\n".join(lines)
 
     def data(t):
@@ -171,7 +186,8 @@ def main():
         return 1 if stale else 0
     with open(OUT, "w") as f:
         f.write(text)
-    print(f"tests/horizons_corpus.inc: {len(obs_rows)} observer rows, {len(vec_rows)} vector rows")
+    print(f"tests/horizons_corpus.inc: {len(obs_rows)} observer rows, {len(vec_rows)} vector rows, "
+          f"{len(ext_rows)} extended-span rows")
     return 0
 
 

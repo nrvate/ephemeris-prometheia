@@ -40,6 +40,10 @@ These are gated at every epoch (1800–2100) and from all observers.
 | Moon, astrometric, topocentric (1981–2026) | 0.008″ | 0.015″ |
 | light-time range, Sun & planets geo/helio · topo · Moon | 1.1 m · 3.6 m · 5.7 m | 3 · 10 · 10 m |
 
+- **Beyond DE440's span** (with DE441 behind it, −3000 to 9000, 8 epochs;
+  [DE.md](DE.md), "DE441"): Sun & planets ≤ 8.3 µas and 3.8 m, Moon
+  ≤ 124 µas (at 9000; ≤ 31 µas through 5000) and 0.15 m, geocentric
+  astrometric, gated at 12 µas / 6 m and 180 µas / 0.4 m.
 - **Light time and frame:** the astrometric agreement means the light-time
   solution, observer geometry and ICRF frame agree with JPL at the µas level.
   What remains is DE440 vs DE441.

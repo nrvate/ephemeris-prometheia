@@ -64,6 +64,14 @@ SMALL_EPOCH = 2461200.5
 SMALL_OFFSETS_YR = [-100, -50, -25, -10, 0, 10, 25, 50, 100]
 SMALL_EPOCHS_TT = [SMALL_EPOCH + y * 365.25 for y in SMALL_OFFSETS_YR]
 
+# Outside DE440's span (1550-2650), where Horizons and this engine both answer
+# from DE441: Julian years -3000, -1000, 0, 1000, 1500, 2700, 5000 and 9000
+# (JD = 2451545 + 365.25 * (year - 2000), exact in binary), TT, so Delta T plays
+# no part. The ext-geo requests are not observer-corpus rows: the generator
+# routes them to their own table (kHorizonsExt) for the env-gated DE441 test.
+EXT_YEARS = [-3000, -1000, 0, 1000, 1500, 2700, 5000, 9000]
+EXT_EPOCHS_TT = [2451545.0 + 365.25 * (y - 2000) for y in EXT_YEARS]
+
 # --- Targets -------------------------------------------------------------------
 
 PLANETS = [("sun", "10"), ("moon", "301"), ("mercury", "199"), ("venus", "299"),
@@ -174,6 +182,10 @@ def requests():
                     observer(f"{number};", "500@399", SMALL_EPOCHS_TT, "1,2,20,31,36,38")))
         out.append((f"sb-helio-{name}", "small body heliocentric geometric vectors (TDB)",
                     vectors(f"{number};", "500@10", SMALL_EPOCHS_TT)))
+    # Beyond DE440: geocentric astrometric RA/Dec (1) and range (20) only.
+    for name, cmd in PLANETS:
+        out.append((f"ext-geo-{name}", "geocentric astrometric outside DE440 (DE441 era)",
+                    observer(cmd, "500@399", EXT_EPOCHS_TT, "1,20")))
     return out
 
 

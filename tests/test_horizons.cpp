@@ -21,6 +21,7 @@
 //   build/test_horizons -tc=horizons_small_bodies_long_arc_report --no-skip
 //
 // Needs the DE440 binary (PROMETHEIA_DE440, default ephe/); SKIP otherwise.
+// The DE441-era case also needs DE441 (PROMETHEIA_DE441, default ephe/).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -29,6 +30,7 @@
 #include <memory>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 #include <doctest/doctest.h>
 #include <prometheia/engine.hpp>
@@ -75,6 +77,14 @@ struct HorizonsVec {
     int body;
     double jd_tdb;
     double x, y, z, vx, vy, vz;
+};
+
+struct HorizonsExt {
+    const char* request;
+    int body;
+    double jd_tt;
+    double ra_icrf, dec_icrf;
+    double delta_au;
 };
 
 #include "horizons_corpus.inc"
@@ -133,6 +143,31 @@ Engine* engine_sb441() {
         const std::string data = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/";
         if (!e->add_catalog(data + "sample-100.epm").ok() ||
             !e->add_catalog(data + "covariance-7.epm").ok() || !e->add_perturbers(kernel).ok())
+            e.reset();
+    }
+    return e.get();
+}
+
+// DE440 with DE441 behind it (PROMETHEIA_DE441, default ephe/), or nullptr
+// when either file is absent: the engine outside DE440's span 1550-2650.
+Engine* engine_de441() {
+    static std::unique_ptr<Engine> e;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        const std::string de = env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) +
+                                                              "/ephe/linux_p1550p2650.440");
+        const std::string de441 = env_or("PROMETHEIA_DE441", std::string(PROMETHEIA_SOURCE_DIR) +
+                                                                 "/ephe/linux_m13000p17000.441");
+        if (access(de.c_str(), F_OK) != 0 || access(de441.c_str(), F_OK) != 0) {
+            std::printf("  SKIP: %s or %s not present\n", de.c_str(), de441.c_str());
+            return nullptr;
+        }
+        auto opened = Engine::open(de);
+        if (!opened.ok())
+            return nullptr;
+        e = std::make_unique<Engine>(std::move(opened).value());
+        if (!e->add_ephemeris(de441).ok())
             e.reset();
     }
     return e.get();
@@ -219,12 +254,13 @@ Ours compute(Engine& e, const HorizonsObs& h, bool sigma = false) {
 struct Worst {
     double v = 0.0;
     std::string where;
-    void add(double x, const HorizonsObs& h) {
+    void add(double x, const char* request, double jd) {
         if (std::fabs(x) > std::fabs(v)) {
             v = x;
-            where = std::string(h.request) + " JD " + std::to_string(h.jd_tt);
+            where = std::string(request) + " JD " + std::to_string(jd);
         }
     }
+    void add(double x, const HorizonsObs& h) { add(x, h.request, h.jd_tt); }
     void print(const char* what, const char* unit) const {
         std::printf("  %-44s %12.6f %s  (%s)\n", what, v, unit, where.c_str());
     }
@@ -257,6 +293,72 @@ TEST_CASE("horizons_astrometric_and_range") {
     range.print("Sun/planets light-time range, geo + helio", "m");
     range_topo.print("Sun/planets light-time range, topocentric", "m");
     range_moon.print("Moon light-time range", "m");
+}
+
+// Outside DE440's span, where Horizons and this engine both answer from DE441
+// (docs/DE.md, "DE441"): geocentric astrometric ICRF at Julian years -3000 ..
+// 9000, TT as Julian dates so Delta T plays no part. Same options as the
+// astrometric rows above. Needs both DE440 and DE441; SKIP otherwise.
+TEST_CASE("horizons_astrometric_de441_era") {
+    Engine* e = engine_de441();
+    if (!e)
+        return;
+    struct Row {
+        double jd;
+        double sep_uas = 0.0, dr_km = 0.0;
+        const char* sep_body = "";
+        const char* dr_body = "";
+    };
+    std::vector<Row> rows;
+    Worst planet_sep, moon_sep, planet_dr, moon_dr;
+    for (const HorizonsExt& h : kHorizonsExt) {
+        CalcOptions o;
+        o.center = Center::Geocentric;
+        o.deflection = o.aberration = false;
+        o.frame = Frame::ICRF;
+        o.coords = Coords::Equatorial;
+        o.speed = false;
+        o.sigma = false;
+        auto r = e->calc(h.body, h.jd_tt, o);
+        REQUIRE(r.ok());
+        CHECK(r.value().provenance.denum ==
+              (h.jd_tt < 2287184.5 || h.jd_tt > 2688976.5 ? 441 : 440));
+        const double sep_uas =
+            separation_arcsec(r.value().pos.lon_deg, r.value().pos.lat_deg, h.ra_icrf, h.dec_icrf) *
+            1e6;
+        const double dr_km = (r.value().pos.dist_au - h.delta_au) * kAuM / 1000.0;
+        std::printf("  %-16s JD %10.1f  sep %10.2f uas  range %+10.4f km\n", h.request, h.jd_tt,
+                    sep_uas, dr_km);
+        auto row =
+            std::find_if(rows.begin(), rows.end(), [&](const Row& x) { return x.jd == h.jd_tt; });
+        if (row == rows.end()) {
+            rows.push_back({h.jd_tt});
+            row = rows.end() - 1;
+        }
+        if (sep_uas > row->sep_uas) {
+            row->sep_uas = sep_uas;
+            row->sep_body = h.request;
+        }
+        if (std::fabs(dr_km) > std::fabs(row->dr_km)) {
+            row->dr_km = dr_km;
+            row->dr_body = h.request;
+        }
+        const bool moon_row = h.body == body::kMoon;
+        // Measured (8 epochs, JD 625295..5008295): Sun/planets <= 8.3 uas and
+        // 3.8 m; Moon <= 123.7 uas (year 9000) and 0.15 m. The Horizons RA/Dec
+        // print in 1e-9 degrees, a 3.6 uas quantum.
+        CHECK(sep_uas < (moon_row ? 180.0 : 12.0));
+        CHECK(std::fabs(dr_km) < (moon_row ? 0.0004 : 0.006));
+        (moon_row ? moon_sep : planet_sep).add(sep_uas, h.request, h.jd_tt);
+        (moon_row ? moon_dr : planet_dr).add(dr_km, h.request, h.jd_tt);
+    }
+    for (const Row& r : rows)
+        std::printf("  JD %10.1f  worst sep %10.2f uas (%s)  worst range %+10.4f km (%s)\n", r.jd,
+                    r.sep_uas, r.sep_body, r.dr_km, r.dr_body);
+    planet_sep.print("Sun/planets astrometric beyond DE440", "uas");
+    moon_sep.print("Moon astrometric beyond DE440", "uas");
+    planet_dr.print("Sun/planets range beyond DE440", "km");
+    moon_dr.print("Moon range beyond DE440", "km");
 }
 
 TEST_CASE("horizons_apparent_of_date") {
