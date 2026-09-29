@@ -568,6 +568,11 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
                  (1u << eph::kObjHypothetical) | (1u << eph::kObjElements) |
                  (1u << eph::kObjDesignation);
     c.segMaxSpanDays = cfg.max_seg_span_days;
+    // Coverage (A.3 0x000A): one entry per ephemeris, in consulting order,
+    // its span in TDB. Routing only; errCode 3 stays the authority.
+    for (const ServerConfig::Coverage& cv : cfg.coverage)
+        c.coverage.push_back(
+            {cv.id, eph::Time{cv.first_jd_tdb, 0.0}, eph::Time{cv.last_jd_tdb, 0.0}});
     eph::EncodeCapabilities(c, &w.caps_);
     // The deep-sky catalogues kind 2 resolves (A.3 0x000B) and the element
     // equinoxes (0x0012); EncodeCapabilities knows neither, so they go in
@@ -591,22 +596,6 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
         ew.u32((1u << (eph::kEquinoxMax + 1)) - 1u);
         eq.value.assign(reinterpret_cast<const char*>(eb.data()), eb.size());
         w.caps_.push_back(std::move(eq));
-        // Coverage (A.3 0x000A): one entry per ephemeris, in consulting
-        // order, its span in TDB. Routing only; errCode 3 stays the authority.
-        if (!cfg.coverage.empty()) {
-            eph::Tlv cov;
-            cov.tag = eph::kCapTagCoverage;
-            std::vector<uint8_t> vb;
-            eph::Writer vw(&vb);
-            vw.u16(uint16_t(cfg.coverage.size()));
-            for (const ServerConfig::Coverage& c : cfg.coverage) {
-                vw.str8(c.id);
-                eph::WriteTime(vw, eph::Time{c.first_jd_tdb, 0.0});
-                eph::WriteTime(vw, eph::Time{c.last_jd_tdb, 0.0});
-            }
-            cov.value.assign(reinterpret_cast<const char*>(vb.data()), vb.size());
-            w.caps_.push_back(std::move(cov));
-        }
         std::sort(w.caps_.begin(), w.caps_.end(),
                   [](const eph::Tlv& a, const eph::Tlv& b) { return a.tag < b.tag; });
     }

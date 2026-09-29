@@ -579,6 +579,11 @@ struct Capabilities {
   uint32_t cellsPerSec = 0, burst = 0;
   uint16_t lookupMax = 0;                // 0: tag absent
   std::vector<std::string> hypotheticals;
+  // A.3 0x000A: one entry per ephemeris, in the order the server consults
+  // them; id as the server names it (its file name when it is one file);
+  // min and max its span in TDB. Routing only (3.5a).
+  struct Coverage { std::string id; Time tMin, tMax; };
+  std::vector<Coverage> coverage;
   // A.3 0x0013: the largest difference of the server's rates from central
   // differences of its own positions. Absent means it meets 3.5a's
   // tolerance (1e-5 deg/day, 1e-9 AU/day).
@@ -665,6 +670,15 @@ inline void EncodeCapabilities(const Capabilities &c, TlvList *out) {
     for (const std::string &h : c.hypotheticals) w.str8(h);
     add(kCapTagHypotheticals);
   }
+  if (!c.coverage.empty()) {
+    w.u16((uint16_t)c.coverage.size());
+    for (const Capabilities::Coverage &e : c.coverage) {
+      w.str8(e.id);
+      WriteTime(w, e.tMin);
+      WriteTime(w, e.tMax);
+    }
+    add(kCapTagCoverage);
+  }
   // 3.1: a TLV area's tags ascend, whatever order they were built in.
   std::sort(out->begin(), out->end(), [](const Tlv &a, const Tlv &b) { return a.tag < b.tag; });
 }
@@ -719,6 +733,17 @@ inline Outcome ParseCapabilities(const TlvList &caps, Capabilities *c, std::stri
         std::vector<std::string> &list = e.tag == kCapTagZodiacs ? c->zodiacs : c->hypotheticals;
         for (uint16_t i = 0; i < n && r.ok(); i++)
           list.push_back(ReadText(r, v, "capability token is not text"));
+        break;
+      }
+      case kCapTagCoverage: {
+        uint16_t n = r.u16();
+        for (uint16_t i = 0; i < n && r.ok(); i++) {
+          Capabilities::Coverage e;
+          e.id = ReadText(r, v, "coverage id is not text");
+          e.tMin = ReadTime(r, v);
+          e.tMax = ReadTime(r, v);
+          c->coverage.push_back(e);
+        }
         break;
       }
       case kCapTagSiderealPlanes: c->siderealPlanes = r.u32(); break;
