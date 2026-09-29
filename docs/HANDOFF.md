@@ -47,7 +47,11 @@ date differs by swetest's ε_A-series obliquity (ours is the pole angle): 16 mas
 at 2640, up to 65″ over DE441's span (a27b515). §3.5a now names the pole
 angle (Astrolog `d0286de`). Their fork follows in its release after ts.16;
 until then it is a known difference (CROSS-TEST.md, their S8). Measure it
-closing when they say it has landed. The C API gained
+closing when they say it has landed. Beyond DE440 we agree with Horizons
+to ≤ 8.3 µas, and the Moon to 124 µas at year 9000, a ~0.2 ms time offset
+(0645170, 055cb29, DE.md). JSON rows now carry `delta_t_s` and
+`delta_t_basis` (6ad20b7). The MCP server config serves DE441 too
+(maintainer, 2026-09-29). The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
