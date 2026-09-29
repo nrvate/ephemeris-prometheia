@@ -237,9 +237,15 @@ const char* delta_t_basis(double jd_tt) {
 Json time_of(double jd_tt) {
     const std::string utc = format_utc(jd_tt);
     Json t = {{"jd_tt", jd_tt}};
-    if (!utc.empty())
+    if (!utc.empty()) {
         t["utc"] = utc;
-    else
+        // After the last leap second UTC is TAI - 37 s, no further leap
+        // seconds assumed (maintainer, 2026-09-29): how far that puts the
+        // clock from Earth rotation, 0 s now, 134 s by 2100.
+        if (auto u = time::tt_to_utc(jd_tt))
+            t["ut1_minus_utc_s"] =
+                u.value().tai_minus_utc + time::kTtMinusTaiSeconds - time::delta_t(jd_tt);
+    } else
         t["ut1"] = format_civil(time::jd_ut1_from_tt(jd_tt));
     t["delta_t_s"] = time::delta_t(jd_tt);
     t["delta_t_basis"] = delta_t_basis(jd_tt);
@@ -1291,6 +1297,9 @@ guess.
   "Priapus") likewise, within ~27 degrees. They are not opposite each other.
 - A zodiac defined at the instant (true-citra, the galactic ones) has no
   anchor plane; capabilities lists each zodiac's planes.
+- After the last leap second, UTC is read as TAI - 37 s: no further leap
+  seconds are assumed. A row's time.ut1_minus_utc_s says how far that puts
+  the clock from Earth rotation (0 s now, 134 s by 2100).
 - Times before 1657 or in the future carry delta T from a model: each row's
   time gives delta_t_s and delta_t_basis. Far from the present, delta T's
   uncertainty, not the ephemeris, bounds anything computed from a clock

@@ -44,7 +44,8 @@ inline constexpr double kTtMinusTaiSeconds = 32.184;
 
 // The TAI-UTC offset in seconds in effect at 00:00 UTC of the given
 // month (post-1972 era; the table tracks the USNO tai-utc.dat list,
-// currently ending at 37 s effective 2017-01-01).
+// currently ending at 37 s effective 2017-01-01). Later months keep the
+// last offset: no further leap seconds are assumed (docs/TIME.md).
 double tai_minus_utc(int year, int month);
 
 // Converts a civil UTC instant to JD(TT). second may be 60.x during an

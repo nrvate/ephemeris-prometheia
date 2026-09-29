@@ -20,6 +20,9 @@ documented, not that it is frozen.
 - **`capabilities` says which dates it serves** (`dates`: each ephemeris
   file's span, in answering order) and `precession_default`; the C++
   `Engine::ephemeris_spans()` is what it reads.
+- **UTC after the last leap second is TAI − 37 s, said out loud**
+  (maintainer): no further leap seconds assumed, as CGPM 2022 implies; UTC
+  rows carry `ut1_minus_utc_s` (−134 s by 2100) (docs/TIME.md).
 - **DE441 behind DE440** (docs/DE.md, "DE441"). `Engine::add_ephemeris`
   (C `prometheia_engine_add_ephemeris`; `--ephemeris` twice to the servers,
   `-e` twice to `ephem`) answers the instants the first file does not

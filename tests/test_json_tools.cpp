@@ -123,6 +123,13 @@ TEST_CASE("json_rows_say_what_their_delta_t_rests_on") {
     const Json rows = run(e, "positions", {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}});
     const Json& t = rows["results"][0]["rows"][0]["time"];
     CHECK(t["delta_t_basis"] == "observed: USNO");
+    // UTC after the last leap second is TAI - 37 s; the row says how far
+    // that is from UT1: under a second now, minutes by 2100.
+    CHECK(std::fabs(t["ut1_minus_utc_s"].get<double>()) < 0.9);
+    const Json far = run(e, "convert_time", {{"time", "2100-01-01T00:00:00Z"}});
+    const double drift = far["ut1_minus_utc_s"].get<double>(); // time_of, as every row
+    CHECK(drift == doctest::Approx(69.184 - far["delta_t_s"].get<double>()).epsilon(1e-9));
+    CHECK(drift < -100.0);
     CHECK(t["delta_t_s"].get<double>() == doctest::Approx(63.83).epsilon(1e-3));
 }
 

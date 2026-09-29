@@ -148,6 +148,10 @@ The agent-facing summary of what to ask, and how, is the MCP resource
     DE440 a clock time can reach millennia back, where ΔT is hours and
     its uncertainty, not the ephemeris, bounds anything computed from UT:
     the Moon moves 0.55″ and Earth rotation 15″ per second of ΔT.
+  - **A UTC row also carries `ut1_minus_utc_s`.** After the last leap
+    second UTC is read as TAI − 37 s, with no further leap seconds
+    assumed (docs/TIME.md), so a future clock time drifts from Earth
+    rotation by this much: 0 s now, −134 s by 2100.
     A leap second (`:60`) before 1972 is refused (maintainer, 2026-09-19).
 - **Defaults** are what a chart wants: apparent (all three corrections),
   geocentric, the true ecliptic of date, tropical, rates on. Each can be

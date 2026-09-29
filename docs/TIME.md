@@ -32,6 +32,15 @@ anchors.
   table is keyed by the calendar month of the UTC day, which makes the
   leap second 23:59:60 belong to the day that contains it, under the
   offset still in effect.
+- **After the table, the last offset holds for ever**: no further leap
+  seconds are assumed (maintainer, 2026-09-29). That matches the 2022
+  CGPM resolution to relax the |UT1−UTC| ≤ 0.9 s bound from 2035, which
+  is what civil time is expected to do over the coming century. It puts a
+  future UTC clock this far from Earth rotation, by the ΔT model: UT1−UTC
+  ≈ 0 s in 2030, −11 s in 2050, −134 s in 2100 (0.56° on the chart angles),
+  −373 s in 2200 and −73 min by 3000. Centuries ahead, what a clock time
+  will mean is not known. `prometheia-json` gives `ut1_minus_utc_s` on
+  every UTC row so the drift is never silent.
 - The 1961–1972 linear-drift era of UTC is rejected with a clear error;
   supply JD(TT) directly for those epochs.
 - `utc_to_tt` / `tt_to_utc` round-trip every monthly sample from 1972 to
