@@ -295,10 +295,22 @@ TEST_CASE("horizons_astrometric_and_range") {
     range_moon.print("Moon light-time range", "m");
 }
 
+// Horizons' own TT -> TDB: the one-term formula of JPL's SPICE leap-seconds
+// kernel, K sin E, E = M + EB sin M. Measured to <= 6 us of what Horizons
+// does at these epochs (docs/TIME.md, "TDB"). Ours is the full
+// Fairhead-Bretagnon series, which follows the eccentricity's decline; the
+// two part by 0.3 ms at year 9000.
+double horizons_tdb_minus_tt(double jd_tt) {
+    const double m = 6.239996 + 1.99096871e-7 * (jd_tt - 2451545.0) * 86400.0;
+    return 1.657e-3 * std::sin(m + 1.671e-2 * std::sin(m));
+}
+
 // Outside DE440's span, where Horizons and this engine both answer from DE441
 // (docs/DE.md, "DE441"): geocentric astrometric ICRF at Julian years -3000 ..
 // 9000, TT as Julian dates so Delta T plays no part. Same options as the
-// astrometric rows above. Needs both DE440 and DE441; SKIP otherwise.
+// astrometric rows above. Each row is asked at the TDB instant Horizons
+// used, so it grades the ephemeris and the pipeline, not the two time
+// conversions. Needs both DE440 and DE441; SKIP otherwise.
 TEST_CASE("horizons_astrometric_de441_era") {
     Engine* e = engine_de441();
     if (!e)
@@ -319,7 +331,8 @@ TEST_CASE("horizons_astrometric_de441_era") {
         o.coords = Coords::Equatorial;
         o.speed = false;
         o.sigma = false;
-        auto r = e->calc(h.body, h.jd_tt, o);
+        const double jd_tt = time::tt_from_tdb(h.jd_tt + horizons_tdb_minus_tt(h.jd_tt) / 86400.0);
+        auto r = e->calc(h.body, jd_tt, o);
         REQUIRE(r.ok());
         CHECK(r.value().provenance.denum ==
               (h.jd_tt < 2287184.5 || h.jd_tt > 2688976.5 ? 441 : 440));
@@ -344,11 +357,12 @@ TEST_CASE("horizons_astrometric_de441_era") {
             row->dr_body = h.request;
         }
         const bool moon_row = h.body == body::kMoon;
-        // Measured (8 epochs, JD 625295..5008295): Sun/planets <= 8.3 uas and
-        // 3.8 m; Moon <= 123.7 uas (year 9000) and 0.15 m. The Horizons RA/Dec
-        // print in 1e-9 degrees, a 3.6 uas quantum.
-        CHECK(sep_uas < (moon_row ? 180.0 : 12.0));
-        CHECK(std::fabs(dr_km) < (moon_row ? 0.0004 : 0.006));
+        // Measured on Horizons' TDB (8 epochs, JD 625295..5008295): Sun and
+        // planets <= 3.4 uas, the Horizons RA/Dec print's 3.6 uas quantum, and
+        // 0.8 m; the Moon <= 8 uas at five epochs and 56-76 uas at -3000, 5000
+        // and 9000, not explained (docs/DE.md), and 0.15 m.
+        CHECK(sep_uas < (moon_row ? 100.0 : 5.0));
+        CHECK(std::fabs(dr_km) < (moon_row ? 0.0004 : 0.0015));
         (moon_row ? moon_sep : planet_sep).add(sep_uas, h.request, h.jd_tt);
         (moon_row ? moon_dr : planet_dr).add(dr_km, h.request, h.jd_tt);
     }

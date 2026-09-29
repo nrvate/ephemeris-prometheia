@@ -23,3 +23,4 @@ stars-raw/
 fuzz-corpus/
 fuzz-artifacts/
 .venv-oracle/
+erfa-raw/

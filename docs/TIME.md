@@ -59,14 +59,29 @@ quantization floor. This is inherent to JD-as-double, not to UTC.
 
 ## TDB
 
-`tdb_minus_tt` is the truncated Fairhead–Bretagnon series published in
-USNO Circular 179 (eq. 2.6), maximum error **~10 µs over 1600–2200**;
-`tt_from_tdb` inverts it by evaluating the series at the TDB argument
-(inversion error ~nanoseconds, far below the series' own accuracy).
-Amplitude is the familiar 1.657 ms annual term; the J2000 value is about
-−96 µs (perihelion-side anomaly). For reference-grade pulsar timing this
-would need the Harada–Fukushima series; for ephemeris lookup and
-astrology it is orders of magnitude beyond sufficient.
+`tdb_minus_tt` is the **full Fairhead & Bretagnon (1990) series** at the
+geocentre, 787 terms in five powers of time plus the adjustment to JPL
+planetary masses (since 2026-09-29, the maintainer's decision; before, the
+seven-term series of USNO Circular 179, eq. 2.6). The coefficients come from
+ERFA v2.0.1's `dtdb.c` (BSD-3), by `tools/gen/gen_tdb_series.py`, pinned by
+sha256. The evaluation is our own, and it matches pyerfa's `dtdb` to
+rounding (`time_tdb_tt_is_the_full_series`). ERFA states ±3 ns against
+time ephemerides integrated on DE405 over 1950–2050. The J2000 value is
+−99.3 µs. `tt_from_tdb` inverts it by evaluating at the TDB argument,
+which is exact to nanoseconds.
+
+The full series costs ~12 µs, and a calc converts several instants, so
+the engine keeps a `TdbInterpolator`. It uses nodes one day apart holding
+the value and rate of the 136 terms that can move TDB−TT by 0.1 µs
+anywhere in DE441's span, with a cubic Hermite polynomial between two
+nodes. Measured every 2.4 days, that is within **1.55 µs of all 787 terms
+over −13000..17000** (0.94 µs over 1550–2650). A JD held as a double
+quantizes an instant to 10–80 µs across that span, so the rest cannot
+reach an answer. Before and after, µs per call (`prometheia-engine-bench`,
+DE440): planets apparent 5.40 → 4.04, Moon mean node and apogee 18.6 →
+21.7, natural apogee 28.5 → 37.5. The full series called directly each
+time was 56, 101 and 130. `prometheiad`'s latency on fresh 50-row requests
+is unchanged within run-to-run noise.
 
 **Against Horizons and the full series (measured 2026-09-29).** Horizons'
 own TT↔TDB is the one-term formula of JPL's SPICE leap-seconds kernel,
@@ -89,10 +104,14 @@ eccentricity, 1.657 ms × e/e₀. The amplitude of each model, in ms:
 
 (The range is e from a linear and from a quadratic secular fit.) The full
 series follows the eccentricity. Horizons' holds it at today's value, and
-ours, with its single T term, lies between. At year 9000 ours is 0.2 ms
-from the full series, 0.1 mas on the Moon. **The full series is the
-more accurate choice outside 1600–2200**, which DE441 now reaches. Whether
-to adopt it is open (HANDOFF).
+the seven-term series, with its single T term, lies between: at year 9000
+it was 0.2 ms from the full series, 0.1 mas on the Moon. The full series
+stays physically sane across all of DE441's span. Its amplitude is within
+~5% of the eccentricity scaling at ±15 millennia (1.909 ms at −13000,
+0.796 ms at 17000), which is why it was adopted. Against Horizons, which
+converts with its one-term formula, answers far from J2000 therefore
+differ by Horizons' time argument, 0.3 ms at 9000. `test_horizons` grades
+its DE441-era rows on Horizons' own TDB for that reason.
 
 ## Delta T (TT − UT1)
 

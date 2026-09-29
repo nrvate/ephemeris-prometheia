@@ -11,6 +11,17 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **TDB−TT is the full Fairhead & Bretagnon series** (787 terms, from ERFA's
+  BSD-3 table; docs/TIME.md, "TDB"), where it was the seven-term Circular 179
+  series. The full series follows the decline of Earth's eccentricity:
+  0.2 ms apart at year 9000, ≤ 10 µs within 1600–2200. The engine
+  interpolates it from one-day nodes to within 1.55 µs, at the old speed.
+  **Moves answers** by ≤ 5 µas within 1600–2200 and up to ~0.15 mas far
+  from J2000. Against Horizons, the DE441-era planets now agree to 3.4 µas
+  on Horizons' own time argument.
+
 ## 0.7.2 — 2026-09-29
 
 The library and tools are 0.7.2. The C ABI stays 6: one function is appended,

@@ -148,7 +148,7 @@ tool and script in this repo, and for anyone running them:
     docs/TIME.md) — Hinnant exact calendar↔JD; the USNO leap-second
     table with UTC↔TAI↔TT including correct 23:59:60 labeling on both
     directions; TT↔TDB via the Circular 179 truncated series (~10 µs
-    class); pluggable Delta T with the Espenak–Meeus polynomials as
+    class; the full Fairhead & Bretagnon series since 2026-09-29, TIME.md); pluggable Delta T with the Espenak–Meeus polynomials as
     default (ΔT(J2000) = 63.88 s vs 63.83 observed).
   - Increment 3 (done 2026-09-16): frames (`prometheia::frames`,
     docs/FRAMES.md) — IAU 2006 precession, the full 1365-term IAU 2000A

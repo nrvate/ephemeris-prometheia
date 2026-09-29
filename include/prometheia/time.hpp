@@ -13,6 +13,7 @@
 #ifndef PROMETHEIA_TIME_HPP
 #define PROMETHEIA_TIME_HPP
 
+#include <array>
 #include <cstdint>
 
 #include "prometheia/error.hpp"
@@ -77,17 +78,49 @@ inline double tai_from_tt(double jd_tt) {
 
 // --- TT <-> TDB -------------------------------------------------------------
 
-// Geocentric TDB-TT in seconds: the truncated Fairhead-Bretagnon series
-// as published in USNO Circular 179 (eq. 2.6), maximum error ~10 us over
-// 1600-2200.
+// Geocentric TDB-TT in seconds: the full Fairhead & Bretagnon (1990)
+// series, 787 terms (docs/TIME.md, "TDB"), within +/- 3 ns of integrated
+// time ephemerides over 1950-2050, and carrying the secular decline of the
+// Earth's eccentricity that epochs millennia away need. ~12 us a call:
+// code that converts many instants keeps a TdbInterpolator.
 double tdb_minus_tt(double jd_tt);
+
+// The same, with its rate in seconds per day, from the series' analytic
+// derivative.
+void tdb_minus_tt_with_rate(double jd_tt, double& value, double& rate_per_day);
+
+// TDB-TT for code that converts many instants (the Engine keeps one): nodes
+// one day apart, each holding the value and rate of the series' 136 terms
+// that can move it by 0.1 us anywhere in DE441's span, with the cubic
+// Hermite polynomial matching both between two nodes. Within 1.55 us of all
+// 787 terms over -13000..17000 (0.94 us over 1550-2650), below the 10-80 us
+// a JD double can hold there, at a tenth of the cost (docs/TIME.md). The
+// value depends only on the instant, never on query history. Nodes are kept
+// in a direct-mapped cache of 256. Not thread-safe; one per thread.
+class TdbInterpolator {
+public:
+    double tdb_minus_tt(double jd_tt);
+    double tdb_from_tt(double jd_tt) { return jd_tt + tdb_minus_tt(jd_tt) / 86400.0; }
+    // Series sums so far (for tests and benchmarks).
+    unsigned long long evaluations() const { return evaluations_; }
+    static constexpr double kNodeSpacingDays = 1.0;
+
+private:
+    struct Node {
+        long long index = -(1LL << 62);
+        double value = 0.0, rate = 0.0;
+    };
+    const Node& node(long long index);
+    std::array<Node, 256> nodes_{};
+    unsigned long long evaluations_ = 0;
+};
 
 inline double tdb_from_tt(double jd_tt) {
     return jd_tt + tdb_minus_tt(jd_tt) / 86400.0;
 }
 
 // Inverse; evaluating the series at the TDB argument inverts it to a
-// few nanoseconds, negligible next to the series' own ~10 us accuracy.
+// few nanoseconds (TDB-TT changes by under 3e-8 s per second).
 inline double tt_from_tdb(double jd_tdb) {
     return jd_tdb - tdb_minus_tt(jd_tdb) / 86400.0;
 }

@@ -529,7 +529,8 @@ PROMETHEIA_API prometheia_status prometheia_tt_to_utc(double jd_tt, prometheia_u
 /* The default Delta T model (observed USNO values), seconds. */
 PROMETHEIA_API double prometheia_delta_t(double jd_tt);
 
-/* TDB - TT in seconds (geocentric series). */
+/* TDB - TT in seconds at the geocentre: the full Fairhead & Bretagnon
+   series, 787 terms (docs/TIME.md). */
 PROMETHEIA_API double prometheia_tdb_minus_tt(double jd_tt);
 
 #ifdef __cplusplus

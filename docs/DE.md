@@ -56,13 +56,15 @@ over 30,000 years. Inside DE440's span JPL recommends DE440.
   Mercury from 8.2 to 4.4 µas, and leaves every other body at the print
   quantum. At 5000 and −3000 the fitted offsets (+0.05, −0.02 ms) are
   too small for the planets to confirm. Measured since (TIME.md, "TDB"):
-  Horizons converts TT with a one-term formula and ours with seven, so the
-  two differ by −0.145 to +0.027 ms across these epochs. That is part of
-  it but not all: evaluating our Moon on Horizons' TDB takes year 9000
-  from 124 to 76 µas and year −3000 from 14 to 65 µas. A JD held as a
-  double is quantized to 10–80 µs at these epochs, 5–43 µas on the Moon,
-  which floors the comparison. The last 50–75 µas at the two extreme
-  epochs is not explained. The ext-geo requests are declared in
+  Horizons converts TT with a one-term formula, and ours has been the full
+  Fairhead & Bretagnon series since 2026-09-29, 0.3 ms apart at 9000. So
+  the test now asks each row at the TDB instant Horizons used. On that
+  footing the Sun and planets agree to ≤ 3.4 µas, which is Horizons'
+  print quantum, and 0.8 m; they were 8.3 µas and 3.8 m before. The Moon
+  is ≤ 8 µas at five epochs and 56–76 µas at −3000, 5000 and 9000. A JD
+  held as a double is quantized to 10–80 µs at these epochs (5–43 µas on
+  the Moon), but at −3000 the quantum is only 5 µas. **The Moon's 56–76
+  µas at the far epochs, about 0.1 m, is not explained.** The ext-geo requests are declared in
   `tools/fetch/horizons_fetch.py`.
 - **Against DE440 where both run** (61 epochs 1550–2650, astrometric
   ICRF): the Sun and every planet agree to ≤ 0.013 mas and a few metres.

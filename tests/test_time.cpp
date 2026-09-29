@@ -194,7 +194,7 @@ TEST_CASE("time_utc_tt_sweep_roundtrip") {
 }
 
 TEST_CASE("time_tdb_tt") {
-    // Amplitude bound over the DE200 span, published-accuracy class.
+    // Amplitude over the DE200 span: the annual term dominates.
     double max_abs = 0.0;
     double j2000_val = tdb_minus_tt(2451545.0);
     for (double jd = 2305424.5; jd <= 2513392.5; jd += 8.0) {
@@ -212,6 +212,47 @@ TEST_CASE("time_tdb_tt") {
         const double rt = tt_from_tdb(tdb_from_tt(jd));
         CHECK(near(rt, jd, 1e-11));
     }
+}
+
+TEST_CASE("time_tdb_tt_is_the_full_series") {
+    // The full Fairhead & Bretagnon series (docs/TIME.md, "TDB"): pyerfa
+    // 2.0.1.5's dtdb at the geocentre (ut = elong = u = v = 0), across DE441's
+    // span. The same 787 terms summed in the same order: rounding only.
+    static const struct {
+        double jd_tt, seconds;
+    } kErfa[] = {
+        {-3027000.5, -8.66682288231936711e-04}, {625295.0, 1.31620397249393082e-03},
+        {1721045.0, 5.14161367189664808e-04},   {2287184.5, 9.73366141642354642e-05},
+        {2415020.0, -3.33217401018734853e-05},  {2451545.0, -9.93071989437944655e-05},
+        {2461300.5, -1.54983894752191227e-03},  {2688976.5, 2.72691536953814455e-04},
+        {5008295.0, -1.24146362054622286e-03},  {7930000.5, -8.39980598383652569e-04},
+    };
+    for (const auto& f : kErfa) {
+        CAPTURE(f.jd_tt);
+        CHECK(std::fabs(tdb_minus_tt(f.jd_tt) - f.seconds) < 1e-17);
+    }
+    // The analytic rate against a central difference of the series.
+    for (double jd : {625295.0, 2451545.0, 2461300.5, 5008295.0}) {
+        double v, r;
+        tdb_minus_tt_with_rate(jd, v, r);
+        const double h = 0.01;
+        CHECK(std::fabs(r - (tdb_minus_tt(jd + h) - tdb_minus_tt(jd - h)) / (2 * h)) < 1e-11);
+        CHECK(v == tdb_minus_tt(jd));
+    }
+    // The engine's interpolator: one-day nodes of its 136 terms, within
+    // 1.55 us of all 787 anywhere in -13000..17000 (measured every 2.4 days;
+    // 0.94 us over 1550-2650), and independent of what it was asked before.
+    TdbInterpolator walk;
+    double worst = 0.0;
+    for (double jd = -3027000.5; jd < 7930000.0; jd += 5471.37) {
+        TdbInterpolator fresh;
+        const double a = walk.tdb_minus_tt(jd), b = fresh.tdb_minus_tt(jd);
+        CHECK(a == b);
+        worst = std::max(worst, std::fabs(a - tdb_minus_tt(jd)));
+    }
+    std::printf("  interpolated engine series vs all 787 terms: worst %.3e s\n", worst);
+    CHECK(worst < 1.6e-6);
+    CHECK(worst > 1e-8); // it is the truncated set, not the full one
 }
 
 TEST_CASE("time_delta_t") {

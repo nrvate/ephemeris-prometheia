@@ -1201,6 +1201,10 @@ struct Engine::Impl {
     // 0.004 uas): the value depends only on the epoch, and the node cache is
     // shared by every body and every rate stencil this engine evaluates.
     frames::NutationInterpolator nutation;
+    // TDB-TT from one-day nodes (time::TdbInterpolator, docs/TIME.md): the
+    // full series costs ~12 us and a calc converts several instants. Within
+    // 1.55 us of all 787 terms, below what a JD double holds.
+    time::TdbInterpolator tdb;
 
     void add_nutation(EpochFrames& f) {
         nutation.at(f.jd_tt, f.dpsi, f.deps);
@@ -1598,7 +1602,7 @@ struct Engine::Impl {
         if (tracks->empty())
             return 0.0; // covariance present but zero
 
-        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
         const double t_ret = jd_tdb - tau;
         double cov[6];
         if (!tracks->covariance_at(t_ret, cov) || !perturbers.ok())
@@ -1799,7 +1803,7 @@ struct Engine::Impl {
                 lon += kTwoPi / 2.0;
         } else {
             double pos[3];
-            const double jd_tdb = time::tdb_from_tt(jd_tt);
+            const double jd_tdb = tdb.tdb_from_tt(jd_tt);
             if (z.anchor == ZodiacAnchor::Star) {
                 auto idx = star_by_hr(z.hr);
                 if (!idx)
@@ -1927,7 +1931,7 @@ struct Engine::Impl {
     // the solution does not depend on it beyond the 1e-15-day tolerance.
     Result<void> vector_at(int id, double jd_tt, const CalcOptions& o, double out[3], double& tau,
                            int& origin) {
-        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
         double obs[6];
         auto r = observer(o, jd_tt, jd_tdb, obs);
         if (!r)
@@ -2449,7 +2453,7 @@ struct Engine::Impl {
     template <class PointFn>
     Result<void> computed_point_vector_at(double jd_tt, const CalcOptions& o, PointFn&& at,
                                           bool point_is_sun, double out[3], double& tau) {
-        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
         double obs[6], pt[3];
         auto r = observer(o, jd_tt, jd_tdb, obs);
         if (!r)
@@ -2498,7 +2502,7 @@ struct Engine::Impl {
                                      (o.center == Center::Body && o.center_body == body::kSun);
         if (o.deflection && !observer_is_sun && !point_is_sun) {
             double sun[6];
-            r = sun_at(time::tdb_from_tt(jd_tt - tau), sun);
+            r = sun_at(tdb.tdb_from_tt(jd_tt - tau), sun);
             if (!r)
                 return r;
             const double sun_to_point[3] = {pt[0] - sun[0], pt[1] - sun[1], pt[2] - sun[2]};
@@ -2589,7 +2593,7 @@ struct Engine::Impl {
         }
         apply_transpose(to_ecliptic, ecl, rel);
 
-        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
         double centre[6];
         auto r = el.origin == ElementOrigin::Earth
                      ? source->barycentric(body::kEarth, jd_tdb, centre)
@@ -2702,7 +2706,7 @@ struct Engine::Impl {
 
     Result<void> star_vector_at(const stars::Object& star, double jd_tt, const CalcOptions& o,
                                 double out[3]) {
-        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
         double obs[6];
         auto r = observer(o, jd_tt, jd_tdb, obs);
         if (!r)
@@ -2753,7 +2757,7 @@ struct Engine::Impl {
     // period leaves no truncation worth the name.
     Result<void> star_distance_rate(const stars::Object& star, double jd_tt, const CalcOptions& o,
                                     double& rate_au_day) {
-        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
         double obs[6];
         auto r = observer(o, jd_tt, jd_tdb, obs);
         if (!r)
@@ -3059,7 +3063,7 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
     if (!r)
         return r.error();
 
-    const Source& answered = impl_->chain->at(time::tdb_from_tt(jd_tt));
+    const Source& answered = impl_->chain->at(impl_->tdb.tdb_from_tt(jd_tt));
     res.provenance.source = origin == kFromCatalog && !impl_->overlay_source_.empty()
                                 ? std::string_view(impl_->overlay_source_)
                                 : std::string_view(answered.description);
@@ -3214,7 +3218,7 @@ Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitEleme
         res.pos);
     if (!r)
         return r.error();
-    const Source& answered = impl_->chain->at(time::tdb_from_tt(jd_tt));
+    const Source& answered = impl_->chain->at(impl_->tdb.tdb_from_tt(jd_tt));
     res.provenance.source = answered.description;
     res.provenance.denum = answered.denum;
     res.provenance.precession = o.precession;
