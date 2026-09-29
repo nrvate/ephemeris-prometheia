@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Fetch JPL planetary ephemeris binaries (DE440, DE441) with checksums.
+"""Fetch JPL's ephemeris files (DE440, DE441, the SB441-N16 asteroid
+perturber kernel) with checksums, and provision what derives from them.
 
-The engine reads JPL's DE binaries directly (docs/DE.md). They are not
-committed -- DE441 is ~2.6 GB -- so they are acquired here, by committed
-machinery, and verified against pinned SHA-256s:
+The engine reads JPL's DE binaries directly (docs/DE.md), and integrates
+small bodies with the 16 masses of SB441-N16 (docs/INGESTION.md, "Asteroid
+perturber kernel"). None is committed -- DE441 is ~2.6 GB, the full kernel
+646 MB -- so they are acquired here, by committed machinery, and verified
+against pinned SHA-256s:
 
   * strictly sequential, one file at a time, a pause between requests;
   * an identifying User-Agent;
@@ -13,15 +16,25 @@ machinery, and verified against pinned SHA-256s:
   * retries only on transport errors and 5xx, with backoff (a 4xx means the
     request itself was refused, and repeating it helps nobody);
   * `--probe` sends HEAD requests only, to confirm names and sizes before a
-    large download is started.
+    large download is started;
+  * a derived file (the kernel cut to DE440's span, made by
+    build/prometheia-spk-trim) is made after its source and verified
+    against its own pin, so either file can be checked on any machine.
 
-JPL's planetary ephemerides are US-government work. Source:
-https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/ (docs/DE.md).
+Which to fetch: with DE440 alone the cut kernel suffices (1550-2650). A
+small body more than 100 years from its element epoch is refused without
+a kernel, and beyond 1550-2650 it needs the full one (-7999..9000), which
+is what DE441's span calls for (docs/VALIDATION.md, "Small bodies").
+
+JPL's ephemerides are US-government work. Sources:
+https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/ (docs/DE.md) and
+https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/.
 
 Usage:
     tools/fetch/de_fetch.py --list
     tools/fetch/de_fetch.py --dir /nvm/work/ephe --only de441 --probe
     tools/fetch/de_fetch.py --dir /nvm/work/ephe --only de441
+    tools/fetch/de_fetch.py --dir ephe --only sb441        # kernel + DE440-span cut
     tools/fetch/de_fetch.py --dir /nvm/work/ephe --verify
 """
 
@@ -29,6 +42,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -37,9 +51,12 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetchlog  # noqa: E402
 
-USER_AGENT = ("prometheia-fetch/0.1.0 (Ephemeris Prometheia; JPL DE binaries; "
+USER_AGENT = ("prometheia-fetch/0.1.0 (Ephemeris Prometheia; JPL ephemeris files; "
               "strictly sequential, one file at a time)")
 BASE = "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/"
+# A set's files live under BASE + set name, unless named here.
+SET_URL = {"sb441": "https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/"}
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PAUSE_S = 5.0
 CHUNK = 1 << 20
 
@@ -60,11 +77,73 @@ SETS = {
         ("testpo.441",
          "e60c08ced7741a07d4dfe89b124afb4b1648bd1e3d0eb68dd9a79bf6990bb9c2"),
     ],
+    # JPL's asteroid perturbers (IOM 392R-21-005, Farnocchia 2021), -7999..9000;
+    # the pin is the one in ephe/SHA256SUMS since 2026-09-17.
+    "sb441": [
+        ("sb441-n16.bsp", "919d612ce3c72a78fc7158f9120156542d0f21e6b8b052e4c1339c759747fd90"),
+    ],
 }
+
+# Files made from a fetched one, per set: (name, source, prometheia-spk-trim
+# arguments, pinned sha256). The cut is bit-identical to the source inside
+# its span (docs/SPK.md), and its comment names no tool version, so the pin
+# holds across releases.
+DERIVED = {
+    "sb441": [
+        ("sb441-n16-de440span.bsp", "sb441-n16.bsp", ["--from", "2287184.5", "--to", "2688976.5"],
+         "e7b67e3281583f53115849e74993d76da08c974f987916c9293541f9a0147f09"),
+    ],
+}
+# Cuts made before the comment dropped the tool version (2026-09-29): the same
+# records, a comment reading "prometheia-spk-trim 0.1.0". Accepted by --verify.
+LEGACY = {"a31b839a9b265725da293b0c7a927f7a9dfaa0de4cdb5da6772f7b406d8f2376":
+          "an older prometheia-spk-trim's cut, the same records"}
 
 
 def url_of(de, name):
-    return f"{BASE}{de}/{name}"
+    return f"{SET_URL.get(de, BASE + de + '/')}{name}"
+
+
+def derive(directory, sets, force, verify_only):
+    """Make (or, with verify_only, check) each derived file; count failures."""
+    bad = 0
+    trim = os.path.join(REPO, "build", "prometheia-spk-trim")
+    for de in sets:
+        for name, source, args, pin in DERIVED.get(de, []):
+            path, src = os.path.join(directory, name), os.path.join(directory, source)
+            if verify_only:
+                if not os.path.exists(path):
+                    print(f"MISSING  {name}")
+                    bad += 1
+                    continue
+                digest = sha256_file(path)
+                state = "ok" if digest == pin else ("ok" if digest in LEGACY else "CHANGED")
+                bad += state != "ok"
+                note = f" ({LEGACY[digest]})" if digest in LEGACY else ""
+                print(f"{state:10s} {name} {digest}{note}")
+                continue
+            if os.path.exists(path) and not force:
+                print(f"present  {name} (derived; use --force to remake)")
+                continue
+            if not os.path.exists(src):
+                print(f"cannot make {name}: {source} is not in {directory}")
+                bad += 1
+                continue
+            if not os.access(trim, os.X_OK):
+                print(f"cannot make {name}: {trim} is not built "
+                      "(cmake --build build --target prometheia-spk-trim)")
+                bad += 1
+                continue
+            part = path + ".part"
+            subprocess.run([trim, src, part] + args, check=True)
+            digest = sha256_file(part)
+            if digest != pin:
+                print(f"{name}: made, but sha256 {digest} DIFFERS from pin; {part} kept")
+                bad += 1
+                continue
+            os.replace(part, path)
+            print(f"{name}: made from {source}, sha256 {digest} (matches pin)")
+    return bad
 
 
 def request(url, method="GET"):
@@ -127,6 +206,10 @@ def main():
     if args.list:
         for de, name, pin in todo:
             print(f"{url_of(de, name)}\n  pinned {pin or '(not pinned)'}")
+        for de in sets:
+            for name, source, trim_args, pin in DERIVED.get(de, []):
+                print(f"{name} (made from {source}: prometheia-spk-trim {' '.join(trim_args)})"
+                      f"\n  pinned {pin}")
         return 0
     if not args.dir:
         ap.error("--dir is required")
@@ -167,6 +250,8 @@ def main():
                           "fetched_utc": fetchlog.utc()}
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2, sort_keys=True)
+    if not args.probe:
+        bad += derive(args.dir, sets, args.force, args.verify)
     return 1 if bad else 0
 
 

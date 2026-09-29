@@ -141,9 +141,12 @@ periodic.
 **Where the integration refuses:** with a kernel loaded, an instant outside
 its span is a coverage error naming the kernel's span (per-object errCode
 3, JSON `outside-coverage`). The trimmed `sb441-n16-de440span.bsp` covers
-1550–2650 and the full kernel −7999 to 9000. Without a kernel, nothing
-refuses short of the planets' own coverage, so the accuracy statement says
-how the answer degrades.
+1550–2650 and the full kernel −7999 to 9000. **Without a kernel, a catalog
+body is refused more than 100 years (and a day, for light time) from its
+element epoch** (maintainer, 2026-09-29). There the no-kernel error is
+8.7″, and at 400 years it is 75″. The refusal is the same coverage error,
+and it names `tools/fetch/de_fetch.py --only sb441`, which fetches and
+provisions the kernel (`small_bodies_need_the_kernel_past_a_century`).
 
 - **Frame fix at the element epoch:** the first measurement showed 40–100 km
   here. SBDB elements are in **JPL's J2000 ecliptic**: the ICRF rotated by the

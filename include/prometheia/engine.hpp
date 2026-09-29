@@ -337,7 +337,10 @@ public:
     // trajectories come from older orbit solutions (measured tens of km off
     // the current ones near the present). Replaces an earlier perturber
     // kernel and invalidates the integrated trajectories and uncertainty
-    // tracks.
+    // tracks. Without a kernel a catalog body is served within 100 years (and
+    // a day) of its element epoch and refused beyond with a CoverageError;
+    // with one, as far as the kernel spans (docs/VALIDATION.md, "Small
+    // bodies"; tools/fetch/de_fetch.py --only sb441 provisions it).
     Result<void> add_perturbers(const std::string& spk_path);
 
     // Drops every memoized small-body trajectory and uncertainty track (they

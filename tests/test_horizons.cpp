@@ -524,6 +524,31 @@ TEST_CASE("horizons_sigma_calibration") {
 }
 
 // Report only (seconds: +-100-year integrations and the sigma tracks).
+// Without an asteroid perturber kernel a catalog body is refused more than 100
+// years (and a day) from its element epoch, and the refusal says how to get
+// one; with the kernel it is answered (docs/VALIDATION.md, maintainer
+// 2026-09-29).
+TEST_CASE("small_bodies_need_the_kernel_past_a_century") {
+    Engine* plain = engine();
+    Engine* kernel = engine_sb441();
+    if (!plain || !kernel)
+        return;
+    CalcOptions g = CalcOptions::geometric();
+    g.speed = false;
+    g.sigma = false;
+    constexpr int kCeres = 20000001;
+    // Ceres's element epoch in tests/data/sample-100.epm.
+    constexpr double kEpoch = kSmallEpoch;
+    CHECK(plain->calc(kCeres, kEpoch - 99.0 * 365.25, g).ok());
+    CHECK(plain->calc(kCeres, kEpoch + 100.0 * 365.25, g).ok()); // the edge itself
+    auto far = plain->calc(kCeres, kEpoch - 101.0 * 365.25, g);
+    REQUIRE_FALSE(far.ok());
+    CHECK(far.error().code == ErrorCode::CoverageError);
+    CHECK(far.error().message.find("perturber kernel") != std::string::npos);
+    CHECK(far.error().message.find("de_fetch.py --only sb441") != std::string::npos);
+    CHECK(kernel->calc(kCeres, kEpoch - 101.0 * 365.25, g).ok());
+}
+
 // Ceres, Pallas and Vesta out to the span Horizons itself serves a numbered
 // asteroid (it refuses one before 1599-12-11), about four centuries either
 // side of the element epoch, with JPL's 16 perturbers: heliocentric
@@ -565,20 +590,31 @@ TEST_CASE("horizons_small_bodies_long_arc_report" * doctest::skip()) {
     if (!e)
         return;
     Engine* p = engine_sb441(); // optional column
+    // Without a kernel a catalog body is refused past 100 years of its element
+    // epoch (docs/VALIDATION.md): that column reads kNa there.
+    const auto refused = [](Engine& en, int body, double jd_tt) {
+        CalcOptions g = CalcOptions::geometric();
+        g.speed = false;
+        g.sigma = false;
+        auto r = en.calc(body, jd_tt, g);
+        return !r.ok() && r.error().code == ErrorCode::CoverageError;
+    };
     std::printf("  %-16s %6s %12s %12s %14s %14s\n", "request", "years", "astrometric",
                 "with SB441", "3-sigma ours", "3-sigma JPL");
     for (const HorizonsObs& h : kHorizonsObs) {
         if (!is_small(h))
             continue;
         double ours3 = kNa;
-        const double sep = small_body_offset_arcsec(*e, h, &ours3);
+        const double sep =
+            refused(*e, h.body, h.jd_tt) ? kNa : small_body_offset_arcsec(*e, h, &ours3);
         const double sep_p = p ? small_body_offset_arcsec(*p, h, nullptr) : kNa;
         std::printf("  %-16s %+6.0f %11.4f\" %11.4f\" %13.4f\" %13.3f\"\n", h.request,
                     (h.jd_tt - kSmallEpoch) / 365.25, sep, sep_p, ours3, h.pos_3s);
     }
     for (const HorizonsVec& v : kHorizonsVec)
         std::printf("  %-16s %+6.0f %12.1f km %12.1f km heliocentric (without / with SB441)\n",
-                    v.request, (v.jd_tdb - kSmallEpoch) / 365.25, heliocentric_km(*e, v),
+                    v.request, (v.jd_tdb - kSmallEpoch) / 365.25,
+                    refused(*e, v.body, time::tt_from_tdb(v.jd_tdb)) ? kNa : heliocentric_km(*e, v),
                     p ? heliocentric_km(*p, v) : kNa);
 }
 

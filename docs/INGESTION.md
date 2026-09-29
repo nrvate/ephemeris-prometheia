@@ -182,21 +182,26 @@ asteroids (docs/ENGINE.md, `add_perturbers`). Their trajectories come from
 JPL's SB441-N16 kernel, a US-government work:
 
 ```sh
-# once, 616 MB, sequential single download (announce it; see Etiquette)
-curl -f -A 'prometheia-fetch/0.1.0' -o ephe/sb441-n16.bsp \
-  https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/sb441-n16.bsp
-# the DE440 span only: 41.8 MB, bit-identical inside it
-./build/prometheia-spk-trim ephe/sb441-n16.bsp ephe/sb441-n16-de440span.bsp \
-  --from 2287184.5 --to 2688976.5
+# once, 646 MB, a single sequential download (announce it; see Etiquette),
+# then the DE440-span cut (41.8 MB, bit-identical inside it) made from it by
+# build/prometheia-spk-trim; both checked against pinned SHA-256s
+tools/fetch/de_fetch.py --dir ephe --only sb441
+tools/fetch/de_fetch.py --dir ephe --only sb441 --verify
 ```
+
+Without a kernel a catalog body is served within 100 years of its element
+epoch; beyond, it needs one: the cut for 1550–2650, and the full kernel for
+DE441's span (docs/VALIDATION.md, "Small bodies").
 
 - The kernel carries no masses; the engine takes them from the DE file's
   `MAnnnn` constants (DE440 carries all 16) or its built-in DE440 table.
   JPL documents the set in IOM 392R-21-005 (Farnocchia 2021).
 - Releases ship the trimmed kernel as an asset beside the catalogs, with its
   SHA-256 (the full kernel: 919d612c…fd90; the DE440-span cut:
-  a31b839a…2376). It changes only when JPL publishes a new perturber
-  set.
+  e7b67e32…7f09). It changes only when JPL publishes a new perturber
+  set. Cuts made before 2026-09-29 read a31b839a…2376: the same records,
+  with a comment naming the trim tool's version, which it no longer
+  writes so that the cut can be pinned. `--verify` accepts both.
 
 ## Orbit covariance: on demand
 

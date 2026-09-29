@@ -80,9 +80,10 @@ int main(int argc, char** argv) {
     char span[160];
     std::snprintf(span, sizeof span, "JD %.1f .. %.1f TDB", jd0, jd1);
     const std::string name = std::filesystem::path(in).filename().string();
-    std::string comments = "Trimmed by prometheia-spk-trim " +
-                           std::string(prometheia::version_string) + " from " + name + " to " +
-                           span + " (whole records, copied verbatim).\n";
+    // No version in the comment: the cut's bytes depend on the source and the
+    // span alone, so tools/fetch/de_fetch.py can pin the result.
+    std::string comments = "Trimmed by prometheia-spk-trim from " + name + " to " + span +
+                           " (whole records, copied verbatim).\n";
     if (!original.value().empty())
         comments += "Original comments follow.\n\n" + original.value();
     std::string internal = file.value().internal_name();

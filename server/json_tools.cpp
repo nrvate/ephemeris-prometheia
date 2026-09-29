@@ -710,7 +710,8 @@ Json accuracy(const ResolvedObject& obj) {
         return {{"statement",
                  "integrated from JPL SBDB elements: against JPL Horizons 0.04\" rms within "
                  "10 years of the element epoch (0.005\" with JPL's asteroid perturbers) and "
-                 "up to 0.9\" over 1600-2500 with them, 75\" without; outside 1600-2500 JPL "
+                 "up to 0.9\" over 1600-2500 with them; without them a body is served only "
+                 "within 100 years of its element epoch (8.7\"); outside 1600-2500 JPL "
                  "publishes no reference and the error grows to arcminutes over millennia; "
                  "sigma_arcsec where the catalog carries a covariance"},
                 {"doc", "docs/VALIDATION.md"}};

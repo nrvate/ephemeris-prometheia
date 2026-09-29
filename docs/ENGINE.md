@@ -416,7 +416,13 @@ not indexed (address those by their NAIF IDs).
   μ/(c²r³)[(4μ/r − v²) **r** + 4(**r**·**v**) **v**], relative to the Sun:
   the relativistic perihelion advance (tested against the closed form
   6πμ/(c²a(1−e²)) per orbit to 1 part in 10⁴).
-- **Asteroid perturbers** (`add_perturbers(path)`, optional): an SPK
+- **Asteroid perturbers** (`add_perturbers(path)`, optional, but required
+  past 100 years): without a kernel a catalog body is served within 100
+  years (and a day) of its element epoch, where the integration is measured
+  within 8.7″ of Horizons, and refused beyond with a coverage error that
+  says how to get one (maintainer, 2026-09-29). With the kernel it is served
+  as far as the kernel spans (docs/VALIDATION.md, "Small bodies"). The kernel
+  is an SPK
   kernel of heliocentric numbered-asteroid segments (JPL's
   `sb441-n16.bsp`: Ceres, Pallas, Juno, Vesta, Iris, Hygiea, Eunomia,
   Psyche, Euphrosyne, Europa, Cybele, Sylvia, Thisbe, Camilla, Davida,

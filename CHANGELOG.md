@@ -13,6 +13,15 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Without an asteroid perturber kernel, a catalog body is served within 100
+  years of its element epoch** and refused beyond, with a coverage error
+  naming how to get the kernel (maintainer). The error there is 8.7″;
+  without the kernel it reaches 75″ by 400 years and arcminutes beyond.
+  `tools/fetch/de_fetch.py --only sb441` fetches JPL's SB441-N16 and makes
+  the DE440-span cut, both checked against pinned SHA-256s. It replaces the
+  documented `curl` line. `prometheia-spk-trim` no longer writes its version
+  into the cut, so the cut's hash holds across releases (e7b67e32…; the old
+  a31b839a… is the same records).
 - **Small bodies far from their element epoch, measured and stated**
   (docs/VALIDATION.md, "Centuries and millennia"). With JPL's perturbers,
   Ceres, Pallas and Vesta stay within 0.9″ of Horizons over 1600–2500, the

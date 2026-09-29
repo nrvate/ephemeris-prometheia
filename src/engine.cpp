@@ -284,6 +284,12 @@ struct MeanElementsFit {
 // The fit's span (the table header): nothing outside it is answered.
 constexpr double kMeanElementsFromJd = 2287188.5, kMeanElementsToJd = 2688975.5;
 
+// How far from its element epoch a catalog body is integrated without an
+// asteroid perturber kernel: 100 Julian years (docs/VALIDATION.md), plus a
+// day, so that the limit applies to the instant asked for and not to the
+// light-time-retarded instant evaluated (under 0.6 day even at 100 AU).
+constexpr double kNoPerturberSpanDays = 100.0 * 365.25 + 1.0;
+
 // The Moon's mean orbit: node and perigee from the fundamental arguments;
 // inclination, eccentricity and semi-major axis as constants (the published
 // mean values of the lunar orbit).
@@ -1428,6 +1434,19 @@ struct Engine::Impl {
                                                        " is in neither " + source->description +
                                                        " nor the loaded catalog(s)");
         const catalog::Record& rec = *recr.value();
+        // Without JPL's 16 asteroid perturbers the integration drifts: 8.7"
+        // at 100 years from the element epoch, 75" at 400, arcminutes over
+        // millennia (docs/VALIDATION.md, "Small bodies"). Past 100 years it
+        // is refused, and the kernel extends it (maintainer, 2026-09-29).
+        if (!asteroids && std::fabs(jd_tdb - rec.epoch_jtdb) > kNoPerturberSpanDays) {
+            char buf[320];
+            std::snprintf(buf, sizeof buf,
+                          "without an asteroid perturber kernel a catalog body is served within "
+                          "100 years of its element epoch (JD %.1f); load one (add_perturbers, "
+                          "--perturbers; tools/fetch/de_fetch.py --only sb441 provisions it)",
+                          rec.epoch_jtdb);
+            return make_error(ErrorCode::CoverageError, buf);
+        }
 
         auto& slot = small_bodies[uint64_t(id)];
         if (!slot.memo) {
