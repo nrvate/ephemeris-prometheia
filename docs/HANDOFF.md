@@ -97,6 +97,15 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
 
 ## Released
 
+- **v0.7.1**, published 2026-09-29
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.7.1).
+  - The library and tools are 0.7.1 (C ABI 6, one status appended);
+    `prometheiad` is 0.9.0.
+  - New: a fixed star's distance rate in closed form;
+    `PROMETHEIA_ERROR_COVERAGE`; protocol v4 re-pinned at the site drop and
+    the rate-bound reading (Astrolog `7cbf0d8`, `5f11726`); `ratesweep.py`
+    grading per max(1 AU, r); the drift check scheduled.
+  - Moves a pinned value twice: star distance rates, and the dataset id.
 - **v0.7.0**, published 2026-09-19
   (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.7.0).
   - The library and tools are 0.7.0 (C ABI 6, unchanged); `prometheiad` is

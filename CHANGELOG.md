@@ -11,7 +11,17 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.7.1 — 2026-09-29
+
+The library and tools are 0.7.1; the C ABI is unchanged (6: one status value
+appended, no layout moved), announced to the Astrolog side before it landed.
+`prometheiad` is 0.9.0, because two of its answers change: a fixed star's
+distance rate, and a site at or below the Earth's centre, now ERROR 1. **Two
+things move for anyone pinning values:** the star distance-rate column (by up
+to 2.3e-5 AU/day on Polaris), and the dataset id's digest, which carries the
+engine version (`…#2cc1eee3` for DE440 alone). The USNO ΔT and leap-second
+tables were refreshed for the release and are unchanged (observed through
+2026-04).
 
 - **A fixed star's distance rate is computed in closed form**
   (docs/ENGINE.md, "Rates"). It was a central difference of positions
