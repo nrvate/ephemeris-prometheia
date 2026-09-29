@@ -51,7 +51,13 @@ closing when they say it has landed. Beyond DE440 we agree with Horizons
 to ≤ 8.3 µas, and the Moon to 124 µas at year 9000, a ~0.2 ms time offset
 (0645170, 055cb29, DE.md). JSON rows now carry `delta_t_s` and
 `delta_t_basis` (6ad20b7). The MCP server config serves DE441 too
-(maintainer, 2026-09-29). The C API gained
+(maintainer, 2026-09-29).
+
+**Record z (f4cbcba), against their ts.16:** no findings against them. Their
+Hamburg rows all moved toward ours. The one finding was our `apparent` band
+omitting the date-frame models: their truncated nutation, 1 mas at 2100.
+The band now carries a measured 1.7 mas (CROSS-TEST.md). Future UTC stays
+TAI − 37 s (maintainer), disclosed as `ut1_minus_utc_s` (0447aeb). The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
