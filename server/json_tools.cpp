@@ -216,13 +216,34 @@ std::string format_utc(double jd_tt) {
     return buf;
 }
 
+// What the default Delta T at an instant rests on (docs/TIME.md): read
+// off the model's own spans, so a clock time far from the present says the
+// Earth rotation under it is reconstructed or predicted, not observed.
+const char* delta_t_basis(double jd_tt) {
+    const double year = 2000.0 + (jd_tt - 2451545.0) / 365.25;
+    if (jd_tt > time::ObservedDeltaT::table_last_jd())
+        return "predicted: the recent trend, then the Morrison & Stephenson (2004) tidal parabola";
+    if (jd_tt >= time::ObservedDeltaT::table_first_jd())
+        return "observed: USNO";
+    if (year >= time::StephensonMorrisonHohenkerkDeltaT::spline_first_year())
+        return "reconstructed from historical eclipses and occultations: Stephenson, Morrison & "
+               "Hohenkerk (2016, v. 2020)";
+    return "before the eclipse record: the long-term tidal parabola of Stephenson, Morrison & "
+           "Hohenkerk (2016)";
+}
+
 // An instant as the replies give it: JD(TT), and UTC from 1972, or before it
-// the UT1 a clock then kept.
+// the UT1 a clock then kept; with the Delta T between them and its basis.
 Json time_of(double jd_tt) {
     const std::string utc = format_utc(jd_tt);
+    Json t = {{"jd_tt", jd_tt}};
     if (!utc.empty())
-        return {{"jd_tt", jd_tt}, {"utc", utc}};
-    return {{"jd_tt", jd_tt}, {"ut1", format_civil(time::jd_ut1_from_tt(jd_tt))}};
+        t["utc"] = utc;
+    else
+        t["ut1"] = format_civil(time::jd_ut1_from_tt(jd_tt));
+    t["delta_t_s"] = time::delta_t(jd_tt);
+    t["delta_t_basis"] = delta_t_basis(jd_tt);
+    return t;
 }
 
 // The instants a call asks for, TT.
@@ -1042,8 +1063,9 @@ Result<Json> convert_time(const Json& a, ToolError* err) {
                     {"jd_ut1", time::jd_ut1_from_tt(tt)},
                     {"delta_t_s", dt},
                     {"notes", "TT-UT1 (delta T) is observed from 1657 to the present month, a "
-                              "reconstruction before and a trend after (docs/TIME.md). Before "
-                              "1972 a clock time is read as UT1, and given back as \"ut1\""}});
+                              "reconstruction before and a trend after (docs/TIME.md); "
+                              "delta_t_basis says which. Before 1972 a clock time is read as "
+                              "UT1, and given back as \"ut1\""}});
     return out;
 }
 
@@ -1249,7 +1271,10 @@ guess.
   "Priapus") likewise, within ~27 degrees. They are not opposite each other.
 - A zodiac defined at the instant (true-citra, the galactic ones) has no
   anchor plane; capabilities lists each zodiac's planes.
-- Times before 1657 or in the future carry delta T from a model (convert_time).
+- Times before 1657 or in the future carry delta T from a model: each row's
+  time gives delta_t_s and delta_t_basis. Far from the present, delta T's
+  uncertainty, not the ephemeris, bounds anything computed from a clock
+  time (the Moon moves 0.55 arcsec per second of it).
 )";
 }
 

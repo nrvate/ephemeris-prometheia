@@ -99,6 +99,33 @@ TEST_CASE("json_clock_times_before_1972_are_ut1") {
     CHECK(err.code == "invalid-arguments");
 }
 
+TEST_CASE("json_rows_say_what_their_delta_t_rests_on") {
+    // Far from the present the Delta T under a clock time is modelled, and
+    // at the Moon it is worth 0.5" a second: every row carries the value
+    // and which of the model's spans it came from.
+    synth::TempFile tf("json-dt");
+    Engine e = synth::open_synthetic(tf);
+    const std::pair<const char*, const char*> cases[] = {
+        {"1955-03-01T09:00:00Z", "observed"},
+        {"1000-03-20T12:00:00Z", "reconstructed"},
+        {"-1000-03-20T12:00:00Z", "before the eclipse record"},
+        {"2200-03-20T12:00:00Z", "predicted"},
+    };
+    for (const auto& [when, basis] : cases) {
+        CAPTURE(when);
+        const Json c = run(e, "convert_time", {{"time", when}});
+        REQUIRE(c.is_object());
+        CHECK(c["delta_t_basis"].get<std::string>().rfind(basis, 0) == 0);
+        CHECK(c["delta_t_s"].get<double>() ==
+              doctest::Approx((c["jd_tt"].get<double>() - c["jd_ut1"].get<double>()) * 86400.0)
+                  .epsilon(1e-6));
+    }
+    const Json rows = run(e, "positions", {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}});
+    const Json& t = rows["results"][0]["rows"][0]["time"];
+    CHECK(t["delta_t_basis"] == "observed: USNO");
+    CHECK(t["delta_t_s"].get<double>() == doctest::Approx(63.83).epsilon(1e-3));
+}
+
 TEST_CASE("json_bad_arguments_are_whole_call_errors") {
     synth::TempFile tf("json-bad");
     Engine e = synth::open_synthetic(tf);

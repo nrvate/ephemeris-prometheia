@@ -139,6 +139,15 @@ The agent-facing summary of what to ask, and how, is the MCP resource
     second (from 1961). So a birth chart can be asked by clock time in any
     year. A reply names the scale: each row's `time` is `{"jd_tt", "utc"}`
     from 1972 and `{"jd_tt", "ut1"}` before it, as does `convert_time`.
+  - **Every row's `time` also carries `delta_t_s` and `delta_t_basis`**
+    (2026-09-29): the ΔT between TT and UT1 at that instant, and whether
+    it is `observed` (USNO, 1657 to the table's last month), `reconstructed`
+    from historical eclipses and occultations (Stephenson, Morrison &
+    Hohenkerk, −720 to 1657), from the long-term tidal parabola `before the
+    eclipse record`, or `predicted` after the table. With DE441 behind
+    DE440 a clock time can reach millennia back, where ΔT is hours and
+    its uncertainty, not the ephemeris, bounds anything computed from UT:
+    the Moon moves 0.55″ and Earth rotation 15″ per second of ΔT.
     A leap second (`:60`) before 1972 is refused (maintainer, 2026-09-19).
 - **Defaults** are what a chart wants: apparent (all three corrections),
   geocentric, the true ecliptic of date, tropical, rates on. Each can be
