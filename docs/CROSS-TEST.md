@@ -2062,6 +2062,65 @@ measures by differencing f64 positions, and at h = 1/1024 that difference
 cannot resolve Polaris's rate below ~5.7e-6 AU/day however exact the rate
 is. What `0x0013` should say is the next item (HANDOFF.md).
 
+**The sweep after the fix** (`docs/crosstest/2026-09-29-ratesweep-ours.tsv`,
+our daemon at `dd3d14d`; 3,905 of 3,960 answered; varied: five epochs
+1800–2100, twelve observer/frame/zodiac configurations including Zurich at
+500 m and Quito at 2,850 m, ΔT 0/30/140 on the worst cells, and 66 objects
+— bodies, nodes and apsides mean and osculating, the natural apsides, five
+stars). Worst angular 3.6e-6 °/day, the Moon's osculating perihelion from
+Quito. Worst non-star distance rate 1.72e-10 AU/day, unchanged. Worst star
+**7.05e-6 AU/day** (Polaris, Quito, 2026), down from 2.47e-5, and every
+one of the 299 star rows lies at its own h = 1/1024 floor, 18·ulp(r)/12h.
+Held fixed, and so the limit of the claim: the star list. The catalogue
+has 3,135 stars whose floor exceeds 1e-5 AU/day, the farthest (χ Aur,
+0.01 mas) 5.9e-3, so no absolute figure a sweep of five stars could
+recommend would be true of the catalogue as §3.5a measures it.
+
+**The rate sentence, approved on this side 2026-09-29** (worked out with
+the Astrolog session, who carry it to their maintainer; their maintainer
+delegated the wording to the two sessions): *"Rates are compared with a
+five-point central difference of the server's own f64 positions at h =
+1/1024 day. 0x0013's degPerDay bounds the angular rate error absolutely;
+its auPerDay bounds |distance-rate error| / max(1 AU, r), so it is
+absolute within 1 AU and relative beyond. Absent 0x0013: 1e-5 °/day and
+1e-9 AU/day under that reading."* Why each part:
+- **The step stays 1/1024.** The Astrolog side first proposed 1/32 to lower
+  the star floor; at 1/32 a topocentric Moon's five-point truncation alone
+  is 2.5e-4 °/day in longitude (measured, Quito, 2000 and 2026), 25 times
+  the default bound, where 1/1024 gives 2e-6.
+- **max(1 AU, r), not r.** Theirs, and better than this side's pure
+  relative version: the Moon and its points (0.0027 AU) keep an absolute
+  bound instead of one 400 times tighter. It loosens every object beyond
+  1 AU by its distance, not only stars — said so in the sentence's
+  rationale rather than "it moves only stars".
+- Under it, measured as above: 3.6e-6 °/day, 1.7e-10 per AU for the solar
+  system, and ≤ 2.6e-13 per AU for the stars (the floor at 1/1024 is at
+  most 3.4e-13 per AU for any distance). Nothing is advertised until the
+  sentence is in §3.5a and vendored here.
+
+### Record w, 2026-09-29 (`docs/crosstest/2026-09-29w.tsv`)
+
+The joint review's C2 cell (this client against `astrolog-ephd`), with our
+daemon at `2906ecc` and theirs on :47392 at the 2026-09-20 13:37 build
+(pid 1766928, 1,739,128 bytes, sha256 `9635191d6ee5ec6c…`, read from
+`/proc` here). 3,758 rows, **identical to record v verdict for verdict**:
+agree 2,584, expected-difference 449, finding (theirs) 99, refused 46,
+refused (theirs) 548, unadjudicated 1, unanswered 9. `corrapplied.py` OK
+on both. Our sweep is the one above.
+
+**One new cell against their bound, and it is the Moon.** The sweep's ΔT
+pass: the topocentric Moon from Quito at JD 2415020.5, `deltaTSec` 140,
+reports 16.347988 °/day where a five-point difference of its own
+longitudes gives 16.341381 — a miss of **6.6e-3 °/day**, over their
+5e-3. At ΔT 69.2, the value the grid sweeps, the same cell misses by
+1.2e-3 and is inside. Checked by hand through the raw client as well as
+through the sweep: their differenced value agrees with ours to 3e-5 °/day,
+so it is their rate column (their registry §2.6, the topocentric Moon
+rates kept from Swiss), and ours misses by 8.4e-7 at both ΔT. Reported to
+them the same day. The Astrolog side has parked fixed-star work, so their
+advertised 4e-3 AU/day still does not cover topocentric star rows (their
+§2.11a); say so beside any comparison published before that changes.
+
 ### What it leaves behind
 
 The leg table, committed as a dated record under `docs/crosstest/`. Every

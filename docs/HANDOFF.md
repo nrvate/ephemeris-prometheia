@@ -28,8 +28,13 @@ and is never touched.**
 1. **The analytic star rate: done** (ENGINE.md, "Rates"; CROSS-TEST.md,
    "Our star distance rate, computed in closed form"). It changes a value
    on the wire; the Astrolog session has been told and will re-measure.
-2. **What we advertise for rates: measure, then advertise** a `0x0013` we
-   measurably meet, naming the axes varied. Next, now that 1 is in.
+2. **What we advertise for rates: measure, then advertise.** Measured
+   (`docs/crosstest/2026-09-29-ratesweep-ours.tsv`); stars sit at §3.5a's
+   own differencing floor, which no absolute bound can describe. So the
+   maintainer approved a §3.5a sentence instead (CROSS-TEST.md, "The rate
+   sentence"): the distance bound becomes |error| / max(1 AU, r). The
+   Astrolog side writes it into §3.5a and A.3; **advertise `0x0013` once it
+   is vendored here**, with the axes varied stated beside it.
 3. **Vega's radial velocity: keep −13.5 km/s** (current SIMBAD), re-confirm
    with one paced query, and record −20.6 as the 2018 value.
 

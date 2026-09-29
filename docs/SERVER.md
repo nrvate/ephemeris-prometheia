@@ -556,7 +556,11 @@ Settled in the same exchange:
 - **Provenance** is `<engine> | <ephemeris> | <model>`, and `datasetId` is
   `<engine>/<ephemeris>/<catalogs>#<8 hex>` over every data file's checksum
   and the engine version. A request can pin `datasetId` itself.
-- **Rate tolerances:** 1e-5 deg/day for angles, 1e-6 AU/day for distances. A
+- **Rate tolerances:** 1e-5 deg/day for angles, and for distances 1e-6 AU/day
+  in §3.5a's text but 1e-9 AU/day in A.3 — a contradiction found in the
+  2026-09-29 review (the Astrolog side's S3). Our checks have always read
+  A.3's. Both are replaced by the sentence approved on this side that day
+  (CROSS-TEST.md, "The rate sentence"), pending its drop. A
   distance rate that omits the light-time term differs by the observer's
   acceleration times the light time (measured on Swiss: 3e-5 AU/day for
   Uranus), which is a definitional difference a server flags rather than a
