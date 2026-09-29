@@ -785,6 +785,16 @@ TEST_CASE("de441_behind_de440") {
     REQUIRE(chained.value().add_ephemeris(kDe441Path).ok());
     Engine& a = alone.value();
     Engine& c = chained.value();
+    // The spans in answering order, as capabilities reports them.
+    const auto spans = c.ephemeris_spans();
+    REQUIRE(spans.size() == 2);
+    CHECK(spans[0].source == "JPL DE440 binary");
+    CHECK(spans[0].first_jd_tdb == 2287184.5);
+    CHECK(spans[0].last_jd_tdb == 2688976.5);
+    CHECK(spans[1].source == "JPL DE441 binary");
+    CHECK(spans[1].first_jd_tdb < 2451545.0 - 15000.0 * 365.25);
+    CHECK(spans[1].last_jd_tdb > 2451545.0 + 14900.0 * 365.25);
+    CHECK(a.ephemeris_spans().size() == 1);
 
     for (double jd : {2287200.5, 2451545.0, 2461300.5, 2688900.5}) {
         for (int body : {10, 301, 199, 4, 5, 9}) {

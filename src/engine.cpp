@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "natural_apsides.hpp"
@@ -229,6 +230,10 @@ public:
     // Whether an instant lies in this source's span (a DE file's header
     // says; an SPK kernel is asked and answers with a coverage error).
     virtual bool covers(double) const { return true; }
+    // The span covers() answers true over (JD, TDB), for reporting.
+    virtual std::pair<double, double> span() const {
+        return {-std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+    }
     std::string description;
     int denum = 0;
 };
@@ -295,6 +300,9 @@ public:
 
     bool covers(double jd_tdb) const override {
         return jd_tdb >= file_.header().start_jed && jd_tdb <= file_.header().end_jed;
+    }
+    std::pair<double, double> span() const override {
+        return {file_.header().start_jed, file_.header().end_jed};
     }
 
     Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
@@ -413,6 +421,9 @@ public:
         const double et = (jd_tdb - 2451545.0) * 86400.0;
         return et >= first_et_ && et <= last_et_;
     }
+    std::pair<double, double> span() const override {
+        return {2451545.0 + first_et_ / 86400.0, 2451545.0 + last_et_ / 86400.0};
+    }
 
     Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
         if (id == 0) {
@@ -466,6 +477,8 @@ public:
                 return true;
         return false;
     }
+
+    const std::vector<std::unique_ptr<Source>>& members() const { return members_; }
 
     // The member that answers at this instant, for provenance.
     const Source& at(double jd_tdb) const {
@@ -3376,6 +3389,17 @@ void Engine::set_delta_t_model(const time::DeltaTModel* model) {
 
 std::string_view Engine::source() const {
     return impl_ ? std::string_view(impl_->source->description) : std::string_view();
+}
+
+std::vector<Engine::EphemerisSpan> Engine::ephemeris_spans() const {
+    std::vector<EphemerisSpan> out;
+    if (!impl_ || !impl_->chain)
+        return out;
+    for (const auto& m : impl_->chain->members()) {
+        const auto [a, b] = m->span();
+        out.push_back({m->description, a, b});
+    }
+    return out;
 }
 
 } // namespace prometheia

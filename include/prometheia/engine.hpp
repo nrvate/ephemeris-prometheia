@@ -435,6 +435,16 @@ public:
     // order). The view is valid until add_ephemeris() or add_catalog().
     std::string_view source() const;
 
+    // The planetary ephemeris files in the order they answer, each with the
+    // span it covers (JD, TDB). An instant no span holds is refused with a
+    // CoverageError. Features with narrower spans of their own (the
+    // planets' mean orbit points, 1550-2650) refuse separately.
+    struct EphemerisSpan {
+        std::string source;
+        double first_jd_tdb = 0.0, last_jd_tdb = 0.0;
+    };
+    std::vector<EphemerisSpan> ephemeris_spans() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

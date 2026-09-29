@@ -21,7 +21,8 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
 - **Ephemeris:** a JPL DE binary or a DAF/SPK kernel, detected by content;
   `add_ephemeris(path)` puts further files behind the first, each read
   going to the first whose span holds the instant (DE440 then DE441:
-  [DE.md](DE.md), "DE441")
+  [DE.md](DE.md), "DE441"); `ephemeris_spans()` lists the files with
+  their spans in that order
   (`DAF/SPK ` identification word), not extension. Both give identical
   answers for the same DE (DE440 binary vs `de440s.bsp`: ≤ 4 µas through
   the whole pipeline).

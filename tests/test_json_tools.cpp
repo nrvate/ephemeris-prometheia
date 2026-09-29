@@ -428,6 +428,14 @@ TEST_CASE("json_vocabulary_matches_the_registries") {
     }
     CHECK(saw_instant);
     CHECK(saw_epoch);
+    // The dates served, and the precession a request without one gets.
+    CHECK(caps["precession_default"] == "vondrak2011");
+    REQUIRE(caps["dates"]["ephemerides"].size() == 1);
+    const Json& span = caps["dates"]["ephemerides"][0];
+    CHECK(span["source"] == std::string(e.source()));
+    CHECK(span["from_jd_tdb"].get<double>() < 2451545.0);
+    CHECK(span["to_jd_tdb"].get<double>() > 2451545.0);
+    CHECK(span["from"].is_string());
     CHECK(run(e, "positions",
               {{"time", {{"jd_tt", 2451545.0}}},
                {"objects", {"Sun"}},

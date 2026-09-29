@@ -102,7 +102,7 @@ Each tool is one call, whether it arrives as an MCP `tools/call` or as a JSON
 |---|---|
 | `positions` | positions of objects at an instant or a short series |
 | `lookup` | resolve a name to the objects it could mean (`prefix` matches a half-remembered one) |
-| `capabilities` | what this engine answers: bodies, zodiacs, frames, coverage, in words, and whether a small-body catalog is loaded |
+| `capabilities` | what this engine answers: bodies, zodiacs, frames, coverage, in words, and whether a small-body catalog is loaded; under `dates`, each ephemeris file's span in answering order (and the planets' mean orbit points' narrower 1550–2650); `precession_default` |
 | `convert_time` | UTC, TT, UT1 and Julian dates, with ΔT and leap seconds |
 
 The agent-facing summary of what to ask, and how, is the MCP resource

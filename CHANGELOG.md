@@ -17,6 +17,9 @@ documented, not that it is frozen.
   `time` gains `delta_t_s` and `delta_t_basis` (observed, reconstructed,
   before the eclipse record, or predicted). With DE441 a clock time reaches
   millennia back, where ΔT, not the ephemeris, bounds the answer.
+- **`capabilities` says which dates it serves** (`dates`: each ephemeris
+  file's span, in answering order) and `precession_default`; the C++
+  `Engine::ephemeris_spans()` is what it reads.
 - **DE441 behind DE440** (docs/DE.md, "DE441"). `Engine::add_ephemeris`
   (C `prometheia_engine_add_ephemeris`; `--ephemeris` twice to the servers,
   `-e` twice to `ephem`) answers the instants the first file does not

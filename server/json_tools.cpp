@@ -710,6 +710,24 @@ Json accuracy(const ResolvedObject& obj) {
             {"doc", "docs/VALIDATION.md"}};
 }
 
+// The dates this deployment answers: each ephemeris file in the order it
+// answers, with its span, and the narrower spans that refuse on their own.
+// Without it an agent learns the span only by asking and being refused.
+Json dates_served(const Engine& engine) {
+    Json files = Json::array();
+    for (const Engine::EphemerisSpan& s : engine.ephemeris_spans())
+        files.push_back({{"source", s.source},
+                         {"from_jd_tdb", s.first_jd_tdb},
+                         {"to_jd_tdb", s.last_jd_tdb},
+                         {"from", format_civil(s.first_jd_tdb)},
+                         {"to", format_civil(s.last_jd_tdb)}});
+    return {{"ephemerides", files},
+            {"note", "each file answers the instants in its span that no earlier file covers; "
+                     "outside every span a row is a coverage error. The planets' mean orbit "
+                     "points are fitted to DE440 and refused outside 1550-2650. Dates are TDB, "
+                     "ISO 8601 (proleptic Gregorian)"}};
+}
+
 Json kind_word(const ResolvedObject& obj) {
     switch (obj.kind) {
     case ResolvedObject::Kind::Body:
@@ -1030,6 +1048,8 @@ Result<Json> capabilities(Engine& engine, const Context& ctx, const Json& a, Too
          {{"served", {"mean", "osculating", "interpolated (the Moon's apogee and perigee)"}},
           {"not_served", {"osculating-barycentric", "focal-point"}}}},
         {"precession", {"vondrak2011", "iau2006"}},
+        {"precession_default", "vondrak2011"},
+        {"dates", dates_served(engine)},
         {"limits", {{"max_objects", ctx.limits.max_objects}, {"max_times", ctx.limits.max_times}}}};
     if (!ctx.dataset.empty())
         out["dataset"] = ctx.dataset;
