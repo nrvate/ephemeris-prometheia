@@ -6,47 +6,42 @@ working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
 
-## Resume here (state at 2026-09-29)
+## Resume here (state at 2026-09-29, evening)
 
-Work resumed 2026-09-29 after a nine-day gap. `initial` = `origin/initial`
-at the latest commit, gate green. No daemon of ours runs; start one when a
-cross-test needs it:
+`initial` = `origin/initial`, gate green; **v0.7.1 published**
+(library 0.7.1, C ABI 6; `prometheiad` 0.9.0). Start our daemon when a
+cross-test needs it, and stop it by the pid you started:
 
     ./build/prometheiad --ephemeris ephe/linux_p1550p2650.440 \
         --port 47190 --log-level info
 
-The only untracked paths are `.claude-config/` and `.envrc`, which are
-never staged. **:47392 was not listening on 2026-09-29** (the machine or
-the process did not survive the week; the Astrolog session did not stop
-it). Their binary on disk is still the 2026-09-20 13:37 build; they will
-send the running process's identity when it is back. Read it from the
-process anyway before trusting a row. **:47391 is their production daemon
-and is never touched.**
+Untracked `.claude-config/` and `.envrc` are never staged. Astrolog's spare
+is **:47392** (read its identity from `/proc` before trusting a row);
+**:47391 is their production daemon and is never touched.** The channel to
+the Astrolog session (now named `Astrolog`) is open by the maintainer's
+word; say what matters at milestones, don't ping-pong.
 
-**The maintainer settled the three parked decisions on 2026-09-29:**
+**Focus: solar-system objects.** Fixed stars are parked
+([STARS_BACKLOG.md](STARS_BACKLOG.md)); don't raise them.
 
-1. **The analytic star rate: done** (ENGINE.md, "Rates"; CROSS-TEST.md,
-   "Our star distance rate, computed in closed form"). It changes a value
-   on the wire; the Astrolog session has been told and will re-measure.
-2. **What we advertise for rates: measure, then advertise.** Measured
-   (`docs/crosstest/2026-09-29-ratesweep-ours.tsv`); stars sit at §3.5a's
-   own differencing floor, which no absolute bound can describe. So the
-   maintainer approved a §3.5a sentence instead (CROSS-TEST.md, "The rate
-   sentence"): the distance bound becomes |error| / max(1 AU, r). The
-   Astrolog side wrote it into §3.5a and A.3 (`5f11726`), vendored here
-   the same day; under it we meet the A.3 default everywhere the sweep
-   reached, so **we send no `0x0013`, deliberately** (CROSS-TEST.md, "In
-   §3.5a and vendored").
-3. **Vega's radial velocity: kept at −13.5 km/s**, re-confirmed against
-   SIMBAD on 2026-09-29 (STARS.md); −20.6 recorded as the 2018 value.
+**What 2026-09-29 settled** (details in CROSS-TEST.md and CHANGELOG 0.7.1):
+- A star's distance rate in closed form; `PROMETHEIA_ERROR_COVERAGE`;
+  protocol v4 re-pinned at the site drop and the rate-bound reading
+  (|distance-rate error| / max(1 AU, r)); we meet the A.3 default under it
+  and send no `0x0013`, deliberately.
+- ΔT is now seen arriving by all 18 cross-test legs, and `legtest.py`
+  holds each leg's anchor to a sabotage.
+- Astrolog now differences its body rates from its own positions: record
+  x takes their `rates` findings 84 → 5 (the five are a parked star).
 
-**Fixed stars are on the back burner** (maintainer, 2026-09-29: "we barely
-use Stars"): every open star item is in [STARS_BACKLOG.md](STARS_BACKLOG.md),
-and effort goes to solar-system objects.
-
-Channel to the Astrolog session reopened by the maintainer on 2026-09-29
-(it is `zero-adaptive-scott` now); their current goal is Prometheia as
-Astrolog's **primary** source through the C API.
+**Waiting on Astrolog:** their osculating orbit points go the same way
+(33 topocentric Jupiter/Saturn rows over their new 5e-5 °/day bound);
+when the new build's identity arrives, re-run
+`tools/check/crossrun.py --record` and `ratesweep.py --server
+127.0.0.1:47392 --out docs/crosstest/<date>-ratesweep-theirs.tsv`, and send
+them the diff. They also route all 30 stock hypothetical element sets
+through our `prometheia_calc_elements`; their 80,000 AU set differs from
+Swiss by arcseconds, and ours is converged (τ to 5e-9 s).
 
 **Open, unassigned, needing no decision** — full detail in "Open items":
 `--jd` blind in 13 of 18 legs (the legs with no outside anchor). Closed
