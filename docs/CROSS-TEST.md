@@ -2260,6 +2260,38 @@ every one, with τ consistent to 1e-13 s. Against Swiss:
   rather than heliocentric focus (the Sun's offset along it is 194,000 km
   at t and 676,000 km at t − τ). Left open, on their side.
 
+### Record z, 2026-09-29 (`docs/crosstest/2026-09-29z.tsv`): their ts.16 build, our Vondrák default
+
+Their :47392 was pid 2142244, sha256 `2ba4769d4d6c7b00…`, 1741784 bytes,
+binary mtime 14:14:26, engine "Swiss Ephemeris 2.10.03-ts.16", Astrolog
+`be6762f`. Ours was HEAD `0447aeb`, with precession now defaulting to
+Vondrák 2011. Verdicts: agree 2731, expected-difference 450, finding 1,
+finding (theirs) 20, refused 46, refused (theirs) 548, unadjudicated 1,
+unanswered 9. Against record y only the `apparent` leg changed. Both rate
+sweeps pass their advertisements, and corrapplied passes on both sides.
+
+- **Their fictitious-body fix is visible.** All 24 `hamburg` rows moved
+  closer to ours (worst 0.62 → 0.56 mas), and none moved away.
+- **The one finding was the harness's.** It is Mercury, barycentric,
+  light time only, true ecliptic of date, at 2100. The servers were
+  2.221 mas apart against a 2.214 mas band, where record y had 2.014 mas.
+  Our answer moved 0.22 mas, which is the Vondrák default; theirs did not
+  move. Taken apart with the frame dropped, 1.31 mas of the gap remains in
+  ICRF, and that is their `.se1` refit, which is all the band allowed for.
+  The other −0.99 mas is in longitude only in the date frame. That equals
+  their nutation in longitude minus ours at 2100: swetest prints 3.2894″,
+  our full IAU 2000A gives 3.2884″, so Swiss's default is truncated (0.5
+  mas at 1800 and at J2000). A true-of-date row carries the two sides'
+  frame models as well as the refit, and the `apparent` band had never
+  included them. It stayed inside only because our IAU 2006 frame
+  happened to sit 0.2 mas nearer theirs. The band now adds
+  `DATE_FRAME_BAND` = 1.7 mas: our apparent places against swetest's on
+  the same DE440, Sun and planets at the leg's eight epochs, worst 1.67
+  mas at 1800. That is measured, not tuned. Re-run with the legs its
+  adjudication needs, the row agrees and nothing else moves. S8's
+  obliquity is ~0 at these epochs (under 0.1 mas), so it is not part of
+  this.
+
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 
 The fault injections written up above — "1% on the textbook GM reds four
