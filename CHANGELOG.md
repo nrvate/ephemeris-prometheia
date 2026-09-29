@@ -11,7 +11,23 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
-## Unreleased
+## 0.7.3 — 2026-09-29
+
+The library and tools are 0.7.3, and the C ABI is unchanged (6).
+`prometheiad` is 0.11.0, because its answers change in two ways: TDB−TT is
+the full Fairhead & Bretagnon series, and a catalog body more than 100 years
+from its element epoch now needs an asteroid perturber kernel.
+
+**What moves for anyone pinning values:**
+- date and position answers, by ≤ 5 µas within 1600–2200 and up to ~0.15
+  mas far from J2000;
+- such catalog bodies, which are now refused when no kernel is loaded;
+- the dataset id's digest (`…#c029261c` for DE440 alone);
+- the DE440-span perturber cut's hash (e7b67e32…; same records as the old
+  a31b839a…).
+
+The USNO ΔT and leap-second tables were not re-fetched, since 0.7.1
+refreshed them the same day (observed through 2026-04).
 
 - **Without an asteroid perturber kernel, a catalog body is served within 100
   years of its element epoch** and refused beyond, with a coverage error

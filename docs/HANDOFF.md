@@ -74,7 +74,7 @@ matches them to 0.055 mas, and the leg re-proves this each run from
 **v0.7.2 cut 2026-09-29** (maintainer): library 0.7.2 (C ABI 6), prometheiad
 0.10.0; DE441 behind DE440, Vondrák default, JSON ΔT disclosure, coverage.
 
-**After 0.7.2 (unreleased):**
+**After 0.7.2, released as 0.7.3 (2026-09-29):**
 - The Moon's ~1 mas against swetest is its TT-for-TDB argument (903a553).
 - TDB−TT is the full Fairhead & Bretagnon series (df1d8b5, maintainer): 787 terms
   for the public function, and 136 on one-day nodes in the engine (1.55 µs,
