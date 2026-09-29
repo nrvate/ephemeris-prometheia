@@ -2098,6 +2098,20 @@ absolute within 1 AU and relative beyond. Absent 0x0013: 1e-5 °/day and
   most 3.4e-13 per AU for any distance). Nothing is advertised until the
   sentence is in §3.5a and vendored here.
 
+**In §3.5a and vendored, the same day** (Astrolog `5f11726`; our
+`registries.json` `ad449ae6…`, whose A.3 tag 19 now reads the bound this
+way). `ratesweep.py` grades the distance column per max(1 AU, r), and its
+selftest pins that reading: the control puts its objects at 1e6 AU with
+1e-5 AU/day of error, inside the bound as read now and 100× over it as
+read before, and grading the absolute column again reds exactly that case.
+Our server under it (`docs/crosstest/2026-09-29-ratesweep-ours-graded.tsv`,
+the same axes as above): **within the A.3 default everywhere the sweep
+reached**, the ΔT pass included — 3.6e-6 °/day and 1.7e-10 per max(1 AU, r)
+against 1e-5 and 1e-9. **So `prometheiad` sends no `0x0013`**, and that is
+now a true statement rather than an unmet one: the default describes us
+with 2.8× and 5.8× headroom, and a tighter figure would claim more than a
+66-object grid can back.
+
 ### Record w, 2026-09-29 (`docs/crosstest/2026-09-29w.tsv`)
 
 The joint review's C2 cell (this client against `astrolog-ephd`), with our

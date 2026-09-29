@@ -33,8 +33,10 @@ and is never touched.**
    own differencing floor, which no absolute bound can describe. So the
    maintainer approved a §3.5a sentence instead (CROSS-TEST.md, "The rate
    sentence"): the distance bound becomes |error| / max(1 AU, r). The
-   Astrolog side writes it into §3.5a and A.3; **advertise `0x0013` once it
-   is vendored here**, with the axes varied stated beside it.
+   Astrolog side wrote it into §3.5a and A.3 (`5f11726`), vendored here
+   the same day; under it we meet the A.3 default everywhere the sweep
+   reached, so **we send no `0x0013`, deliberately** (CROSS-TEST.md, "In
+   §3.5a and vendored").
 3. **Vega's radial velocity: keep −13.5 km/s** (current SIMBAD), re-confirm
    with one paced query, and record −20.6 as the 2018 value.
 

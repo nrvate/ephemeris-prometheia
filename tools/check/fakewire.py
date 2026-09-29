@@ -40,6 +40,9 @@ ratestest.py drives, and the extra fields are:
     rate_error_au    added to the reported distance rate
     rate_error_deg_alt  added on top of those, and
     rate_error_au_alt   ... only when
+    dist_scale     multiplies every distance and distance rate, so an object
+                   can sit at a star's 1e6 AU, where 0x0013's auPerDay is read
+                   per max(1 AU, r) (Astrolog 5f11726)
     rate_error_alt_under ... only when --deltat is BELOW this value. This is
                      the shape the Astrolog server showed on 2026-09-20: a
                      cell inside the advertised bound at one delta T and far
@@ -163,6 +166,8 @@ def emit_series(scn, ask):
     print(f'# object 0 name "{ask["name"]}" rowsOk {ask["count"]} corr 7 err 0 ""')
     for i in range(ask["count"]):
         lon, lat, dist, dlon, dlat, ddist = ephemeris(ask["name"], ask["jd"] + i * ask["step"])
+        dist *= scn.get("dist_scale", 1.0)
+        ddist *= scn.get("dist_scale", 1.0)
         dlon += scn.get("rate_error_deg", 0.0)
         ddist += scn.get("rate_error_au", 0.0)
         if ask["deltat"] < scn.get("rate_error_alt_under", float("-inf")):

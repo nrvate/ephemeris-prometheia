@@ -560,9 +560,11 @@ Settled in the same exchange:
   and the engine version. A request can pin `datasetId` itself.
 - **Rate tolerances:** 1e-5 deg/day for angles, and for distances 1e-6 AU/day
   in §3.5a's text but 1e-9 AU/day in A.3 — a contradiction found in the
-  2026-09-29 review (the Astrolog side's S3). Our checks have always read
-  A.3's. Both are replaced by the sentence approved on this side that day
-  (CROSS-TEST.md, "The rate sentence"), pending its drop. A
+  2026-09-29 review (the Astrolog side's S3). Our checks had always read
+  A.3's. Both are replaced by the sentence in §3.5a since Astrolog
+  `5f11726`, vendored here: the distance bound is |error| / max(1 AU, r)
+  (CROSS-TEST.md, "The rate sentence"). We meet the default under it and
+  send no `0x0013`. A
   distance rate that omits the light-time term differs by the observer's
   acceleration times the light time (measured on Swiss: 3e-5 AU/day for
   Uranus), which is a definitional difference a server flags rather than a

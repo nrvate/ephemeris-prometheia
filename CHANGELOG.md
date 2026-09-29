@@ -28,6 +28,12 @@ documented, not that it is frozen.
   6 (no layout changed). Announced to the Astrolog side, whose plugin maps 7
   from their `aa83946`, before it landed. `prometheiad` and
   `prometheia-json` now classify coverage by the error's type, not its words.
+- **The rate bound's distance figure is read per max(1 AU, r)** (protocol
+  §3.5a and A.3 tag 19, Astrolog `5f11726`; `registries.json` re-vendored,
+  two payload strings). `tools/check/ratesweep.py` grades it that way. Under
+  it `prometheiad` meets the A.3 default everywhere measured (3.6e-6 °/day,
+  1.7e-10 per AU), so it still sends no `0x0013`, now truthfully
+  (docs/CROSS-TEST.md).
 - **Protocol v4 re-pinned to Astrolog `7cbf0d8`, the site drop**
   (third_party/README.md). `prometheiad` now answers a REQUEST whose site
   height is at or below the WGS-84 polar radius with ERROR 1 (malformed),

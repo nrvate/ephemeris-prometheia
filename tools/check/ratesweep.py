@@ -148,18 +148,15 @@ DELTA_T_WIDEN = (0.0, 30.0, 140.0)
 
 def rate_error(v):
     """|reported rate - central difference| from rows t-2h .. t+2h, as
-    (lon, lat, dist_abs, dist_rel): degrees a day, then AU a day ABSOLUTE
-    and the same divided by the distance. None when a row is missing.
-    Five points: error ~ h^4 f5/30.
+    (lon, lat, dist_abs, dist_graded): degrees a day, then AU a day
+    absolute, then that divided by max(1 AU, r). None when a row is
+    missing. Five points: error ~ h^4 f5/30.
 
-    The bound is tested against the absolute figure, because that is the
-    unit 3.5a and A.3 0x0013 are written in ("1e-9 AU/day", with no per-AU
-    qualifier, in both ephproto.h and registries.json). The relative figure
-    is kept because it is the one that is comparable between a body at
-    0.0027 AU and one at 30, but reading it as if it were the spec's
-    understates a distant body by its distance -- 30x for Pluto. This side
-    reported the relative figure as though it were the bound until
-    2026-09-20, when the Astrolog session pointed at the units."""
+    The bound is tested against the last, which is how 3.5a and A.3 0x0013
+    read auPerDay since Astrolog 5f11726 (2026-09-29): absolute within 1 AU,
+    relative beyond, so a star's figure measures the server and not the
+    ulp floor of its 1e5..1e10 AU distance. Until then the bound was plain
+    absolute AU/day, and this graded dist_abs; that is kept as a column."""
     if any(r is None or any(math.isnan(x) for x in r) for r in v):
         return None
     mid = v[2]
@@ -255,7 +252,7 @@ def main():
                     rows.append((label, jd, name, "", "", "", "", f"unanswered errCode {err}"))
                     continue
                 answered += 1
-                bad = e[0] > bound_deg or e[1] > bound_deg or e[2] > bound_au
+                bad = e[0] > bound_deg or e[1] > bound_deg or e[3] > bound_au
                 rows.append((label, jd, name, "%.4e" % e[0], "%.4e" % e[1], "%.4e" % e[2],
                              "%.4e" % e[3], "OVER" if bad else ""))
                 for i in range(4):
@@ -270,22 +267,25 @@ def main():
                 if bad:
                     over.append((name, label, jd, e))
                     print(f"  OVER  {name:26s} {label:40s} JD {jd:.1f}  "
-                          f"lon {e[0]:.3e} lat {e[1]:.3e} deg/d  dist {e[2]:.3e} AU/d")
+                          f"lon {e[0]:.3e} lat {e[1]:.3e} deg/d  dist {e[2]:.3e} AU/d "
+                          f"({e[3]:.3e} graded)")
 
-    print(f"\nserver {args.server}: bound {bound_deg:g} deg/day, {bound_au:g} AU/day absolute "
+    print(f"\nserver {args.server}: bound {bound_deg:g} deg/day, {bound_au:g} AU/day per "
+          f"max(1 AU, r) "
           f"({source})")
     print(f"asked {asked}, answered {answered}")
     print(f"{len(configs)} configuration(s) x {len(epochs)} epoch(s) x {len(objects)} object(s)"
           + (f", --only {args.only!r}" if args.only else ""))
     print(f"worst lon  {worst[0]:.4e} deg/day   ({worst_where[0]})")
     print(f"worst lat  {worst[1]:.4e} deg/day   ({worst_where[1]})")
-    print(f"worst dist {worst[2]:.4e} AU/day ABSOLUTE, the bound's unit   ({worst_where[2]})")
-    print(f"worst dist {worst[3]:.4e} AU/day per AU (diagnostic)   ({worst_where[3]})")
+    print(f"worst dist {worst[2]:.4e} AU/day absolute (diagnostic)   ({worst_where[2]})")
+    print(f"worst dist {worst[3]:.4e} AU/day per max(1 AU, r), the bound's unit   "
+          f"({worst_where[3]})")
     if args.out:
         with open(args.out, "w") as f:
             f.write(f"# ratesweep {args.server} bound {bound_deg:g} {bound_au:g} ({source})\n")
             f.write("config\tepoch_tt\tobject\tlon_err\tlat_err\t"
-                    "dist_err_au_per_day\tdist_err_per_au\tflag\n")
+                    "dist_err_au_per_day\tdist_err_graded\tflag\n")
             for r in rows:
                 f.write("\t".join(str(x) for x in r) + "\n")
         print(f"table: {args.out} ({len(rows)} rows)")
@@ -296,7 +296,7 @@ def main():
     hidden = []
     if args.widen > 0 and cells:
         picked, seen = [], set()
-        for axis in (0, 1, 2):
+        for axis in (0, 1, 3):
             for c in sorted(cells, key=lambda c: -c["e"][axis])[:args.widen]:
                 if c["key"] not in seen:
                     seen.add(c["key"])
@@ -312,10 +312,11 @@ def main():
                 if e is None:
                     continue
                 widened_measurements += 1
-                if (e[0] > bound_deg or e[1] > bound_deg or e[2] > bound_au) and not c["bad"]:
+                if (e[0] > bound_deg or e[1] > bound_deg or e[3] > bound_au) and not c["bad"]:
                     hidden.append((c["key"], dt, e))
                     print(f"  HIDDEN  {c['key']}  ΔT {dt:g}s  lon {e[0]:.3e} lat {e[1]:.3e} "
-                          f"deg/d  dist {e[2]:.3e} AU/d  (inside the bound at ΔT {DELTA_T:g})")
+                          f"deg/d  dist {e[2]:.3e} AU/d ({e[3]:.3e} graded)  "
+                          f"(inside the bound at ΔT {DELTA_T:g})")
         print(f"widened {widened_cells} cell(s) x {len(DELTA_T_WIDEN)} ΔT value(s): "
               f"{widened_measurements} measurement(s)")
     elif args.widen > 0:

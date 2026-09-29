@@ -65,8 +65,14 @@ def cases():
         # servers go red, not that correct ones stay green -- and this tool
         # points at somebody else's server, so a false accusation costs more
         # than a missed one.
+        # It also pins how the distance bound is read. The objects sit at a
+        # star's 1e6 AU with 1e-5 AU/day of distance-rate error: 1e-11 per
+        # max(1 AU, r), inside the bound, as §3.5a reads it since Astrolog
+        # 5f11726. Graded as plain AU/day, as before, it is 100x over, so a
+        # sweep that lost the division reds here.
         ("rates that describe the positions",
-         {"mode": "rates", "ratesbound": BOUND}, [], set(), 0),
+         {"mode": "rates", "ratesbound": BOUND, "dist_scale": 1e6, "rate_error_au": 1e-5},
+         [], set(), 0),
 
         # Ten times the advertised bound in the longitude rate. This is the
         # shape of the real finding: the Astrolog server's rates were honest
@@ -115,7 +121,7 @@ def cases():
         # ΔT at all.
         ("a rate outside the advertisement only at a delta T the grid skips",
          {"mode": "rates", "ratesbound": BOUND,
-          "rate_error_deg_alt": 1e-2, "rate_error_alt_under": 25.0},
+          "rate_error_au_alt": 1e-4, "rate_error_alt_under": 25.0},
          [], {"deltat-undersampled"}, 1),
 
         # The grid selected nothing at all. Judged before the others on
