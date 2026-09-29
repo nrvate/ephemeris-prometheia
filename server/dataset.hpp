@@ -32,7 +32,8 @@ struct Dataset {
 Dataset make_dataset(std::string engine, const std::string& ephemeris_path,
                      const std::vector<std::string>& catalog_paths,
                      const std::string& perturbers_path,
-                     const std::vector<std::string>& hypothetical_paths = {});
+                     const std::vector<std::string>& hypothetical_paths = {},
+                     const std::vector<std::string>& extra_ephemeris_paths = {});
 
 } // namespace prometheia::server
 

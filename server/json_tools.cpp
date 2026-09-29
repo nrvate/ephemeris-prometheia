@@ -576,14 +576,14 @@ std::optional<Options> parse_options(Engine& engine, const Json& a, Bad& bad) {
         return std::nullopt;
     }
     o.speed = a.contains("rates") ? a["rates"].get<bool>() : true;
-    const std::string prec = str("precession", "iau2006");
+    const std::string prec = str("precession", "vondrak2011");
     out.precession_token = prec;
     if (prec == "iau2006") {
         o.precession = Precession::IAU2006;
     } else if (prec == "vondrak2011") {
         o.precession = Precession::Vondrak2011;
     } else {
-        bad.message = "the precession is iau2006 or vondrak2011";
+        bad.message = "the precession is vondrak2011 or iau2006";
         return std::nullopt;
     }
     // The zodiac: tropical, an A.11 token, or a user anchor.
@@ -809,7 +809,13 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
         if (obj.kind == ResolvedObject::Kind::Body || obj.kind == ResolvedObject::Kind::OrbitPoint)
             r["object"]["naif"] = obj.naif_id;
         Json rows = Json::array();
-        std::string source;
+        // Every source the rows used, in first-use order: a series across
+        // 1550 or 2650 is answered by two ephemerides, and says so.
+        std::vector<std::string> sources, models;
+        const auto note = [](std::vector<std::string>& v, std::string x) {
+            if (std::find(v.begin(), v.end(), x) == v.end())
+                v.push_back(std::move(x));
+        };
         std::optional<Error> failure;
         for (double jd : *times) {
             auto c = calc_at(engine, obj, jd, eph::kTimeTT, o);
@@ -818,8 +824,9 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
                 break;
             }
             const CalcResult& cr = c.value();
-            if (source.empty())
-                source = std::string(cr.provenance.source);
+            note(sources, std::string(cr.provenance.source));
+            note(models,
+                 cr.provenance.precession == Precession::Vondrak2011 ? "vondrak2011" : "iau2006");
             Json row;
             row["time"] = time_of(jd);
             const bool ecl = o.coords == Coords::Ecliptic;
@@ -850,6 +857,9 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
             continue;
         }
         r["rows"] = rows;
+        std::string source;
+        for (const std::string& x : sources)
+            source += (source.empty() ? "" : "; ") + x;
         Json prov = {{"source", source},
                      {"observer", options->observer_words},
                      {"corrections", corrections_applied(obj, o)},
@@ -865,8 +875,12 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
         // Only where it entered: a tropical answer in ICRF or J2000 axes is
         // the same number under either model, and naming one there would
         // claim a dependence the answer does not have.
-        if (options->of_date || options->sidereal)
-            prov["precession"] = options->precession_token;
+        if (options->of_date || options->sidereal) {
+            std::string used;
+            for (const std::string& x : models)
+                used += (used.empty() ? "" : " and ") + x;
+            prov["precession"] = used; // the model used
+        }
         if (obj.no_parallax)
             prov["no_distance"] = true;
         r["provenance"] = prov;
@@ -994,7 +1008,7 @@ Result<Json> capabilities(Engine& engine, const Context& ctx, const Json& a, Too
         {"orbit_methods",
          {{"served", {"mean", "osculating", "interpolated (the Moon's apogee and perigee)"}},
           {"not_served", {"osculating-barycentric", "focal-point"}}}},
-        {"precession", {"iau2006", "vondrak2011"}},
+        {"precession", {"vondrak2011", "iau2006"}},
         {"limits", {{"max_objects", ctx.limits.max_objects}, {"max_times", ctx.limits.max_times}}}};
     if (!ctx.dataset.empty())
         out["dataset"] = ctx.dataset;
@@ -1094,7 +1108,10 @@ Json schema_positions() {
                             "\"light-time\", \"gravitational-deflection\", \"aberration\""}}},
           {"rates", {{"type", "boolean"}, {"default", true}}},
           {"precession",
-           {{"type", "string"}, {"enum", {"iau2006", "vondrak2011"}}, {"default", "iau2006"}}}}},
+           {{"type", "string"},
+            {"enum", {"vondrak2011", "iau2006"}},
+            {"default", "vondrak2011"},
+            {"description", "vondrak2011 serves every date; iau2006 only near the present"}}}}},
         {"required", {"objects"}}};
 }
 

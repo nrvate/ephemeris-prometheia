@@ -130,7 +130,7 @@ PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION *
 #define PROMETHEIA_SIDEREAL_PLANE_INVARIABLE 2 /* invariable plane of the solar system */
 
 #define PROMETHEIA_PRECESSION_IAU2006 0
-#define PROMETHEIA_PRECESSION_VONDRAK2011 1
+#define PROMETHEIA_PRECESSION_VONDRAK2011 1 /* the default since 0.8 (docs/FRAMES.md) */
 
 /*
  * Start from prometheia_options_init(), not a zeroed struct: zero is not
@@ -142,7 +142,7 @@ typedef struct prometheia_options {
     int frame;      /* PROMETHEIA_FRAME_*, default true of date */
     int coords;     /* PROMETHEIA_COORDS_*, default ecliptic */
     int sidereal;   /* PROMETHEIA_SIDEREAL_*, default tropical */
-    int precession; /* PROMETHEIA_PRECESSION_*, default IAU 2006 */
+    int precession; /* PROMETHEIA_PRECESSION_*, default Vondrak 2011 (IAU 2006 before 0.8) */
     /* PROMETHEIA_SIDEREAL_USER anchor: the MEAN ayanamsha (degrees) at a
      * TT Julian date. */
     double sidereal_epoch_jd;
@@ -234,6 +234,16 @@ PROMETHEIA_API prometheia_status prometheia_engine_add_catalog(prometheia_engine
 PROMETHEIA_API prometheia_status prometheia_engine_add_perturbers(prometheia_engine* engine,
                                                                   const char* spk_path,
                                                                   prometheia_error* err);
+
+/*
+ * Adds a further planetary ephemeris behind the one(s) open, answering the
+ * instants they do not cover: opened with DE440 and given DE441, the engine
+ * answers 1550-2650 from DE440 and -13000..17000 outside it from DE441.
+ * result.source names the file that answered. Library 0.8; ABI unchanged.
+ */
+PROMETHEIA_API prometheia_status prometheia_engine_add_ephemeris(prometheia_engine* engine,
+                                                                 const char* ephemeris_path,
+                                                                 prometheia_error* err);
 
 /* Resolves a designation or proper name ("1", "Ceres"; ASCII
  * case-insensitive) to the SPK-ID calc takes. */

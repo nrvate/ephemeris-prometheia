@@ -23,6 +23,7 @@ if (prometheia_engine_open("ephe/linux_p1550p2650.440", &eph, &err) != PROMETHEI
     fprintf(stderr, "%s\n", err.message);
     return 1;
 }
+prometheia_engine_add_ephemeris(eph, "linux_m13000p17000.441", &err); /* optional: DE441 outside 1550-2650 */
 prometheia_engine_add_catalog(eph, "sbdb.epm", &err);   /* optional: small bodies */
 prometheia_engine_add_perturbers(eph, "sb441-n16.bsp", &err); /* optional: asteroid masses */
 
@@ -121,6 +122,16 @@ printf("%s\n", r.source);    /* the element set's name */
   | `PROMETHEIA_ERROR_COVERAGE` | an instant outside the loaded data's time span: the ephemeris, the perturber kernel, or the natural apsides' three passages on each side. Appended after 0.7.0 (2026-09-29, announced to the Astrolog side first); those inputs returned `PROMETHEIA_ERROR_ARGUMENT` before, and the message text is unchanged |
 - **Outputs on failure** are zeroed (`*result`, `*utc`, `*body`, `*jd_tt`),
   and `*out` from open is set to `NULL`.
+- **A second ephemeris** (library 0.8, ABI unchanged: a function was
+  added, no layout moved; announced to the Astrolog side before it
+  landed). `prometheia_engine_add_ephemeris` puts a file behind the one
+  opened; each read goes to the first whose span holds the instant, so
+  DE440 then DE441 answers 1550–2650 from DE440 and −13000..17000 from
+  DE441 ([DE.md](DE.md), "DE441"). `result.source` names the file that
+  answered.
+- **Precession** defaults to `PROMETHEIA_PRECESSION_VONDRAK2011` from
+  library 0.8 (IAU 2006 before; [FRAMES.md](FRAMES.md)). Answers that took
+  the default move by ≤ 0.01″ within 1550–2650; `IAU2006` stays selectable.
 - **Options.** Start from `prometheia_options_init()`, not from a zeroed
   struct. Zero is not the default for every field: frame 0 is ICRF and
   sidereal mode 0 is Fagan/Bradley. `sidereal_plane` (ABI version 6)
@@ -164,7 +175,7 @@ printf("%s\n", r.source);    /* the element set's name */
   the source publishes none, which is different from 0.
 - **Strings.** `result.source` and `prometheia_engine_source()` point into
   the engine. They stay valid until the engine is closed. Adding a catalog
-  also invalidates the result strings, because the overlay description is
+  or an ephemeris also invalidates them, because the descriptions are
   rebuilt.
 - **Delta T.** `prometheia_engine_set_delta_t(engine, fn, user)` installs
   `double fn(void *user, double jd_tt)` (seconds of TT−UT1) for

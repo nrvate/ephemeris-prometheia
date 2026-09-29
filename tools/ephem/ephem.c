@@ -51,6 +51,8 @@ static const char* const kDefaultBodies[] = {"sun",     "moon",   "mercury", "ve
 
 typedef struct config {
     const char* ephemeris;
+    const char* extra_ephemerides[MAX_CATALOGS]; /* -e after the first: DE441 behind DE440 */
+    int n_extra_ephemerides;
     const char* catalogs[MAX_CATALOGS];
     int n_catalogs;
     const char* perturbers;
@@ -324,7 +326,8 @@ static void print_help(void) {
            "                 one defined (docs/HYPOTHETICALS.md)\n"
            "\n"
            "Data:\n"
-           "  -e, --ephemeris FILE   planetary ephemeris (default: $PROMETHEIA_EPHEMERIS)\n"
+           "  -e, --ephemeris FILE   planetary ephemeris (default: $PROMETHEIA_EPHEMERIS);\n"
+           "                         again for one answering outside it (DE441 after DE440)\n"
            "  -c, --catalog FILE     add an EPM1 catalog; repeatable, later ones win\n"
            "                         ($PROMETHEIA_CATALOGS, ':'-separated, is added first)\n"
            "  -p, --perturbers FILE  asteroid perturber kernel, e.g. JPL sb441-n16.bsp\n"
@@ -355,7 +358,7 @@ static void print_help(void) {
            "                         galequ-true, galequ-mula (no --sid-plane anchor)\n"
            "      --sid-plane P      the sidereal plane: date (default), anchor (the\n"
            "                         ecliptic of the zodiac's anchor epoch) or invariable\n"
-           "      --precession MODEL iau2006 (default) or vondrak2011 (long-term)\n"
+           "      --precession MODEL vondrak2011 (default) or iau2006\n"
            "      --orbit-point P[:mean|:osc|:natural]  asc, desc, peri or apo of each\n"
            "                         body's orbit instead of the body (osculating by\n"
            "                         default; natural: the Moon's apogee and perigee\n"
@@ -476,7 +479,12 @@ static int parse_args(int argc, char** argv, config* c) {
         } else if (is_opt(&a, "-e", "--ephemeris")) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;
-            c->ephemeris = v;
+            if (!c->ephemeris)
+                c->ephemeris = v;
+            else if (c->n_extra_ephemerides < MAX_CATALOGS)
+                c->extra_ephemerides[c->n_extra_ephemerides++] = v;
+            else
+                return usage_error("too many ephemerides%s", "");
         } else if (is_opt(&a, "-c", "--catalog")) {
             if (!(v = value_of(&a)))
                 return EXIT_USAGE;
@@ -583,7 +591,7 @@ static int parse_args(int argc, char** argv, config* c) {
             else if (equals_nocase(v, "vondrak2011") || equals_nocase(v, "vondrak"))
                 c->opts.precession = PROMETHEIA_PRECESSION_VONDRAK2011;
             else
-                return usage_error("unknown precession model '%s' (iau2006, vondrak2011)", v);
+                return usage_error("unknown precession model '%s' (vondrak2011, iau2006)", v);
         } else if (is_opt(&a, NULL, "--orbit-point")) {
             static const char* const point_names[] = {"asc", "desc", "peri", "apo"};
             static const int point_values[] = {
@@ -1000,6 +1008,14 @@ int main(int argc, char** argv) {
     if (prometheia_engine_open(c.ephemeris, &eng, &err) != PROMETHEIA_OK) {
         fprintf(stderr, "%s: %s\n", g_program, err.message);
         return EXIT_USAGE;
+    }
+    for (i = 0; i < c.n_extra_ephemerides; ++i) {
+        if (prometheia_engine_add_ephemeris(eng, c.extra_ephemerides[i], &err) != PROMETHEIA_OK) {
+            fprintf(stderr, "%s: ephemeris %s: %s\n", g_program, c.extra_ephemerides[i],
+                    err.message);
+            prometheia_engine_close(eng);
+            return EXIT_USAGE;
+        }
     }
     if (!add_env_files(eng, "PROMETHEIA_CATALOGS", "catalog", prometheia_engine_add_catalog,
                        &err) ||

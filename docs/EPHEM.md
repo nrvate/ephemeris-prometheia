@@ -38,7 +38,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 - `--` ends option parsing, for body arguments that begin with `-`.
 
 **Data**
-- `-e FILE` or `$PROMETHEIA_EPHEMERIS` names the planetary ephemeris: a DE binary or an SPK kernel, detected by content.
+- `-e FILE` or `$PROMETHEIA_EPHEMERIS` names the planetary ephemeris: a DE binary or an SPK kernel, detected by content. A second `-e` adds one that answers the instants the first does not cover: `-e linux_p1550p2650.440 -e linux_m13000p17000.441` serves −13000..17000 ([DE.md](DE.md), "DE441").
 - `-p FILE` or `$PROMETHEIA_PERTURBERS` adds an asteroid perturber kernel (JPL's `sb441-n16.bsp`) to the small-body force model; see [ENGINE.md](ENGINE.md).
 - `-c FILE` adds an EPM1 catalog and can be repeated. Catalogs in `$PROMETHEIA_CATALOGS` (colon-separated) load first, and later catalogs win.
 - `--hypotheticals FILE` adds an element file of named hypothetical bodies (JSON Lines; [HYPOTHETICALS.md](HYPOTHETICALS.md)) and can be repeated. Files in `$PROMETHEIA_HYPOTHETICALS` (colon-separated) load first, and a later file's definition of a token wins. A malformed file stops `ephem` before any output, naming the file and line.
@@ -59,7 +59,7 @@ Moon           237.62718531   -5.22939194    0.0026733470   12.16904601   -0.037
 - `--center geo|topo|helio|bary|BODY`: BODY is a built-in name (`mars`) or a NAIF ID, and positions are seen from that body's centre with light time, deflection and aberration for an observer moving with it.
 - `--site LON,LAT[,H]`: geodetic degrees east and north, metres above WGS84. It implies `topo`.
 - `--frame true|mean|j2000|icrf`, `--equatorial`.
-- `--precession iau2006|vondrak2011`: the long-term model for epochs centuries or more from J2000.
+- `--precession vondrak2011|iau2006`: Vondrák 2011 is the default; IAU 2006 is meant for centuries around J2000 only ([FRAMES.md](FRAMES.md)).
 - `--sidereal fagan-bradley|fb|lahiri|user:JD:DEG|tropical`. For `user`, DEG is the mean ayanamsha at the TT Julian date JD.
   It also takes the zodiacs defined at the instant, by their protocol tokens:
   `true-citra`, `true-revati`, `true-pushya`, `true-mula`, `galcent-0sag`,

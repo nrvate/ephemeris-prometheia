@@ -615,10 +615,10 @@ TEST_CASE("json_provenance_names_the_plane_and_the_precession") {
     CHECK(date["results"][0]["provenance"] != inv["results"][0]["provenance"]);
     // Precession appears where it entered the answer: an of-date frame or a
     // sidereal zodiac, and not in a tropical answer on fixed axes.
-    CHECK(ask(Json::object())["results"][0]["provenance"]["precession"] == "iau2006");
+    CHECK(ask(Json::object())["results"][0]["provenance"]["precession"] == "vondrak2011");
     CHECK(ask({{"precession", "vondrak2011"}})["results"][0]["provenance"]["precession"] ==
           "vondrak2011");
     CHECK(ask({{"frame", "icrf"}})["results"][0]["provenance"].contains("precession") == false);
     CHECK(ask({{"frame", "icrf"},
-               {"zodiac", "lahiri"}})["results"][0]["provenance"]["precession"] == "iau2006");
+               {"zodiac", "lahiri"}})["results"][0]["provenance"]["precession"] == "vondrak2011");
 }

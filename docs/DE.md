@@ -16,10 +16,50 @@ in NAIF's SPK container are read by `prometheia::spk`
 | `linux_p1550p2650.440` | `ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/` | 98 MB | DE440, 1550–2650 (`PROMETHEIA_DE440`) |
 | `testpo.440` | same directory | 838 KB | JPL's official test points for DE440 (`PROMETHEIA_TESTPO440`) |
 | `header.440`, `header.200` | JPL ASCII headers | 22 KB | published GROUP 1050 pointer tables, used to pin the tests |
+| `linux_m13000p17000.441` | `ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de441/` | 2.79 GB | DE441, −13200..+17191 per its header (`PROMETHEIA_DE441`) |
+| `testpo.441` | same directory | 24 MB | JPL's test points for DE441, 364,687 of them (`PROMETHEIA_TESTPO441`) |
 
 The DE440 files live in the repo's gitignored `ephe/` directory (see
 `ephe/SHA256SUMS` locally); real-file tests print SKIP when a file is
-absent, so a machine without them runs the synthetic part only.
+absent, so a machine without them runs the synthetic part only. All of
+them are acquired, and checked against pinned SHA-256s, by
+`tools/fetch/de_fetch.py` (`--list`, `--probe` for sizes by HEAD alone,
+`--verify`); DE441 was fetched with it on 2026-09-29, to `/nvm/work/ephe/`
+on this machine and linked into `ephe/`.
+
+## DE441
+
+JPL's long-span companion to DE440: the same integration, fitted without
+the lunar core-mantle damping that DE440 carries, so that it can be run
+over 30,000 years. Inside DE440's span JPL recommends DE440.
+
+- **Against JPL's test points**: all 360,001 inside the file's span
+  (`testpo.441`'s header claims a wider range than the binary holds) —
+  bodies 2.8e-14 AU(/day), nutations 8e-20 rad, librations 5 ulp. Two
+  things in that file would fool a quick reader. The first three fields run
+  together for a negative year or JD (`441-13200.09.01-3099998.5`), so the
+  test scans them rather than splitting on whitespace; and the libration
+  angle ψ reaches 1.2 × 10⁶ rad by the ends, where one f64 ulp is
+  2.3e-10, so libration errors are graded in ulps of each component's
+  largest value rather than absolutely. The gate checks every 20th point
+  (`de441_real_matches_jpl_testpo_sampled`); all of them run with
+  `-tc=de441_real_matches_jpl_testpo_all --no-skip`.
+- **Against DE440 where both run** (61 epochs 1550–2650, astrometric
+  ICRF): the Sun and every planet agree to ≤ 0.013 mas and a few metres.
+  **The Moon does not**: 0.36″ at 1550, 0.08″ at 1700, 0.003″ at 1900,
+  < 1 mas 1950–2026, 0.006″ at 2100, 0.06″ at 2650 — the core damping,
+  growing away from the era of lunar laser ranging.
+- **So the engine serves both, each where it is best**
+  (`Engine::add_ephemeris`, C `prometheia_engine_add_ephemeris`,
+  `--ephemeris` given twice to `prometheiad` and `prometheia-json`, `-e`
+  twice to `ephem`): DE440 first answers 1550–2650 exactly as it does
+  alone (tested to the bit), and DE441 behind it answers outside. A chart
+  carried across 1550 sees the Moon step by ≤ 0.36″ (0.06″ at 2650) and
+  the planets by < 0.02 mas. Provenance names the file that answered.
+- **What else changes out there**: the precession model, now Vondrák 2011
+  by default everywhere (FRAMES.md), and the planets' mean orbit points, which are fitted to DE440
+  over 1550–2650 and are refused outside it rather than extrapolated
+  (ENGINE.md).
 
 ## Byte map
 

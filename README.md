@@ -44,7 +44,9 @@ releases 0.2.0 to 0.7.1 (2026-09-18 to 2026-09-29), the work below the list:
   libration and TT−TDB columns, either byte order) and NAIF SPK kernels
   (`.bsp`, type 2/3 segments with segment chaining). DE440 reproduces all
   13,201 of JPL's official `testpo.440` points to 1.4e-14 AU, and
-  `de440s.bsp` agrees with the DE440 binary to 4 cm.
+  `de440s.bsp` agrees with the DE440 binary to 4 cm. DE441 can stand behind
+  DE440 (`add_ephemeris`) to answer −13000..17000; it passes all 360,001 of
+  JPL's test points in its span ([docs/DE.md](docs/DE.md), "DE441").
   Details: [docs/DE.md](docs/DE.md), [docs/SPK.md](docs/SPK.md).
 - **Time scales** — exact proleptic-Gregorian calendar ↔ JD; UTC ↔ TAI ↔
   TT with the USNO leap-second table and correct `23:59:60` labeling in

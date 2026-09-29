@@ -18,7 +18,10 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
 
 ## Contract
 
-- **Ephemeris:** a JPL DE binary or a DAF/SPK kernel, detected by content
+- **Ephemeris:** a JPL DE binary or a DAF/SPK kernel, detected by content;
+  `add_ephemeris(path)` puts further files behind the first, each read
+  going to the first whose span holds the instant (DE440 then DE441:
+  [DE.md](DE.md), "DE441")
   (`DAF/SPK ` identification word), not extension. Both give identical
   answers for the same DE (DE440 binary vs `de440s.bsp`: ≤ 4 µas through
   the whole pipeline).
@@ -55,7 +58,7 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
 | `coords` | `Ecliptic`, `Equatorial` | ecliptic |
 | `sidereal` | `Tropical`, `FaganBradley`, `Lahiri`, `User` (+ `sidereal_epoch_jtdb`, `sidereal_ayanamsa_deg`), and eleven zodiacs defined at the instant: `TrueCitra` … `GalacticEquatorMula` ([FRAMES.md](FRAMES.md), "Zodiacs defined at the instant") | tropical |
 | `sidereal_plane` | `EclipticOfDate`, `EclipticOfAnchor`, `Invariable` (fixed planes: [FRAMES.md](FRAMES.md), "Sidereal planes") | ecliptic of date |
-| `precession` | `IAU2006`, `Vondrak2011` (long-term; [FRAMES.md](FRAMES.md)) | IAU 2006 |
+| `precession` | `Vondrak2011`, `IAU2006` ([FRAMES.md](FRAMES.md)) | Vondrák 2011 (IAU 2006 before 2026-09-29) |
 | `light_time`, `deflection`, `aberration` | independent switches | all on |
 | `speed` | rates by central difference (3× the work) | on |
 | `sigma` | catalog bodies' `sigma_arcsec` (12 extra integrations per body) | on |
@@ -357,6 +360,11 @@ It is available for the Moon and the major planets (NotFound otherwise).
     of date are nearly degenerate and move quickly.
   - Regenerate the table with `prometheia-gen-mean-elements DE_FILE
     src/mean_elements.inc` (2.7 s) when the planetary ephemeris changes.
+  - **Outside the fit's span (1550–2650) a planet's mean points are
+    refused** (`CoverageError`) rather than extrapolated: the quadratics'
+    T² terms would be multiplied some 700-fold at ±13,000 years, and nothing
+    measures them there. The Moon's mean points come from the fundamental
+    arguments and are served wherever the ephemeris is.
 
 ## Fixed stars
 

@@ -30,6 +30,11 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
 ```
 
 - **Options.** `prometheiad --help` lists them all.
+  - `--ephemeris FILE` again: a further ephemeris answering the instants
+    the first does not cover (DE441 after DE440, [DE.md](DE.md), "DE441");
+    both are in the dataset id. A REQUEST without the precession TLV is
+    answered with Vondrák 2011 (§3.5a, agreed 2026-09-29; IAU 2006 before),
+    and the token `iau2006` selects IAU 2006.
   - `--threads N`: the number of event loops (default: one per hardware
     thread). Each loop opens its own engine.
   - `--bind ADDR`: the listen address.

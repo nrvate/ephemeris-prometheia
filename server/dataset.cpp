@@ -103,10 +103,13 @@ void hash_file(Sha256& sha, const std::string& tag, const std::string& path) {
 Dataset make_dataset(std::string engine, const std::string& ephemeris_path,
                      const std::vector<std::string>& catalog_paths,
                      const std::string& perturbers_path,
-                     const std::vector<std::string>& hypothetical_paths) {
+                     const std::vector<std::string>& hypothetical_paths,
+                     const std::vector<std::string>& extra_ephemeris_paths) {
     Dataset d;
     d.engine = std::move(engine);
     d.ephemeris = base_name(ephemeris_path);
+    for (const std::string& e : extra_ephemeris_paths)
+        d.ephemeris += "+" + base_name(e);
     for (const std::string& c : catalog_paths) {
         d.catalogs.push_back(base_name(c));
     }
@@ -116,6 +119,8 @@ Dataset make_dataset(std::string engine, const std::string& ephemeris_path,
     Sha256 sha;
     sha.update(reinterpret_cast<const uint8_t*>(d.engine.data()), d.engine.size());
     hash_file(sha, "ephemeris", ephemeris_path);
+    for (const std::string& e : extra_ephemeris_paths)
+        hash_file(sha, "ephemeris", e); // in order: the first that covers an instant answers
     for (const std::string& c : catalog_paths) {
         hash_file(sha, "catalog", c);
     }

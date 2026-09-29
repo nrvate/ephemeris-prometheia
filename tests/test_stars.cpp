@@ -336,8 +336,9 @@ TEST_CASE("stars_distance_rate_matches_differenced_distance") {
             const double* x = p.xyz_au;
             const double* v = p.vel_au_day;
             const double r2 = x[0] * x[0] + x[1] * x[1];
+            const double vn = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
             CHECK(std::fabs((x[0] * v[0] + x[1] * v[1] + x[2] * v[2]) / p.dist_au - p.dist_speed) <
-                  1e-12 * std::fabs(p.dist_speed));
+                  1e-12 * vn); // rounding of a dot product scales with |v|, not its radial part
             const double lon_speed = (x[0] * v[1] - x[1] * v[0]) / r2 * 57.29577951308232;
             CHECK(std::fabs(lon_speed - p.lon_speed) < 1e-12 * std::fabs(p.lon_speed) + 1e-15);
         }

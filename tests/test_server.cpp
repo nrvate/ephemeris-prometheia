@@ -503,6 +503,33 @@ TEST_CASE("server_profiles") {
         return r.value();
     };
 
+    SUBCASE("the precession TLV: absent is Vondrak 2011, and each token is honoured") {
+        // Absent is Vondrak 2011 (3.5a, both maintainers, 2026-09-29), and
+        // "iau2006" must select IAU 2006: when that was the default the
+        // parser only ever set Vondrak, and an explicit "iau2006" would have
+        // quietly got the new default.
+        const auto ask = [&](const char* token) {
+            eph::Request req = base_request(jd, 1);
+            req.objs = {body_obj(5)};
+            if (token) {
+                eph::Tlv e;
+                e.tag = eph::kReqTagPrecession;
+                e.value = std::string(1, char(std::strlen(token))) + token;
+                req.ext.push_back(std::move(e));
+            }
+            static uint32_t rid = 400;
+            CHECK(s.on_message(request(req, ++rid), true));
+            return join(drain(s));
+        };
+        CalcOptions iau, vondrak;
+        iau.precession = Precession::IAU2006;
+        vondrak.precession = Precession::Vondrak2011;
+        const double lon_iau = engine(iau).pos.lon_deg, lon_v = engine(vondrak).pos.lon_deg;
+        REQUIRE(lon_iau != lon_v); // the two models must differ here, or this proves nothing
+        CHECK(ask(nullptr).cols[0] == lon_v);
+        CHECK(ask("vondrak2011").cols[0] == lon_v);
+        CHECK(ask("iau2006").cols[0] == lon_iau);
+    }
     SUBCASE("equatorial, J2000") {
         CalcOptions o;
         o.coords = Coords::Equatorial;

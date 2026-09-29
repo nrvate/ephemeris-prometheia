@@ -29,7 +29,9 @@ constexpr const char* kInvariablePlaneNote =
 
 constexpr const char* kUsage =
     "usage: prometheiad --ephemeris FILE [options]\n"
-    "  --ephemeris FILE      JPL DE binary or SPK kernel (required)\n"
+    "  --ephemeris FILE      JPL DE binary or SPK kernel (required). Repeatable:\n"
+    "                        a later file answers only the instants the earlier\n"
+    "                        ones do not cover (DE440 then DE441)\n"
     "  --catalog FILE        EPM1 small-body catalog (repeatable, newest wins)\n"
     "  --perturbers FILE     asteroid perturber SPK kernel (e.g. sb441-n16.bsp)\n"
     "  --hypotheticals FILE  element file of named hypothetical bodies (JSON Lines;\n"
@@ -72,6 +74,7 @@ bool parse_uint(const char* s, unsigned long& out) {
 
 int main(int argc, char** argv) {
     std::string ephemeris, perturbers, tokens_path;
+    std::vector<std::string> extra_ephemerides; // --ephemeris after the first
     std::vector<std::string> catalogs, hypothetical_files;
     WsOptions options;
     options.log_level = LogLevel::Info;
@@ -95,7 +98,10 @@ int main(int argc, char** argv) {
             return n;
         };
         if (arg == "--ephemeris") {
-            ephemeris = value();
+            if (ephemeris.empty())
+                ephemeris = value();
+            else
+                extra_ephemerides.emplace_back(value());
         } else if (arg == "--catalog") {
             catalogs.emplace_back(value());
         } else if (arg == "--hypotheticals") {
@@ -187,6 +193,11 @@ int main(int argc, char** argv) {
         if (!e) {
             return e.error();
         }
+        for (const std::string& x : extra_ephemerides) {
+            if (auto r = e.value().add_ephemeris(x); !r) {
+                return make_error(r.error().code, x + ": " + r.error().message);
+            }
+        }
         for (const std::string& c : catalogs) {
             if (auto r = e.value().add_catalog(c); !r) {
                 return make_error(r.error().code, c + ": " + r.error().message);
@@ -226,9 +237,9 @@ int main(int argc, char** argv) {
             log.always("%s", probe.error().message.c_str());
             return 1;
         }
-        const Dataset dataset = make_dataset("Prometheia " PROMETHEIA_VERSION ", " +
-                                                 std::string(probe.value().source()),
-                                             ephemeris, catalogs, perturbers, hypothetical_files);
+        const Dataset dataset = make_dataset(
+            "Prometheia " PROMETHEIA_VERSION ", " + std::string(probe.value().source()), ephemeris,
+            catalogs, perturbers, hypothetical_files, extra_ephemerides);
         // A.8's invariable plane names its orientation in the engine
         // description (3.5a); the dataset id keeps the bare engine string.
         options.config.engine = dataset.engine + kInvariablePlaneNote;

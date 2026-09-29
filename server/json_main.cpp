@@ -30,7 +30,9 @@ namespace {
 
 constexpr const char* kUsage =
     "usage: prometheia-json --ephemeris FILE (--stdio | --http PORT) [options]\n"
-    "  --ephemeris FILE      JPL DE binary or SPK kernel (required)\n"
+    "  --ephemeris FILE      JPL DE binary or SPK kernel (required). Repeatable:\n"
+    "                        a later file answers only the instants the earlier\n"
+    "                        ones do not cover (DE440 then DE441)\n"
     "  --catalog FILE        EPM1 small-body catalog (repeatable, newest wins)\n"
     "  --perturbers FILE     asteroid perturber SPK kernel\n"
     "  --hypotheticals FILE  element file of named hypothetical bodies (repeatable)\n"
@@ -250,6 +252,7 @@ int serve_stdio(mcp::Dispatcher& mcp, const Log& log) {
 
 int main(int argc, char** argv) {
     std::string ephemeris, perturbers, tokens_path, bind = "127.0.0.1";
+    std::vector<std::string> extra_ephemerides; // --ephemeris after the first
     std::vector<std::string> catalogs, hypotheticals;
     std::unordered_set<std::string> origins;
     bool stdio = false;
@@ -274,7 +277,10 @@ int main(int argc, char** argv) {
             return n;
         };
         if (arg == "--ephemeris") {
-            ephemeris = value();
+            if (ephemeris.empty())
+                ephemeris = value();
+            else
+                extra_ephemerides.emplace_back(value());
         } else if (arg == "--catalog") {
             catalogs.emplace_back(value());
         } else if (arg == "--perturbers") {
@@ -323,6 +329,11 @@ int main(int argc, char** argv) {
         return 1;
     }
     Engine engine = std::move(opened).value();
+    for (const std::string& x : extra_ephemerides)
+        if (auto r = engine.add_ephemeris(x); !r) {
+            log.always("%s: %s", x.c_str(), r.error().message.c_str());
+            return 1;
+        }
     for (const std::string& c : catalogs)
         if (auto r = engine.add_catalog(c); !r) {
             log.always("%s: %s", c.c_str(), r.error().message.c_str());
@@ -340,7 +351,7 @@ int main(int argc, char** argv) {
         }
     const Dataset dataset =
         make_dataset("Prometheia " PROMETHEIA_VERSION ", " + std::string(engine.source()),
-                     ephemeris, catalogs, perturbers, hypotheticals);
+                     ephemeris, catalogs, perturbers, hypotheticals, extra_ephemerides);
     jsontools::Context ctx;
     ctx.engine = dataset.engine;
     ctx.dataset = dataset.id;

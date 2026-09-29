@@ -11,6 +11,28 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **DE441 behind DE440** (docs/DE.md, "DE441"). `Engine::add_ephemeris`
+  (C `prometheia_engine_add_ephemeris`; `--ephemeris` twice to the servers,
+  `-e` twice to `ephem`) answers the instants the first file does not
+  cover: DE440 inside 1550–2650, to the bit as before, DE441 over
+  −13000..17000 outside it. DE441 passes all 360,001 of JPL's test points
+  in its span; it agrees with DE440 on the planets to 0.013 mas and on the
+  Moon to 0.36″ at 1550. Fetched and pinned by the new
+  `tools/fetch/de_fetch.py`. ABI unchanged (6); announced to the Astrolog
+  side before it landed.
+- **Precession defaults to Vondrák 2011 everywhere** (maintainer, with the
+  Astrolog side; protocol §3.5a for a REQUEST without the TLV). IAU 2006's
+  polynomials part from it by degrees at ±10,000 years, and within
+  1550–2650 the two agree to ≤ 0.01″, so one model serves every date with
+  no seam (docs/FRAMES.md). **Moves every answer that took the old default
+  by up to 0.01″** (≤ 2 mas over 1800–2200). IAU 2006 stays selectable, and
+  an explicit `iau2006` TLV now selects it rather than the default (a fault
+  the change would otherwise have introduced; a test holds it).
+- **The planets' mean orbit points are refused outside 1550–2650**, the
+  span their quadratics were fitted over, rather than extrapolated.
+
 ## 0.7.1 — 2026-09-29
 
 The library and tools are 0.7.1; the C ABI is unchanged (6: one status value

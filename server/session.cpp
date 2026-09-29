@@ -205,8 +205,9 @@ std::optional<std::string> plan_profiles(const eph::Request& q, std::vector<Prof
         p.columns = pf.columns;
         out.push_back(std::move(p));
     }
-    // The precession model (REQUEST TLV 0x0003) applies to every profile.
-    Precession precession = Precession::IAU2006;
+    // The precession model (REQUEST TLV 0x0003) applies to every profile;
+    // absent, Vondrak 2011 (3.5a as agreed by both maintainers 2026-09-29).
+    Precession precession = Precession::Vondrak2011;
     bool fUnknownPrecession = false;
     for (const eph::Tlv& e : q.ext) {
         if (e.tag != eph::kReqTagPrecession) {
@@ -218,7 +219,9 @@ std::optional<std::string> plan_profiles(const eph::Request& q, std::vector<Prof
         }
         if (token == "vondrak2011") {
             precession = Precession::Vondrak2011;
-        } else if (token != "iau2006") {
+        } else if (token == "iau2006") {
+            precession = Precession::IAU2006; // explicit: the default is no longer this
+        } else {
             fUnknownPrecession = true; // falls back, and the answer says so
         }
     }

@@ -270,6 +270,7 @@ TEST_CASE("engine_synthetic_frames_compose") {
     Engine e = open_synthetic(tf);
     const double jd_tt = 2470000.5; // inside the kernel's +/- 60 yr
     CalcOptions o = CalcOptions::geometric();
+    o.precession = Precession::IAU2006; // the references below are IAU 2006's
     o.speed = false;
     // Every query must succeed: a failed Result carries a zero Position,
     // which would make the comparisons below vacuous.
@@ -596,6 +597,7 @@ TEST_CASE("sidereal_output_consistency") {
     // latitude and distance untouched; the reported ayanamsa is the
     // applied shift; the rates carry the ayanamsha motion.
     CalcOptions trop = CalcOptions::apparent();
+    trop.precession = Precession::IAU2006; // frames::ayanamsa is IAU 2006's p_A
     CalcOptions sid = trop;
     sid.sidereal = SiderealMode::Lahiri;
     auto tr = e.calc(body::kSun, t, trop);
@@ -715,6 +717,8 @@ const std::string kDe440Path =
     env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/linux_p1550p2650.440");
 const std::string kDe440sPath =
     env_or("PROMETHEIA_DE440S", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/de440s.bsp");
+const std::string kDe441Path =
+    env_or("PROMETHEIA_DE441", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/linux_m13000p17000.441");
 
 struct FixedDeltaT final : time::DeltaTModel {
     double seconds = 0.0;
@@ -764,6 +768,68 @@ const char* mode_name(Mode m) {
                                   "heliocentric geometric (J2000)",
                                   "topocentric apparent"};
     return names[int(m)];
+}
+
+// DE440 with DE441 behind it (Engine::add_ephemeris; docs/DE.md, "DE441"):
+// inside 1550-2650 every answer is DE440's to the bit, outside it DE441
+// answers and says so, the default precession is Vondrak 2011 there too, and the
+// planets' mean points, fitted over 1550-2650, are refused rather than
+// extrapolated.
+TEST_CASE("de441_behind_de440") {
+    if (!available(kDe440Path, "PROMETHEIA_DE440") || !available(kDe441Path, "PROMETHEIA_DE441"))
+        return;
+    auto alone = Engine::open(kDe440Path);
+    auto chained = Engine::open(kDe440Path);
+    REQUIRE(alone.ok());
+    REQUIRE(chained.ok());
+    REQUIRE(chained.value().add_ephemeris(kDe441Path).ok());
+    Engine& a = alone.value();
+    Engine& c = chained.value();
+
+    for (double jd : {2287200.5, 2451545.0, 2461300.5, 2688900.5}) {
+        for (int body : {10, 301, 199, 4, 5, 9}) {
+            auto x = a.calc(body, jd, CalcOptions{});
+            auto y = c.calc(body, jd, CalcOptions{});
+            REQUIRE(x.ok());
+            REQUIRE(y.ok());
+            CHECK(x.value().pos.lon_deg == y.value().pos.lon_deg);
+            CHECK(x.value().pos.lat_deg == y.value().pos.lat_deg);
+            CHECK(x.value().pos.dist_au == y.value().pos.dist_au);
+            CHECK(y.value().provenance.denum == 440);
+            CHECK(y.value().provenance.precession == Precession::Vondrak2011); // the default
+        }
+    }
+
+    // Outside: DE440 alone refuses, the chain answers from DE441.
+    for (double jd :
+         {2451545.0 - 3000.0 * 365.25, 2451545.0 + 5000.0 * 365.25, 2451545.0 - 12000.0 * 365.25}) {
+        auto x = a.calc(4, jd, CalcOptions{});
+        REQUIRE(!x.ok());
+        CHECK(x.error().code == ErrorCode::CoverageError);
+        auto y = c.calc(4, jd, CalcOptions{});
+        REQUIRE(y.ok());
+        CHECK(y.value().provenance.denum == 441);
+        CHECK(std::string(y.value().provenance.source) == "JPL DE441 binary");
+        CHECK(y.value().provenance.precession == Precession::Vondrak2011);
+        CalcOptions iau;
+        iau.precession = Precession::IAU2006; // an explicit model is honoured
+        auto z = c.calc(4, jd, iau);
+        REQUIRE(z.ok());
+        CHECK(z.value().provenance.precession == Precession::IAU2006);
+        // The planets' mean points: fitted over 1550-2650, so refused.
+        auto m = c.calc_orbit_point(4, OrbitPoint::AscendingNode, OrbitElements::Mean, jd,
+                                    CalcOptions{});
+        REQUIRE(!m.ok());
+        CHECK(m.error().code == ErrorCode::CoverageError);
+        // The Moon's mean node comes from its analytic arguments and stays.
+        CHECK(c.calc_orbit_point(301, OrbitPoint::AscendingNode, OrbitElements::Mean, jd,
+                                 CalcOptions{})
+                  .ok());
+    }
+    // Past DE441's own span, a coverage error as before.
+    auto far = c.calc(4, 2451545.0 - 20000.0 * 365.25, CalcOptions{});
+    REQUIRE(!far.ok());
+    CHECK(far.error().code == ErrorCode::CoverageError);
 }
 
 TEST_CASE("de440_engine_matches_swetest") {
@@ -844,6 +910,7 @@ TEST_CASE("de440_vondrak_precession_matches_swetest") {
             if (d.jd_tt == f.jd_tt)
                 dt.seconds = d.seconds;
         CalcOptions o = options_for(f.mode);
+        o.precession = Precession::IAU2006;
         auto iau = e.calc(f.body, f.jd_tt, o);
         o.precession = Precession::Vondrak2011;
         auto ltp = e.calc(f.body, f.jd_tt, o);
@@ -987,6 +1054,7 @@ TEST_CASE("sidereal_fixed_planes") {
     // there, and A0 is the mean ayanamsha there: a user zodiac anchored at
     // t answers the same on plane 1 as on plane 0 in the mean frame.
     CalcOptions date = CalcOptions::apparent();
+    date.precession = Precession::IAU2006; // the references are IAU 2006 matrices
     date.frame = Frame::MeanOfDate;
     date.sidereal = SiderealMode::User;
     date.sidereal_epoch_jtdb = t;
@@ -1008,9 +1076,11 @@ TEST_CASE("sidereal_fixed_planes") {
     // sine is the ICRF direction's component along the pole; the reported
     // ayanamsa is the anchor's A0.
     CalcOptions icrf = CalcOptions::apparent();
+    icrf.precession = Precession::IAU2006; // the references are IAU 2006 matrices
     icrf.frame = Frame::ICRF;
     icrf.coords = Coords::Equatorial;
     CalcOptions inv = CalcOptions::apparent();
+    inv.precession = Precession::IAU2006; // the references are IAU 2006 matrices
     inv.sidereal = SiderealMode::Lahiri;
     inv.sidereal_plane = SiderealPlane::Invariable;
     const auto anchor_lahiri = frames::ayanamsa_anchor(1);

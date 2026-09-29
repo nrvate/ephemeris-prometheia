@@ -34,6 +34,15 @@ word; say what matters at milestones, don't ping-pong.
 - Astrolog now differences its body rates from its own positions: record
   x takes their `rates` findings 84 → 5 (the five are a parked star).
 
+**DE441 and the precession default (2026-09-29, the maintainer's go-ahead
+for both):** DE441 is fetched to `/nvm/work/ephe/` (pinned in
+`tools/fetch/de_fetch.py`, linked into `ephe/`) and stands behind DE440 via
+`add_ephemeris`, DE440 answering 1550–2650 to the bit as before
+([DE.md](DE.md), "DE441"). Precession now defaults to Vondrák 2011
+everywhere — on the wire too, once Astrolog's §3.5a text lands — moving
+old-default answers by ≤ 0.01″ ([FRAMES.md](FRAMES.md)). The C API gained
+`prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
+
 **Astrolog's rates are done:** bodies and orbit points both differenced
 from their own positions (their `218b00e`, `418841e`); record y has their
 sweep within their advertised 3e-5 °/day and 1e-9 everywhere it reached,

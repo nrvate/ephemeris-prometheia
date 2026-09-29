@@ -159,7 +159,23 @@ grow quickly beyond a few centuries. For epochs further out (DE441 spans
 Capitaine & Wallace (A&A 534, A22, 2011), selected per query with
 `CalcOptions::precession = Precession::Vondrak2011` (C:
 `PROMETHEIA_PRECESSION_VONDRAK2011`; `ephem --precession vondrak2011`).
-IAU 2006 remains the default.
+**Vondrák 2011 is the default since 2026-09-29** (maintainer's decision,
+with the Astrolog side; protocol §3.5a says the same for a REQUEST without
+the precession TLV). With DE441 behind DE440 the engine answers
+−13000..17000 ([DE.md](DE.md), "DE441"), and IAU 2006's polynomials are
+fitted for centuries, not millennia. Measured on the Moon, apparent ecliptic
+of date, IAU 2006 against Vondrák 2011: 0.01″ at 1550, 0.004″ at 2650,
+0.06″ at 1000, 0.35″ at year 0, 1.3″ at −1000, 8″ at −3000, and 1508″ in
+longitude and 1994″ in latitude at −10000 (−3.9″/−162″ at +10000,
+2383″/5682″ at +15000). Within 1550–2650 the two agree to ≤ 0.01″, below
+either model's accuracy, so one model for every date costs nothing there
+and leaves no seam where two would meet. It is also what the Swiss
+Ephemeris and `astrolog-ephd` compute. **Every answer that used the old
+IAU 2006 default moved by up to 0.01″** (≤ 2 mas over 1800–2200). IAU 2006
+stays selectable (`Precession::IAU2006`, C `PROMETHEIA_PRECESSION_IAU2006`,
+JSON `"precession": "iau2006"`, the TLV token `iau2006`), and the model used
+is in `Provenance::precession`. The ERFA- and swetest-derived fixtures that
+test the IAU 2006 chain ask for it explicitly.
 
 - **Model:** each primary parameter is a cubic polynomial plus 8–14
   periodic terms, fitted to IAU 2006 near J2000 and to numerical

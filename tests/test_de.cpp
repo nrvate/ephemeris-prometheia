@@ -11,6 +11,7 @@
 //  - DE200 (PROMETHEIA_DE200, default /shares/swisseph/ephe/de200.eph);
 //  - DE440 (PROMETHEIA_DE440, default ephe/linux_p1550p2650.440) against
 //    JPL's own test points (PROMETHEIA_TESTPO440, default ephe/testpo.440).
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -476,6 +477,10 @@ const std::string kDe440Path =
     env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/linux_p1550p2650.440");
 const std::string kTestpoPath =
     env_or("PROMETHEIA_TESTPO440", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/testpo.440");
+const std::string kDe441Path =
+    env_or("PROMETHEIA_DE441", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/linux_m13000p17000.441");
+const std::string kTestpo441Path =
+    env_or("PROMETHEIA_TESTPO441", std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/testpo.441");
 
 const double kJ2000 = 2451545.0;
 
@@ -683,66 +688,178 @@ TEST_CASE("de440_real_header") {
     }
 }
 
-// JPL's testpo.440: "denum date jed target center coordinate value", in
+// JPL's testpo files: "denum date jed target center coordinate value", in
 // AU and AU/day (nutations and librations in radians and rad/day).
 // Targets: 1-11 bodies (3 = Earth, 10 = Moon), 12 = SSB, 13 = EMB,
-// 14 = nutations, 15 = librations. Every point inside the file's
-// coverage is checked.
-TEST_CASE("de440_real_matches_jpl_testpo") {
-    if (!available(kDe440Path, "PROMETHEIA_DE440") ||
-        !available(kTestpoPath, "PROMETHEIA_TESTPO440"))
-        return;
-    DeFile f = open_ok(kDe440Path);
+// 14 = nutations, 15 = librations. The first three fields run together
+// when the year or the JD is negative ("441-13200.09.01-3099998.5" in
+// testpo.441), so they are scanned, not split on whitespace: a whitespace
+// split reads every such line wrongly and would skip it in silence.
+struct TestpoRow {
+    int denum = 0, target = 0, center = 0, coord = 0;
+    double jed = 0.0, value = 0.0;
+};
+
+bool parse_testpo(const std::string& line, TestpoRow& r) {
+    const char* p = line.c_str();
+    char* end = nullptr;
+    r.denum = int(std::strtol(p, &end, 10)); // stops at the date's sign or blank
+    if (end == p)
+        return false;
+    p = end;
+    while (*p == ' ')
+        ++p;
+    // The date: [+-]year.month.day, then the JD straight after it.
+    if (*p == '-' || *p == '+')
+        ++p;
+    for (int part = 0; part < 3; ++part) {
+        if (!std::isdigit(static_cast<unsigned char>(*p)))
+            return false;
+        while (std::isdigit(static_cast<unsigned char>(*p)))
+            ++p;
+        if (part < 2 && *p++ != '.')
+            return false;
+    }
+    r.jed = std::strtod(p, &end);
+    if (end == p)
+        return false;
+    std::istringstream ls(end);
+    return bool(ls >> r.target >> r.center >> r.coord >> r.value);
+}
+
+struct TestpoResult {
+    long checked = 0, lines = 0, in_span = 0;
+    double worst_pos = 0.0, worst_nut = 0.0, worst_lib = 0.0;
+    // Libration angles accumulate: the Moon's rotation angle psi reaches
+    // 1.2e6 rad by DE441's ends, where one f64 ulp is 2.3e-10. A Chebyshev
+    // series' rounding scales with the size of the quantity it represents,
+    // not with its value at the instant (a component near zero keeps the
+    // absolute error of the series), so each component is graded in ulps
+    // of its own largest |value| over the points checked.
+    double lib_max_value[3] = {0.0, 0.0, 0.0}, lib_max_err[3] = {0.0, 0.0, 0.0};
+    double worst_lib_ulps = 0.0;
+};
+
+// Every `stride`-th point inside the file's coverage.
+TestpoResult check_testpo(DeFile& f, const std::string& path, int denum, long stride) {
     const de::Header& h = f.header();
-    std::ifstream in(kTestpoPath);
+    std::ifstream in(path);
     CHECK(in.is_open());
     std::string line;
     bool in_body = false;
-    long checked = 0;
-    double worst_pos = 0.0, worst_nut = 0.0, worst_lib = 0.0;
+    TestpoResult res;
+    long seen = 0;
     while (std::getline(in, line)) {
         if (!in_body) {
             in_body = line.rfind("EOT", 0) == 0;
             continue;
         }
-        std::istringstream ls(line);
-        int denum = 0, target = 0, center = 0, coord = 0;
-        std::string date;
-        double jed = 0.0, value = 0.0;
-        if (!(ls >> denum >> date >> jed >> target >> center >> coord >> value))
-            continue;
-        CHECK(denum == 440);
-        if (jed < h.start_jed || jed > h.end_jed)
+        ++res.lines;
+        TestpoRow r;
+        REQUIRE_MESSAGE(parse_testpo(line, r), line);
+        CHECK(r.denum == denum);
+        if (r.jed < h.start_jed || r.jed > h.end_jed)
+            continue; // the testpo header spans more than the file does (DE441)
+        ++res.in_span;
+        if (seen++ % stride != 0)
             continue;
         double out[6];
         double got = 0.0;
-        if (target == 14) {
-            CHECK(f.state(Body::Nutations, jed, out).ok());
+        if (r.target == 14) {
+            CHECK(f.state(Body::Nutations, r.jed, out).ok());
             static constexpr int map[4] = {0, 1, 3, 4};
-            got = out[map[coord - 1]];
-            worst_nut = std::max(worst_nut, std::fabs(got - value));
-        } else if (target == 15) {
-            CHECK(f.state(Body::Librations, jed, out).ok());
-            got = out[coord - 1];
-            worst_lib = std::max(worst_lib, std::fabs(got - value));
+            got = out[map[r.coord - 1]];
+            res.worst_nut = std::max(res.worst_nut, std::fabs(got - r.value));
+        } else if (r.target == 15) {
+            CHECK(f.state(Body::Librations, r.jed, out).ok());
+            got = out[r.coord - 1];
+            res.worst_lib = std::max(res.worst_lib, std::fabs(got - r.value));
+            if (r.coord >= 1 && r.coord <= 3) {
+                res.lib_max_value[r.coord - 1] =
+                    std::max(res.lib_max_value[r.coord - 1], std::fabs(r.value));
+                res.lib_max_err[r.coord - 1] =
+                    std::max(res.lib_max_err[r.coord - 1], std::fabs(got - r.value));
+            }
         } else {
-            CHECK(f.relative_state(Target(target), Target(center), jed, out).ok());
-            got = out[coord - 1] / h.au_km;
-            worst_pos = std::max(worst_pos, std::fabs(got - value));
+            CHECK(f.relative_state(Target(r.target), Target(r.center), r.jed, out).ok());
+            got = out[r.coord - 1] / h.au_km;
+            res.worst_pos = std::max(res.worst_pos, std::fabs(got - r.value));
         }
-        ++checked;
+        ++res.checked;
     }
+    for (int c = 0; c < 3; ++c) {
+        const double v = res.lib_max_value[c];
+        if (v > 0.0)
+            res.worst_lib_ulps = std::max(res.worst_lib_ulps,
+                                          res.lib_max_err[c] / (std::nextafter(v, INFINITY) - v));
+    }
+    return res;
+}
+
+TEST_CASE("de_testpo_line_layouts") {
+    // Both layouts testpo.441 uses, and testpo.440's.
+    TestpoRow r;
+    REQUIRE(parse_testpo("441-13200.09.01-3099998.5 14  0  1       -0.00002631732501007959", r));
+    CHECK(r.denum == 441);
+    CHECK(r.jed == -3099998.5);
+    CHECK(r.target == 14);
+    CHECK(r.coord == 1);
+    CHECK(r.value == doctest::Approx(-0.00002631732501007959));
+    REQUIRE(parse_testpo("441 -9999.02.01-1931045.5 13  6  1       -3.27709358375850845491", r));
+    CHECK(r.jed == -1931045.5);
+    CHECK(r.center == 6);
+    REQUIRE(parse_testpo("440  1550.01.01 2287184.5  3 12  4        0.00123", r));
+    CHECK(r.jed == 2287184.5);
+    CHECK(r.target == 3);
+    CHECK(!parse_testpo("EOT", r));
+}
+
+TEST_CASE("de440_real_matches_jpl_testpo") {
+    if (!available(kDe440Path, "PROMETHEIA_DE440") ||
+        !available(kTestpoPath, "PROMETHEIA_TESTPO440"))
+        return;
+    DeFile f = open_ok(kDe440Path);
+    const TestpoResult r = check_testpo(f, kTestpoPath, 440, 1);
     std::printf("  testpo.440: %ld points; worst |delta| bodies %.2e AU(/day), "
-                "nutations %.2e rad, librations %.2e rad\n",
-                checked, worst_pos, worst_nut, worst_lib);
-    CHECK(checked > 13000);
+                "nutations %.2e rad, librations %.2e rad (%.1f ulp)\n",
+                r.checked, r.worst_pos, r.worst_nut, r.worst_lib, r.worst_lib_ulps);
+    CHECK(r.checked > 13000);
     // testpo prints 20 digits after the decimal point; the bodies and
     // nutations reproduce to the double-precision noise of that print.
     // Libration angles grow to thousands of radians, so their absolute
     // noise floor is correspondingly larger.
-    CHECK(worst_pos < 1e-13);
-    CHECK(worst_nut < 1e-15);
-    CHECK(worst_lib < 1e-10);
+    CHECK(r.worst_pos < 1e-13);
+    CHECK(r.worst_nut < 1e-15);
+    CHECK(r.worst_lib_ulps < 16.0);
+}
+
+// DE441, -13200 to +17191: JPL's 364,694 test points. The gate reads the
+// file whole (every line must parse) and checks every 20th point; the report
+// below checks all of them.
+void de441_testpo(long stride) {
+    if (!available(kDe441Path, "PROMETHEIA_DE441") ||
+        !available(kTestpo441Path, "PROMETHEIA_TESTPO441"))
+        return;
+    DeFile f = open_ok(kDe441Path);
+    const TestpoResult r = check_testpo(f, kTestpo441Path, 441, stride);
+    std::printf("  testpo.441: %ld of %ld points in the file's span (of %ld); worst |delta| "
+                "bodies %.2e AU(/day), nutations %.2e rad, librations %.2e rad (%.1f ulp)\n",
+                r.checked, r.in_span, r.lines, r.worst_pos, r.worst_nut, r.worst_lib,
+                r.worst_lib_ulps);
+    CHECK(r.lines > 364000);
+    CHECK(r.in_span > 350000);
+    CHECK(r.checked == (r.in_span + stride - 1) / stride);
+    CHECK(r.worst_pos < 1e-13);
+    CHECK(r.worst_nut < 1e-15);
+    CHECK(r.worst_lib_ulps < 16.0);
+}
+
+TEST_CASE("de441_real_matches_jpl_testpo_sampled") {
+    de441_testpo(20);
+}
+
+TEST_CASE("de441_real_matches_jpl_testpo_all" * doctest::skip()) {
+    de441_testpo(1);
 }
 
 TEST_CASE("de440_real_nutations_and_continuity") {

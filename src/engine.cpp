@@ -13,6 +13,7 @@
 #include <deque>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -225,6 +226,9 @@ public:
     // ephemeris when it carries the constant, absent otherwise (the
     // caller falls back to the DE440 values in forces.hpp).
     virtual std::optional<double> gm_au3(int) const { return std::nullopt; }
+    // Whether an instant lies in this source's span (a DE file's header
+    // says; an SPK kernel is asked and answers with a coverage error).
+    virtual bool covers(double) const { return true; }
     std::string description;
     int denum = 0;
 };
@@ -272,6 +276,8 @@ struct MeanElementsFit {
     double rms[5];
 };
 #include "mean_elements.inc"
+// The fit's span (the table header): nothing outside it is answered.
+constexpr double kMeanElementsFromJd = 2287188.5, kMeanElementsToJd = 2688975.5;
 
 // The Moon's mean orbit: node and perigee from the fundamental arguments;
 // inclination, eccentricity and semi-major axis as constants (the published
@@ -285,6 +291,10 @@ public:
     explicit DeSource(de::DeFile f) : file_(std::move(f)) {
         denum = file_.header().denum;
         description = "JPL DE" + std::to_string(denum) + " binary";
+    }
+
+    bool covers(double jd_tdb) const override {
+        return jd_tdb >= file_.header().start_jed && jd_tdb <= file_.header().end_jed;
     }
 
     Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
@@ -391,6 +401,17 @@ public:
         description = "NAIF SPK kernel";
         if (!file_.internal_name().empty())
             description += " (" + file_.internal_name() + ")";
+        // The span any segment covers: an instant outside it is answered by
+        // no body here, so a chain's provenance must not name this file.
+        for (const auto& seg : file_.segments()) {
+            first_et_ = std::min(first_et_, seg.start_et);
+            last_et_ = std::max(last_et_, seg.end_et);
+        }
+    }
+
+    bool covers(double jd_tdb) const override {
+        const double et = (jd_tdb - 2451545.0) * 86400.0;
+        return et >= first_et_ && et <= last_et_;
     }
 
     Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
@@ -404,6 +425,58 @@ public:
 
 private:
     spk::SpkFile file_;
+    double first_et_ = std::numeric_limits<double>::infinity();
+    double last_et_ = -std::numeric_limits<double>::infinity();
+};
+
+// The engine's planetary ephemeris: one file, or several in order (Engine::
+// add_ephemeris). A read goes to the first member whose span holds the
+// instant and falls through only on a coverage error, so DE440 then DE441
+// answers from DE440 inside 1550-2650 and from DE441 outside. The GM
+// constants are the first member's.
+class ChainSource final : public Source {
+public:
+    void add(std::unique_ptr<Source> s) {
+        members_.push_back(std::move(s));
+        denum = members_.front()->denum;
+        description = members_.front()->description;
+        for (size_t i = 1; i < members_.size(); ++i)
+            description += ", then " + members_[i]->description + " outside it";
+    }
+
+    Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
+        bool tried = false;
+        Result<void> last;
+        for (const auto& m : members_) {
+            if (!m->covers(jd_tdb))
+                continue;
+            tried = true;
+            last = m->barycentric(id, jd_tdb, out);
+            if (last || last.error().code != ErrorCode::CoverageError)
+                return last;
+        }
+        return tried ? last : members_.front()->barycentric(id, jd_tdb, out);
+    }
+
+    std::optional<double> gm_au3(int id) const override { return members_.front()->gm_au3(id); }
+
+    bool covers(double jd_tdb) const override {
+        for (const auto& m : members_)
+            if (m->covers(jd_tdb))
+                return true;
+        return false;
+    }
+
+    // The member that answers at this instant, for provenance.
+    const Source& at(double jd_tdb) const {
+        for (const auto& m : members_)
+            if (m->covers(jd_tdb))
+                return *m;
+        return *members_.front();
+    }
+
+private:
+    std::vector<std::unique_ptr<Source>> members_;
 };
 
 // Asteroid perturber kernel (JPL SB441-N16 and similar): heliocentric SPK
@@ -961,7 +1034,8 @@ struct SmallBody {
 };
 
 struct Engine::Impl {
-    std::unique_ptr<Source> source;
+    std::unique_ptr<Source> source; // always a ChainSource (chain, below)
+    ChainSource* chain = nullptr;
 
     // Named hypothetical bodies: every definition ever added (a deque, so the
     // set names answers point at stay put), the current one per token, and
@@ -2067,6 +2141,12 @@ struct Engine::Impl {
             if (!fit)
                 return make_error(ErrorCode::NotFound,
                                   "mean elements exist for the Moon and the major planets only");
+            // Quadratics in T fitted over 1550-2650: outside it they would
+            // be extrapolated, which is an answer nothing measured.
+            if (jd_tdb < kMeanElementsFromJd || jd_tdb > kMeanElementsToJd)
+                return make_error(ErrorCode::CoverageError,
+                                  "outside the span the planets' mean elements are fitted "
+                                  "over (DE440, 1550-2650)");
             const double T = (jd_tdb - kJ2000) / 36525.0;
             const auto poly = [T](const double c[3]) { return c[0] + T * (c[1] + T * c[2]); };
             const double a = poly(fit->a), hh = poly(fit->h), kk = poly(fit->k);
@@ -2874,7 +2954,8 @@ Engine::~Engine() = default;
 Engine::Engine(Engine&&) noexcept = default;
 Engine& Engine::operator=(Engine&&) noexcept = default;
 
-Result<Engine> Engine::open(const std::string& path) {
+// A JPL DE binary or a DAF/SPK kernel, detected by content.
+Result<std::unique_ptr<Source>> open_ephemeris_source(const std::string& path) {
     char magic[8] = {};
     {
         std::ifstream f(path, std::ios::binary);
@@ -2882,19 +2963,49 @@ Result<Engine> Engine::open(const std::string& path) {
             return make_error(ErrorCode::IoError, "cannot open " + path);
         f.read(magic, sizeof magic);
     }
-    Engine e;
-    e.impl_ = std::make_unique<Impl>();
     if (std::memcmp(magic, "DAF/SPK ", 8) == 0) {
         auto s = spk::SpkFile::open(path);
         if (!s)
             return s.error();
-        e.impl_->source = std::make_unique<SpkSource>(std::move(s).value());
-    } else {
-        auto d = de::DeFile::open(path);
-        if (!d)
-            return d.error();
-        e.impl_->source = std::make_unique<DeSource>(std::move(d).value());
+        return std::unique_ptr<Source>(std::make_unique<SpkSource>(std::move(s).value()));
     }
+    auto d = de::DeFile::open(path);
+    if (!d)
+        return d.error();
+    return std::unique_ptr<Source>(std::make_unique<DeSource>(std::move(d).value()));
+}
+
+Result<void> Engine::add_ephemeris(const std::string& path) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    auto src = open_ephemeris_source(path);
+    if (!src)
+        return src.error();
+    impl_->chain->add(std::move(src).value());
+    impl_->refresh_overlay_source();
+    // Anything computed from the ephemeris may have stopped at the old span's
+    // edge: small-body tracks, and the natural apsides' passage blocks, which
+    // are kept even when a scan ran off the file (and would keep refusing an
+    // instant the new file covers).
+    impl_->small_bodies.clear();
+    impl_->record_cache.clear();
+    impl_->sigma_tracks.clear();
+    impl_->apsis_blocks.clear();
+    impl_->apsis_k_lo = 1;
+    impl_->apsis_k_hi = 0;
+    return {};
+}
+
+Result<Engine> Engine::open(const std::string& path) {
+    auto src = open_ephemeris_source(path);
+    if (!src)
+        return src.error();
+    Engine e;
+    e.impl_ = std::make_unique<Impl>();
+    auto chain = std::make_unique<ChainSource>();
+    chain->add(std::move(src).value());
+    e.impl_->chain = chain.get();
+    e.impl_->source = std::move(chain);
     e.impl_->perturbers.attach(e.impl_->source.get());
     frames::frame_bias_matrix(e.impl_->bias);
     e.impl_->eps_j2000 = frames::mean_obliquity(kJ2000);
@@ -2935,10 +3046,12 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
     if (!r)
         return r.error();
 
+    const Source& answered = impl_->chain->at(time::tdb_from_tt(jd_tt));
     res.provenance.source = origin == kFromCatalog && !impl_->overlay_source_.empty()
                                 ? std::string_view(impl_->overlay_source_)
-                                : std::string_view(impl_->source->description);
-    res.provenance.denum = impl_->source->denum;
+                                : std::string_view(answered.description);
+    res.provenance.denum = answered.denum;
+    res.provenance.precession = o.precession;
     res.provenance.light_time_days = tau;
     if (o.sidereal != SiderealMode::Tropical) {
         auto s = impl_->sidereal_shift(o, jd_tt);
@@ -3088,8 +3201,10 @@ Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitEleme
         res.pos);
     if (!r)
         return r.error();
-    res.provenance.source = impl_->source->description;
-    res.provenance.denum = impl_->source->denum;
+    const Source& answered = impl_->chain->at(time::tdb_from_tt(jd_tt));
+    res.provenance.source = answered.description;
+    res.provenance.denum = answered.denum;
+    res.provenance.precession = o.precession;
     res.provenance.light_time_days = tau;
     if (o.sidereal != SiderealMode::Tropical) {
         auto s = impl_->sidereal_shift(o, jd_tt);
@@ -3133,6 +3248,7 @@ Result<CalcResult> Engine::calc_elements(const PolynomialElements& el, double jd
     if (!r)
         return r.error();
     res.provenance.source = "two-body orbital elements";
+    res.provenance.precession = o.precession;
     res.provenance.light_time_days = tau;
     if (o.sidereal != SiderealMode::Tropical) {
         auto s = impl_->sidereal_shift(o, jd_tt);
@@ -3228,6 +3344,7 @@ Result<CalcResult> Engine::calc_star(size_t star_index, double jd_tt, const Calc
                                                     "Yale Bright Star Catalogue (1991)",
                                                     "SIMBAD (CDS)"};
     res.provenance.source = kSources[int(star.astrometry)];
+    res.provenance.precession = o.precession;
     if (o.sidereal != SiderealMode::Tropical) {
         auto s = impl_->sidereal_shift(o, jd_tt);
         if (!s)

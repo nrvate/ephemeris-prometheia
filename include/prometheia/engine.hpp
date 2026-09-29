@@ -140,6 +140,10 @@ enum class SiderealPlane : int {
 // IAU 2006 is the standard near the present; Vondrak, Capitaine & Wallace
 // (2011) stays valid over +-200 millennia (docs/FRAMES.md). Nutation is IAU
 // 2000A either way.
+// Vondrak, Capitaine & Wallace 2011 is the default (maintainer, 2026-09-29):
+// within 1550-2650 it agrees with IAU 2006 to 0.01", and outside it IAU 2006
+// parts from it by arcseconds at 3000 years and degrees at 10,000, so one
+// model serves every date the ephemerides reach with no seam (docs/FRAMES.md).
 enum class Precession : int {
     IAU2006 = 0,
     Vondrak2011 = 1,
@@ -209,7 +213,7 @@ struct CalcOptions {
     Coords coords = Coords::Ecliptic;
     SiderealMode sidereal = SiderealMode::Tropical;
     SiderealPlane sidereal_plane = SiderealPlane::EclipticOfDate; // with a sidereal zodiac
-    Precession precession = Precession::IAU2006;
+    Precession precession = Precession::Vondrak2011;
     double sidereal_epoch_jtdb = 0.0;   // SiderealMode::User anchor epoch
     double sidereal_ayanamsa_deg = 0.0; // SiderealMode::User anchor value
     bool light_time = true;             // retarded position of the body
@@ -257,6 +261,7 @@ struct Provenance {
     std::string_view source;      // e.g. "JPL DE440 binary" (valid while the Engine lives)
     int denum = 0;                // DE number when known, else 0
     double light_time_days = 0.0; // tau applied (0 without light_time)
+    Precession precession = Precession::Vondrak2011; // the model used
 };
 
 struct CalcResult {
@@ -300,6 +305,14 @@ public:
     // Opens a planetary ephemeris: a JPL DE binary or a DAF/SPK kernel
     // (detected by content, not extension).
     static Result<Engine> open(const std::string& ephemeris_path);
+
+    // Adds a further planetary ephemeris behind the ones already open, for
+    // the instants they do not cover: each ephemeris read goes to the first
+    // file whose span holds it, and falls through only on a coverage error.
+    // So DE440 opened first and DE441 added answers 1550-2650 from DE440 and
+    // -13000..17000 outside it from DE441 (docs/DE.md, "DE441"). Provenance
+    // names the file that answered. The GM constants stay the first file's.
+    Result<void> add_ephemeris(const std::string& ephemeris_path);
 
     // Adds a small-body catalog (an EPM1 container, docs/FORMAT.md).
     // Catalog bodies answer calc() under their SPK-ID — the same NAIF
@@ -418,7 +431,8 @@ public:
     // owned; nullptr restores the default (time::ObservedDeltaT).
     void set_delta_t_model(const time::DeltaTModel* model);
 
-    // Human-readable description of the loaded ephemeris.
+    // Human-readable description of the loaded ephemeris (every file, in
+    // order). The view is valid until add_ephemeris() or add_catalog().
     std::string_view source() const;
 
 private:

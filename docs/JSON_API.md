@@ -203,7 +203,7 @@ digits cut):
         "coordinates": "ecliptic",
         "zodiac": {"token": "lahiri", "plane": "date",
                    "doc": "docs/FRAMES.md (zodiacs) and docs/ENGINE.md (ayanamshas)"},
-        "precession": "iau2006",
+        "precession": "vondrak2011",
         "accuracy": {"statement": "JPL planetary ephemeris; positions agree with JPL Horizons to 6 µas",
                      "doc": "docs/VALIDATION.md"}
       },
@@ -227,6 +227,10 @@ digits cut):
     the request that made it.
   - `zodiac.plane` is the plane the zodiac is counted along (`date`,
     `anchor`, `invariable`), on every sidereal answer.
+  - `precession` is the model used: `vondrak2011` by default, `iau2006`
+    when asked for. `source` names every ephemeris that answered, since with
+    DE441 behind DE440 (`--ephemeris` twice) a series across 1550 or 2650
+    uses both ([DE.md](DE.md), "DE441").
   - `precession` appears where it entered the answer: an of-date frame or a
     sidereal zodiac. A tropical answer in ICRF or J2000 axes is the same
     number under either model, and naming one there would claim a
