@@ -1562,7 +1562,27 @@ equal its fresh twin, the stale-observer shape. Re-measured
 legs**, and no leg sees nothing. Blind in N of 18 now: `--obj` 18 (as
 above), `--jd` 13, `--corrections` 9, `--eq` 7, `--icrs` 7, `--center` 4,
 `--helio` 4, `--bary` 3, `--topo` 3, `--step` 3, `--j2000` 3, `--sid` 3,
-`--count` 2, `--sid-plane` 1. Found on the way, by a review of the change:
+`--count` 2, `--sid-plane` 1.
+
+**The epoch arrives too, the same day.** For every (server, epoch) a
+request sends, the harness asks that server once for the geometric Sun and
+Moon and holds them to low-precision theories — Meeus ch. 25 for the Sun
+(measured 0.012° from DE440 over 1552–2650, band 0.1°) and the six largest
+terms of ch. 47 for the Moon (0.28°, band 1°). The Moon is there because
+this harness's epochs are mostly 1 January, where the Sun alone cannot tell
+1900 from 2000 (0.2° apart); the Moon separates every epoch used by 20
+bands or more. `epoch-arrival` rows grade it per leg and server; only a
+request at J2000 itself, the client's default, passes with `--jd` dropped,
+correctly. Re-measured: **`--jd` is blind in 1 leg of 18** (`surfaces`,
+which grades refusals, not epochs), down from 13. Blind in N of 18 now:
+`--obj` 18, `--corrections` 9, `--eq` 7, `--icrs` 7, `--center` 4, `--helio`
+4, `--bary` 3, `--topo` 3, `--count` 3, `--step` 3, `--j2000` 3, `--sid` 3,
+`--sid-plane` 1, `--jd` 1. The record committed with the ΔT change had
+`points` seeing `--count`; it does not — that run re-read `crosstest.py`
+while it was being edited, and one leg's run caught it mid-change. This
+record is from a run with the harness unchanged throughout.
+
+Found on the way, by a review of the change:
 the `helio` leg ran outside any `leg_*` function, so the check could not
 name it and skipped it; it is now a leg function, and a request made
 outside one is still checked under a label that says so.
@@ -2174,6 +2194,54 @@ over it, **every one a Jupiter or Saturn osculating orbit point seen
 topocentrically** from Zurich or Quito — the one body class they kept on
 their library's rates — worst 1.01e-4 °/day (Saturn's osculating
 aphelion, Quito, 2026), twice the figure. Reported to them the same day.
+
+### Record y, 2026-09-29 (`docs/crosstest/2026-09-29y.tsv`): their orbit points, differenced
+
+Against their `418841e` (pid 1965814, sha256 `aa78581909005975…`, mtime
+12:30:49, read from `/proc`), where every orbit-point row is differenced
+too and `ratesApprox` stays only on fixed stars. They now advertise
+`0x0013` = 3e-5 °/day and 1e-9. **Their sweep is within it everywhere it
+reached** (`docs/crosstest/2026-09-29-ratesweep-theirs-osc.tsv`: 3,147
+answered, none over, the ΔT pass included); their worst rows are all
+parked stars. Every leg verdict is identical to record x, so differencing
+moved no position. First record with the `epoch-arrival` rows (below).
+
+**Set 26, their 80,000 AU hypothetical, is a definition, not a defect.**
+Elements: epoch J2000, equinox of date, circular, in the ecliptic. They
+measured Swiss's solver converged (τ = 462.04 d; one pass and convergence
+agree) and its direction 63.7″ from B(t−τ) − E(t) built with the equinox at
+t − τ: 462 days of general precession. So the question is which instant an
+equinox of date means under light time. Ours takes the **emission
+instant**, as HYPOTHETICALS.md states — measured: 63.61″ and 63.62″ from
+the same elements with the equinox pinned to t, at J2000.0 and 2026.
+That is the physically consistent reading (an element set defines the
+body's state as a function of time, frame included, and the light arriving
+at t left at t − τ), and it is the §3.5a clarification agreed with the
+Astrolog side: *"under light time, the instant evaluated is the emission
+instant, for the elements and for an equinox of date alike."* Swiss then
+differs by the precession over τ, 64″ here and nothing measurable on a body
+with a short light time.
+
+**Five more element sets refereed the same day** (their stock elements,
+astrometric, geocentric, J2000 ecliptic, JD 2461300.5 TT). Ours equals
+B(t−τ) − E(t), built from our own geometric outputs, to under 3e-9″ for
+every one, with τ consistent to 1e-13 s. Against Swiss:
+- the two **Earth-centred** sets (their 17, 19) agree to 0.001″ — so the
+  definition holds for geocentric orbits, and the 0.4″/3.6″ their own
+  reconstruction showed there was in the reconstruction (retracted by
+  them);
+- 18 and 24 differ by 0.063″ and 0.041″, which is S6 (precession × τ);
+- **16 (a fast inner orbit, τ 0.005 d) differs by 0.103″**, where
+  precession accounts for 0.0007″ — ours and their independent
+  reconstruction agree, so this one is Swiss's. The Astrolog side then
+  found Swiss's answer depends on whether speeds are asked for: 0.103″ from
+  ours without, 0.024″ with (what Astrolog users see). Open on their side,
+  mechanism unknown;
+- set 26's 65.15″ is S6 (63.6″) plus the kind-4 mean-anomaly rule: its
+  file writes M = 0.0 + 0.0·T, which the protocol reads as M at epoch plus
+  the Gaussian mean motion (1.457″ by t−τ), and Swiss holds fixed. Its
+  56,000 km distance difference (4.7e-9 relative) is unexplained — not the
+  Sun's motion over τ, which is 482,000 km along that line.
 
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 

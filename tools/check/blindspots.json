@@ -5,7 +5,6 @@
       "--center",
       "--corrections",
       "--helio",
-      "--jd",
       "--obj (probe)",
       "--topo",
       "--corrections=5~1",
@@ -16,6 +15,7 @@
     "seen": [
       "--columns",
       "--deltat",
+      "--jd",
       "--corrections=7~1",
       "--corrections=7~4"
     ]
@@ -25,7 +25,6 @@
       "--corrections",
       "--eq",
       "--icrs",
-      "--jd",
       "--obj (probe)"
     ],
     "control": "green",
@@ -35,6 +34,7 @@
       "--columns",
       "--deltat",
       "--helio",
+      "--jd",
       "--topo"
     ]
   },
@@ -58,7 +58,6 @@
       "--center",
       "--eq",
       "--icrs",
-      "--jd",
       "--obj (probe)"
     ],
     "control": "green",
@@ -66,6 +65,7 @@
       "--columns",
       "--corrections",
       "--deltat",
+      "--jd",
       "--corrections=1~1",
       "--corrections=3~1",
       "--corrections=3~2"
@@ -76,7 +76,6 @@
       "--count",
       "--eq",
       "--icrs",
-      "--jd",
       "--obj (probe)",
       "--step"
     ],
@@ -85,6 +84,7 @@
       "--columns",
       "--corrections",
       "--deltat",
+      "--jd",
       "--corrections=1~1",
       "--corrections=3~1",
       "--corrections=3~2"
@@ -95,7 +95,6 @@
       "--count",
       "--eq",
       "--icrs",
-      "--jd",
       "--obj (probe)",
       "--step"
     ],
@@ -104,6 +103,7 @@
       "--columns",
       "--corrections",
       "--deltat",
+      "--jd",
       "--topo",
       "--corrections=1~1",
       "--corrections=3~1",
@@ -115,14 +115,14 @@
       "--corrections",
       "--helio",
       "--j2000",
-      "--jd",
       "--obj (probe)"
     ],
     "control": "green",
     "seen": [
       "--columns",
       "--deltat",
-      "--hyp"
+      "--hyp",
+      "--jd"
     ]
   },
   "helio": {
@@ -160,6 +160,7 @@
     "blind": [
       "--bary",
       "--center",
+      "--count",
       "--helio",
       "--j2000",
       "--obj (probe)",
@@ -170,7 +171,6 @@
     "seen": [
       "--columns",
       "--corrections",
-      "--count",
       "--deltat",
       "--jd",
       "--node"
@@ -183,7 +183,6 @@
       "--helio",
       "--icrs",
       "--j2000",
-      "--jd",
       "--obj (probe)",
       "--sid",
       "--topo",
@@ -195,6 +194,7 @@
       "--columns",
       "--count",
       "--deltat",
+      "--jd",
       "--node",
       "--star",
       "--step",
@@ -207,19 +207,18 @@
       "--corrections",
       "--eq",
       "--icrs",
-      "--jd",
       "--obj (probe)"
     ],
     "control": "green",
     "seen": [
       "--columns",
-      "--deltat"
+      "--deltat",
+      "--jd"
     ]
   },
   "sidereal": {
     "blind": [
       "--corrections",
-      "--jd",
       "--obj (probe)",
       "--sid-plane",
       "--corrections=7~1",
@@ -230,13 +229,13 @@
     "seen": [
       "--columns",
       "--deltat",
+      "--jd",
       "--sid"
     ]
   },
   "sidinstant": {
     "blind": [
       "--corrections",
-      "--jd",
       "--obj (probe)",
       "--sid",
       "--corrections=7~1",
@@ -246,13 +245,13 @@
     "control": "green",
     "seen": [
       "--columns",
-      "--deltat"
+      "--deltat",
+      "--jd"
     ]
   },
   "sidsweep": {
     "blind": [
       "--corrections",
-      "--jd",
       "--obj (probe)",
       "--corrections=7~1",
       "--corrections=7~2",
@@ -262,6 +261,7 @@
     "seen": [
       "--columns",
       "--deltat",
+      "--jd",
       "--sid",
       "--sid-plane",
       "--sidu"
@@ -272,7 +272,6 @@
       "--corrections",
       "--eq",
       "--icrs",
-      "--jd",
       "--obj (probe)",
       "--sid",
       "--corrections=7~1",
@@ -283,6 +282,7 @@
     "seen": [
       "--columns",
       "--deltat",
+      "--jd",
       "--star"
     ]
   },

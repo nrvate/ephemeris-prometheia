@@ -44,9 +44,9 @@ through our `prometheia_calc_elements`; their 80,000 AU set differs from
 Swiss by arcseconds, and ours is converged (τ to 5e-9 s).
 
 **Open, unassigned, needing no decision** — full detail in "Open items":
-`--jd` blind in 13 of 18 legs (the legs with no outside anchor). Closed
-2026-09-29: `--deltat` (now seen by all 18 legs), the legs' selftest
-(`legtest.py`), and v0.7.1 (published).
+none from the 2026-09-20 list. Closed 2026-09-29: `--deltat` (seen by all
+18 legs), `--jd` (seen by 17; `surfaces` grades no epoch), the legs'
+selftest (`legtest.py`), and v0.7.1 (published).
 
 **The day's lesson, if only one survives:** four times in a week a claim
 here or in Astrolog was bounded by an axis nobody varied — a floor exact

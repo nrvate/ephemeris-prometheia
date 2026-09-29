@@ -223,8 +223,80 @@ def _calling_leg():
     return None
 
 
+# Epoch arrival (2026-09-29), the same idea for `--jd`: blindspots.py measured
+# it blind in 13 of 18 legs, since a leg with no outside anchor compares two
+# servers that would both answer at the client's default instant if the
+# epoch never arrived, and agree. So for every (server, epoch) a request
+# sends, the harness asks that server once for the geometric Sun at that
+# epoch and holds it to a low-precision solar theory (Meeus, "Astronomical
+# Algorithms" ch. 25: geometric longitude, mean equinox of date, ~0.01 deg
+# over these centuries). The Sun moves ~1 deg a day, so a wrong day cannot
+# pass the 0.1 deg band. The Sun alone cannot tell 1 January 1900 from
+# 1 January 2000 (0.2 deg apart), which is what most of this harness's
+# epochs are, so the Moon rides along, held to the six largest terms of
+# Meeus ch. 47 (~0.3 deg): it moves 13 deg a day, and its phase on one date
+# differs from year to year. A wrong minute passes both; the anchored legs
+# cover that.
+JD_SUN_BAND_DEG = 0.1
+JD_MOON_BAND_DEG = 1.0
+_epoch = {"cache": {}, "seen": {}, "bad": {}}
+
+
+def sun_longitude_low_precision(jd):
+    """Geometric ecliptic longitude of the Sun, mean equinox of date (deg)."""
+    t = (jd - 2451545.0) / 36525.0
+    l0 = 280.46646 + 36000.76983 * t + 0.0003032 * t * t
+    m = math.radians(357.52911 + 35999.05029 * t - 0.0001537 * t * t)
+    c = ((1.914602 - 0.004817 * t - 0.000014 * t * t) * math.sin(m)
+         + (0.019993 - 0.000101 * t) * math.sin(2 * m) + 0.000289 * math.sin(3 * m))
+    return (l0 + c) % 360.0
+
+
+def moon_longitude_low_precision(jd):
+    """Geocentric ecliptic longitude of the Moon, mean equinox of date (deg):
+    the mean longitude and the six largest periodic terms of Meeus ch. 47."""
+    t = (jd - 2451545.0) / 36525.0
+    lp = 218.3164477 + 481267.88123421 * t
+    d = math.radians(297.8501921 + 445267.1114034 * t)
+    m = math.radians(357.5291092 + 35999.0502909 * t)
+    mp = math.radians(134.9633964 + 477198.8675055 * t)
+    f = math.radians(93.2720950 + 483202.0175233 * t)
+    return (lp + 6.288774 * math.sin(mp) + 1.274027 * math.sin(2 * d - mp)
+            + 0.658314 * math.sin(2 * d) + 0.213618 * math.sin(2 * mp)
+            - 0.185116 * math.sin(m) - 0.114332 * math.sin(2 * f)) % 360.0
+
+
+def _check_epoch(client, srv, args, leg, verbose):
+    """Record whether this request's epoch reached the server (see above)."""
+    jd = float(args[args.index("--jd") + 1])
+    ut = "--ut" in args
+    key = (srv, jd, ut)
+    if key not in _epoch["cache"]:
+        probe = (["--jd", repr(jd), "--obj", "10", "--obj", "301", "--corrections", "0"]
+                 + (["--ut"] if ut else []))
+        rep = wirelib.run(client, srv[0], srv[1], probe, verbose)
+        sun, moon = rep.row(0), rep.row(1)
+        if sun is None or moon is None or math.isnan(sun[0]) or math.isnan(moon[0]):
+            _epoch["cache"][key] = None  # the probe itself was refused: not graded
+        else:
+            def off(a, b):
+                return abs((a - b + 180.0) % 360.0 - 180.0)
+            _epoch["cache"][key] = max(
+                off(sun[0], sun_longitude_low_precision(jd)) / JD_SUN_BAND_DEG,
+                off(moon[0], moon_longitude_low_precision(jd)) / JD_MOON_BAND_DEG)
+    miss = _epoch["cache"][key]
+    if miss is None:
+        return
+    k = (leg, srv)
+    _epoch["seen"][k] = _epoch["seen"].get(k, 0) + 1
+    if miss > 1.0:  # in units of each band
+        _epoch["bad"].setdefault(k, []).append((jd, miss))
+
+
 def ask(client, srv, args, verbose):
     args = list(args)
+    if "--jd" in args and _deltat["columns"]:
+        _check_epoch(client, srv, args, _calling_leg() or "(no leg function)", verbose)
     intended = None
     if (args.count("--deltat") == 1 and "--segments" not in args
             and "--columns" not in args):
@@ -250,6 +322,26 @@ def ask(client, srv, args, verbose):
             if not abs(got - intended) <= 1e-9:
                 _deltat["bad"].setdefault(key, []).append(got)
     return rep
+
+
+def epoch_arrival_rows(table):
+    """One row per (leg, server): did every epoch it asked for arrive?"""
+    table.asked(None, None)
+    for key in sorted(_epoch["seen"], key=str):
+        leg, srv = key
+        who = _deltat["who"].get(srv, "?")
+        bad = _epoch["bad"].get(key, [])
+        n = _epoch["seen"][key]
+        table.add(leg="epoch-arrival", object=leg, observer=who,
+                  verdict=("agree" if not bad else
+                           "finding (theirs)" if who == "theirs" else "finding"),
+                  band=f"Sun {JD_SUN_BAND_DEG} deg, Moon {JD_MOON_BAND_DEG} deg",
+                  note=(f"{n} request(s) sent --jd; the server's geometric Sun and Moon at "
+                        "that epoch " + ("are within their bands of Meeus's on every one"
+                                         if not bad else
+                                         f"miss Meeus's by {bad[0][1]:.1f}x the band at JD "
+                                         f"{bad[0][0]} ({len(bad)} request(s)): the epoch "
+                                         "did not arrive")))
 
 
 def deltat_arrival_rows(table):
@@ -2393,6 +2485,7 @@ def main():
     # about. A verdict a run cannot support is the mis-attribution this
     # harness exists to avoid.
     deltat_arrival_rows(table)
+    epoch_arrival_rows(table)
     adjudicate_helio_light_time(table)
     adjudicate_same(table)
     adjudicate_coverage(table)  # last: an anchor refused for coverage still adjudicates nothing
