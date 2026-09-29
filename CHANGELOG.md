@@ -11,6 +11,16 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **A fixed star's distance rate is computed in closed form**
+  (docs/ENGINE.md, "Rates"). It was a central difference of positions
+  1e5–1e10 AU long, which missed by one f64 ulp of the position: 2.3e-5
+  AU/day on Polaris, 1e-7 on the nearer stars. It now matches differenced
+  distances to the difference's own floor. **Moves a value on the wire:**
+  the star distance-rate column, and the radial part of a star's velocity
+  vector. Positions and angular rates are unchanged. The C ABI is unchanged.
+
 ## 0.7.0 — 2026-09-19
 
 The library and tools are 0.7.0; the C ABI is unchanged (6), and no

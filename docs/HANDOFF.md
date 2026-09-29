@@ -6,38 +6,36 @@ working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
 
-## Resume here (state at 2026-09-20 13:57)
+## Resume here (state at 2026-09-29)
 
-`6abf1a9` on `initial`, pushed, gate green, tree clean. Nothing is in
-flight: no daemon of ours running, no scheduled jobs, no background work.
-Our server, when a cross-test needs it:
+Work resumed 2026-09-29 after a nine-day gap. `initial` = `origin/initial`
+at the latest commit, gate green. No daemon of ours runs; start one when a
+cross-test needs it:
 
     ./build/prometheiad --ephemeris ephe/linux_p1550p2650.440 \
         --port 47190 --log-level info
 
 The only untracked paths are `.claude-config/` and `.envrc`, which are
-never staged.
-The Astrolog exchange reached a close on both sides at their `a0fc9ad`;
-their spare `astrolog-ephd` on **:47392** stays up overnight at the 13:37
-build (1739128 bytes, sha256 `9635191d6ee5ec6c…`), and they carry that
-identity in their own status so a rebuild is announced rather than
-silent. Read it from the running process anyway before trusting a row —
-that habit is what made the three builds of 2026-09-20 separable at all,
-and their undertaking is a courtesy, not a substitute.
-**:47391 is their production daemon and is never touched.**
+never staged. **:47392 was not listening on 2026-09-29** (the machine or
+the process did not survive the week; the Astrolog session did not stop
+it). Their binary on disk is still the 2026-09-20 13:37 build; they will
+send the running process's identity when it is back. Read it from the
+process anyway before trusting a row. **:47391 is their production daemon
+and is never touched.**
 
-**Three decisions are the maintainer's and nothing proceeds without
-them.** All three are in "Parked" below with their evidence:
+**The maintainer settled the three parked decisions on 2026-09-29:**
 
-1. **Vega's radial velocity** — ours −13.5 km/s, theirs −20.6, and it is
-   one database at two vintages rather than two sources, so the question
-   is whether to re-query rather than which source to believe.
-2. **The analytic star rate** — diagnosed (`1dc0767`), not implemented,
-   because it changes a value on the wire.
-3. **What we advertise for rates** — we send no A.3 `0x0013` at all.
-   *Not* the same decision as 2: one fixes a number, the other fixes a
-   promise. Astrolog holds the mirror question; neither side widens a
-   bound alone.
+1. **The analytic star rate: done** (ENGINE.md, "Rates"; CROSS-TEST.md,
+   "Our star distance rate, computed in closed form"). It changes a value
+   on the wire; the Astrolog session has been told and will re-measure.
+2. **What we advertise for rates: measure, then advertise** a `0x0013` we
+   measurably meet, naming the axes varied. Next, now that 1 is in.
+3. **Vega's radial velocity: keep −13.5 km/s** (current SIMBAD), re-confirm
+   with one paced query, and record −20.6 as the 2018 value.
+
+Channel to the Astrolog session reopened by the maintainer on 2026-09-29
+(it is `zero-adaptive-scott` now); their current goal is Prometheia as
+Astrolog's **primary** source through the C API.
 
 **Open, unassigned, needing no decision** — full detail in "Open items":
 the two-engines-on-rates instrument gap (named, deliberately unfilled);
@@ -657,7 +655,7 @@ Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
     a twentieth-century date carries. **CROSS-TEST.md already carries it**
     ("The chase does not converge") with the adjudication: no honest
     absolute number exists while a tolerance in AU/day is applied to a
-    column whose ulp is 6e-9 AU, a bound wide enough to cover it with
+    column whose ulp is 3.7e-9 AU (6e-9 until corrected 2026-09-29), a bound wide enough to cover it with
     headroom would be ~2e-2 AU/day and describe nothing, and the fix is the
     §3.5a sentence — which landed. It is a standing, adjudicated row, not a
     finding, and it was nearly re-reported to them as one from this page's
@@ -699,7 +697,8 @@ Still theirs, all long-standing: 84 `rates` rows of body speeds, 15
   wire type, not an engine. **Our sweep already read f64** — nothing in
   `tools/check/` passes `--f32` — so our 218 star rows stand, and we
   advertise no `0x0013` for the artifact to have described. What remains
-  true is the original point: at f64 the floor is still ~9e-6 AU/day for
+  true is the original point: at f64 the floor is still ~5.7e-6 AU/day (9e-6
+  until corrected 2026-09-29) for
   Polaris, four orders above A.3's 1e-9 default.
 - **Topocentric with the interpolated method** is now refused on their side
   (no `swe_nod_aps` destination exists), while their chart column keeps
@@ -723,7 +722,8 @@ unlisted correction masks (both §3.5a parts approved).
 
 Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
 
-- **Vega's radial velocity.** Ours is −13.5 km/s (SIMBAD, quality C; the
+- **Vega's radial velocity — decided 2026-09-29: keep −13.5, re-query
+  once, record −20.6 as the 2018 value (not yet done).** Ours is −13.5 km/s (SIMBAD, quality C; the
   BSC's own field says −14), theirs is −20.6 from `sefstars.txt`
   (CROSS-TEST.md, "Vega: one database at two vintages"). Not two
   catalogues: that file cites SIMBAD too, last updated from it in 2018,
@@ -732,7 +732,8 @@ Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
   (Vega is a pole-on rapid rotator with a wide literature spread).
   Changing ours changes a published catalogue value, so it is not a
   thing a cross-test decides; parked on their side for the same reason.
-- **The analytic star rate.** Diagnosed at `1dc0767`: a fixed star's
+- **The analytic star rate — done 2026-09-29** (ENGINE.md, "Rates").
+  Diagnosed at `1dc0767`: a fixed star's
   reported distance rate misses a difference of its own positions by one
   f64 ulp of that position over the engine's `kSpeedStepDays` stencil
   (2/4096 d, 42 s), not by a missing term. Predicted across five stars
@@ -741,7 +742,8 @@ Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
   looks clean. The fix is to compute a star's rate in closed form, since
   a star is a straight line. **It changes a value on the wire**, which is
   why it is here and not done.
-- **What we advertise for rates.** `prometheiad` sends no A.3 `0x0013`
+- **What we advertise for rates — decided 2026-09-29: measure, then
+  advertise; next.** `prometheiad` sends no A.3 `0x0013`
   record at all, so the registry default (1e-5 °/day, **1e-9 AU/day**) is
   what a client is entitled to assume, and the sweep's 60 Polaris rows
   all exceed the AU figure — worst 2.4722e-05, four decades (CROSS-TEST.md,
@@ -751,7 +753,7 @@ Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
   leaves the other wrong. Astrolog holds the mirror-image question (their
   `4e-3`, also with their maintainer), and the standing joint adjudication
   is that **no honest absolute number exists for this column while a
-  tolerance in AU/day is applied to a quantity whose ulp is 6e-9 AU** — so
+  tolerance in AU/day is applied to a quantity whose ulp is 3.7e-9 AU** — so
   neither side widens a bound alone.
 - The `deadlineMs` strategy switch: parsed and advisory today, and
   documented as unimplemented in SERVER.md.

@@ -292,3 +292,54 @@ TEST_CASE("stars_binary_orbits") {
                                   (jd - 2451545.0) / 365.25);
     CHECK(std::fabs(dangle(spa, 59.0 + 180.0)) < 0.06);
 }
+
+// A star's distance rate is computed in closed form (ENGINE.md, "Rates"):
+// differencing positions 1e5..1e10 AU long over the 42-second stencil missed
+// by one f64 ulp of the position, 2.3e-5 AU/day at Polaris. The oracle is a
+// five-point difference of the reported distances, whose own floor is
+// ~18 ulp(r) / 12h; the rate must sit within a few of those floors. The step
+// is 1/8 day geocentrically and 1/64 topocentrically, where the site's
+// diurnal motion would otherwise put ~3e-6 AU/day of truncation in it.
+// Binaries (Sirius, alpha Cen A and B) take their orbit's rate too.
+TEST_CASE("stars_distance_rate_matches_differenced_distance") {
+    synth::TempFile tf("stars-rate");
+    Engine e = synth::open_synthetic(tf);
+    CalcOptions geo;
+    CalcOptions topo;
+    topo.center = Center::Topocentric;
+    topo.site = {-78.47 * 3.14159265358979323846 / 180.0, -0.18 * 3.14159265358979323846 / 180.0,
+                 2850.0};
+    const char* names[] = {"Polaris", "Vega", "Sirius", "HR 5459", "HR 5460", "Aldebaran"};
+    const double jd = 2451545.25;
+    for (const CalcOptions* o : {&geo, &topo}) {
+        const double h = o == &topo ? 1.0 / 64.0 : 1.0 / 8.0;
+        for (const char* name : names) {
+            const size_t i = must_find(name);
+            const auto dist = [&](double t) {
+                auto r = e.calc_star(i, t, *o);
+                REQUIRE(r.ok());
+                return r.value().pos.dist_au;
+            };
+            auto c = e.calc_star(i, jd, *o);
+            REQUIRE(c.ok());
+            const Position& p = c.value().pos;
+            const double diff =
+                (dist(jd - 2 * h) - 8 * dist(jd - h) + 8 * dist(jd + h) - dist(jd + 2 * h)) /
+                (12 * h);
+            const double floor = 18 * std::nextafter(p.dist_au, 1e300) - 18 * p.dist_au;
+            const std::string label =
+                std::string(name) + (o == &topo ? " topocentric" : " geocentric");
+            INFO(label);
+            CHECK(std::fabs(p.dist_speed - diff) < 4 * floor / (12 * h) + 1e-9);
+            // The vector agrees with the columns: its radial part is the
+            // distance rate, and the angular rates still follow from it.
+            const double* x = p.xyz_au;
+            const double* v = p.vel_au_day;
+            const double r2 = x[0] * x[0] + x[1] * x[1];
+            CHECK(std::fabs((x[0] * v[0] + x[1] * v[1] + x[2] * v[2]) / p.dist_au - p.dist_speed) <
+                  1e-12 * std::fabs(p.dist_speed));
+            const double lon_speed = (x[0] * v[1] - x[1] * v[0]) / r2 * 57.29577951308232;
+            CHECK(std::fabs(lon_speed - p.lon_speed) < 1e-12 * std::fabs(p.lon_speed) + 1e-15);
+        }
+    }
+}

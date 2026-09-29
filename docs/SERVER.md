@@ -495,7 +495,8 @@ two sides agreed these semantics:
 - **Rates** are the time derivatives of the answered coordinates, per day of
   the request's time scale. A server whose rates differ from the central
   difference of its own positions flags them and advertises the size of the
-  difference. Ours are that central difference.
+  difference. Ours are that central difference, except a fixed star's
+  distance rate, which is exact in closed form (ENGINE.md, "Rates").
 - **ΔT** may come as a table of samples, interpolated piecewise-linearly, not
   one value for a whole span.
 - **Sidereal** is ecliptic-only. The anchor epoch is TT and its ayanamsa is

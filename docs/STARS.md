@@ -196,7 +196,8 @@ Each object also carries:
 `Engine::calc_star(index, jd_tt, options)` and `calc_star_ut` compute a
 catalog object like any body: any observer (geocentric, topocentric,
 heliocentric, barycentric, planet-centred), frame, coordinates and zodiac,
-with rates from central differences.
+with rates from central differences, except the distance rate, which is
+computed in closed form (ENGINE.md, "Rates").
 
 1. **Space motion.** The catalog position at its epoch (J1991.25 for
    Hipparcos, J2000 otherwise) is placed at its parallax distance and moved

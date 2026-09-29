@@ -461,7 +461,8 @@ PROMETHEIA_API prometheia_status prometheia_star_info(int index, prometheia_star
                                                       prometheia_error* err);
 
 /* Apparent (or, per options, astrometric) place of a catalog object, as for
- * prometheia_calc. PROMETHEIA_HAS_SIGMA is never set. */
+ * prometheia_calc. PROMETHEIA_HAS_SIGMA is never set. The distance rate is
+ * computed in closed form rather than differenced (docs/ENGINE.md, "Rates"). */
 PROMETHEIA_API prometheia_status prometheia_calc_star(prometheia_engine* engine, int index,
                                                       double jd_tt, const prometheia_options* opts,
                                                       prometheia_result* result,

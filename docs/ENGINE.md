@@ -163,8 +163,16 @@ For a TT epoch *t*:
      three-point truncation. At 0.001 day it was 2.6e-5 °/day; smaller
      steps than 1/4096 lose to roundoff. The cross-test's `rates` leg
      checks this through the server.
-   - **A fixed star's distance rate is the exception, and it is
-     quantisation, not truncation** (2026-09-20). The measurement above
+   - **A fixed star's distance rate is the exception, and is computed in
+     closed form** (2026-09-29). The reported distance is |star − observer|
+     — deflection, aberration and the frame rotation all keep a vector's
+     length — so its rate is that vector's direction dotted with the star's
+     straight-line velocity less the observer's. A binary's orbit offset
+     ("Binary stars", STARS.md) adds its own rate, differenced over ±1 day,
+     where a period of decades leaves nothing to truncate. Only the radial
+     part of the velocity vector is replaced, so the angular rates and every
+     position are what they were. The diagnosis that led here:
+   - **It was quantisation, not truncation** (2026-09-20). The measurement above
      covered the Sun, Moon, Mercury, Mars and Jupiter; no star was in it,
      and "consistent with differencing positions" was stated without one.
      A star's distance rate is not: Polaris misses a five-point difference
@@ -198,16 +206,35 @@ For a TT epoch *t*:
        longitude miss is 3.7e-12 to 9.5e-12. One mechanism, two channels,
        and the angular one only *looks* clean. Reading the two misses as
        comparable numbers is a mistake either side can make.
-     - **What would fix it** is not a smaller step — a smaller step makes it
-       worse, linearly. A star's barycentric motion is a straight line in
-       closed form and the observer's velocity is already known, so a star's
-       rate can be computed analytically instead of differenced. **Not
-       done**; it changes a wire value and is recorded here first.
-     - **What it costs today:** 1.45e-05 AU/day on 2.7e7 AU is nine parts in
-       10^13, and the column is f32 on the wire at conformance level 32,
-       where one ulp is 3.26 AU. Nothing observable depends on it. It is
-       recorded because the sentence above it claimed something about every
-       object and had been tested on five.
+     - **What fixed it** was not a smaller step — a smaller step makes it
+       worse, linearly — but the closed form above (maintainer, 2026-09-29;
+       it changes a value on the wire).
+     - **Measured after the fix** (DE440, `ephem`, apparent), against a
+       five-point difference of the reported distances at h = 1/32 day,
+       AU/day:
+
+       | star, observer | miss before | miss after | the check's floor |
+       |---|---|---|---|
+       | Polaris, geocentric, 1900 | 1.30e-05 | 6.8e-08 | ~1.8e-07 |
+       | Polaris, Quito, 1900, ΔT 69.2 | 2.28e-05 | 2.7e-07 | ~1.8e-07 |
+       | Polaris, Quito, 2026, ΔT 0 | 1.40e-05 | 3.2e-07 | ~1.8e-07 |
+       | Polaris, Zurich, 2026, ΔT 140 | 6.61e-06 | 2.8e-07 | ~1.8e-07 |
+       | Vega, geocentric, J2000 | 1.10e-07 | 2.7e-08 | ~1.1e-08 |
+       | Sirius (binary), geocentric | 1.21e-07 | 2.0e-10 | ~5.6e-09 |
+       | Rigil Kentaurus (binary) | 2.74e-07 | 2.3e-09 | ~2.8e-09 |
+
+       What is left is the check's own floor, not the rate: sweeping the
+       checking step from 1/256 to 1/4 day moves the "after" miss down with
+       the floor (Polaris 6e-07 → 4e-08), where "before" stayed at 2.3e-05
+       for every step. At h = 1/1024, the step `ratesweep.py` and the §3.5a
+       comparison use, the floor for Polaris is ~5.7e-06 AU/day, so no
+       difference of f64 positions at that step can show a star's rate to
+       be better than that.
+     - **Held by** `stars_distance_rate_matches_differenced_distance`
+       (tests/test_stars.cpp, synthetic kernel, in the gate): six stars
+       including three binaries, geocentric and topocentric, within four of
+       the check's floors. Without the closed form all twelve rows fail;
+       without the binaries' orbit rate, five of their six.
 
 Cost (`-O2`, DE440, measured 2026-09-17 on ten bodies × 10,000 hourly
 instants):

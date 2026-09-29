@@ -17,8 +17,10 @@
 //      as the requested frame demands, then spherical coordinates; a
 //      sidereal option then rotates the longitude zero point by the
 //      zodiac's ayanamsha.
-// Rates come from central differences of the whole pipeline (h = 0.001
-// day), so they are rates of the *apparent* coordinates.
+// Rates come from central differences of the whole pipeline (h = 1/4096
+// day), so they are rates of the *apparent* coordinates. A fixed star's
+// distance rate is the exception: it is computed in closed form, since a
+// difference of its 1e5..1e10 AU distance is one f64 ulp (ENGINE.md, "Rates").
 //
 // Body identity is the NAIF integer ID, the same key the catalog uses
 // for small bodies. For Mars through Pluto the JPL planetary files carry

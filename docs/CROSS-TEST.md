@@ -1442,6 +1442,12 @@ arithmetic happens. A.3's default of 1e-9 AU/day is roughly four orders
 below what the column can represent. Ours measures 2.47e-5 AU/day there
 (a few times the floor) and theirs 7.48e-3.
 
+*Corrected 2026-09-29: one f64 ulp at 2.7356e7 AU is **3.73e-9 AU**
+(`math.ulp(27356391.0)`), not 6.07e-9, so that floor is **5.7e-6 AU/day**,
+not 9.3e-6. Every conclusion here survives the smaller number — the default
+is still nearly four orders below the floor — but the figure was wrong and was
+carried into HANDOFF.md and into messages to the Astrolog side.*
+
 So **§3.5a's distance tolerance is unmeetable for a star at any conformance
 level**, and a server that says nothing is claiming something it cannot
 deliver. This is a question for the protocol rather than for either
@@ -2037,6 +2043,24 @@ nothing else. The two facts are the same fact.
 That Vega was solved anyway, by four numbers and no tool, is not evidence
 the gap does not matter. It is what having no instrument looks like when
 someone happens to look.
+
+### Our star distance rate, computed in closed form, 2026-09-29
+
+The fix diagnosed at `1dc0767` ("Ours is diagnosed", above) is in, on the
+maintainer's decision of 2026-09-29: a fixed star's distance rate is
+computed from its straight-line velocity and the observer's, not
+differenced (ENGINE.md, "Rates", with the before/after table). **It
+changes a value on the wire**: our star distance-rate column moves by up to
+2.3e-5 AU/day on Polaris and by 1e-7 or less for the nearer stars. Star
+positions, angular rates, and everything that is not a fixed star are
+unchanged.
+
+What it does to the rows above: our side of the Polaris table falls from
+1.3e-5–3.6e-5 to the checking difference's own floor. It does **not** make
+us meet A.3's 1e-9 AU/day default as §3.5a measures it, because §3.5a
+measures by differencing f64 positions, and at h = 1/1024 that difference
+cannot resolve Polaris's rate below ~5.7e-6 AU/day however exact the rate
+is. What `0x0013` should say is the next item (HANDOFF.md).
 
 ### What it leaves behind
 

@@ -2521,7 +2521,10 @@ struct Engine::Impl {
     // is the proper motion across the line of sight at the parallax distance
     // and the radial velocity along it (only with a parallax: without a
     // distance a velocity along the line of sight has no meaning).
-    static void star_line_km(const stars::Object& star, double jd_tdb, double pos[3]) {
+    // `vel`, when given, receives the line's velocity (km/day), which is
+    // constant.
+    static void star_line_km(const stars::Object& star, double jd_tdb, double pos[3],
+                             double* vel = nullptr) {
         const double a = star.ra_deg / kRad2Deg, d = star.dec_deg / kRad2Deg;
         const double ca = std::cos(a), sa = std::sin(a), cd = std::cos(d), sd = std::sin(d);
         const double u[3] = {cd * ca, cd * sa, sd};
@@ -2537,6 +2540,8 @@ struct Engine::Impl {
         for (int i = 0; i < 3; ++i) {
             const double v = dist_au * (pm_a * east[i] + pm_d * north[i]) + rv * u[i];
             pos[i] = (dist_au * u[i] + v * dt) * kAuKm;
+            if (vel)
+                vel[i] = v * kAuKm;
         }
     }
 
@@ -2637,6 +2642,59 @@ struct Engine::Impl {
         if (o.aberration)
             apparent::aberration(p, obs + 3, p);
         return to_output(jd_tt, o, p, out);
+    }
+
+    // A catalog star's distance rate (AU/day) in closed form. The reported
+    // distance is |star - observer|, since deflection, aberration and the
+    // output rotation all keep a vector's length, so its rate is that
+    // vector's direction dotted with the star's velocity less the
+    // observer's. The central difference in position() cannot give it: the
+    // positions it subtracts are 1e5..1e10 AU long, and one ulp of them over
+    // its 2/4096-day stencil was 2.3e-5 AU/day at Polaris (ENGINE.md,
+    // "Rates"). The line's velocity is exact; a binary's orbit offset
+    // (kBinaryOrbits) is differenced over +-1 day, where its decades-long
+    // period leaves no truncation worth the name.
+    Result<void> star_distance_rate(const stars::Object& star, double jd_tt, const CalcOptions& o,
+                                    double& rate_au_day) {
+        const double jd_tdb = time::tdb_from_tt(jd_tt);
+        double obs[6];
+        auto r = observer(o, jd_tt, jd_tdb, obs);
+        if (!r)
+            return r;
+        double pos[3], line[3], vel[3];
+        star_line_km(star, jd_tdb, line, vel);
+        star_barycentric_km(star, jd_tdb, pos);
+        if (star.hip && binary_orbit(star.hip)) {
+            double sp[3], lp[3], sm[3], lm[3];
+            star_barycentric_km(star, jd_tdb + 1.0, sp);
+            star_line_km(star, jd_tdb + 1.0, lp);
+            star_barycentric_km(star, jd_tdb - 1.0, sm);
+            star_line_km(star, jd_tdb - 1.0, lm);
+            for (int i = 0; i < 3; ++i)
+                vel[i] += ((sp[i] - lp[i]) - (sm[i] - lm[i])) / 2.0;
+        }
+        const double g[3] = {pos[0] - obs[0], pos[1] - obs[1], pos[2] - obs[2]};
+        const double gn = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+        double dot = 0.0;
+        for (int i = 0; i < 3; ++i)
+            dot += g[i] / gn * (vel[i] - obs[3 + i]);
+        rate_au_day = dot / kAuKm;
+        return {};
+    }
+
+    // Replaces the radial part of a position's velocity with `rate_au_day`,
+    // leaving its transverse part, and so the angular rates, as they were.
+    static void set_distance_rate(Position& pos, double rate_au_day) {
+        const double* x = pos.xyz_au;
+        const double rn = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+        if (!(rn > 0.0))
+            return;
+        double radial = 0.0;
+        for (int i = 0; i < 3; ++i)
+            radial += pos.vel_au_day[i] * x[i] / rn;
+        for (int i = 0; i < 3; ++i)
+            pos.vel_au_day[i] += (rate_au_day - radial) * x[i] / rn;
+        pos.dist_speed = rate_au_day;
     }
 
     // Spherical coordinates and rates from a vector and its central
@@ -3151,6 +3209,13 @@ Result<CalcResult> Engine::calc_star(size_t star_index, double jd_tt, const Calc
         res.pos);
     if (!r)
         return r.error();
+    if (o.speed) {
+        double rate = 0.0;
+        r = impl_->star_distance_rate(star, jd_tt, o, rate);
+        if (!r)
+            return r.error();
+        Impl::set_distance_rate(res.pos, rate);
+    }
     static constexpr std::string_view kSources[] = {"Hipparcos new reduction (van Leeuwen 2007)",
                                                     "Yale Bright Star Catalogue (1991)",
                                                     "SIMBAD (CDS)"};
