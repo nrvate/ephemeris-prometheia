@@ -778,7 +778,7 @@
         {
           "tag": 10,
           "critical": false,
-          "payload": "coverage: u16 n, n \u00d7 {str8 id, TIME min, TIME max}"
+          "payload": "coverage: u16 n, n \u00d7 {str8 id, TIME min, TIME max} \u2014 one entry per ephemeris, in the order the server consults them; id names that ephemeris as the server does, its file name when it is one file; min and max are its span in TDB. Absent means the server states no coverage. Routing only: the per-object errCode remains the authority (\u00a73.5a)"
         },
         {
           "tag": 11,

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
@@ -247,6 +248,14 @@ int main(int argc, char** argv) {
         options.config.dataset_id = dataset.id;
         options.config.ephemeris_name = dataset.ephemeris;
         options.config.catalog_names = dataset.catalogs;
+        // Coverage (A.3 0x000A): the engine's spans in consulting order, named
+        // by the files they came from, which are opened in the same order.
+        const auto spans = probe.value().ephemeris_spans();
+        std::vector<std::string> files{ephemeris};
+        files.insert(files.end(), extra_ephemerides.begin(), extra_ephemerides.end());
+        for (size_t i = 0; i < spans.size() && i < files.size(); ++i)
+            options.config.coverage.push_back({std::filesystem::path(files[i]).filename().string(),
+                                               spans[i].first_jd_tdb, spans[i].last_jd_tdb});
         log.always("dataset %s", dataset.id.c_str());
         log.always("%zu hypothetical bod%s", options.config.hypotheticals.size(),
                    options.config.hypotheticals.size() == 1 ? "y" : "ies");

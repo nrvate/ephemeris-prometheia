@@ -82,6 +82,13 @@ struct ServerConfig {
     // and any others its element files add), advertised in WELCOME (A.3
     // 0x0011). Filled at startup from a probe engine, as the dataset is.
     std::vector<std::string> hypotheticals;
+    // A.3 0x000A: the planetary ephemerides in the order they are consulted,
+    // each by its file name with its span in TDB (for routing only, 3.5a).
+    struct Coverage {
+        std::string id;
+        double first_jd_tdb = 0.0, last_jd_tdb = 0.0;
+    };
+    std::vector<Coverage> coverage;
 };
 
 // One computed answer, in the server's own units (f64 throughout; the f32

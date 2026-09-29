@@ -23,6 +23,9 @@ documented, not that it is frozen.
 - **UTC after the last leap second is TAI − 37 s, said out loud**
   (maintainer): no further leap seconds assumed, as CGPM 2022 implies; UTC
   rows carry `ut1_minus_utc_s` (−134 s by 2100) (docs/TIME.md).
+- **`prometheiad` states its coverage** (A.3 0x000A, agreed with the
+  Astrolog side): each ephemeris file, in consulting order, with its TDB
+  span. It is for routing only. `prometheia-wire-client` prints any it receives.
 - **DE441 behind DE440** (docs/DE.md, "DE441"). `Engine::add_ephemeris`
   (C `prometheia_engine_add_ephemeris`; `--ephemeris` twice to the servers,
   `-e` twice to `ephem`) answers the instants the first file does not

@@ -324,6 +324,14 @@ does with them:
   value, and a body observer is never "the object".
 - **Designations** (kind 5) resolve exactly as a LOOKUP of quality 0 or 1
   through the catalogs' name index; no match is per-object error 1.
+- **Coverage** (A.3 0x000A, defined at Astrolog `8e74027`, 2026-09-29):
+  one entry per `--ephemeris` file in the order the engine consults them,
+  named by its file name, with the span its header states in TDB. With
+  DE441 behind DE440 that is `linux_p1550p2650.440` and then
+  `linux_m13000p17000.441`. It is for routing only: a client may send an
+  instant outside every span elsewhere, but errCode 3 stays the
+  authority. This server refuses outside its spans, so it never sets
+  `approximated` on that account.
 - **Per-object errors** (A.17). One object failing never fails the request.
   The code is classified from the engine's error *type* first, and message
   text is consulted only for types that carry no client text. Coverage (3)

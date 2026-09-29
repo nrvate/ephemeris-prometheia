@@ -411,6 +411,24 @@ int main(int argc, char** argv) {
                     // honour, for which observers, then 0x0014's additions per
                     // object kind. A checker compares the corrApplied it reports
                     // against these.
+                    // A.3 0x000A, one line per entry as sent: the coverage a
+                    // server states (the id is printed verbatim).
+                    for (const eph::Tlv& t : w.caps_) {
+                        if (t.tag != eph::kCapTagCoverage) {
+                            continue;
+                        }
+                        eph::Reader cr(reinterpret_cast<const uint8_t*>(t.value.data()),
+                                       t.value.size());
+                        eph::Verdict cv;
+                        const unsigned n = cr.u16();
+                        for (unsigned i = 0; i < n && cr.ok(); ++i) {
+                            const std::string id = cr.str8();
+                            const eph::Time lo = eph::ReadTime(cr, cv);
+                            const eph::Time hi = eph::ReadTime(cr, cv);
+                            std::printf("# coverage %s %.6f %.6f\n", id.c_str(), lo.Sum(),
+                                        hi.Sum());
+                        }
+                    }
                     eph::Capabilities caps;
                     if (eph::ParseCapabilities(w.caps_, &caps, &why) == eph::kOk) {
                         for (const auto& e : caps.corrMasks) {

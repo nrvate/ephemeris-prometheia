@@ -111,6 +111,8 @@ struct Fixture {
         config.dataset_id = "synthetic/test#00000000";
         config.ephemeris_name = "synthetic.bsp";
         config.catalog_names = {"sample-100.epm"};
+        for (const Engine::EphemerisSpan& sp : engine.ephemeris_spans())
+            config.coverage.push_back({"synthetic.bsp", sp.first_jd_tdb, sp.last_jd_tdb});
         ctx = std::make_unique<LoopContext>(std::move(engine), config, nullptr, nullptr, log);
         session = std::make_unique<Session>(*ctx, "10.0.0.9", "0.7");
     }
@@ -1652,6 +1654,35 @@ struct ElementFile {
 };
 
 } // namespace
+
+TEST_CASE("server_welcome_states_coverage") {
+    // A.3 0x000A (Astrolog 8e74027): one entry per ephemeris, in consulting
+    // order, named by its file, its span in TDB; routing only.
+    Fixture f;
+    const eph::Welcome w = f.welcome();
+    int seen = 0;
+    for (const eph::Tlv& t : w.caps_) {
+        if (t.tag != eph::kCapTagCoverage)
+            continue;
+        ++seen;
+        eph::Reader r(reinterpret_cast<const uint8_t*>(t.value.data()), t.value.size());
+        eph::Verdict v;
+        REQUIRE(r.u16() == 1);
+        CHECK(r.str8() == "synthetic.bsp");
+        const eph::Time lo = eph::ReadTime(r, v), hi = eph::ReadTime(r, v);
+        REQUIRE(f.config.coverage.size() == 1);
+        CHECK(lo.Sum() == f.config.coverage[0].first_jd_tdb);
+        CHECK(hi.Sum() == f.config.coverage[0].last_jd_tdb);
+        CHECK(lo.Sum() < 2451545.0);
+        CHECK(hi.Sum() > 2451545.0);
+        CHECK(r.ok());
+        CHECK(r.left() == 0);
+    }
+    CHECK(seen == 1);
+    // The TLVs stay in ascending tag order (A.3).
+    for (size_t i = 1; i < w.caps_.size(); ++i)
+        CHECK(w.caps_[i - 1].tag < w.caps_[i].tag);
+}
 
 TEST_CASE("server_hypotheticals") {
     SUBCASE("with only the shipped set, WELCOME advertises exactly its tokens") {
