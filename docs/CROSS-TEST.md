@@ -2383,6 +2383,21 @@ objects, which assumes every object's tropical gap is at the mas level,
 and the mean points' is up to 0.5″ (their definitions). `blindspots.json`
 records the leg now seeing `--node`.
 
+### Our v0.7.3 through Astrolog's own gates, 2026-09-29
+
+The Astrolog side rebuilt its prometheia source against v0.7.3 (`838d965`,
+C ABI 6) and ran two gates. Their cross-engine gate
+(`tools/ephsrv-prometheia.sh`, their real server source against
+`prometheiad`) passed 69 of 69, every scenario's worst identical to the run
+before the full TDB−TT series. The planets 0.2226″, small bodies 0.85″
+and rates 1.8e-4 °/day are two orbit solutions and their refit, printed to
+0.0001″. Their prometheia suite group passed 171 of 171, including the 78
+Object Selections bodies, the elements path and the long-span leg. At our
+suggestion their gate gained a leg (their `88adc58`): a catalog with no
+perturber kernel and Ceres at 1900. Our library refuses it with status 7,
+their chain falls through to Swiss with no warning, and changing the
+mapping of status 7 turns the leg red.
+
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 
 The fault injections written up above — "1% on the textbook GM reds four
