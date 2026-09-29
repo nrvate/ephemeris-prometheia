@@ -77,6 +77,8 @@ def main():
 
     obs_rows, vec_rows, ext_rows, prov = [], [], [], []
     for name, purpose, params in hf.requests():
+        if name.startswith("tdbtt-"):
+            continue  # a measurement of Horizons' TDB-TT (docs/TIME.md), not a fixture
         if name.startswith("bary-"):
             continue  # a cross-test anchor (tools/check/crosstest.py), not an engine test
         path = os.path.join(args.raw_dir, name + ".json")

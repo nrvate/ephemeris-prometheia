@@ -186,6 +186,13 @@ def requests():
     for name, cmd in PLANETS:
         out.append((f"ext-geo-{name}", "geocentric astrometric outside DE440 (DE441 era)",
                     observer(cmd, "500@399", EXT_EPOCHS_TT, "1,20")))
+    # Horizons' own TDB-TT, read off one geocentric Moon vector asked at the
+    # same numbers as TDB and as TT: the difference is the velocity times
+    # TDB-TT (docs/TIME.md, "TDB"). The DE441-era epochs plus J2000.
+    for scale in ("TDB", "TT"):
+        out.append((f"tdbtt-moon-{scale.lower()}", f"geocentric Moon vectors, TLIST as {scale}",
+                    dict(vectors("301", "500@399", [2451545.0] + EXT_EPOCHS_TT),
+                         TIME_TYPE=f"'{scale}'")))
     return out
 
 

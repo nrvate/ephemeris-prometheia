@@ -68,6 +68,32 @@ Amplitude is the familiar 1.657 ms annual term; the J2000 value is about
 would need the Harada–Fukushima series; for ephemeris lookup and
 astrology it is orders of magnitude beyond sufficient.
 
+**Against Horizons and the full series (measured 2026-09-29).** Horizons'
+own TT↔TDB is the one-term formula of JPL's SPICE leap-seconds kernel,
+K sin E with E = M + EB sin M (K 1.657 ms, EB 0.01671). It matches that
+formula to ≤ 6 µs at eight epochs from −3000 to 9000. That was read off
+two geocentric Moon vector tables asked at the same numbers as TT and as
+TDB (`tools/fetch/horizons_fetch.py`, `tdbtt-moon-*`), which resolves it to
+0.2 ns. Near the present it is 17–27 µs from the full Fairhead–Bretagnon
+series (pyerfa `dtdb`, 787 terms), since it has no lunar or planetary
+terms. Ours is 3.5 µs from the full series at J2000.
+
+Far from J2000 the physics decides. The annual term scales with Earth's
+eccentricity, 1.657 ms × e/e₀. The amplitude of each model, in ms:
+
+| year | Horizons | ours | full series | 1.657 × e/e₀ |
+|---|---:|---:|---:|---:|
+| −3000 | 1.657 | 1.929 | 1.844 | 1.835–1.865 |
+| 5000 | 1.657 | 1.562 | 1.524 | 1.521–1.532 |
+| 9000 | 1.657 | 1.499 | 1.289 | 1.305–1.365 |
+
+(The range is e from a linear and from a quadratic secular fit.) The full
+series follows the eccentricity. Horizons' holds it at today's value, and
+ours, with its single T term, lies between. At year 9000 ours is 0.2 ms
+from the full series, 0.1 mas on the Moon. **The full series is the
+more accurate choice outside 1600–2200**, which DE441 now reaches. Whether
+to adopt it is open (HANDOFF).
+
 ## Delta T (TT − UT1)
 
 `DeltaTModel` is a virtual interface with three built-in implementations.
