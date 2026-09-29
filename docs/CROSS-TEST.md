@@ -2291,6 +2291,12 @@ sweeps pass their advertisements, and corrapplied passes on both sides.
   adjudication needs, the row agrees and nothing else moves. S8's
   obliquity is ~0 at these epochs (under 0.1 mas), so it is not part of
   this.
+- **Their nutation is IAU 2000B, and it is their S9** (Astrolog `3336574`).
+  §3.5a names IAU 2000A "or the server's advertised equivalent", and they
+  advertise none. By their measurement, full 2000A costs them 14× per row
+  for 0.97 mas. Their maintainer chooses between three options: state
+  2000B as the equivalent with its 1 mas bound, move to 2000A, or move to
+  2000A with a per-instant memo. `DATE_FRAME_BAND` stays until they say.
 
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 
