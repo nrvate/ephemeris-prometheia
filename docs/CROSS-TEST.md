@@ -2241,7 +2241,9 @@ every one, with τ consistent to 1e-13 s. Against Swiss:
   file writes M = 0.0 + 0.0·T, which the protocol reads as M at epoch plus
   the Gaussian mean motion (1.457″ by t−τ), and Swiss holds fixed. Its
   56,000 km distance difference (4.7e-9 relative) is unexplained — not the
-  Sun's motion over τ, which is 482,000 km along that line.
+  Sun's motion over τ (482,000 km along that line), nor a barycentric
+  rather than heliocentric focus (the Sun's offset along it is 194,000 km
+  at t and 676,000 km at t − τ). Left open, on their side.
 
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 
