@@ -50,10 +50,14 @@ over 30,000 years. Inside DE440's span JPL recommends DE440.
   geocentric astrometric ICRF): the Sun and planets agree to ≤ 8.3 µas,
   at Horizons' 3.6 µas print quantum, and 3.8 m in range. The Moon agrees
   to 3–31 µas through year 5000 and 124 µas at 9000, and 0.15 m. The
-  Moon's residual is along-track, with a sign that varies by epoch;
-  as a timing offset it is 10–50 µs, 0.2 ms at 9000. A difference in
-  the TDB−TT series at extreme epochs would fit, but that is an
-  estimate, not investigated. The ext-geo requests are declared in
+  Moon's residual is along-track, with a sign that varies by epoch, and
+  it behaves as a time-argument offset. Fitting one offset to the Moon
+  at 9000 gives −0.208 ms, which takes the Moon from 124 to 3.2 µas and
+  Mercury from 8.2 to 4.4 µas, and leaves every other body at the print
+  quantum. At 5000 and −3000 the fitted offsets (+0.05, −0.02 ms) are
+  too small for the planets to confirm. So the likely cause is the two
+  sides' TDB−TT at extreme epochs; which side's is closer is not
+  measured. The ext-geo requests are declared in
   `tools/fetch/horizons_fetch.py`.
 - **Against DE440 where both run** (61 epochs 1550–2650, astrometric
   ICRF): the Sun and every planet agree to ≤ 0.013 mas and a few metres.
