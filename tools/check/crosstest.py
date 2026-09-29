@@ -1828,6 +1828,13 @@ def leg_stars(client, ours, theirs, table, verbose):
 # offset across bodies with the planes agreeing in latitude is the Astrolog
 # side's pending fix, and agrees once the offset closes.
 SIDEREAL_BODIES = [10, 301, 4, 5, 6]
+# The sidereal leg also asks for the Moon's mean and osculating node and
+# apogee: an orbit point in a sidereal zodiac is a path of its own. Swiss's
+# sidereal nodes carried the whole nutation in longitude (12.8" in 1990),
+# and no leg asked for one until the Astrolog side's own gate found it
+# (2026-09-29, their ts.18, test G30).
+SIDEREAL_POINTS = ["301.a.m", "301.a.o", "301.A.m", "301.A.o"]
+SIDEREAL_OBJECTS = [("--obj", b) for b in SIDEREAL_BODIES] + [("--node", p) for p in SIDEREAL_POINTS]
 # What a sidereal rotation may add to the tropical gap: the two ayanamsa
 # series differ by their precession models, 0.0026" over 1800-2200
 # (docs/FRAMES.md, measured against swetest -ay).
@@ -1944,10 +1951,10 @@ def leg_sidereal(client, ours, theirs, table, verbose):
     tropical = {}
     for jd in epochs:
         args = ["--jd", repr(jd), "--corrections", "7", "--deltat", str(DELTA_T)]
-        for b in SIDEREAL_BODIES:
-            args += ["--obj", str(b)]
+        for flag, b in SIDEREAL_OBJECTS:
+            args += [flag, str(b)]
         ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
-        for k, b in enumerate(SIDEREAL_BODIES):
+        for k, b in enumerate(b for _, b in SIDEREAL_OBJECTS):
             va, vb = ra.row(k), rb.row(k)
             if va is not None and vb is not None and not math.isnan(va[0] + vb[0]):
                 tropical[(jd, b)] = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
@@ -1958,12 +1965,17 @@ def leg_sidereal(client, ours, theirs, table, verbose):
             for jd in epochs:
                 args = ["--jd", repr(jd), "--corrections", "7", "--deltat", str(DELTA_T),
                         "--sid", zodiac, "--sid-plane", plane]
-                for b in SIDEREAL_BODIES:
-                    args += ["--obj", str(b)]
+                # Points only where a row is judged against its own tropical
+                # gap: the invariable plane's check assumes every object's
+                # tropical gap is at the mas level, and the mean points' is not.
+                objects = SIDEREAL_OBJECTS if plane != "invariable" else \
+                    [("--obj", b) for b in SIDEREAL_BODIES]
+                for flag, b in objects:
+                    args += [flag, str(b)]
                 ra, rb = ask(client, ours, args, verbose), ask(client, theirs, args, verbose)
                 table.asked(ra, rb)
                 rows = []
-                for k, b in enumerate(SIDEREAL_BODIES):
+                for k, b in enumerate(b for _, b in objects):
                     va, vb = ra.row(k), rb.row(k)
                     base = dict(leg="sidereal", epoch_tt=jd, object=b, observer="geo",
                                 frame=f"{zodiac} {plane}", plane="ecliptic", mask=7,

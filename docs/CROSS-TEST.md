@@ -2362,6 +2362,27 @@ The band is `HAMBURG_BAND` + `DATE_FRAME_BAND`. Against their ts.17:
 Moon for the epoch check to grade. Against a real second server, the
 comparison itself sees a dropped correction.
 
+### Sidereal orbit points, 2026-09-29
+
+The Astrolog side's own gate, running their real server source against
+`prometheiad`, found a defect in Swiss: a sidereal node or apsis carried
+the whole nutation in longitude, 12.8″ in 1990 and 17.4″ in 1900. It is
+fixed in their fork's ts.18 (their G30). Their sidereal nodes had been
+12.8″ off ours, and **no leg here asked for an orbit point in a sidereal
+zodiac**, so our cross-test could not see it. That is the reciprocal
+check's lesson again: a peer's defect names a path we should hold too.
+
+The `sidereal` leg now asks for the Moon's mean and osculating node and
+apogee (`301.a.m`, `301.a.o`, `301.A.m`, `301.A.o`) with its bodies, on the
+date and anchor planes, where each row is graded against its own tropical
+gap plus `SIDEREAL_EXTRA` (3 mas). Against their ts.18 all 128 point rows
+agree, the worst 1.7 mas beyond the tropical gap. The pre-fix 12.8″ would
+be a finding by three orders of magnitude. The points stay off the
+invariable plane: that check reads a constant origin offset across
+objects, which assumes every object's tropical gap is at the mas level,
+and the mean points' is up to 0.5″ (their definitions). `blindspots.json`
+records the leg now seeing `--node`.
+
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 
 The fault injections written up above — "1% on the textbook GM reds four
