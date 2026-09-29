@@ -57,7 +57,13 @@ to ≤ 8.3 µas, and the Moon to 124 µas at year 9000, a ~0.2 ms time offset
 Hamburg rows all moved toward ours. The one finding was our `apparent` band
 omitting the date-frame models: their truncated nutation, 1 mas at 2100.
 The band now carries a measured 1.7 mas (CROSS-TEST.md). Future UTC stays
-TAI − 37 s (maintainer), disclosed as `ut1_minus_utc_s` (0447aeb). The C API gained
+TAI − 37 s (maintainer), disclosed as `ut1_minus_utc_s` (0447aeb).
+
+**Waiting on Astrolog's ts.17:** full IAU 2000A nutation (their S9, interpolated
+on a node grid) and the pole-angle obliquity (S8). When it lands, drop
+`DATE_FRAME_BAND` in `tools/check/crosstest.py` to what remains, and measure
+S8 closing. Coverage (A.3 0x000A) is agreed and shipped (be156f8); they will
+send theirs once they can list their files' spans. The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
