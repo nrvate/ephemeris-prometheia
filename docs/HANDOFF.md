@@ -74,10 +74,12 @@ The MCP server config (user scope) serves DE440 then DE441.
   - swetest's ecliptic of date uses the ε_A series, where we use the pole
     angle.
 
-**Candidates for next** (none started, none promised):
-- cross-test legs at DE441 epochs, once Astrolog serves beyond ~2400 (their
-  bundled files refuse outside it);
-- the parked items below.
+**Candidates for next** (none started, none promised): the parked items
+below. Cross-test legs at DE441 epochs are off the list: Astrolog serves
+Swiss's bundled files, which refuse beyond ~2400, and does not plan to
+serve further (their answer, 2026-09-29, evening). Their wire and
+registries are unchanged since qt.25 (`ephproto.h` 91c2fa6a, registries
+5fed5d64).
 
 **The day's lesson, if only one survives:** four times in a week a claim
 here or in Astrolog was bounded by an axis nobody varied — a floor exact
