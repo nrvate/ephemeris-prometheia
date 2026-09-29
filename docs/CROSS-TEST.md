@@ -1544,15 +1544,28 @@ legs that do see it are the ones with an outside anchor — `horizons`,
 site-shift rows: **a non-comparative check is the only kind that survives
 both servers being wrong together.**
 
-Blind in N of 18: `--deltat` 18, `--obj` 18 (dropping it breaks the WELCOME
-probe before any leg, so it is recorded as unreachable rather than unseen),
-`--jd` 13, `--corrections` 9, `--eq` 7, `--icrs` 7, `--center` 4, `--helio`
-4, `--bary` 3, `--topo` 3, `--count` 3, `--step` 3, `--j2000` 3, `--sid` 3,
-`--sid-plane` 1.
+Blind in N of 18, as first measured: `--deltat` 18, `--obj` 18 (dropping it
+breaks the WELCOME probe before any leg, so it is recorded as unreachable
+rather than unseen), `--jd` 13, `--corrections` 9, `--eq` 7, `--icrs` 7,
+`--center` 4, `--helio` 4, `--bary` 3, `--topo` 3, `--count` 3, `--step` 3,
+`--j2000` 3, `--sid` 3, `--sid-plane` 1. Legs seeing nothing at all then:
+`same`, `apparent`, `sidinstant`.
 
-Legs seeing nothing at all: `same`, `apparent`, `sidinstant`. Legs seeing
-most of what they send: `helio` and `topo` and `bary` (5 of 7), `horizons`
-(4 of 6).
+**Delta T arrives, 2026-09-29.** Every request that sends one `--deltat`
+now also asks for the ΔT column (A.10 bit 8) where the server advertises
+it, and each row must report exactly the value sent; the `deltat-arrival`
+rows grade it per leg and server. The `arrival` leg also asks a
+topocentric Moon at ΔT 0 and 100 on one connection (the client's repeated
+`--deltat`) and again on fresh ones: the two must differ and each must
+equal its fresh twin, the stale-observer shape. Re-measured
+(`tools/check/blindspots.json`): **`--deltat` is now seen by all 18
+legs**, and no leg sees nothing. Blind in N of 18 now: `--obj` 18 (as
+above), `--jd` 13, `--corrections` 9, `--eq` 7, `--icrs` 7, `--center` 4,
+`--helio` 4, `--bary` 3, `--topo` 3, `--step` 3, `--j2000` 3, `--sid` 3,
+`--count` 2, `--sid-plane` 1. Found on the way, by a review of the change:
+the `helio` leg ran outside any `leg_*` function, so the check could not
+name it and skipped it; it is now a leg function, and a request made
+outside one is still checked under a label that says so.
 
 **An option can also be half tested**, and a whole-option drop reports it
 covered. One option, two effects, one of them reaching nothing: the Astrolog
@@ -2134,6 +2147,33 @@ rates kept from Swiss), and ours misses by 8.4e-7 at both ΔT. Reported to
 them the same day. The Astrolog side has parked fixed-star work, so their
 advertised 4e-3 AU/day still does not cover topocentric star rows (their
 §2.11a); say so beside any comparison published before that changes.
+
+### Record x, 2026-09-29 (`docs/crosstest/2026-09-29x.tsv`): their rates, differenced
+
+Against the Astrolog build that differences its body rates from its own
+positions (their `218b00e`; daemon pid 1881350, 1,738,752 bytes, sha256
+`da91998a6f018ee2…`, mtime 2026-09-29 12:13:23, read from `/proc` here),
+with the ΔT arrival checks in every leg for the first time. 3,794 rows:
+agree 2,699, expected-difference 449, finding (theirs) 20, refused 46,
+refused (theirs) 548, unadjudicated 1, unanswered 9.
+
+- **The `rates` leg: 84 standing findings against them fall to 5,** and all
+  five are Sirius — a fixed star, whose rates they have parked
+  (STARS_BACKLOG.md). Every solar-system row agrees.
+- **ΔT arrives on both servers in every leg** (`deltat-arrival`: 17 legs ×
+  2 servers, every row reporting the value sent), and the two new `arrival`
+  rows agree on both: ΔT moves a topocentric Moon ~17″, and one connection
+  answers as a fresh one does — their stale observer stays fixed.
+- The other 15 findings are the standing `galequ-iau1958` pole transfer.
+
+**Their advertised bound is exceeded on one class it did not measure.**
+They now send `0x0013` = 5e-5 °/day and 2e-5 (read per max(1 AU, r)),
+measured over three observers. The sweep
+(`docs/crosstest/2026-09-29-ratesweep-theirs.tsv`) finds 33 of 3,147 rows
+over it, **every one a Jupiter or Saturn osculating orbit point seen
+topocentrically** from Zurich or Quito — the one body class they kept on
+their library's rates — worst 1.01e-4 °/day (Saturn's osculating
+aphelion, Quito, 2026), twice the figure. Reported to them the same day.
 
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 

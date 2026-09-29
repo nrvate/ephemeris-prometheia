@@ -49,10 +49,9 @@ Channel to the Astrolog session reopened by the maintainer on 2026-09-29
 Astrolog's **primary** source through the C API.
 
 **Open, unassigned, needing no decision** — full detail in "Open items":
-the two-engines-on-rates instrument gap (named, deliberately unfilled);
-`--deltat` blind in 18 of 18 legs; `crosstest.py`'s **legs**, the last
-thing under `tools/check/` whose falsification is still prose rather than
-a selftest; and v0.7.1, offered and not taken.
+`--jd` blind in 13 of 18 legs (the legs with no outside anchor). Closed
+2026-09-29: `--deltat` (now seen by all 18 legs), the legs' selftest
+(`legtest.py`), and v0.7.1 (published).
 
 **The day's lesson, if only one survives:** four times in a week a claim
 here or in Astrolog was bounded by an axis nobody varied — a floor exact
@@ -193,7 +192,8 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
      our daemon on both endpoints, so only its non-comparative checks can
      red, then re-run once per argument with that argument stripped. Green
      means the leg cannot tell the argument arrived. Eighteen legs, all
-     measured. **`--deltat` is blind in all eighteen**, and this document
+     measured. **`--deltat` was blind in all eighteen** (seen by all eighteen
+     since 2026-09-29, CROSS-TEST.md "Delta T arrives"), and this document
      says every numeric leg sends delta T explicitly so that neither
      server's model enters — with nothing checking that it did. `--jd` is
      blind in thirteen. The record is committed, so a leg that *stops*
