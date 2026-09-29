@@ -2683,6 +2683,10 @@ struct Engine::Impl {
         for (int i = 0; i < 3; ++i)
             dot += g[i] / gn * (vel[i] - obs[3 + i]);
         rate_au_day = dot / kAuKm;
+        // As position(): never a success with a non-finite answer.
+        if (!std::isfinite(rate_au_day))
+            return make_error(ErrorCode::ArgumentError,
+                              "numerical failure: the answer is not finite");
         return {};
     }
 

@@ -46,13 +46,13 @@ CASES = [
 ]
 
 
-def run(port, sabotage, out, self_compare=True):
+def run(port, sabotage, out, self_compare=True, theirs=None):
     env = dict(os.environ)
     env.pop("PROMETHEIA_XTEST_SABOTAGE", None)
     if sabotage:
         env["PROMETHEIA_XTEST_SABOTAGE"] = sabotage
     ep = f"127.0.0.1:{port}"
-    argv = [sys.executable, CROSSTEST, "--ours", ep, "--theirs", ep, "--legs", LEGS,
+    argv = [sys.executable, CROSSTEST, "--ours", ep, "--theirs", theirs or ep, "--legs", LEGS,
             "--out", out] + (["--self-compare"] if self_compare else [])
     return subprocess.run(argv, cwd=ROOT, capture_output=True, text=True, env=env, timeout=600)
 
@@ -86,12 +86,19 @@ def main():
               + ("" if ok else f", wanted {sorted(want) or 'nothing'} and exit {want_exit} "
                                 f"(got exit {done.returncode})"))
         failed += not ok
-    # A sabotaged harness must refuse to grade anything but our own server.
-    done = run(args.port, "bary-sun", out, self_compare=False)
-    refused = done.returncode != 0 and "must never grade" in (done.stderr + done.stdout)
-    print(f"{'ok' if refused else 'FAIL':7s} a sabotage without --self-compare is refused")
-    failed += not refused
-    print(f"\n{len(CASES) + 1 - failed} of {len(CASES) + 1} cases pass")
+    # A sabotaged harness must refuse to grade anything but our own server:
+    # without --self-compare, and with it but two different endpoints (the
+    # second is refused before any request is made).
+    refusals = [("a sabotage without --self-compare is refused", False, None),
+                ("a sabotage with two different endpoints is refused", True,
+                 f"127.0.0.1:{args.port + 1}")]
+    for name, self_compare, theirs in refusals:
+        done = run(args.port, "bary-sun", out, self_compare=self_compare, theirs=theirs)
+        refused = done.returncode != 0 and "must never grade" in (done.stderr + done.stdout)
+        print(f"{'ok' if refused else 'FAIL':7s} {name}")
+        failed += not refused
+    total = len(CASES) + len(refusals)
+    print(f"\n{total - failed} of {total} cases pass")
     return 1 if failed else 0
 
 

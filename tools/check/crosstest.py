@@ -228,11 +228,16 @@ def ask(client, srv, args, verbose):
     intended = None
     if (args.count("--deltat") == 1 and "--segments" not in args
             and "--columns" not in args):
-        leg = _calling_leg()
-        if leg is not None and _deltat["columns"].get(srv, 0) & DELTAT_COLUMN:
+        # A request made outside any leg_* function is still checked, under
+        # a label that says so: helio's requests went unchecked that way
+        # until a review found it (2026-09-29).
+        leg = _calling_leg() or "(no leg function)"
+        if not _deltat["columns"]:
+            leg = None  # the WELCOME probe in main(), before capabilities are known
+        elif _deltat["columns"].get(srv, 0) & DELTAT_COLUMN:
             intended = float(args[args.index("--deltat") + 1])
             args += ["--columns", str(DELTAT_COLUMN)]
-        elif leg is not None:
+        else:
             _deltat["uncheckable"].add((leg, srv))
     rep = wirelib.run(client, srv[0], srv[1], args, verbose)
     if intended is not None:
@@ -392,6 +397,13 @@ def leg_same_and_horizons(client, ours, theirs, table, verbose, do_same, do_hori
     corpus_ = corpus()
     return compare_against_anchor(client, ours, theirs, table, verbose, corpus_, [],
                                   "geo", do_same, do_horizons)
+
+
+def leg_helio(client, ours, theirs, table, verbose):
+    """The Sun-centred observer against Horizons. A function of its own so
+    ask()'s delta T check can name the leg its requests belong to."""
+    compare_against_anchor(client, ours, theirs, table, verbose,
+                           corpus("helio-", "'500@10'"), ["--helio"], "helio", True, True)
 
 
 def compare_against_anchor(client, ours, theirs, table, verbose, corpus, observer_args,
@@ -1005,17 +1017,20 @@ DELTAT_MOVE_FLOOR = 1.0
 DELTAT_FRESH_BAND = 1e-6
 
 
-def _shift_row(table, leg, observer, keys, whos, shift, band, want, source, note):
+def _shift_row(table, leg, observer, keys, whos, shift, band, want, source, note,
+               expect=()):
     """One graded row: the worst shift over `keys`, per server, against `band`.
     `want` is "at least" when the row asks whether an observer arrived, and
-    "at most" when it asks whether two spellings of one observer agree."""
+    "at most" when it asks whether two spellings of one observer agree.
+    `expect` names the servers that were asked: one of them with no value is
+    unanswered, not a row graded on the other server alone."""
     worst = {}
-    for w in whos:
+    for w in sorted(set(whos) | set(expect)):
         vals = [v for v in (shift(k) for k in keys if k[0] == w) if v is not None]
         worst[w] = max(vals) if vals else None
     ok = {w: (worst[w] >= band if want == "at least" else worst[w] <= band)
-          for w in whos if worst[w] is not None}
-    if not ok:
+          for w in worst if worst[w] is not None}
+    if not ok or any(worst.get(w) is None for w in expect):
         verdict = "unanswered"
     elif all(ok.values()):
         verdict = "agree"
@@ -1036,13 +1051,14 @@ def leg_arrival(client, ours, theirs, wel_a, wel_b, table, verbose):
     """Does each observer reach the computation, and are observers distinct?"""
     srv = {"ours": ours, "theirs": theirs}
     wel = {"ours": wel_a, "theirs": wel_b}
-    seen = {}
+    seen, asked = {}, {}
     for name, bit, where, cannot in ARRIVAL_OBSERVERS:
         bodies = [b for b in ARRIVAL_BODIES if b != cannot]
-        seen[name] = {}
+        seen[name], asked[name] = {}, set()
         for who in ("ours", "theirs"):
             if ARRIVAL_MASK not in advertised(wel[who], bit):
                 continue
+            asked[name].add(who)
             for jd in ARRIVAL_EPOCHS:
                 args = ["--jd", repr(jd), "--icrs", "--eq", "--corrections", str(ARRIVAL_MASK),
                         "--deltat", str(DELTA_T)] + list(where)
@@ -1063,7 +1079,8 @@ def leg_arrival(client, ours, theirs, wel_a, wel_b, table, verbose):
         if not keys:
             return
         _shift_row(table, "arrival", f"{a} vs {b}", keys, whos,
-                   lambda k: angle(seen[a][k], seen[b][k]), band, want, source, note)
+                   lambda k: angle(seen[a][k], seen[b][k]), band, want, source, note,
+                   expect=asked[a] & asked[b])
 
     for name, _, _, _ in ARRIVAL_OBSERVERS:
         if name == "geo":
@@ -1085,13 +1102,18 @@ def leg_arrival(client, ours, theirs, wel_a, wel_b, table, verbose):
 
 def _deltat_use_rows(client, srv, wel, table, verbose):
     """Delta T moves a topocentric answer, and one connection = a fresh one."""
-    moves, stale = {}, {}
+    moves, stale, asked = {}, {}, set()
     for who in ("ours", "theirs"):
         if ARRIVAL_MASK not in advertised(wel[who], 1):
             continue
+        asked.add(who)
         for jd in ARRIVAL_EPOCHS:
+            # The same request both ways: with the delta T column where the
+            # server has one, so ask() leaves the fresh twins as they are.
+            cols = (["--columns", str(DELTAT_COLUMN)]
+                    if wel[who].caps.get("columns", 0) & DELTAT_COLUMN else [])
             base = (["--jd", repr(jd), "--icrs", "--eq", "--corrections", str(ARRIVAL_MASK),
-                     "--obj", "301"] + DELTAT_USE_SITE)
+                     "--obj", "301"] + DELTAT_USE_SITE + cols)
             both = sum((["--deltat", repr(d)] for d in DELTAT_USE), [])
             conn = {dt: rep.row(0) for dt, rep in
                     wirelib.run_many(client, srv[who][0], srv[who][1], base + both, verbose)}
@@ -1108,7 +1130,7 @@ def _deltat_use_rows(client, srv, wel, table, verbose):
     def row(name, vals, band, want, note):
         worst = {w: max(v) for w, v in vals.items()}
         good = {w: (x >= band if want == "at least" else x <= band) for w, x in worst.items()}
-        verdict = ("unanswered" if not good else "agree" if all(good.values()) else
+        verdict = ("unanswered" if not good or asked - set(good) else "agree" if all(good.values()) else
                    "finding" if not any(good.values()) else
                    "finding (ours)" if not good.get("ours", True) else "finding (theirs)")
         table.add(leg="arrival", observer=name, frame="ICRF", plane="equator",
@@ -2293,9 +2315,9 @@ def main():
     if SABOTAGE:
         if SABOTAGE not in SABOTAGES:
             sys.exit(f"unknown sabotage {SABOTAGE!r}: one of {sorted(SABOTAGES)}")
-        if not args.self_compare:
-            sys.exit("PROMETHEIA_XTEST_SABOTAGE is only for --self-compare: a sabotaged "
-                     "harness must never grade another project's server")
+        if not args.self_compare or args.ours != args.theirs:
+            sys.exit("PROMETHEIA_XTEST_SABOTAGE is only for --self-compare with one "
+                     "endpoint: a sabotaged harness must never grade another project's server")
         print(f"SABOTAGE {SABOTAGE}: a reference is deliberately wrong in this run")
 
     client = shutil.which(args.client) or args.client
@@ -2307,6 +2329,9 @@ def main():
     b = ask(client, theirs, ["--obj", "10", "--corrections", "0"], args.verbose)
     if not a.server or not b.server:
         sys.exit("both servers must answer a WELCOME: " + (a.stderr or b.stderr))
+    if SABOTAGE and not a.server.startswith("prometheiad/"):
+        sys.exit(f"PROMETHEIA_XTEST_SABOTAGE: the endpoint answered as {a.server}, not our "
+                 "prometheiad: a sabotaged harness must never grade another project's server")
     if a.server == b.server and a.dataset == b.dataset and not args.self_compare:
         # Two harnesses on one machine have met: a port taken by someone
         # else's daemon compares a server with itself, and every verdict
@@ -2334,8 +2359,7 @@ def main():
     if "hamburg" in legs:
         leg_hamburg(client, ours, theirs, table, args.verbose)
     if "helio" in legs:
-        compare_against_anchor(client, ours, theirs, table, args.verbose,
-                               corpus("helio-", "'500@10'"), ["--helio"], "helio", True, True)
+        leg_helio(client, ours, theirs, table, args.verbose)
     if "apparent" in legs:
         leg_apparent(client, ours, theirs, a, b, table, args.verbose)
     if "points" in legs:
