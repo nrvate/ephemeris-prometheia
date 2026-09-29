@@ -623,6 +623,18 @@ def leg_hamburg(client, ours, theirs, table, verbose):
             print(f"  {jd:.1f} {t:9s} {s:.6f}\"  dDist {va[2] - vb[2]:+.2e} AU")
 
 
+# Kind 3 tokens the two servers define from different printed sets (A.15
+# lets each server define its own). Each maps to the other side's elements
+# as numbers, sent as kind 4 to OUR server: a row is a definition difference
+# only when our engine on their elements lands within the band of their
+# answer, re-proved every run. neptune-leverrier: ours is Le Verrier's own
+# print (Comptes rendus 23, 1846), theirs Hoyt's 1980 transcription
+# (a 36.15 for 36.154, M 34.05 for 34.033); measured 2026-09-29 at <= 0.055
+# mas once theirs is run on ours.
+DEFINITIONS = {"neptune-leverrier": os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                 "definitions", "neptune-leverrier-hoyt.jsonl")}
+
+
 def leg_hypotheticals(client, ours, theirs, a, b, table, verbose):
     """Kind 3 by token as a chart asks for it: every token BOTH WELCOMEs
     advertise (A.3 0x0011, so a token either side adds is compared the day it
@@ -653,6 +665,19 @@ def leg_hypotheticals(client, ours, theirs, a, b, table, verbose):
                           verdict="unanswered")
                 continue
             s = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+            verdict, why = ("agree" if s <= band else "finding"), ""
+            if verdict == "finding" and t in DEFINITIONS:
+                rc = ask(client, ours, ["--jd", repr(jd), "--corrections", str(mask),
+                                        "--deltat", str(DELTA_T), "--elements", DEFINITIONS[t]],
+                         verbose)
+                vc = rc.row(0)
+                if vc is not None and not any(math.isnan(x) for x in vc[:2]):
+                    sc = sep_arcsec((vc[0], vc[1]), (vb[0], vb[1]))
+                    why = (f"; our engine on their definition ({os.path.basename(DEFINITIONS[t])}) "
+                           f"is {sc * 1000:.4f} mas from theirs")
+                    if sc <= band:
+                        verdict = "expected-difference"
+                        why += ": two printed element sets under one token (A.15)"
             # Kind 3 elements are server-defined (A.15): each side's resolved
             # name goes in the note, since a token two servers define from
             # different sets differs by the sets, not by either engine.
@@ -661,9 +686,9 @@ def leg_hypotheticals(client, ours, theirs, a, b, table, verbose):
             table.add(leg="hypotheticals", epoch_tt=jd, object=t, observer="geo",
                       frame="true of date", plane="ecliptic", mask=mask, deltat=DELTA_T,
                       ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s, band=band,
-                      tier=2, verdict="agree" if s <= band else "finding",
+                      tier=2, verdict=verdict,
                       note=f"resolved ours \"{na}\" theirs \"{nb}\"; "
-                           f"dist ours {va[2]:.9f} theirs {vb[2]:.9f}")
+                           f"dist ours {va[2]:.9f} theirs {vb[2]:.9f}{why}")
             print(f"  {jd:.1f} {t:18s} {s:.6f}\"  dDist {va[2] - vb[2]:+.2e} AU")
 
 

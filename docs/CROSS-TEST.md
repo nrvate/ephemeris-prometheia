@@ -2344,9 +2344,18 @@ The band is `HAMBURG_BAND` + `DATE_FRAME_BAND`. Against their ts.17:
   (Neptune)"). Kind 3 elements are server-defined (A.15), so this can be
   two element sets under one token and not an engine defect. Ours is Le
   Verrier's own printed orbit (Comptes rendus 23, 1846, p. 432;
-  HYPOTHETICALS.md). The growth with time points to a different mean motion
-  or semi-major axis. **Open:** their elements and citation, as numbers,
-  are asked for. It stays a finding until the two sets are compared.
+  HYPOTHETICALS.md). **Resolved the same day, a definition difference.**
+  Their set, as numbers, is the stock seorbel.txt set 12, citing W. G.
+  Hoyt, *Planets X and Pluto* (1980), p. 63: a 36.15 for Le Verrier's
+  36.154, M 34.05° for his 34.033°, with the same e, perihelion, epoch and
+  equinox. Our engine on those numbers, sent as kind 4, is 0.055, 0.013
+  and 0.010 mas from their answer, so the whole 100–301″ is the two
+  printed sets. The leg now re-proves this every run: for a token in
+  `DEFINITIONS` it asks our server for the other side's elements
+  (`tools/check/definitions/`), and marks the row expected-difference only
+  if that lands within the band of theirs. Shifting their M by 0.01° keeps
+  all three rows findings. Ours stays Le Verrier's own print: his is the
+  primary source, and Hoyt rounded it.
 
 `blindspots.py` measures the leg's reach as `--columns --deltat --hyp
 --jd`. It is blind to the correction bits, because it asks for no Sun or
