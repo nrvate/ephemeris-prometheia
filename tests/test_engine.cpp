@@ -887,7 +887,8 @@ TEST_CASE("de440_engine_matches_swetest") {
         const bool date_frame = Mode(m) == Mode::Apparent || Mode(m) == Mode::ApparentEquatorial ||
                                 Mode(m) == Mode::Topocentric;
         // J2000-frame modes isolate the correction pipeline: SWE prints
-        // 0.0001" and the Moon carries ~1 mas of unexplained difference.
+        // 0.0001", and the Moon's ~1 mas is SWE evaluating the ephemeris at
+        // TT rather than TDB (swetest_takes_tt_as_the_ephemeris_argument).
         // Date frames (both Vondrak 2011) add SWE's epsilon_A-series
         // obliquity and nutation details, <= 2 mas over 1800-2100. SWE
         // rotates the topocentric site with the mean pole, ~0.1" at the
@@ -951,6 +952,40 @@ TEST_CASE("de440_vondrak_precession_matches_swetest") {
     CHECK(worst[0] < worst_iau[0]);
     CHECK(worst[1] < worst_iau[1]);
     CHECK(worst_ayan < 0.005);
+}
+
+TEST_CASE("swetest_takes_tt_as_the_ephemeris_argument") {
+    // The Moon's geocentric residual against swetest (~1 mas in every frame,
+    // ICRF included, while barycentric positions agree to 0.1 mas) is its
+    // ~1 km/s times the 1.66 ms annual TDB-TT term: swetest evaluates the
+    // JPL ephemeris at the TT it is given, where the file's argument is TDB.
+    // Ours converts, as JPL defines it; Horizons agrees with ours (the Moon
+    // to 31 uas, test_horizons). Evaluated with TDB set to the fixture's JD,
+    // ours meets swetest at its print resolution.
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    REQUIRE(opened.ok());
+    Engine e = std::move(opened).value();
+    double at_tt = 0.0, at_tdb = 0.0;
+    int n = 0;
+    for (const Fixture& f : kFixtures) {
+        if (f.mode != Mode::GeometricJ2000 || f.body != body::kMoon)
+            continue;
+        auto x = e.calc(f.body, f.jd_tt, options_for(f.mode));
+        auto y = e.calc(f.body, time::tt_from_tdb(f.jd_tt), options_for(f.mode));
+        REQUIRE(x.ok());
+        REQUIRE(y.ok());
+        at_tt = std::max(at_tt, sep_as(x.value().pos.lon_deg, x.value().pos.lat_deg, f.a, f.b));
+        at_tdb = std::max(at_tdb, sep_as(y.value().pos.lon_deg, y.value().pos.lat_deg, f.a, f.b));
+        ++n;
+    }
+    std::printf(
+        "  Moon vs swetest, %d rows: ours at TT %.5f\", ours with TDB = the given JD %.5f\"\n", n,
+        at_tt, at_tdb);
+    REQUIRE(n > 0);
+    CHECK(at_tdb < 0.00015); // swetest's 0.0001" print, plus rounding
+    CHECK(at_tt > 2.0 * at_tdb);
 }
 
 TEST_CASE("de440_natural_apsides") {

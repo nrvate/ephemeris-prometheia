@@ -612,11 +612,20 @@ case:
   apart outside DE440's span — 46″ at −13000, 65″ at +15000 — so across
   DE441's range an ecliptic of date built on the series differs from ours
   by up to that. The ~1.5 mas left at J2000 itself is attributed: the
-  Moon's ~0.9 mas, present in every frame down to ICRF (the J2000 rows'
-  Moon difference above), plus SWE's nutation angles, which differ from
-  our full IAU 2000A by ≤ 0.5 mas. Planets at J2000 are ≤ 0.5 mas in
+  Moon's ~0.9 mas, which is the time argument below, plus SWE's nutation
+  angles, which differ from our full IAU 2000A by ≤ 0.5 mas. Planets at J2000 are ≤ 0.5 mas in
   ecliptic of date. On the equator, SWE prints RA to 0.0001 s, which is
   1.5 mas, so a residual under ~0.8 mas there is its rounding.
+- **The Moon, ~1 mas in every frame, is SWE's time argument** (measured
+  2026-09-29, `swetest_takes_tt_as_the_ephemeris_argument`). It appears
+  down to ICRF, while barycentric positions agree to 0.1 mas: the Moon's
+  ~1 km/s geocentric speed times the 1.66 ms annual TDB−TT term. swetest
+  evaluates the JPL ephemeris at the TT it is given, where the file's
+  argument is TDB. Over 48 instants 1800–2100 our geometric J2000 Moon
+  sits 0.04–1.06 mas from swetest's, tracking |TDB−TT| exactly. Evaluated
+  with TDB set to the given JD it is ≤ 0.067 mas, swetest's print. Ours
+  converts, as JPL defines the argument; Horizons agrees with ours (the
+  Moon to 31 µas beyond DE440's span).
 - **Topocentric Moon, ≤ 0.13″:** SWE's site is offset from ours by about
   the nutation angle at the poles (±0.27 km in the Moon distance at
   latitude ±90°), i.e. it rotates the site about the mean rather than the
