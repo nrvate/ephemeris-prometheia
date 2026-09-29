@@ -156,6 +156,22 @@
       "--corrections=1~1"
     ]
   },
+  "hypotheticals": {
+    "blind": [
+      "--corrections",
+      "--obj (probe)",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--hyp",
+      "--jd"
+    ]
+  },
   "points": {
     "blind": [
       "--bary",

@@ -15,6 +15,10 @@ running daemons:
              mask 1 (astrometric), ICRF, equatorial, geocentric
   hamburg    the eight Hamburg points by name (kind 3) from both servers:
              heliocentric, mask 0, mean ecliptic of J2000
+  hypotheticals
+             every kind 3 token both WELCOMEs advertise, geocentric, true
+             ecliptic of date, at the fullest mask both list for kind 3: the
+             light-time solution on the orbit and the date frame
   helio      each server against Horizons from the Sun's centre: mask 1,
              ICRF, equatorial (Horizons' Sun-centred APPARENT place is
              referred to the Sun's equator and is never used)
@@ -617,6 +621,50 @@ def leg_hamburg(client, ours, theirs, table, verbose):
                       verdict="agree" if s <= HAMBURG_BAND else "finding",
                       note=f"dist ours {va[2]:.9f} theirs {vb[2]:.9f}")
             print(f"  {jd:.1f} {t:9s} {s:.6f}\"  dDist {va[2] - vb[2]:+.2e} AU")
+
+
+def leg_hypotheticals(client, ours, theirs, a, b, table, verbose):
+    """Kind 3 by token as a chart asks for it: every token BOTH WELCOMEs
+    advertise (A.3 0x0011, so a token either side adds is compared the day it
+    is served), geocentric, true ecliptic of date, at the fullest correction
+    mask both list for kind 3. The hamburg leg holds the elements alone
+    (heliocentric, mask 0); this one holds what the light-time solution on
+    the orbit and the date frame do to them, which no leg saw before
+    2026-09-29 (their G27 changed exactly that path)."""
+    tokens = [t for t in a.caps.get("hypotheticals", []) if t in b.caps.get("hypotheticals", [])]
+    both = {m for m in range(8) if a.permitted(0, 3, m) and b.permitted(0, 3, m)}
+    mask = max(both, key=lambda m: (bin(m).count("1"), m)) if both else None
+    print(f"\n== hypotheticals: kind 3, geocentric, true ecliptic of date, mask {mask}: "
+          f"{','.join(tokens) or 'no token both serve'}")
+    if not tokens or mask is None:
+        return
+    band = HAMBURG_BAND + DATE_FRAME_BAND
+    for jd in HAMBURG_EPOCHS:
+        args = ["--jd", repr(jd), "--corrections", str(mask), "--deltat", str(DELTA_T)]
+        for t in tokens:
+            args += ["--hyp", t]
+        ra = ask(client, ours, args, verbose)
+        rb = ask(client, theirs, args, verbose)
+        table.asked(ra, rb)
+        for k, t in enumerate(tokens):
+            va, vb = ra.row(k), rb.row(k)
+            if va is None or vb is None or any(math.isnan(x) for x in va[:2] + vb[:2]):
+                table.add(leg="hypotheticals", epoch_tt=jd, object=t, observer="geo",
+                          verdict="unanswered")
+                continue
+            s = sep_arcsec((va[0], va[1]), (vb[0], vb[1]))
+            # Kind 3 elements are server-defined (A.15): each side's resolved
+            # name goes in the note, since a token two servers define from
+            # different sets differs by the sets, not by either engine.
+            na = ra.objects[k].name if k < len(ra.objects) else ""
+            nb = rb.objects[k].name if k < len(rb.objects) else ""
+            table.add(leg="hypotheticals", epoch_tt=jd, object=t, observer="geo",
+                      frame="true of date", plane="ecliptic", mask=mask, deltat=DELTA_T,
+                      ours=(va[0], va[1]), theirs=(vb[0], vb[1]), sep_servers=s, band=band,
+                      tier=2, verdict="agree" if s <= band else "finding",
+                      note=f"resolved ours \"{na}\" theirs \"{nb}\"; "
+                           f"dist ours {va[2]:.9f} theirs {vb[2]:.9f}")
+            print(f"  {jd:.1f} {t:18s} {s:.6f}\"  dDist {va[2] - vb[2]:+.2e} AU")
 
 
 APPARENT_BODIES = [10, 301, 199, 299, 4, 5, 6, 7, 8, 9]
@@ -2400,7 +2448,7 @@ def main():
     ap.add_argument("--client", default=os.path.join(REPO, "build", "prometheia-wire-client"))
     ap.add_argument("--ut1", default=os.path.join(REPO, "build", "prometheia-ut1"))
     ap.add_argument("--legs",
-                    default="surfaces,same,horizons,hamburg,helio,apparent,topo,bary,"
+                    default="surfaces,same,horizons,hamburg,hypotheticals,helio,apparent,topo,bary,"
                             "deflection,deflection-geo,deflection-topo,arrival,points,rates,"
                             "sidereal,sidsweep,sidinstant,stars")
     ap.add_argument("--out", help="write the leg table (TSV) here")
@@ -2461,6 +2509,8 @@ def main():
                               "same" in legs, "horizons" in legs)
     if "hamburg" in legs:
         leg_hamburg(client, ours, theirs, table, args.verbose)
+    if "hypotheticals" in legs:
+        leg_hypotheticals(client, ours, theirs, a, b, table, args.verbose)
     if "helio" in legs:
         leg_helio(client, ours, theirs, table, args.verbose)
     if "apparent" in legs:

@@ -2323,6 +2323,36 @@ either side. Both rate sweeps stay within their advertisements.
   ≤ 0.13 mas (Sun, Mars, Jupiter). Their own figures for the pole angle
   minus the series match ours at every epoch they quote.
 
+### The `hypotheticals` leg, 2026-09-29
+
+The `hamburg` leg compares the eight Hamburg points heliocentric and
+geometric (mask 0), so it holds the elements alone. Their G27 fix changed
+light time solved on the orbit, and that path appears only with
+corrections on. No leg had compared it, and `neptune-leverrier`, which both
+servers serve, was compared nowhere. The new leg takes every token both
+WELCOMEs advertise (A.3 0x0011), so a token either side adds is compared
+the day both serve it. It asks for them geocentric, true ecliptic of date,
+at the fullest mask both list for kind 3 (7), at 1900, 2000 and 2100.
+The band is `HAMBURG_BAND` + `DATE_FRAME_BAND`. Against their ts.17:
+
+- **The Hamburg points agree to 0.012 mas** at apparent place, with range
+  within 2e-9 AU. That is their G27 fix measured on the wire, and it is
+  better than the ≤ 0.0005″ they reported.
+- **`neptune-leverrier` differs by 100″, 219″ and 301″** (1900, 2000, 2100),
+  growing with time, with range 0.003–0.007 AU apart. The two servers
+  resolve it to different names ("Neptune (Le Verrier)" and "Leverrier
+  (Neptune)"). Kind 3 elements are server-defined (A.15), so this can be
+  two element sets under one token and not an engine defect. Ours is Le
+  Verrier's own printed orbit (Comptes rendus 23, 1846, p. 432;
+  HYPOTHETICALS.md). The growth with time points to a different mean motion
+  or semi-major axis. **Open:** their elements and citation, as numbers,
+  are asked for. It stays a finding until the two sets are compared.
+
+`blindspots.py` measures the leg's reach as `--columns --deltat --hyp
+--jd`. It is blind to the correction bits, because it asks for no Sun or
+Moon for the epoch check to grade. Against a real second server, the
+comparison itself sees a dropped correction.
+
 ### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
 
 The fault injections written up above — "1% on the textbook GM reds four
