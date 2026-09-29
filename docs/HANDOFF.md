@@ -41,7 +41,11 @@ for both):** DE441 is fetched to `/nvm/work/ephe/` (pinned in
 ([DE.md](DE.md), "DE441"). Precession now defaults to Vondrák 2011
 everywhere — on the wire too, §3.5a and A.20 saying so since Astrolog
 `b6f1387` (registries `f7a12c75…`, vendored) — moving
-old-default answers by ≤ 0.01″ ([FRAMES.md](FRAMES.md)). The C API gained
+old-default answers by ≤ 0.01″ ([FRAMES.md](FRAMES.md)). Against swetest
+the equator of date now agrees to ≤ 1.8 mas over 1560–2640; the ecliptic of
+date differs by swetest's ε_A-series obliquity (ours is the pole angle): 16 mas
+at 2640, up to 65″ over DE441's span (a27b515). A §3.5a sentence naming the
+pole angle is proposed to Astrolog; their answer is pending. The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
 **Astrolog's rates are done:** bodies and orbit points both differenced
