@@ -39,7 +39,8 @@ for both):** DE441 is fetched to `/nvm/work/ephe/` (pinned in
 `tools/fetch/de_fetch.py`, linked into `ephe/`) and stands behind DE440 via
 `add_ephemeris`, DE440 answering 1550–2650 to the bit as before
 ([DE.md](DE.md), "DE441"). Precession now defaults to Vondrák 2011
-everywhere — on the wire too, once Astrolog's §3.5a text lands — moving
+everywhere — on the wire too, §3.5a and A.20 saying so since Astrolog
+`b6f1387` (registries `f7a12c75…`, vendored) — moving
 old-default answers by ≤ 0.01″ ([FRAMES.md](FRAMES.md)). The C API gained
 `prometheia_engine_add_ephemeris` (ABI 6, announced and acked).
 
@@ -55,7 +56,9 @@ our `prometheia_calc_elements`. Under light time an equinox of date means
 the emission instant (§3.5a, agreed with them); ours satisfies
 B(t−τ) − E(t) to 1e-11″ on every set refereed (CROSS-TEST.md, record y).
 Open on their side only: Swiss's Vulcan (0.024″ with speeds) and set 26's
-56,000 km distance gap.
+56,000 km distance gap. They report (2026-09-29, their fork `9ed27ec`) ≤ 0.0005″
+against our kind 4 on every stock set but set 26's 1.457″ fixed-M reading —
+not yet measured here: wait for the build identity they will send.
 
 **Open, unassigned, needing no decision** — full detail in "Open items":
 none from the 2026-09-20 list. Closed 2026-09-29: `--deltat` (seen by all

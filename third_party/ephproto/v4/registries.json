@@ -646,12 +646,12 @@
         {
           "index": 0,
           "token": "iau2006",
-          "note": "Capitaine et al. 2003, IAU 2006 (the default)"
+          "note": "Capitaine et al. 2003, IAU 2006"
         },
         {
           "index": 1,
           "token": "vondrak2011",
-          "note": "Vondr\u00e1k, Capitaine & Wallace 2011, long-term"
+          "note": "Vondr\u00e1k, Capitaine & Wallace 2011, long-term (the default)"
         }
       ]
     },
