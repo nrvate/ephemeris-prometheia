@@ -104,6 +104,17 @@ else
     skipped+=("stars_fk5 selftest: needs .venv-oracle (pyerfa) and stars-raw/")
 fi
 
+# The Python package against pyswisseph (docs/PYTHON.md): the same calls
+# through both, on the same DE440 file. It reports the differences and grades
+# none -- they are explained in PYTHON.md -- so what it catches here is an
+# API call that stopped working. Needs pyswisseph in .venv-oracle.
+if [[ -x "$oracle" ]] && "$oracle" -c "import swisseph" 2>/dev/null && [[ -f "$ephemeris" ]]; then
+    step "pyswisseph comparison (report)" env PYTHONPATH="$repo/python" "$oracle" \
+        "$repo/tools/check/pyswe_oracle.py" --ephe-dir "$(dirname "$ephemeris")"
+else
+    skipped+=("pyswisseph comparison: needs pyswisseph in .venv-oracle and $ephemeris")
+fi
+
 # The protocol pin against its owner's tree. The vendored ephproto.h and the
 # conformance set are compared only when PROMETHEIA_ASTROLOG names an Astrolog
 # checkout, and nothing set it: the site drop (their 7cbf0d8) sat unvendored

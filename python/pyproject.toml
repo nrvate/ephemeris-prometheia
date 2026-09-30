@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prometheia"
+version = "0.7.3"
+description = "Ephemeris Prometheia from Python: a pyswisseph-shaped interface with no C extension"
+requires-python = ">=3.8"
+license = {text = "GPL-2.0-or-later"}
+readme = "README.md"
+
+[tool.setuptools]
+packages = ["prometheia"]

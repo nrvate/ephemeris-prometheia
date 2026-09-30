@@ -75,9 +75,12 @@ The MCP server config (user scope) serves DE440 then DE441.
     angle.
 
 **In progress: a pure-Python, pyswisseph-shaped library**, planned in
-[PYTHON.md](PYTHON.md) (maintainer decisions 2026-09-29). Phases 1 and 2 are done: houses
-in the engine and the JSON/MCP `houses` tool ([HOUSES.md](HOUSES.md)). Next
-is the Python package itself (`python/`).
+[PYTHON.md](PYTHON.md) (maintainer decisions 2026-09-29). Phases 1–3 are done: houses in
+the engine, the JSON/MCP `houses` tool ([HOUSES.md](HOUSES.md)), and the
+package over stdio and HTTP (`python/`, `prometheia.swe`). Next: vendor
+Astrolog's houses drop (their `6235abd`: kind 6, 124 fixtures, 2,244
+reference rows) and check our rows against it, then v4 houses in
+`prometheiad`, then the binary transport in Python.
 The v4 houses extension is being drafted with Astrolog.
 
 **Candidates for next** (none started, none promised): the parked items

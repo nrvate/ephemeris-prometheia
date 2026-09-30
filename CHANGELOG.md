@@ -26,6 +26,17 @@ documented, not that it is frozen.
   - Served by the JSON/MCP `houses` tool (per-system errors, including
     `undefined-at-latitude`), with `house_systems` in `capabilities`.
   - Not yet in the C ABI or the protocol.
+- **A Python package, `python/prometheia`** ([docs/PYTHON.md](docs/PYTHON.md)):
+  - Pure Python with no C extension. It talks to a local `prometheia-json`
+    over stdio or to one over HTTP.
+  - `prometheia.swe` is shaped like pyswisseph (`calc_ut`, `houses`,
+    `set_sid_mode`, `utc_to_jd` and more), and `prometheia.Client` exposes
+    the JSON tools as they are.
+  - Against pyswisseph on the same DE440 file: the Sun, Moon and planets
+    agree to 0.0027″ at TT over 1800–2100.
+  - Our reported rates match our positions' derivative to 0.008″/day;
+    pyswisseph's depart from its own by up to 0.11″/day, and 9.9″/day
+    topocentric.
 
 ## 0.7.3 — 2026-09-29
 

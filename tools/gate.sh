@@ -6,6 +6,7 @@
 #   1a. the v4 registries; then the assertions of the registries checker,
 #       crosstest.py's adjudicators, ratesweep.py and the v4 fixture reader --
 #       each against scripted or mutated inputs, no daemon and no ephemeris
+#   1b. the Python package's tests (python/tests)
 #   2. Release build + ctest in build/
 #   3. ASan+UBSan build + ctest in build-asan/
 # Tests run serially: the integrator benchmark asserts a wall-clock bound.
@@ -105,6 +106,14 @@ step python3 tools/check/fixturestest.py
 # their own structural selftest wired into no runner on 2026-09-20 -- a rule
 # existing is not a rule running -- and this is the reciprocal. It reads
 # files and starts nothing.
+# The Python package (python/, docs/PYTHON.md): flag translation and answer
+# shapes against a scripted client, calendar arithmetic, and a live run
+# against build/prometheia-json on DE440 when both are present (it SKIPs
+# otherwise). Under a second; ResourceWarnings are errors, so a leaked child
+# process or pipe fails here.
+echo "== python package (python/tests)"
+step env PYTHONPATH=python python3 -W error::ResourceWarning -m unittest discover -s python/tests
+
 echo "== runners (is every check run by something?)"
 step python3 tools/check/runners.py
 echo "== runners audit (by assertion)"

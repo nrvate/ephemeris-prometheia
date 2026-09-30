@@ -80,6 +80,8 @@ TOOLS = {
     # Against Astrolog's conformance set, when their tree is here (it was all
     # along; the reason once given for running it by nothing said otherwise).
     "ephproto4_fixtures.py": ("scheduled", ""),
+    # A report, not a grade: the Python package beside pyswisseph.
+    "pyswe_oracle.py": ("scheduled", ""),
 
     # scheduled.sh does invoke crossrun.py, behind --with-cross: the status
     # names the runner because the runner's code names it, and the flag is
