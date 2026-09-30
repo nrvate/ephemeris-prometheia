@@ -11,6 +11,20 @@ communicated to known consumers *before* it lands, never shipped unannounced.
 That policy is what `0.x` means here: the interface is deliberate and
 documented, not that it is frozen.
 
+## Unreleased
+
+- **Houses in the engine** ([docs/HOUSES.md](docs/HOUSES.md)):
+  - `Engine::houses` and `houses_ut` answer eleven systems: Placidus, Koch,
+    Porphyry, Regiomontanus, Campanus, Equal, Whole Sign, Alcabitius,
+    Morinus, Meridian and Topocentric.
+  - Each returns the cusps with the Ascendant, MC, ARMC, Vertex and
+    equatorial Ascendant, tropical or sidereal on the ecliptic of date.
+  - Checked against `swetest` at its own ARMC: 18,214 values, worst 0.0056″
+    (0.033″ for Koch within a degree of a polar circle).
+  - The sidereal time is within 0.00075″ of ERFA's `gst06a`.
+  - Placidus and Koch are refused inside a polar circle, never replaced.
+  - C++ only for now; not yet in the C ABI, JSON or the protocol.
+
 ## 0.7.3 — 2026-09-29
 
 The library and tools are 0.7.3, and the C ABI is unchanged (6).

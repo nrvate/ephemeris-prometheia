@@ -24,6 +24,7 @@ add_library(prometheia
   src/de.cpp
   src/elements.cpp
   src/engine.cpp
+  src/houses.cpp
   src/hypotheticals.cpp
   src/segments.cpp
   src/spk.cpp
@@ -97,6 +98,7 @@ set_source_files_properties(tests/c_api_smoke.c PROPERTIES
 
 prometheia_test(time tests/test_time.cpp)
 prometheia_test(frames tests/test_frames.cpp)
+prometheia_test(houses tests/test_houses.cpp)
 prometheia_test(stars tests/test_stars.cpp)
 prometheia_test(segments tests/test_segments.cpp)
 

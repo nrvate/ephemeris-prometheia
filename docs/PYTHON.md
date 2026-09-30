@@ -22,10 +22,12 @@ here is built yet, and each phase updates this file as it lands.
 - **House systems, first set:** Placidus, Koch, Porphyry, Regiomontanus,
   Campanus, Equal (from the Ascendant), Whole Sign, Alcabitius, Morinus,
   Meridian (Axial) and Topocentric. Any other letter raises by name.
-- **Polar latitudes:** a system with no defined cusps there (Placidus, Koch,
-  Topocentric, where part of the ecliptic never rises or sets) **refuses**,
+- **Polar latitudes:** a system with no defined cusps there **refuses**,
   naming the reason and the systems that do answer there. It never
-  substitutes another system.
+  substitutes another system. That is Placidus and Koch inside a polar
+  circle, where part of the ecliptic never rises or sets. Topocentric, first
+  listed here too, is built from pole heights and is defined at every
+  latitude short of the pole; it answers ([HOUSES.md](HOUSES.md)).
 - **Cleanroom:** the API's shape (names, signatures, constant values) comes
   from pyswisseph's published documentation and from introspecting an
   installed pyswisseph (`dir()`, constant values) in a separate oracle venv,
@@ -100,7 +102,7 @@ python/
 
 ## Phases
 
-1. **Houses in the engine.** `include/prometheia/houses.hpp`,
+1. **Houses in the engine** (done, [HOUSES.md](HOUSES.md)). `include/prometheia/houses.hpp`,
    `src/houses.cpp`: cusps and angles (Ascendant, MC, ARMC, Vertex,
    equatorial Ascendant, co-Ascendants, polar Ascendant) for the eleven
    systems, from the true obliquity and apparent sidereal time of date,

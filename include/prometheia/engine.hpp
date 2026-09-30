@@ -43,6 +43,7 @@
 
 #include "prometheia/error.hpp"
 #include "prometheia/frames.hpp"
+#include "prometheia/houses.hpp"
 #include "prometheia/time.hpp"
 
 namespace prometheia {
@@ -430,6 +431,27 @@ public:
     Result<CalcResult> calc_star(size_t star_index, double jd_tt, const CalcOptions& opts = {});
     Result<CalcResult> calc_star_ut(size_t star_index, double jd_ut1, const CalcOptions& opts = {});
 
+    // House cusps and the chart's angles at a site (docs/HOUSES.md): the
+    // true obliquity and apparent sidereal time of date under opts.precession,
+    // the site's geodetic latitude and east longitude (its height is not
+    // used). Tropical, or sidereal on the ecliptic of date (opts.sidereal):
+    // every longitude less the zodiac's true ayanamsha, and Whole Sign's
+    // houses from the sidereal Ascendant's sign. Only Frame::TrueOfDate and
+    // SiderealPlane::EclipticOfDate are served; the other CalcOptions fields
+    // do not enter. No ephemeris file is read, save for a zodiac defined by a
+    // star or the Galactic Centre at the instant.
+    struct HouseResult {
+        houses::Houses houses;
+        double jd_tt = 0.0, jd_ut1 = 0.0;
+        double obliquity_deg = 0.0;         // true obliquity of date
+        std::optional<double> ayanamsa_deg; // sidereal only
+        Precession precession = Precession::Vondrak2011;
+    };
+    Result<HouseResult> houses(houses::System system, double jd_tt, const frames::GeoSite& site,
+                               const CalcOptions& opts = {});
+    Result<HouseResult> houses_ut(houses::System system, double jd_ut1, const frames::GeoSite& site,
+                                  const CalcOptions& opts = {});
+
     // Delta T model for UT inputs and topocentric Earth rotation. Not
     // owned; nullptr restores the default (time::ObservedDeltaT).
     void set_delta_t_model(const time::DeltaTModel* model);
@@ -451,6 +473,8 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    Result<HouseResult> houses_at(houses::System system, double jd_tt, double jd_ut1,
+                                  const frames::GeoSite& site, const CalcOptions& opts);
 };
 
 } // namespace prometheia

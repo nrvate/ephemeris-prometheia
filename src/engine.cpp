@@ -3416,6 +3416,69 @@ Result<CalcResult> Engine::calc_star_ut(size_t star_index, double jd_ut1, const 
     return calc_star(star_index, impl_->ut1_to_tt(jd_ut1), o);
 }
 
+Result<Engine::HouseResult> Engine::houses_at(houses::System system, double jd_tt, double jd_ut1,
+                                              const frames::GeoSite& site, const CalcOptions& o) {
+    Impl& impl = *impl_;
+    if (!std::isfinite(jd_tt) || !std::isfinite(jd_ut1) || std::fabs(jd_tt) > 1e8)
+        return make_error(ErrorCode::ArgumentError, "houses need a finite Julian date");
+    if (o.frame != Frame::TrueOfDate)
+        return make_error(ErrorCode::ArgumentError,
+                          "houses are served on the true ecliptic and equinox of date only");
+    const bool sidereal = o.sidereal != SiderealMode::Tropical;
+    if (sidereal && o.sidereal_plane != SiderealPlane::EclipticOfDate)
+        return make_error(ErrorCode::ArgumentError,
+                          "sidereal houses are served on the ecliptic of date only");
+    const auto& f = impl.frames_at(jd_tt, true, o.precession);
+    const double gast = frames::gast_rad(jd_ut1, jd_tt, f.dpsi, f.eps_mean);
+    auto h = houses::compute(system, gast + site.lon_rad, f.eps_mean + f.deps, site.lat_rad);
+    if (!h)
+        return h.error();
+    Engine::HouseResult r;
+    r.houses = h.value();
+    r.jd_tt = jd_tt;
+    r.jd_ut1 = jd_ut1;
+    r.obliquity_deg = (f.eps_mean + f.deps) * kRad2Deg;
+    r.precession = o.precession;
+    if (sidereal) {
+        auto shift = impl.sidereal_shift(o, jd_tt);
+        if (!shift)
+            return shift.error();
+        const double a = shift.value();
+        auto sid = [a](double d) {
+            d = std::fmod(d - a, 360.0);
+            if (d < 0.0)
+                d += 360.0;
+            return d >= 360.0 ? 0.0 : d;
+        };
+        houses::Angles& g = r.houses.angles;
+        g.asc_deg = sid(g.asc_deg);
+        g.mc_deg = sid(g.mc_deg);
+        g.vertex_deg = sid(g.vertex_deg);
+        g.equatorial_asc_deg = sid(g.equatorial_asc_deg);
+        for (int k = 0; k < 12; ++k)
+            r.houses.cusp_deg[k] =
+                system == houses::System::WholeSign
+                    ? std::fmod(std::floor(g.asc_deg / 30.0) * 30.0 + 30.0 * k, 360.0)
+                    : sid(r.houses.cusp_deg[k]);
+        r.ayanamsa_deg = a;
+    }
+    return r;
+}
+
+Result<Engine::HouseResult> Engine::houses(houses::System system, double jd_tt,
+                                           const frames::GeoSite& site, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return houses_at(system, jd_tt, jd_tt - impl_->delta_t_seconds(jd_tt) / 86400.0, site, o);
+}
+
+Result<Engine::HouseResult> Engine::houses_ut(houses::System system, double jd_ut1,
+                                              const frames::GeoSite& site, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return houses_at(system, impl_->ut1_to_tt(jd_ut1), jd_ut1, site, o);
+}
+
 Result<CalcResult> Engine::calc_orbit_point_ut(int id, OrbitPoint point, OrbitElements elements,
                                                double jd_ut1, const CalcOptions& o) {
     if (!impl_)
