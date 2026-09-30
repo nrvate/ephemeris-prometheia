@@ -231,7 +231,10 @@ def parse_profile(r, request_id_unused=None):
         # upper bound. Stated in the header, not yet in section 3's text.
         if not site[2] > -6356752.0:
             raise Malformed("site height at or below the centre of the Earth")
-    if columns & ~0x0F:
+    # A.10: bits 0-3, and since the houses drop (Astrolog 6235abd) bits 4
+    # (ARMC) and 5 (true obliquity), for kind 6 only -- which is a per-object
+    # refusal at the server, not a verdict on the bytes.
+    if columns & ~0x3F:
         raise Unsupported(f"column bits {columns:#010x} are not in A.10")
     if zodiac and zodiac not in ZODIACS:
         raise Unsupported(f"zodiac token '{zodiac}' is not in A.11")
@@ -251,7 +254,7 @@ def parse_object(r, n_profiles):
     kind = r.u8()
     profile = r.u8()
     r.zero(2, "OBJECT reserved")
-    if kind > 5:
+    if kind > 6:
         raise Unsupported(f"object kind {kind} is not in A.12")
     if profile >= n_profiles:
         raise Malformed(f"object names profile {profile} of {n_profiles}")
@@ -292,6 +295,15 @@ def parse_object(r, n_profiles):
         r.str8("elements name")
     elif kind == 5:
         r.str8("designation")
+    elif kind == 6:
+        # 3.4: u8 system (A.22), u8 point (A.23). Both registries grow, so a
+        # value past them is unsupported, never malformed.
+        system = r.u8()
+        point = r.u8()
+        if system > 10:
+            raise Unsupported(f"house system {system} is not in A.22")
+        if not 1 <= point <= 16:
+            raise Unsupported(f"house point {point} is not in A.23")
     return kind, profile
 
 
@@ -420,7 +432,7 @@ def parse_data(r):
     # column bits: an unadvertised one changes the row width, so the message
     # cannot be read at all. The verdict is still unsupported (registry
     # growth), the taxonomy the codec uses.
-    if columns & ~0x0F:
+    if columns & ~0x3F:
         raise Unsupported(f"columnsPresent {columns:#010x} are not in A.10")
     if i_time + n_rows > total_rows:
         raise Malformed("this chunk's rows run past totalRows")
@@ -586,6 +598,8 @@ CAPABILITY_LAYOUTS = {
     0x0012: _u32,
     0x0013: lambda r: (r.f32("rates degPerDay"), r.f32("rates auPerDay")),
     0x0014: lambda r: None,       # parse_corrections_by_kind, which keeps its entries
+    0x0015: lambda r: [r.u8() for _ in range(r.u16())],   # house systems served (A.22 ids)
+    0x0016: lambda r: r.str8("sidereal time model"),
 }
 
 

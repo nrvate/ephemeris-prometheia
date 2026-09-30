@@ -34,10 +34,10 @@
 
 namespace {
 
-// The set of the coverage drop (Astrolog qt 7957abb), recorded in
-// third_party/README.md at the 110/110 verdict.
+// The set of the houses drop (Astrolog qt 6235abd), recorded in
+// third_party/README.md at the 124/124 verdict.
 constexpr const char* kPinnedSetSha256 =
-    "1df64f69af50b3ab8dfcc9fd90bbab6dfcd4e247f7626fe2be8fc0321c1f1c73";
+    "38f7e09d4b25fc2c12c05ac0bab0d2716e30feec111157137cc6bcbbdbc6ecab";
 
 // FIPS 180-4 SHA-256, only to check the fixture set's digest against the
 // manifest's and the pin. Public-domain algorithm, written from the standard.

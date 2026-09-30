@@ -200,6 +200,16 @@
           "bit": 3,
           "mask": 8,
           "name": "\u0394T used, s"
+        },
+        {
+          "bit": 4,
+          "mask": 16,
+          "name": "ARMC, deg (kind 6 only)"
+        },
+        {
+          "bit": 5,
+          "mask": 32,
+          "name": "true obliquity of date used, deg (kind 6 only)"
         }
       ]
     },
@@ -238,6 +248,128 @@
         {
           "value": 3,
           "name": "ICRF"
+        }
+      ]
+    },
+    "house_points": {
+      "appendix": "A.23",
+      "title": "House points",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 1,
+          "name": "cusp 1"
+        },
+        {
+          "value": 2,
+          "name": "cusp 2"
+        },
+        {
+          "value": 3,
+          "name": "cusp 3"
+        },
+        {
+          "value": 4,
+          "name": "cusp 4"
+        },
+        {
+          "value": 5,
+          "name": "cusp 5"
+        },
+        {
+          "value": 6,
+          "name": "cusp 6"
+        },
+        {
+          "value": 7,
+          "name": "cusp 7"
+        },
+        {
+          "value": 8,
+          "name": "cusp 8"
+        },
+        {
+          "value": 9,
+          "name": "cusp 9"
+        },
+        {
+          "value": 10,
+          "name": "cusp 10"
+        },
+        {
+          "value": 11,
+          "name": "cusp 11"
+        },
+        {
+          "value": 12,
+          "name": "cusp 12"
+        },
+        {
+          "value": 13,
+          "name": "Ascendant"
+        },
+        {
+          "value": 14,
+          "name": "Midheaven"
+        },
+        {
+          "value": 15,
+          "name": "Vertex"
+        },
+        {
+          "value": 16,
+          "name": "equatorial Ascendant"
+        }
+      ]
+    },
+    "house_systems": {
+      "appendix": "A.22",
+      "title": "House systems",
+      "kind": "value",
+      "entries": [
+        {
+          "value": 0,
+          "name": "placidus"
+        },
+        {
+          "value": 1,
+          "name": "koch"
+        },
+        {
+          "value": 2,
+          "name": "porphyry"
+        },
+        {
+          "value": 3,
+          "name": "regiomontanus"
+        },
+        {
+          "value": 4,
+          "name": "campanus"
+        },
+        {
+          "value": 5,
+          "name": "equal"
+        },
+        {
+          "value": 6,
+          "name": "whole-sign"
+        },
+        {
+          "value": 7,
+          "name": "alcabitius"
+        },
+        {
+          "value": 8,
+          "name": "morinus"
+        },
+        {
+          "value": 9,
+          "name": "meridian"
+        },
+        {
+          "value": 10,
+          "name": "topocentric"
         }
       ]
     },
@@ -512,6 +644,10 @@
         {
           "value": 8,
           "name": "internal"
+        },
+        {
+          "value": 9,
+          "name": "undefined here (a house point at a latitude or instant where the system is not defined, \u00a73.5b)"
         }
       ]
     },
@@ -543,6 +679,10 @@
         {
           "value": 5,
           "name": "designation"
+        },
+        {
+          "value": 6,
+          "name": "house point"
         }
       ]
     },
@@ -829,6 +969,16 @@
           "tag": 20,
           "critical": false,
           "payload": "corrections by kind: u8 n, n \u00d7 {u32 observers (A.5), u32 kinds (A.12), u8 mask (A.7)} \u2014 ADDS to tag 0x0004 per (observer, kind). 0x0004 is the intersection over kinds; a pair no entry names falls back to it, so a kind-uniform server sends nothing and the two cannot contradict. A profile's mask is checked against every (observer, kind) of the objects referencing it, ERROR 11 for the whole request; an unreferenced profile against 0x0004 alone. Mask bits above 0x07 are reserved and MUST be zero (\u00a73.1: reject, do not normalise); unknown observer and kind bits are ignored"
+        },
+        {
+          "tag": 21,
+          "critical": false,
+          "payload": "house systems served: u16 n, n \u00d7 u8 (A.22 ids)"
+        },
+        {
+          "tag": 22,
+          "critical": false,
+          "payload": "sidereal time model for houses: str8, `iau2006-2000a` for \u00a73.5b's reference, otherwise a name the server chooses"
         }
       ]
     },

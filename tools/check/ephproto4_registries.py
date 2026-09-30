@@ -146,7 +146,9 @@ def main():
                          "unsupported (a value, capability or critical extension not advertised)"),
                         ("kErrDraining", "draining (retry elsewhere)")],
         "extra_column_bits": [("kColSigma", "σ, arcsec"), ("kColAyanamsa", "ayanamsa applied, deg"),
-                              ("kColLightTime", "light time, days"), ("kColDeltaT", "ΔT used, s")],
+                              ("kColLightTime", "light time, days"), ("kColDeltaT", "ΔT used, s"),
+                              ("kColArmc", "ARMC, deg (kind 6 only)"),
+                              ("kColObliquity", "true obliquity of date used, deg (kind 6 only)")],
         "forms": [("kFormSpherical", "spherical"), ("kFormRectangular", "rectangular")],
         "frames": [("kFrameTrueOfDate", "true of date"), ("kFrameMeanOfDate", "mean of date"),
                    ("kFrameJ2000", "J2000 (mean)"), ("kFrameIcrf", "ICRF")],
@@ -163,10 +165,22 @@ def main():
                                ("kOErrUnsupported", None), ("kOErrCoverage", None),
                                ("kOErrDataMissing", None), ("kOErrUndefinedPoint", None),
                                ("kOErrAmbiguous", "ambiguous name"),
-                               ("kOErrNumerical", None), ("kOErrInternal", "internal")],
+                               ("kOErrNumerical", None), ("kOErrInternal", "internal"),
+                               ("kOErrUndefinedHere", None)],
         "object_kinds": [("kObjBody", "body"), ("kObjOrbitPoint", "orbit point"),
                          ("kObjStar", "fixed star"), ("kObjHypothetical", "named hypothetical"),
-                         ("kObjElements", "elements"), ("kObjDesignation", "designation")],
+                         ("kObjElements", "elements"), ("kObjDesignation", "designation"),
+                         ("kObjHouse", "house point")],
+        "house_systems": [("kHsPlacidus", "placidus"), ("kHsKoch", "koch"),
+                          ("kHsPorphyry", "porphyry"), ("kHsRegiomontanus", "regiomontanus"),
+                          ("kHsCampanus", "campanus"), ("kHsEqual", "equal"),
+                          ("kHsWholeSign", "whole-sign"), ("kHsAlcabitius", "alcabitius"),
+                          ("kHsMorinus", "morinus"), ("kHsMeridian", "meridian"),
+                          ("kHsTopocentric", "topocentric")],
+        # The four angles have symbols; cusps 1-12 are the range the header
+        # bounds (kHousePointMin..kHousePointMax), so they are reserved below.
+        "house_points": [("kHpAsc", "Ascendant"), ("kHpMc", "Midheaven"),
+                         ("kHpVertex", "Vertex"), ("kHpEquAsc", "equatorial Ascendant")],
         "observers": [("kObsGeo", "geocentric"), ("kObsTopo", "topocentric"),
                       ("kObsHelio", "heliocentric"),
                       ("kObsBary", "solar-system barycentre"), ("kObsBody", "body")],
@@ -191,16 +205,17 @@ def main():
                                     "kCapTagCoverage", "kCapTagCatalogs", "kCapTagDeltaT",
                                     "kCapTagPrecession", "kCapTagRate", "kCapTagSegments",
                                     "kCapTagLookup", "kCapTagHypotheticals", "kCapTagEquinoxes",
-                                    "kCapTagRatesBound", "kCapTagCorrectionsByKind"],
+                                    "kCapTagRatesBound", "kCapTagCorrectionsByKind",
+                                    "kCapTagHouseSystems", "kCapTagSiderealTime"],
     }
     token_map = {"zodiac_tokens": "kZodiacTokens", "hypothetical_tokens": "kHypotheticalTokens"}
     # Reserved by design: the registry holds the value, the header implements
     # nothing for it (an unknown type is kUnsupported at the session).
-    reserved = {"message_types": {11, 12, 13, 14}}
+    reserved = {"message_types": {11, 12, 13, 14}, "house_points": set(range(1, 13))}
     # The header-symbol prefix each reserved registry uses, so "reserved by
     # design" can be checked rather than assumed: the reservation is a claim
     # that no header symbol spells the value, and claims expire.
-    prefix = {"message_types": "kMsg"}
+    prefix = {"message_types": "kMsg", "house_points": "kHp"}
     # No header constants: the registry's token strings are the payload of
     # REQUEST TLV 0x0003 and this check pins only the tag (in tlv_map).
     unchecked = {"precession_model_tokens"}

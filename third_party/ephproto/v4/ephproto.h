@@ -82,13 +82,23 @@ enum TimeScale : uint8_t { kTimeUT1 = 0, kTimeTT = 1, kTimeTDB = 2 };
 inline constexpr uint8_t kTimeScaleMax = 2;
 enum TimeMode : uint8_t { kTimeGrid = 0, kTimeList = 1 };
 inline constexpr uint32_t kColSigma = 1u << 0, kColAyanamsa = 1u << 1,
-                          kColLightTime = 1u << 2, kColDeltaT = 1u << 3;
-inline constexpr uint32_t kColMask = 0xF;
+                          kColLightTime = 1u << 2, kColDeltaT = 1u << 3,
+                          kColArmc = 1u << 4, kColObliquity = 1u << 5;
+inline constexpr uint32_t kColMask = 0x3F;
 enum ObjKind : uint8_t {
   kObjBody = 0, kObjOrbitPoint = 1, kObjStar = 2, kObjHypothetical = 3,
-  kObjElements = 4, kObjDesignation = 5,
+  kObjElements = 4, kObjDesignation = 5, kObjHouse = 6,
 };
-inline constexpr uint8_t kObjKindMax = 5;
+inline constexpr uint8_t kObjKindMax = 6;
+// A.22 house systems and A.23 house points (kind 6).
+enum HouseSystem : uint8_t {
+  kHsPlacidus = 0, kHsKoch = 1, kHsPorphyry = 2, kHsRegiomontanus = 3,
+  kHsCampanus = 4, kHsEqual = 5, kHsWholeSign = 6, kHsAlcabitius = 7,
+  kHsMorinus = 8, kHsMeridian = 9, kHsTopocentric = 10,
+};
+inline constexpr uint8_t kHouseSystemMax = 10;
+inline constexpr uint8_t kHousePointMin = 1, kHousePointMax = 16;
+enum HousePoint : uint8_t { kHpAsc = 13, kHpMc = 14, kHpVertex = 15, kHpEquAsc = 16 };
 enum OrbitPoint : uint8_t { kPtAscNode = 0, kPtDescNode = 1, kPtPeri = 2, kPtApo = 3 };
 inline constexpr uint8_t kOrbitPointMax = 3;
 enum OrbitMethod : uint8_t {
@@ -105,7 +115,7 @@ enum Precision : uint8_t { kPrecF64 = 0, kPrecF32 = 1 };
 enum ObjErr : uint16_t {
   kOErrNone = 0, kOErrUnknownBody = 1, kOErrUnsupported = 2, kOErrCoverage = 3,
   kOErrDataMissing = 4, kOErrUndefinedPoint = 5, kOErrAmbiguous = 6,
-  kOErrNumerical = 7, kOErrInternal = 8,
+  kOErrNumerical = 7, kOErrInternal = 8, kOErrUndefinedHere = 9,
 };
 enum ErrCode : uint16_t {
   kErrMalformed = 1, kErrLimits = 2, kErrUnknownType = 3, kErrInternal = 4,
@@ -139,6 +149,7 @@ enum WelcomeTag : uint16_t {
   kCapTagPrecession = 0x000D, kCapTagRate = 0x000E, kCapTagSegments = 0x000F,
   kCapTagLookup = 0x0010, kCapTagHypotheticals = 0x0011, kCapTagEquinoxes = 0x0012,
   kCapTagRatesBound = 0x0013, kCapTagCorrectionsByKind = 0x0014,
+  kCapTagHouseSystems = 0x0015, kCapTagSiderealTime = 0x0016,
 };
 enum RequestTag : uint16_t {
   kReqTagPrecession = 0x0003, kReqTagEphemerisPin = 0x8001, kReqTagCatalogPin = 0x8002,
@@ -510,7 +521,7 @@ inline const uint16_t kWelcomeTags[] = {
   kCapTagTimeScales, kCapTagCoverage, kCapTagCatalogs, kCapTagDeltaT,
   kCapTagPrecession, kCapTagRate, kCapTagSegments, kCapTagLookup,
   kCapTagHypotheticals, kCapTagEquinoxes, kCapTagRatesBound,
-  kCapTagCorrectionsByKind,
+  kCapTagCorrectionsByKind, kCapTagHouseSystems, kCapTagSiderealTime,
 };
 
 inline Outcome ParseWelcome(const uint8_t *p, size_t n, Welcome *w, std::string *why) {
@@ -579,6 +590,10 @@ struct Capabilities {
   uint32_t cellsPerSec = 0, burst = 0;
   uint16_t lookupMax = 0;                // 0: tag absent
   std::vector<std::string> hypotheticals;
+  // A.3 0x0015 and 0x0016: the house systems served (A.22 ids) and the name of
+  // the sidereal time model behind them (3.5b). Both absent: no kind 6.
+  std::vector<uint8_t> houseSystems;
+  std::string siderealTime;
   // A.3 0x000A: one entry per ephemeris, in the order the server consults
   // them; id as the server names it (its file name when it is one file);
   // min and max its span in TDB. Routing only (3.5a).
@@ -670,6 +685,12 @@ inline void EncodeCapabilities(const Capabilities &c, TlvList *out) {
     for (const std::string &h : c.hypotheticals) w.str8(h);
     add(kCapTagHypotheticals);
   }
+  if (!c.houseSystems.empty()) {
+    w.u16((uint16_t)c.houseSystems.size());
+    for (uint8_t h : c.houseSystems) w.u8(h);
+    add(kCapTagHouseSystems);
+  }
+  if (!c.siderealTime.empty()) { w.str8(c.siderealTime); add(kCapTagSiderealTime); }
   if (!c.coverage.empty()) {
     w.u16((uint16_t)c.coverage.size());
     for (const Capabilities::Coverage &e : c.coverage) {
@@ -735,6 +756,14 @@ inline Outcome ParseCapabilities(const TlvList &caps, Capabilities *c, std::stri
           list.push_back(ReadText(r, v, "capability token is not text"));
         break;
       }
+      case kCapTagHouseSystems: {
+        uint16_t n = r.u16();
+        for (uint16_t i = 0; i < n && r.ok(); i++) c->houseSystems.push_back(r.u8());
+        break;
+      }
+      case kCapTagSiderealTime:
+        c->siderealTime = ReadText(r, v, "sidereal time model is not text");
+        break;
       case kCapTagCoverage: {
         uint16_t n = r.u16();
         for (uint16_t i = 0; i < n && r.ok(); i++) {
@@ -801,7 +830,8 @@ struct Object {
   uint8_t kind = kObjBody;
   uint8_t profile = 0;
   int32_t naif = 0;                    // body, orbit point
-  uint8_t point = 0, method = 0;       // orbit point
+  uint8_t system = 0;                  // kind 6: A.22
+  uint8_t point = 0, method = 0;       // orbit point (kind 6: A.23 point)
   std::string name;                    // star, hypothetical, elements, designation
   // elements
   Time epoch;
@@ -1026,6 +1056,13 @@ inline bool ReadObject(Reader &r, Verdict &v, Object *o, bool fTolerant = false)
       if (!fTolerant && o->method > kOrbitMethodMax) v.Unsupported("orbit method not in the registry");
       break;
     }
+    case kObjHouse:
+      o->system = r.u8();
+      o->point = r.u8();
+      if (!fTolerant && o->system > kHouseSystemMax) v.Unsupported("house system not in the registry");
+      if (!fTolerant && (o->point < kHousePointMin || o->point > kHousePointMax))
+        v.Unsupported("house point not in the registry");
+      break;
     case kObjStar: case kObjHypothetical: case kObjDesignation:
       o->name = ReadText(r, v, "object name is not text");
       if (r.ok() && o->name.empty()) v.Malformed("empty object name");
@@ -1078,6 +1115,7 @@ inline void WriteObject(Writer &w, const Object &o) {
   switch (o.kind) {
     case kObjBody: w.i32(o.naif); break;
     case kObjOrbitPoint: w.i32(o.naif); w.u8(o.point); w.u8(o.method); w.u16(0); break;
+    case kObjHouse: w.u8(o.system); w.u8(o.point); break;
     case kObjStar: case kObjHypothetical: case kObjDesignation: w.str8(o.name); break;
     case kObjElements:
       WriteTime(w, o.epoch);
@@ -1168,7 +1206,11 @@ inline Outcome ParseRequest(const uint8_t *p, size_t n, Request *q, std::string 
   // Objects.
   uint16_t nObj = r.u16();
   if (r.ok() && nObj == 0) v.Malformed("no objects");
-  if (r.ok() && (size_t)nObj * 8u > r.left()) {
+  // The smallest object is 6 bytes: a 4-byte head and a house point's two, or
+  // a one-character star name (a str8 of length 1). This said 8 until kind 6
+  // arrived, which refused a request of several house points -- and, before
+  // that, of several one-character star or designation names.
+  if (r.ok() && (size_t)nObj * 6u > r.left()) {
     v.Malformed("object list runs past the payload");
     *why = v.why();
     return v.outcome();

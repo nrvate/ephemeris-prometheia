@@ -77,18 +77,17 @@ The MCP server config (user scope) serves DE440 then DE441.
 **In progress: a pure-Python, pyswisseph-shaped library**, planned in
 [PYTHON.md](PYTHON.md) (maintainer decisions 2026-09-29). Phases 1–3 are done: houses in
 the engine, the JSON/MCP `houses` tool ([HOUSES.md](HOUSES.md)), and the
-package over stdio and HTTP (`python/`, `prometheia.swe`). Next: vendor
-Astrolog's houses drop (their `6235abd`: kind 6, 124 fixtures, 2,244
-reference rows) and check our rows against it, then v4 houses in
-`prometheiad`, then the binary transport in Python.
-The v4 houses extension is being drafted with Astrolog.
+package over stdio and HTTP (`python/`, `prometheia.swe`). Next: v4 houses
+(kind 6) in `prometheiad`, then the binary transport in Python.
+The v4 houses drop (Astrolog `6235abd`) is vendored: `ephproto.h` 85d21bc8,
+registries 9845fef7, 124/124 fixtures through both readers, their 2,244
+reference rows agree to 0.000002″. `prometheiad` refuses kind 6 per object
+(error 2) until it serves it.
 
 **Candidates for next** (none started, none promised): the parked items
 below. Cross-test legs at DE441 epochs are off the list: Astrolog serves
 Swiss's bundled files, which refuse beyond ~2400, and does not plan to
-serve further (their answer, 2026-09-29, evening). Their wire and
-registries are unchanged since qt.25 (`ephproto.h` 91c2fa6a, registries
-5fed5d64).
+serve further (their answer, 2026-09-29, evening).
 
 **The day's lesson, if only one survives:** four times in a week a claim
 here or in Astrolog was bounded by an axis nobody varied — a floor exact
