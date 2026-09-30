@@ -694,8 +694,8 @@ priority (2026-09-17):
    dropping the stream drops the compute — and a cancelled request caches
    nothing (the samples cache is written only by a compute that reached its
    last row). Priority 0 answers are worked and sent before priority 1;
-   within one request the chunks stay in order. `deadlineMs` is accepted and
-   advisory: this server does not yet switch strategies on it.
+   within one request the chunks stay in order. `deadlineMs` is read, because
+   the wire carries it, and ignored.
 
 ## The segment lattice
 
@@ -1309,8 +1309,5 @@ that do, and `--with-cross` is deliberately absent from its `ExecStart`.
   DATA chunk (12 bodies × 1000 days, all answering) came to 96.8% at zstd
   levels 1–10 and 95.5% at 19, and the fast levels stored it uncompressed.
   Packed ephemeris values do not compress; f32 halves them.
-- **`deadlineMs` as a strategy switch.** The field is parsed and advisory;
-  this server does not yet choose a cheaper strategy (samples rather than a
-  fit) to meet one.
 - **TDB's own timescale machinery**: TDB instants convert to TT through the
   Fairhead-Bretagnon series (a few ns against its own ~10 us; TIME.md).

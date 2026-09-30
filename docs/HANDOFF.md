@@ -792,12 +792,11 @@ unlisted correction masks (both §3.5a parts approved).
 
 ## Parked (maintainer go-ahead required before starting)
 
-Declined: zstd payloads, on measurement (SERVER.md, "Not implemented").
+Declined: zstd payloads, on measurement (SERVER.md, "Not implemented"); acting on
+`deadlineMs` (maintainer, 2026-09-29: the field is read and ignored).
 Settled 2026-09-29, recorded in STARS_BACKLOG.md and CROSS-TEST.md:
 - Vega's radial velocity (kept at −13.5 km/s);
 - the analytic star rate (done);
 - what we advertise for rates (the §3.5a reading; no `0x0013`).
 
-- The `deadlineMs` strategy switch: parsed and advisory today, and
-  documented as unimplemented in SERVER.md.
 - Nightly or automated catalogue release builds: an idea only.
