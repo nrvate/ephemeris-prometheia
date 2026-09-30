@@ -324,6 +324,27 @@ does with them:
   value, and a body observer is never "the object".
 - **Designations** (kind 5) resolve exactly as a LOOKUP of quality 0 or 1
   through the catalogs' name index; no match is per-object error 1.
+- **House points** (kind 6, Astrolog `6235abd`; [HOUSES.md](HOUSES.md)).
+  - One of the twelve cusps or four angles (Asc, MC, Vertex, equatorial
+    Asc) of one of the eleven A.22 systems. WELCOME lists all eleven
+    (0x0015) and names the sidereal time `iau2006-2000a` (0x0016).
+  - The row is the ecliptic longitude of date, latitude 0, distance 0 with
+    `noDistance`. The rate is §3.5a's five-point stencil of the answered
+    longitude, h = 1/1024 day.
+  - A refused stencil point, or a jump over 90° between neighbours, makes
+    the rate 0 and sets `ratesApprox`. Whole Sign's rates are 0 with no flag.
+  - Columns 4 (ARMC) and 5 (true obliquity) carry what each row used.
+  - The profile must be topocentric (it supplies the site), ecliptic,
+    spherical, true of date, sidereal plane of date. Anything else, and σ
+    or light time, is error 2, as are columns 4 and 5 asked for another
+    kind.
+  - No correction applies (`corrApplied` 0), and the site's height does
+    not enter.
+  - A point undefined at a row's latitude and obliquity is that row failing
+    with error 9: Placidus and Koch inside a polar circle, every point at a
+    pole. The four angles are the same in every system, so they are
+    answered from Porphyry's and still answer where the system is refused.
+  - Not fitted as segments.
 - **Coverage** (A.3 0x000A, defined at Astrolog `8e74027`, 2026-09-29):
   one entry per `--ephemeris` file in the order the engine consults them,
   named by its file name, with the span its header states in TDB. With
@@ -351,6 +372,7 @@ does with them:
   | 6 ambiguous | a star name several stars answer equally | the name is ambiguous |
   | 7 numerical | a small body's integration failed | the computation failed numerically |
   | 8 internal | anything else | internal error |
+  | 9 undefined here | a house point where its system has none: Placidus or Koch inside a polar circle, any point at a pole, a degenerate instant | the server's sentence (docs/HOUSES.md) |
 
   Whole-request refusals are ERROR 11: a zodiac, sidereal plane or
   correction mask this server does not advertise.

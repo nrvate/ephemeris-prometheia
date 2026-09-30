@@ -145,12 +145,30 @@ date (66.56° in 2000).
 ## Served as
 
 - `Engine::houses` (TT) and `houses_ut` (UT1), C++;
-- the JSON/MCP `houses` tool ([JSON_API.md](JSON_API.md), "Houses").
+- the JSON/MCP `houses` tool ([JSON_API.md](JSON_API.md), "Houses");
+- protocol v4 object kind 6 in `prometheiad` ([SERVER.md](SERVER.md),
+  "House points"), as the drop Astrolog wrote with us specifies (their
+  `6235abd`, §3.5b).
+
+**Against the protocol's reference rows.** `ephsrv/houses-rows.tsv` holds
+Astrolog's numeric rows, made from §3.5b's definitions alone by their
+`tools/houses_ref.py`. It covers every system and angle at 6 ARMCs,
+17 latitudes (−89.999° to 90°) and 2 ayanamshas: 2,244 rows and
+35,616 graded cells. `server_houses_match_the_reference_rows` grades our
+`houses::compute` against them at each row's own ARMC and obliquity.
+- **Values:** worst 0.000002″, which is the cells' nine-decimal rounding,
+  Placidus included.
+- **Refusals:** no disagreement in either direction.
+- **The tolerance's history:** the rows were first printed to seven
+  decimals, against a stated tolerance of 0.0001″ that seven decimals
+  cannot express (their rounding alone is 0.00018″). We reported it, and
+  their `513437f` reprinted them to nine.
+- **Where it runs:** `tools/scheduled.sh`, pinned by the rows' digest.
 
 ## Not yet
 
-- rates of the cusps and angles;
+- rates in the engine and the JSON tool (`prometheiad` answers them for kind 6,
+  as the stencil of its answered longitudes);
 - the C ABI (relayed to Astrolog before it lands);
-- the protocol v4 messages (being drafted with Astrolog);
 - the remaining systems (Gauquelin sectors, Vehlow, Sunshine, APC,
   Krusinski and others).

@@ -26,6 +26,14 @@ documented, not that it is frozen.
   - Served by the JSON/MCP `houses` tool (per-system errors, including
     `undefined-at-latitude`), with `house_systems` in `capabilities`.
   - Not yet in the C ABI or the protocol.
+- **Protocol v4 houses:** Astrolog's drop `6235abd` is vendored.
+  - What it adds: object kind 6, the ARMC and obliquity columns, error 9 and
+    WELCOME 0x0015/0x0016.
+  - 124/124 fixtures agree through both readers.
+  - `prometheiad` serves kind 6 for all eleven systems, with stencil rates
+    and per-row polar refusals.
+  - Astrolog's 2,244 reference rows (35,616 cells) agree with our house
+    code to 0.000002″ ([docs/SERVER.md](docs/SERVER.md), "House points").
 - **A Python package, `python/prometheia`** ([docs/PYTHON.md](docs/PYTHON.md)):
   - Pure Python with no C extension. It talks to a local `prometheia-json`
     over stdio or to one over HTTP.

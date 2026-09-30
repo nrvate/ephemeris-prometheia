@@ -263,6 +263,49 @@ bool is_the_observer(eph::ObjKind kind, const ResolvedObject& obj, const CalcOpt
            opts.center_body == obj.naif_id;
 }
 
+// ---- house points (kind 6, 3.5 "House points", docs/HOUSES.md) --------------
+
+// A.22's ids in order; every system is served.
+constexpr houses::System kHouseSystems[] = {
+    houses::System::Placidus,      houses::System::Koch,       houses::System::Porphyry,
+    houses::System::Regiomontanus, houses::System::Campanus,   houses::System::Equal,
+    houses::System::WholeSign,     houses::System::Alcabitius, houses::System::Morinus,
+    houses::System::Meridian,      houses::System::Topocentric};
+
+// Why a profile cannot carry a house point (per-object error 2), or nothing.
+// The observer supplies the site; nothing else about it enters.
+std::optional<std::string> house_profile_problem(const eph::Profile& pf) {
+    if (pf.observer != eph::kObsTopo) {
+        return "a house point needs the topocentric observer, which supplies the site";
+    }
+    if (pf.plane != eph::kPlaneEcliptic || pf.form != eph::kFormSpherical ||
+        pf.frame != eph::kFrameTrueOfDate || pf.siderealPlane != eph::kSidPlaneDate) {
+        return "a house point is an ecliptic longitude of date: plane ecliptic, form "
+               "spherical, frame true of date, sidereal plane of date";
+    }
+    if (pf.columns & (eph::kColSigma | eph::kColLightTime)) {
+        return "a house point has no sigma or light time column";
+    }
+    return std::nullopt;
+}
+
+// "Koch cusp 11", "Placidus Ascendant".
+std::string house_point_name(houses::System sys, uint8_t point) {
+    static constexpr const char* kAngles[] = {"Ascendant", "MC", "Vertex", "equatorial Ascendant"};
+    std::string out(houses::name(sys));
+    if (point >= eph::kHpAsc) {
+        return out + " " + kAngles[point - eph::kHpAsc];
+    }
+    return out + " cusp " + std::to_string(point);
+}
+
+// A house system's refusal (a polar circle, a pole, a degenerate instant) is
+// "undefined here"; anything else is classified as for any object.
+bool house_undefined(const Error& e) {
+    return e.message.find("cusps are undefined") != std::string::npos ||
+           e.message.find("strictly between -90 and 90") != std::string::npos;
+}
+
 // ---- engine failure -> A.17 -------------------------------------------------
 
 // 3.9a: errors by meaning, not convenience; 3.8: the text names no instant.
@@ -518,7 +561,12 @@ void build_welcome(std::vector<uint8_t>& payload, const ServerConfig& cfg, uint8
 
     eph::Capabilities c;
     c.kinds = (1u << eph::kObjBody) | (1u << eph::kObjOrbitPoint) | (1u << eph::kObjStar) |
-              (1u << eph::kObjElements) | (1u << eph::kObjDesignation);
+              (1u << eph::kObjElements) | (1u << eph::kObjDesignation) | (1u << eph::kObjHouse);
+    // Kind 6: every A.22 system, on the reference sidereal time (3.5b).
+    for (uint8_t h = 0; h <= eph::kHouseSystemMax; ++h) {
+        c.houseSystems.push_back(h);
+    }
+    c.siderealTime = "iau2006-2000a";
     // Kind 3 only with something to serve: the tokens are its whole meaning.
     if (!cfg.hypotheticals.empty()) {
         c.kinds |= 1u << eph::kObjHypothetical;
@@ -689,6 +737,25 @@ public:
             Slot& t = objects_[o];
             t.kind = eph::ObjKind(req_.objs[o].kind);
             const ProfilePlan& plan = plans_[req_.objs[o].profile];
+            const eph::Profile& pf = req_.profiles[req_.objs[o].profile];
+            if (t.kind == eph::kObjHouse) {
+                if (auto why = house_profile_problem(pf)) {
+                    t.why = *why;
+                    t.code = eph::kOErrUnsupported;
+                    continue;
+                }
+                t.system = kHouseSystems[req_.objs[o].system];
+                t.point = req_.objs[o].point;
+                t.obj.name = house_point_name(t.system, t.point);
+                t.obj.no_parallax = true; // distance 0 with noDistance (3.5)
+                t.resolved = true;
+                continue;
+            }
+            if (pf.columns & (eph::kColArmc | eph::kColObliquity)) {
+                t.why = "the ARMC and obliquity columns are answered for house points only";
+                t.code = eph::kOErrUnsupported;
+                continue;
+            }
             auto resolved = resolve_object(req_.objs[o], ctx_->engine());
             if (!resolved) {
                 t.why = clean_err_text(resolved.error());
@@ -741,6 +808,10 @@ public:
                 const ProfilePlan& plan = plans_[req_.objs[o].profile];
                 double* row = ans_->cols.data() +
                               (size_t(o) * ans_->n_time + size_t(next_row_)) * size_t(n_cols_);
+                if (s.kind == eph::kObjHouse) {
+                    house_row(s, plan, jd, dtd, row);
+                    continue;
+                }
                 auto res = calc_at(ctx_->engine(), s.obj, jd, req_.timeScale, plan.opts);
                 if (!res) {
                     if (s.first_failed_row == eph::kRowNone) {
@@ -781,7 +852,7 @@ public:
                 }
                 uint32_t extra = ans_->columns_present;
                 int k = 6;
-                for (uint32_t bit = 0; bit < 4; ++bit) {
+                for (uint32_t bit = 0; bit < 6; ++bit) {
                     if (!(extra & (1u << bit))) {
                         continue;
                     }
@@ -799,6 +870,10 @@ public:
                         row[k++] = dtd;
                         break;
                     default:
+                        // ARMC and obliquity are a house point's; this
+                        // object's profile did not ask for them (it would
+                        // have been refused), another's did.
+                        row[k++] = 0.0;
                         break;
                     }
                 }
@@ -842,7 +917,126 @@ private:
         std::string first_err;
         int source_idx = -1;
         bool any_sigma = false;
+        // Kind 6.
+        houses::System system = houses::System::Placidus;
+        uint8_t point = 0;
+        bool rates_approx = false;
     };
+
+    // A house point's longitude, ARMC, obliquity and ayanamsha at one instant
+    // of the request's time scale. The four angles do not depend on the
+    // system, so they are answered from Porphyry's, which is defined wherever
+    // they are: a system refused at a latitude still has its angles there.
+    struct HouseValue {
+        double lon, armc, eps, aya;
+    };
+    Result<HouseValue> house_at(const Slot& s, const ProfilePlan& plan, double jd) {
+        int scale = req_.timeScale;
+        if (scale == eph::kTimeTDB) {
+            jd = prometheia::time::tt_from_tdb(jd);
+            scale = eph::kTimeTT;
+        }
+        const bool angle = s.point >= eph::kHpAsc;
+        const houses::System sys = angle ? houses::System::Porphyry : s.system;
+        Engine& e = ctx_->engine();
+        auto h = scale == eph::kTimeUT1 ? e.houses_ut(sys, jd, plan.opts.site, plan.opts)
+                                        : e.houses(sys, jd, plan.opts.site, plan.opts);
+        if (!h) {
+            return h.error();
+        }
+        const Engine::HouseResult& v = h.value();
+        const houses::Angles& g = v.houses.angles;
+        double lon = 0.0;
+        switch (s.point) {
+        case eph::kHpAsc:
+            lon = g.asc_deg;
+            break;
+        case eph::kHpMc:
+            lon = g.mc_deg;
+            break;
+        case eph::kHpVertex:
+            lon = g.vertex_deg;
+            break;
+        case eph::kHpEquAsc:
+            lon = g.equatorial_asc_deg;
+            break;
+        default:
+            lon = v.houses.cusp_deg[s.point - 1];
+            break;
+        }
+        return HouseValue{lon, g.armc_deg, v.obliquity_deg, v.ayanamsa_deg.value_or(0.0)};
+    }
+
+    // One row of a house point (3.5 "House points"): the longitude, latitude
+    // and distance 0, and the rate as 3.5a's five-point stencil of the
+    // answered longitude, h = 1/1024 day, unwrapped. A refused stencil point
+    // or a jump of more than 90 degrees between neighbours makes the rate 0
+    // and sets ratesApprox; Whole Sign's cusps are steps, rate 0, no flag.
+    void house_row(Slot& s, const ProfilePlan& plan, double jd, double dtd, double* row) {
+        auto v = house_at(s, plan, jd);
+        if (!v) {
+            if (s.first_failed_row == eph::kRowNone) {
+                s.first_failed_row = next_row_;
+                s.first_err = clean_err_text(v.error());
+                s.code =
+                    house_undefined(v.error()) ? eph::kOErrUndefinedHere : obj_err_of(v.error());
+            }
+            return; // the row stays NaN
+        }
+        double rate = 0.0;
+        const bool steps = s.system == houses::System::WholeSign && s.point < eph::kHpAsc;
+        if (plan.opts.speed && !steps) {
+            constexpr double h = 1.0 / 1024.0;
+            double u[5];
+            bool ok = true;
+            for (int i = 0; i < 5 && ok; ++i) {
+                if (i == 2) {
+                    u[i] = 0.0;
+                    continue;
+                }
+                auto w = house_at(s, plan, jd + (i - 2) * h);
+                ok = w.ok();
+                if (ok) {
+                    u[i] = std::remainder(w.value().lon - v.value().lon, 360.0);
+                }
+            }
+            for (int i = 0; ok && i < 4; ++i) {
+                ok = std::fabs(u[i + 1] - u[i]) <= 90.0;
+            }
+            if (ok) {
+                rate = (u[0] - 8.0 * u[1] + 8.0 * u[3] - u[4]) / (12.0 * h);
+            } else {
+                s.rates_approx = true;
+            }
+        }
+        row[0] = v.value().lon;
+        row[1] = row[2] = row[4] = row[5] = 0.0;
+        row[3] = rate;
+        int k = 6;
+        for (uint32_t bit = 0; bit < 6; ++bit) {
+            if (!(ans_->columns_present & (1u << bit))) {
+                continue;
+            }
+            switch (1u << bit) {
+            case eph::kColAyanamsa:
+                row[k++] = v.value().aya;
+                break;
+            case eph::kColDeltaT:
+                row[k++] = dtd;
+                break;
+            case eph::kColArmc:
+                row[k++] = v.value().armc;
+                break;
+            case eph::kColObliquity:
+                row[k++] = v.value().eps;
+                break;
+            default:
+                row[k++] = 0.0; // sigma, light time: another object's columns
+                break;
+            }
+        }
+        ++s.rows_ok;
+    }
 
     // META's facts are about the whole answer (3.4), so they are written
     // once, at the end.
@@ -866,9 +1060,14 @@ private:
             if (s.any_sigma) {
                 m.flags |= eph::kMetaHasSigma;
             }
+            if (s.rates_approx) {
+                m.flags |= eph::kMetaRatesApprox;
+            }
+            // No correction of any kind applies to a house point (3.5).
             m.corrApplied =
-                s.resolved ? corr_applied(eph::ObjKind(req_.objs[o].kind), plan.opts, s.obj.is_sun)
-                           : 0;
+                s.resolved && s.kind != eph::kObjHouse
+                    ? corr_applied(eph::ObjKind(req_.objs[o].kind), plan.opts, s.obj.is_sun)
+                    : 0;
             m.resolvedNaif = s.resolved && has_naif(s.kind) ? s.obj.naif_id : eph::kNaifNone;
             m.firstFailedRow = s.first_failed_row;
             m.name = s.resolved ? s.obj.name : "";
@@ -1077,7 +1276,7 @@ private:
         // The capability names the kinds this server fits (3.4); anything
         // else is a per-object error, as is the Moon's osculating apsis,
         // which swings degrees a day on purpose.
-        const bool fitted_kind = spec.kind != eph::kObjStar;
+        const bool fitted_kind = spec.kind != eph::kObjStar && spec.kind != eph::kObjHouse;
         const bool lunar_osculating = spec.kind == eph::kObjOrbitPoint &&
                                       spec.method == eph::kMethOsculating && spec.naif == 301;
         auto resolved = resolve_object(spec, ctx_->engine());

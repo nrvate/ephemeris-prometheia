@@ -128,6 +128,8 @@ if [[ -f "$astrolog/ephsrv/ephproto.h" ]]; then
         "$repo/build/test_ephproto4"
     step "conformance fixtures (independent reader)" python3 \
         "$repo/tools/check/ephproto4_fixtures.py" --dir "$astrolog/ephsrv/conformance"
+    step "houses reference rows" env PROMETHEIA_ASTROLOG="$astrolog" \
+        "$repo/build/test_server" -tc=server_houses_match_the_reference_rows
 else
     skipped+=("protocol pin: no Astrolog tree at $astrolog (set PROMETHEIA_ASTROLOG)")
 fi

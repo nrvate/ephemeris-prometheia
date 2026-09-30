@@ -18,8 +18,8 @@ cusps, ascmc = swe.houses(jd, 47.37, 8.55, b"P")
 **State (2026-09-29):**
 - **Done:** phases 1–3 (houses in the engine, the JSON `houses` tool, this
   package over stdio and HTTP).
-- **Not done:** the binary transport and the protocol v4 houses kind.
-  Astrolog's houses drop, `6235abd` on their `qt`, is to be vendored.
+- **Not done:** the binary transport (phase 4). `prometheiad` already serves
+  houses as protocol v4 object kind 6 (Astrolog's drop `6235abd`, vendored).
 
 ## Decisions (maintainer, 2026-09-29)
 
@@ -175,5 +175,6 @@ difference of its own positions (h = 1e-3 day).
 3. **This package over stdio and HTTP** (done).
 4. **The binary transport:** a WebSocket client and v4 codec in Python,
    checked against Astrolog's conformance fixtures.
-5. **Protocol v4 houses (kind 6)** in `prometheiad` and the Python client.
-   Astrolog's drop is `6235abd`; time conversion follows.
+5. **Protocol v4 houses (kind 6).** Served by `prometheiad` (done;
+   [SERVER.md](SERVER.md), "House points"). The Python client speaks it
+   with phase 4. Time conversion follows, by agreement with Astrolog.

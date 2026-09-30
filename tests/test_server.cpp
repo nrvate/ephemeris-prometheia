@@ -2022,3 +2022,225 @@ TEST_CASE("server_sha256_vectors") {
     }
     CHECK(h.hex() == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
 }
+
+namespace {
+
+eph::Object house_obj(uint8_t system, uint8_t point, uint8_t profile = 0) {
+    eph::Object o;
+    o.kind = eph::kObjHouse;
+    o.system = system;
+    o.point = point;
+    o.profile = profile;
+    return o;
+}
+
+eph::Profile house_profile(double lon, double lat, uint32_t columns, const char* zodiac = "") {
+    eph::Profile p;
+    p.observer = eph::kObsTopo;
+    p.siteLonEastDeg = lon;
+    p.siteLatDeg = lat;
+    p.corrections = 0;
+    p.columns = columns;
+    p.zodiac = zodiac;
+    return p;
+}
+
+} // namespace
+
+TEST_CASE("server_serves_house_points") {
+    // Kind 6 (Astrolog 6235abd, 3.5 "House points", docs/HOUSES.md).
+    Fixture f;
+    const eph::Welcome w = f.welcome();
+    eph::Capabilities caps;
+    std::string why;
+    REQUIRE(eph::ParseCapabilities(w.caps_, &caps, &why) == eph::kOk);
+    CHECK((caps.kinds & (1u << eph::kObjHouse)) != 0);
+    CHECK(caps.houseSystems.size() == 11);
+    CHECK(caps.siderealTime == "iau2006-2000a");
+    CHECK((caps.columns & (eph::kColArmc | eph::kColObliquity)) ==
+          (eph::kColArmc | eph::kColObliquity));
+
+    Engine& engine = f.ctx->engine();
+    const double jd = 2451545.0;
+    const uint32_t cols = eph::kColAyanamsa | eph::kColDeltaT | eph::kColArmc | eph::kColObliquity;
+    eph::Request req = base_request(jd, 3, 0.25);
+    req.profiles[0] = house_profile(8.55, 47.37, cols);              // Zurich
+    req.profiles.push_back(house_profile(0.0, 70.0, cols));          // inside the polar circle
+    req.profiles.push_back(house_profile(8.55, 47.37, 0, "lahiri")); // sidereal
+    req.profiles.push_back(eph::Profile{});                          // geocentric, for a body
+    eph::Profile body_armc;
+    body_armc.columns = eph::kColArmc;
+    req.profiles.push_back(body_armc);
+    eph::Profile house_sigma = house_profile(8.55, 47.37, eph::kColSigma);
+    req.profiles.push_back(house_sigma);
+    eph::Profile geo_house;
+    req.profiles.push_back(geo_house);
+    req.objs = {house_obj(eph::kHsPlacidus, 11, 0),
+                house_obj(eph::kHsKoch, eph::kHpAsc, 0),
+                house_obj(eph::kHsPlacidus, 11, 1),
+                house_obj(eph::kHsPlacidus, eph::kHpMc, 1),
+                house_obj(eph::kHsWholeSign, 1, 2),
+                body_obj(10),
+                [] {
+                    eph::Object o = body_obj(10);
+                    o.profile = 4;
+                    return o;
+                }(),
+                house_obj(eph::kHsPorphyry, 1, 5),
+                house_obj(eph::kHsPorphyry, 1, 6)};
+    req.objs[5].profile = 3;
+    CHECK(f.session->on_message(request(req, 7), true));
+    const Data d = join(drain(*f.session));
+    REQUIRE(d.meta.size() == 9);
+    // The union of the profiles' columns: one of them asks for sigma.
+    CHECK(d.columns_present == (cols | eph::kColSigma));
+    // An extra column's index: 6 plus the present bits below it.
+    const auto col = [&](uint32_t bit) { return 6 + eph::PopCount(d.columns_present & (bit - 1)); };
+    const auto at = [&](size_t o, uint32_t row, int k) {
+        return d.cols[(o * 3 + row) * size_t(d.n_cols) + k];
+    };
+    frames::GeoSite zurich;
+    zurich.lon_rad = 8.55 * std::acos(-1.0) / 180.0;
+    zurich.lat_rad = 47.37 * std::acos(-1.0) / 180.0;
+
+    // Values are the engine's, row by row, with the ARMC and obliquity used.
+    for (uint32_t r = 0; r < 3; ++r) {
+        const double t = jd + 0.25 * r;
+        auto p = engine.houses(houses::System::Placidus, t, zurich);
+        REQUIRE(p.ok());
+        CHECK(at(0, r, 0) == p.value().houses.cusp_deg[10]);
+        CHECK(at(0, r, 1) == 0.0);
+        CHECK(at(0, r, 2) == 0.0);
+        CHECK(at(0, r, col(eph::kColSigma)) == 0.0);    // another profile's column
+        CHECK(at(0, r, col(eph::kColAyanamsa)) == 0.0); // tropical
+        CHECK(at(0, r, col(eph::kColArmc)) == p.value().houses.angles.armc_deg);
+        CHECK(at(0, r, col(eph::kColObliquity)) == p.value().obliquity_deg);
+        CHECK(at(1, r, 0) == p.value().houses.angles.asc_deg); // Koch's Ascendant is the Asc
+    }
+    CHECK(d.meta[0].errCode == eph::kOErrNone);
+    CHECK((d.meta[0].flags & eph::kMetaNoDistance) != 0);
+    CHECK(d.meta[0].corrApplied == 0);
+    CHECK(d.meta[0].resolvedNaif == eph::kNaifNone);
+    CHECK(d.meta[0].name == "Placidus cusp 11");
+    // The rate is the stencil of the answered longitude: against a wider
+    // central difference of the engine's cusps.
+    {
+        auto lo = engine.houses(houses::System::Placidus, jd - 1e-3, zurich);
+        auto hi = engine.houses(houses::System::Placidus, jd + 1e-3, zurich);
+        const double num =
+            std::remainder(hi.value().houses.cusp_deg[10] - lo.value().houses.cusp_deg[10], 360.0) /
+            2e-3;
+        CHECK(std::fabs(at(0, 0, 3) - num) < 1e-3); // deg/day, of ~360
+        CHECK(at(0, 0, 3) > 300.0);
+    }
+    // Inside the polar circle Placidus' cusp is undefined here (error 9);
+    // the MC, a point every system shares, still answers.
+    CHECK(d.meta[2].errCode == eph::kOErrUndefinedHere);
+    CHECK(d.meta[2].rowsOk == 0);
+    CHECK(std::isnan(at(2, 0, 0)));
+    CHECK(d.meta[3].errCode == eph::kOErrNone);
+    CHECK(d.meta[3].rowsOk == 3);
+    // Sidereal Whole Sign: the sign of the sidereal Ascendant, rate 0, no flag.
+    {
+        CalcOptions o;
+        o.sidereal = SiderealMode::Lahiri;
+        auto s = engine.houses(houses::System::WholeSign, jd, zurich, o);
+        REQUIRE(s.ok());
+        CHECK(at(4, 0, 0) == s.value().houses.cusp_deg[0]);
+        CHECK(std::fmod(at(4, 0, 0), 30.0) == 0.0);
+        CHECK(at(4, 0, 3) == 0.0);
+        CHECK((d.meta[4].flags & eph::kMetaRatesApprox) == 0);
+    }
+    // A body beside them: answered, its ARMC column 0 (not its own).
+    CHECK(d.meta[5].errCode == eph::kOErrNone);
+    CHECK(at(5, 0, col(eph::kColArmc)) == 0.0);
+    // Refused per object (error 2): a body asking for the ARMC, a house point
+    // asking for sigma, and a house point with a geocentric observer.
+    CHECK(d.meta[6].errCode == eph::kOErrUnsupported);
+    CHECK(d.meta[7].errCode == eph::kOErrUnsupported);
+    CHECK(d.meta[8].errCode == eph::kOErrUnsupported);
+}
+
+TEST_CASE("server_houses_match_the_reference_rows") {
+    // Astrolog's numeric rows for 3.5b (ephsrv/houses-rows.tsv, made by their
+    // tools/houses_ref.py from the definitions alone): every system and angle
+    // at 6 ARMCs x 17 latitudes x 2 ayanamshas, graded at the row's own ARMC
+    // and obliquity through houses::compute, as prometheiad answers kind 6.
+    // A cell is a longitude, "refused", or "either" (Placidus and Koch within
+    // 1" of a polar circle). Pinned by the digest of the data rows. SKIPs
+    // without $PROMETHEIA_ASTROLOG.
+    const char* astrolog = std::getenv("PROMETHEIA_ASTROLOG");
+    if (!astrolog || !*astrolog) {
+        std::printf("  SKIP: PROMETHEIA_ASTROLOG not set\n");
+        return;
+    }
+    std::ifstream in(std::string(astrolog) + "/ephsrv/houses-rows.tsv");
+    REQUIRE(in.good());
+    const double kDeg = std::acos(-1.0) / 180.0;
+    Sha256 rows_sha;
+    std::string line;
+    int rows = 0, cells = 0;
+    double worst = 0.0, worst_placidus = 0.0;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+        const std::string with_nl = line + "\n";
+        rows_sha.update(reinterpret_cast<const uint8_t*>(with_nl.data()), with_nl.size());
+        std::vector<std::string> f;
+        for (size_t at = 0, tab;; at = tab + 1) {
+            tab = line.find('\t', at);
+            f.push_back(line.substr(at, tab == std::string::npos ? std::string::npos : tab - at));
+            if (tab == std::string::npos)
+                break;
+        }
+        REQUIRE(f.size() == 21);
+        ++rows;
+        const auto sys = houses::from_token(f[0]);
+        REQUIRE(sys.has_value());
+        const double armc = std::stod(f[1]), lat = std::stod(f[2]), eps = std::stod(f[3]),
+                     aya = std::stod(f[4]);
+        const auto h = houses::compute(*sys, armc * kDeg, eps * kDeg, lat * kDeg);
+        const auto angles =
+            houses::compute(houses::System::Porphyry, armc * kDeg, eps * kDeg, lat * kDeg);
+        const auto sid = [aya](double d) {
+            d = std::fmod(d - aya, 360.0);
+            return d < 0.0 ? d + 360.0 : d;
+        };
+        for (int k = 0; k < 16; ++k) {
+            const std::string& want = f[5 + size_t(k)];
+            if (want == "either")
+                continue;
+            ++cells;
+            const bool ok = k < 12 ? h.ok() : angles.ok();
+            if (want == "refused") {
+                CHECK_MESSAGE(!ok, line, " point ", k + 1);
+                continue;
+            }
+            REQUIRE_MESSAGE(ok, line, " point ", k + 1);
+            double v;
+            if (k < 12 && *sys == houses::System::WholeSign && aya != 0.0) {
+                v = std::fmod(std::floor(sid(h.value().angles.asc_deg) / 30.0) * 30.0 + 30.0 * k,
+                              360.0);
+            } else if (k < 12) {
+                v = sid(h.value().cusp_deg[size_t(k)]);
+            } else {
+                const houses::Angles& g = angles.value().angles;
+                v = sid(k == 12   ? g.asc_deg
+                        : k == 13 ? g.mc_deg
+                        : k == 14 ? g.vertex_deg
+                                  : g.equatorial_asc_deg);
+            }
+            const double d = std::fabs(std::remainder(v - std::stod(want), 360.0)) * 3600.0;
+            const bool placidus = *sys == houses::System::Placidus && k < 12;
+            CHECK_MESSAGE(d < (placidus ? 0.01 : 0.0001), line, " point ", k + 1, ": ", d, "\"");
+            (placidus ? worst_placidus : worst) = std::max(placidus ? worst_placidus : worst, d);
+        }
+    }
+    // Their 513437f, nine decimals (docs/HOUSES.md).
+    CHECK_MESSAGE(rows_sha.hex() ==
+                      "855a73426353f23a542c0601a317f9a704100806dd651d3fafa7360000a73b29",
+                  "Astrolog's houses-rows.tsv changed: review it and re-pin");
+    CHECK(rows == 2244);
+    std::printf("  houses-rows.tsv: %d rows, %d cells, worst %.6f\" (Placidus %.6f\")\n", rows,
+                cells, worst, worst_placidus);
+}
