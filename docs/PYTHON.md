@@ -110,7 +110,8 @@ python/
    (output only) over latitudes to ±66° and epochs 1600–2500, plus the
    polar refusals. The C ABI is not extended in this phase; an ABI
    addition is relayed to Astrolog before it lands.
-2. **`houses` in the JSON API and MCP.** A new tool, same provenance rules.
+2. **`houses` in the JSON API and MCP** (done, [JSON_API.md](JSON_API.md),
+   "Houses"). A new tool, same provenance rules.
 3. **The Python package over stdio and HTTP.** `prometheia.swe` as above;
    unit tests against recorded JSON (in the gate), an integration test
    against a live `prometheia-json` (skipped when absent), and the

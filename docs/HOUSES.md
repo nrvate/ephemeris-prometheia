@@ -1,9 +1,10 @@
 # Houses
 
 House cusps and the chart's angles, computed by the engine
-(`include/prometheia/houses.hpp`, `Engine::houses` and `houses_ut`). This is
-phase 1 of the Python library plan ([PYTHON.md](PYTHON.md)); the JSON tool
-and the protocol extension come next. Each system is built from its
+(`include/prometheia/houses.hpp`, `Engine::houses` and `houses_ut`) and
+served by the JSON/MCP `houses` tool. These are phases 1 and 2 of the
+Python library plan ([PYTHON.md](PYTHON.md)); the protocol extension comes
+later. Each system is built from its
 published geometric definition, and the arithmetic is our own.
 `swetest`'s printed output is an oracle only.
 
@@ -131,10 +132,14 @@ date (66.56° in 2000).
   failed the suite: a Koch step changed by 0.5%, Regiomontanus/Campanus'
   cusp 10 put back to the MC, and the polar band rule removed.
 
+## Served as
+
+- `Engine::houses` (TT) and `houses_ut` (UT1), C++;
+- the JSON/MCP `houses` tool ([JSON_API.md](JSON_API.md), "Houses").
+
 ## Not yet
 
 - rates of the cusps and angles;
-- the JSON and MCP `houses` tool;
 - the C ABI (relayed to Astrolog before it lands);
 - the protocol v4 messages (being drafted with Astrolog);
 - the remaining systems (Gauquelin sectors, Vehlow, Sunshine, APC,

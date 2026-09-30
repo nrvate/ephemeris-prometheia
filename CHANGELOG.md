@@ -23,7 +23,9 @@ documented, not that it is frozen.
     (0.033″ for Koch within a degree of a polar circle).
   - The sidereal time is within 0.00075″ of ERFA's `gst06a`.
   - Placidus and Koch are refused inside a polar circle, never replaced.
-  - C++ only for now; not yet in the C ABI, JSON or the protocol.
+  - Served by the JSON/MCP `houses` tool (per-system errors, including
+    `undefined-at-latitude`), with `house_systems` in `capabilities`.
+  - Not yet in the C ABI or the protocol.
 
 ## 0.7.3 — 2026-09-29
 

@@ -152,7 +152,7 @@ TEST_CASE("json_bad_arguments_are_whole_call_errors") {
 
 TEST_CASE("json_tools_list_their_schemas") {
     const auto t = jsontools::tools();
-    REQUIRE(t.size() == 4);
+    REQUIRE(t.size() == 5);
     for (const auto& tool : t) {
         CHECK(!tool.description.empty());
         CHECK(tool.input_schema["type"] == "object");
@@ -181,7 +181,7 @@ TEST_CASE("mcp_dispatcher") {
     CHECK_FALSE(d.handle(Json{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}}));
     // Tools: listed with schemas; a call answers text and structured content.
     auto list = d.handle(req(3, "tools/list"));
-    CHECK((*list)["result"]["tools"].size() == 4);
+    CHECK((*list)["result"]["tools"].size() == 5);
     auto ok =
         d.handle(req(4, "tools/call",
                      {{"name", "positions"},
@@ -663,4 +663,66 @@ TEST_CASE("json_provenance_names_the_plane_and_the_precession") {
     CHECK(ask({{"frame", "icrf"}})["results"][0]["provenance"].contains("precession") == false);
     CHECK(ask({{"frame", "icrf"},
                {"zodiac", "lahiri"}})["results"][0]["provenance"]["precession"] == "vondrak2011");
+}
+
+// Houses (docs/HOUSES.md): the engine's numbers, by token or letter, with an
+// unserved system and a polar refusal as per-system errors.
+TEST_CASE("json_houses_are_the_engines") {
+    synth::TempFile tf("json-houses");
+    Engine e = synth::open_synthetic(tf);
+    const Json site = {{"lon_deg", 8.55}, {"lat_deg", 47.37}};
+    const Json t = {{"jd_tt", 2451545.0}};
+    const Json out = run(
+        e, "houses", {{"time", t}, {"site", site}, {"systems", {"placidus", "W", "gauquelin"}}});
+    REQUIRE(out.is_object());
+    REQUIRE(out["results"].size() == 3);
+    frames::GeoSite g;
+    g.lon_rad = 8.55 * 3.14159265358979323846 / 180.0;
+    g.lat_rad = 47.37 * 3.14159265358979323846 / 180.0;
+    auto want = e.houses(houses::System::Placidus, 2451545.0, g);
+    REQUIRE(want.ok());
+    const Json& p = out["results"][0];
+    CHECK(p["error"].is_null());
+    CHECK(p["system"]["token"] == "placidus");
+    for (int k = 0; k < 12; ++k)
+        CHECK(p["rows"][0]["cusps_deg"][k].get<double>() == want.value().houses.cusp_deg[k]);
+    CHECK(p["rows"][0]["mc_deg"].get<double>() == want.value().houses.angles.mc_deg);
+    CHECK(p["rows"][0]["obliquity_deg"].get<double>() == want.value().obliquity_deg);
+    CHECK(p["provenance"]["precession"] == "vondrak2011");
+    CHECK_FALSE(p["provenance"].contains("zodiac"));
+    CHECK(out["results"][1]["system"]["token"] == "whole-sign");
+    CHECK(out["results"][2]["error"]["code"] == "unsupported");
+
+    // Inside a polar circle Placidus is refused by name; Porphyry answers.
+    const Json polar = run(e, "houses",
+                           {{"time", t},
+                            {"site", {{"lon_deg", 0.0}, {"lat_deg", 70.0}}},
+                            {"systems", {"P", "porphyry"}}});
+    CHECK(polar["results"][0]["error"]["code"] == "undefined-at-latitude");
+    CHECK(polar["results"][0]["error"]["message"].get<std::string>().find("Porphyry") !=
+          std::string::npos);
+    CHECK(polar["results"][1]["error"].is_null());
+
+    // Sidereal: the ayanamsha and the zodiac are in the answer.
+    const Json sid = run(e, "houses", {{"time", t}, {"site", site}, {"zodiac", "lahiri"}});
+    CHECK(sid["results"][0]["rows"][0].contains("ayanamsa_deg"));
+    CHECK(sid["results"][0]["provenance"]["zodiac"]["token"] == "lahiri");
+
+    // Whole-call refusals: no site, a key houses does not read, a fixed plane.
+    jsontools::ToolError err;
+    CHECK(run(e, "houses", {{"time", t}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+    CHECK(run(e, "houses", {{"time", t}, {"site", site}, {"observer", "topocentric"}}, &err)
+              .is_null());
+    CHECK(err.message.find("\"observer\"") != std::string::npos);
+    CHECK(run(e, "houses",
+              {{"time", t}, {"site", site}, {"zodiac", "lahiri"}, {"sidereal_plane", "invariable"}},
+              &err)
+              .is_null());
+    CHECK(run(e, "houses", {{"time", t}, {"site", {{"lon_deg", 0.0}, {"lat_deg", 90.0}}}}, &err)
+              .is_null());
+
+    // capabilities lists the eleven.
+    const Json caps = run(e, "capabilities", Json::object());
+    CHECK(caps["house_systems"].size() == 11);
 }

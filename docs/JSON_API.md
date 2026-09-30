@@ -104,6 +104,7 @@ Each tool is one call, whether it arrives as an MCP `tools/call` or as a JSON
 | `lookup` | resolve a name to the objects it could mean (`prefix` matches a half-remembered one) |
 | `capabilities` | what this engine answers: bodies, zodiacs, frames, coverage, in words, and whether a small-body catalog is loaded; under `dates`, each ephemeris file's span in answering order (and the planets' mean orbit points' narrower 1550–2650); `precession_default` |
 | `convert_time` | UTC, TT, UT1 and Julian dates, with ΔT and leap seconds |
+| `houses` | house cusps and the chart's angles for a site, in one or more systems ([HOUSES.md](HOUSES.md)) |
 
 The agent-facing summary of what to ask, and how, is the MCP resource
 `prometheia://llms.txt`, and `GET /llms.txt` over HTTP.
@@ -173,10 +174,12 @@ The agent-facing summary of what to ask, and how, is the MCP resource
   reads `time`/`times`/`series`, `objects`, `observer` (`site`, `center`),
   `frame`, `coordinates`, `corrections`, `zodiac`, `sidereal_plane`,
   `precession` and `rates`; `lookup` reads `query` and `prefix`;
-  `convert_time` reads `time`; `capabilities` takes none. Anything else is
-  `invalid-arguments` naming the key. An agent asking for `houses` or
-  `aspects` — neither of which this engine serves — used to get positions
-  back and no hint that half its request had gone nowhere, and a mistyped
+  `convert_time` reads `time`; `houses` reads `time`/`times`/`series`,
+  `site`, `systems`, `zodiac`, `sidereal_plane` and `precession`;
+  `capabilities` takes none. Anything else is `invalid-arguments` naming the
+  key. An agent asking `positions` for houses or aspects used to get
+  positions back and no hint that half its request had gone nowhere (houses
+  have their own tool since 2026-09-29; aspects are not served), and a mistyped
   `prefix` on `lookup` quietly matched exactly and answered nothing, which
   reads as "no such name". Same rule as a name: never a silent guess.
 - **`lookup` and a half-remembered name.** `prefix: true` matches a star by
@@ -256,9 +259,34 @@ digits cut):
   - A per-object error has a code (`unknown-name`, `ambiguous-name`,
     `outside-coverage`,
     `unsupported`, `numerical-failure`, `data-unavailable`) and a sentence.
-    The other objects are still answered.
+    The other objects are still answered. `houses` answers per system the
+    same way, with one more code, `undefined-at-latitude`: Placidus or Koch
+    inside a polar circle.
   - A whole-call error (`invalid-arguments`) is MCP's `isError` result, or
     HTTP 400 on `/v1`.
+
+## Houses
+
+```json
+{"time": "1990-06-15T14:30:00+02:00",
+ "site": {"lon_deg": 8.55, "lat_deg": 47.37},
+ "systems": ["placidus", "W"],
+ "zodiac": "lahiri"}
+```
+
+- `systems` takes tokens or letters, and defaults to `["placidus"]`.
+  `capabilities` lists them under `house_systems`.
+- `site` is geodetic. A `height_m` is accepted, and the provenance says it
+  does not enter.
+- Each system is one result, with `rows` holding `cusps_deg` (12, cusp 1
+  first), `ascendant_deg`, `mc_deg`, `armc_deg`, `vertex_deg`,
+  `equatorial_ascendant_deg`, `obliquity_deg`, and `ayanamsa_deg` when the
+  zodiac is sidereal.
+- The provenance names the sidereal time's model, the obliquity, the
+  precession model, the zodiac and a measured accuracy statement.
+- A sidereal zodiac is counted on the ecliptic of date only: another
+  `sidereal_plane` is refused.
+- The rules and the measurements are in [HOUSES.md](HOUSES.md).
 
 ## Words (shared with Astrolog)
 

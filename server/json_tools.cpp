@@ -758,6 +758,8 @@ std::string error_code(const Error& e) {
     const std::string& m = e.message;
     if (e.code == ErrorCode::CoverageError)
         return "outside-coverage";
+    if (m.find("inside the polar circle") != std::string::npos)
+        return "undefined-at-latitude";
     if (m.find("numerical failure") != std::string::npos ||
         m.find("integration failed") != std::string::npos)
         return "numerical-failure";
@@ -942,6 +944,124 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
     return out;
 }
 
+constexpr const char* kHousesKeys[] = {"time",    "times",  "series",         "site",
+                                       "systems", "zodiac", "sidereal_plane", "precession"};
+
+Result<Json> houses(Engine& engine, const Context& ctx, const Json& a, ToolError* err) {
+    Bad bad;
+    const auto refuse = [&](const std::string& m) -> Result<Json> {
+        *err = {"invalid-arguments", m};
+        return make_error(ErrorCode::ArgumentError, m);
+    };
+    if (has_unknown_key(a, kHousesKeys, "houses",
+                        "it reads time/times/series, site, systems, zodiac, sidereal_plane and "
+                        "precession",
+                        err))
+        return make_error(ErrorCode::ArgumentError, err->message);
+    auto times = parse_times(a, ctx.limits, bad);
+    if (!times)
+        return refuse(bad.message);
+    const Json site = a.contains("site") ? a["site"] : Json();
+    if (!site.is_object() || !site.contains("lon_deg") || !site.contains("lat_deg") ||
+        !site["lon_deg"].is_number() || !site["lat_deg"].is_number() ||
+        (site.contains("height_m") && !site["height_m"].is_number()))
+        return refuse("houses need \"site\": {\"lon_deg\", \"lat_deg\"} (geodetic, east and "
+                      "north positive)");
+    const double lon = site["lon_deg"].get<double>(), lat = site["lat_deg"].get<double>();
+    if (!(std::fabs(lon) <= 180.0) || !(std::fabs(lat) < 90.0))
+        return refuse("a site's longitude is within ±180° and, for houses, its latitude strictly "
+                      "within ±90°");
+    // Only the zodiac, its plane and the precession model are read here;
+    // parse_options' other defaults (geocentric, true of date) are the
+    // houses' own frame.
+    auto options = parse_options(engine, a, bad);
+    if (!options)
+        return refuse(bad.message);
+    if (options->opts.sidereal_plane != SiderealPlane::EclipticOfDate)
+        return refuse("houses are counted on the ecliptic of date; a sidereal zodiac's houses are "
+                      "the tropical ones less its ayanamsha, so sidereal_plane is date");
+    const Json asked = a.contains("systems") ? a["systems"] : Json::array({"placidus"});
+    if (!asked.is_array() || asked.empty() || asked.size() > 12)
+        return refuse("\"systems\" is a list of 1 to 12 house systems, by token (\"placidus\") "
+                      "or letter (\"P\"); capabilities lists them");
+    const CalcOptions& o = options->opts;
+    frames::GeoSite g;
+    g.lon_rad = lon * 3.14159265358979323846 / 180.0;
+    g.lat_rad = lat * 3.14159265358979323846 / 180.0;
+    Json results = Json::array();
+    for (const Json& item : asked) {
+        Json r = {{"system", {{"asked", item}}}};
+        std::optional<houses::System> sys;
+        if (item.is_string()) {
+            const std::string w = item.get<std::string>();
+            sys = w.size() == 1 ? houses::from_letter(w[0]) : houses::from_token(lower(w));
+        }
+        if (!sys) {
+            r["error"] = {{"code", "unsupported"},
+                          {"message", "that house system is not served; capabilities lists "
+                                      "house_systems"}};
+            results.push_back(r);
+            continue;
+        }
+        r["system"]["token"] = std::string(houses::token(*sys));
+        r["system"]["name"] = std::string(houses::name(*sys));
+        Json rows = Json::array();
+        std::optional<Error> failure;
+        for (double jd : *times) {
+            auto h = engine.houses(*sys, jd, g, o);
+            if (!h) {
+                failure = h.error();
+                break;
+            }
+            const auto& v = h.value();
+            const houses::Angles& an = v.houses.angles;
+            Json row = {{"time", time_of(jd)},
+                        {"cusps_deg", v.houses.cusp_deg},
+                        {"ascendant_deg", an.asc_deg},
+                        {"mc_deg", an.mc_deg},
+                        {"armc_deg", an.armc_deg},
+                        {"vertex_deg", an.vertex_deg},
+                        {"equatorial_ascendant_deg", an.equatorial_asc_deg},
+                        {"obliquity_deg", v.obliquity_deg}};
+            if (v.ayanamsa_deg)
+                row["ayanamsa_deg"] = *v.ayanamsa_deg;
+            rows.push_back(row);
+        }
+        if (failure) {
+            r["error"] = {{"code", error_code(*failure)}, {"message", failure->message}};
+            if (!rows.empty())
+                r["rows"] = rows;
+            results.push_back(r);
+            continue;
+        }
+        r["rows"] = rows;
+        Json prov = {
+            {"site", {{"lon_deg", lon}, {"lat_deg", lat}}},
+            {"latitude", "geodetic; the site's height does not enter"},
+            {"sidereal_time", "IAU 2006 GMST (Earth rotation angle) plus the IAU 2000A equation of "
+                              "the equinoxes"},
+            {"obliquity", "true, of date: the mean obliquity plus the IAU 2000A nutation"},
+            {"frame", "true ecliptic and equinox of date"},
+            {"precession", o.precession == Precession::Vondrak2011 ? "vondrak2011" : "iau2006"},
+            {"accuracy",
+             {{"statement", "cusps agree with swetest at its own sidereal time to 0.0056 arcsec "
+                            "(0.033 for Koch within a degree of a polar circle); the sidereal "
+                            "time with ERFA gst06a to 0.00075 arcsec, 1600-2200"},
+              {"doc", "docs/HOUSES.md"}}}};
+        if (options->sidereal)
+            prov["zodiac"] = {{"token", options->zodiac_token},
+                              {"plane", "date"},
+                              {"doc", "docs/HOUSES.md (sidereal houses)"}};
+        r["provenance"] = prov;
+        r["error"] = nullptr;
+        results.push_back(r);
+    }
+    Json out = {{"engine", ctx.engine}, {"results", results}};
+    if (!ctx.dataset.empty())
+        out["dataset"] = ctx.dataset;
+    return out;
+}
+
 constexpr const char* kLookupKeys[] = {"query", "prefix"};
 
 Result<Json> lookup(Engine& engine, const Json& a, ToolError* err) {
@@ -999,6 +1119,17 @@ Result<Json> lookup(Engine& engine, const Json& a, ToolError* err) {
         matches.push_back(m);
     }
     return Json{{"query", q}, {"matches", matches}};
+}
+
+Json house_systems() {
+    Json out = Json::array();
+    for (char c : std::string("PKORCAWBMXT")) {
+        const houses::System s = *houses::from_letter(c);
+        out.push_back({{"token", std::string(houses::token(s))},
+                       {"letter", std::string(1, c)},
+                       {"name", std::string(houses::name(s))}});
+    }
+    return out;
 }
 
 Result<Json> capabilities(Engine& engine, const Context& ctx, const Json& a, ToolError* err) {
@@ -1059,6 +1190,7 @@ Result<Json> capabilities(Engine& engine, const Context& ctx, const Json& a, Too
           {"not_served", {"osculating-barycentric", "focal-point"}}}},
         {"precession", {"vondrak2011", "iau2006"}},
         {"precession_default", "vondrak2011"},
+        {"house_systems", house_systems()},
         {"dates", dates_served(engine)},
         {"limits", {{"max_objects", ctx.limits.max_objects}, {"max_times", ctx.limits.max_times}}}};
     if (!ctx.dataset.empty())
@@ -1167,6 +1299,45 @@ Json schema_positions() {
         {"required", {"objects"}}};
 }
 
+Json schema_houses() {
+    const Json time = {{"description", "ISO 8601 clock time with offset (UTC from 1972, UT1 "
+                                       "before), or {\"jd_tt\": n} or {\"jd_ut1\": n}"}};
+    return {{"type", "object"},
+            {"properties",
+             {{"time", time},
+              {"times", {{"type", "array"}, {"items", time}}},
+              {"series",
+               {{"type", "object"},
+                {"properties",
+                 {{"start", time},
+                  {"step_days", {{"type", "number"}}},
+                  {"count", {{"type", "integer"}, {"minimum", 1}}}}}}},
+              {"site",
+               {{"type", "object"},
+                {"properties",
+                 {{"lon_deg", {{"type", "number"}}},
+                  {"lat_deg", {{"type", "number"}}},
+                  {"height_m", {{"type", "number"}, {"description", "accepted; does not enter"}}}}},
+                {"required", {"lon_deg", "lat_deg"}}}},
+              {"systems",
+               {{"type", "array"},
+                {"items", {{"type", "string"}}},
+                {"minItems", 1},
+                {"maxItems", 12},
+                {"default", {"placidus"}},
+                {"description", "tokens (\"placidus\", \"whole-sign\") or letters (\"P\", "
+                                "\"W\"); capabilities lists house_systems"}}},
+              {"zodiac",
+               {{"description", "\"tropical\" (default), a zodiac token, or {\"user\": "
+                                "{\"epoch_jd_tt\", \"ayanamsa_deg\"}}"}}},
+              {"sidereal_plane", {{"type", "string"}, {"enum", {"date"}}, {"default", "date"}}},
+              {"precession",
+               {{"type", "string"},
+                {"enum", {"vondrak2011", "iau2006"}},
+                {"default", "vondrak2011"}}}}},
+            {"required", {"site"}}};
+}
+
 } // namespace
 
 std::vector<Tool> tools() {
@@ -1197,6 +1368,13 @@ std::vector<Tool> tools() {
          "What this engine answers: bodies, lunar points, hypothetical bodies, zodiacs, frames, "
          "observers, corrections and limits.",
          {{"type", "object"}, {"properties", Json::object()}}},
+        {"houses", "Houses",
+         "House cusps and the chart's angles (Ascendant, MC, ARMC, Vertex, equatorial Ascendant) "
+         "for a site and an instant or series, in one or more systems: Placidus, Koch, Porphyry, "
+         "Regiomontanus, Campanus, Equal, Whole Sign, Alcabitius, Morinus, Meridian, "
+         "Topocentric. Tropical, or sidereal on the ecliptic of date. Placidus and Koch are "
+         "refused inside a polar circle, never replaced by another system.",
+         schema_houses()},
         {"convert_time",
          "Convert time",
          "One instant in UTC, TT, TDB and UT1, with delta T, using the leap-second table.",
@@ -1226,6 +1404,8 @@ Result<Json> call_checked(Engine& engine, const Context& ctx, std::string_view t
         return capabilities(engine, ctx, a, err);
     if (tool == "convert_time")
         return convert_time(a, err);
+    if (tool == "houses")
+        return houses(engine, ctx, a, err);
     *err = {"unknown-tool", "no tool is called that"};
     return make_error(ErrorCode::NotFound, err->message);
 }
@@ -1268,8 +1448,15 @@ std::string llms_txt() {
   with rates. Options: observer (topocentric with "site", or "body" with
   "center"), zodiac (e.g. "lahiri"), sidereal_plane, frame, coordinates,
   corrections, precession. An argument no tool here reads is refused by
-  name rather than ignored -- this engine serves positions, not houses or
+  name rather than ignored -- this engine serves positions and houses, not
   aspects, and a mistyped option is a refusal, not a silent default.
+- houses: cusps and angles for a "site" ({"lon_deg", "lat_deg"}) at "time",
+  "times" or "series", in "systems" (default ["placidus"]; tokens or letters,
+  e.g. "koch", "whole-sign", "W"), tropical or with a "zodiac". Placidus and
+  Koch inside a polar circle are an error (undefined-at-latitude), never
+  another system in their place. The MC is the culminating point in every
+  system; Regiomontanus' and Campanus' cusp 10 is the meridian point above
+  the horizon, which inside a polar circle can be the IC.
 - lookup: what a name could mean; with "prefix" it also matches a name by
   its start, or by the start of any word in it ("node" finds "true node").
 - capabilities: what is served, and the limits. Ask it before an asteroid

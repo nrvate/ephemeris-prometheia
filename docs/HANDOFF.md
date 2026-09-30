@@ -75,8 +75,9 @@ The MCP server config (user scope) serves DE440 then DE441.
     angle.
 
 **In progress: a pure-Python, pyswisseph-shaped library**, planned in
-[PYTHON.md](PYTHON.md) (maintainer decisions 2026-09-29). Phase 1, houses in
-the engine, is done ([HOUSES.md](HOUSES.md)); next is the JSON `houses` tool.
+[PYTHON.md](PYTHON.md) (maintainer decisions 2026-09-29). Phases 1 and 2 are done: houses
+in the engine and the JSON/MCP `houses` tool ([HOUSES.md](HOUSES.md)). Next
+is the Python package itself (`python/`).
 The v4 houses extension is being drafted with Astrolog.
 
 **Candidates for next** (none started, none promised): the parked items
