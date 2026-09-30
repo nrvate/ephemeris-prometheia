@@ -2136,6 +2136,7 @@ TEST_CASE("server_serves_house_points") {
     // Inside the polar circle Placidus' cusp is undefined here (error 9);
     // the MC, a point every system shares, still answers.
     CHECK(d.meta[2].errCode == eph::kOErrUndefinedHere);
+    CHECK(d.meta[2].errText.find("polar circle") != std::string::npos);
     CHECK(d.meta[2].rowsOk == 0);
     CHECK(std::isnan(at(2, 0, 0)));
     CHECK(d.meta[3].errCode == eph::kOErrNone);

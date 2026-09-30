@@ -165,6 +165,20 @@ Astrolog's numeric rows, made from §3.5b's definitions alone by their
   their `513437f` reprinted them to nine.
 - **Where it runs:** `tools/scheduled.sh`, pinned by the rows' digest.
 
+**Astrolog's server gate, run against ours.** Their `tools/ephsrv_houses.py`,
+run against our `prometheiad` (`b312e13`, DE440), found two faults. Both
+were in their specification and server, and neither was in our engine.
+- They refused a system's four angles inside a polar circle along with its
+  cusps. The angles are the same in every system, so they are refused only
+  at a pole.
+- They gave Whole Sign's angles rate 0. Only Whole Sign's cusps are steps;
+  its angles moved 338–383° a day here, correctly.
+- Both sat in their server and their gate together, so no check with the
+  same engine on both sides could see them.
+- Fixed in their `9109449`. The gate passes on both engines: 11,088
+  answered rows at each row's own ARMC and obliquity, and 352 rates. It
+  runs as a leg of their `tools/ephsrv-prometheia.sh`.
+
 ## Not yet
 
 - rates in the engine and the JSON tool (`prometheiad` answers them for kind 6,

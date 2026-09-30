@@ -977,9 +977,14 @@ private:
         if (!v) {
             if (s.first_failed_row == eph::kRowNone) {
                 s.first_failed_row = next_row_;
-                s.first_err = clean_err_text(v.error());
-                s.code =
-                    house_undefined(v.error()) ? eph::kOErrUndefinedHere : obj_err_of(v.error());
+                // 3.8: a fixed sentence, which names neither the latitude
+                // nor the instant.
+                const bool undefined = house_undefined(v.error());
+                s.first_err = undefined ? "this house system has no cusps here: inside a polar "
+                                          "circle, at a pole, or where the ecliptic lies along "
+                                          "one of its circles"
+                                        : clean_err_text(v.error());
+                s.code = undefined ? eph::kOErrUndefinedHere : obj_err_of(v.error());
             }
             return; // the row stays NaN
         }

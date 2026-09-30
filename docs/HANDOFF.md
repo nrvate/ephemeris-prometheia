@@ -77,8 +77,10 @@ The MCP server config (user scope) serves DE440 then DE441.
 **In progress: a pure-Python, pyswisseph-shaped library**, planned in
 [PYTHON.md](PYTHON.md) (maintainer decisions 2026-09-29). Phases 1–3 are done: houses in
 the engine, the JSON/MCP `houses` tool ([HOUSES.md](HOUSES.md)), and the
-package over stdio and HTTP (`python/`, `prometheia.swe`). Next: the binary
-transport in Python (phase 4).
+package over stdio and HTTP (`python/`, `prometheia.swe`). Phase 4 (the binary
+transport, v4 to `prometheiad`) is done too, so all five phases are.
+What's left is time conversion over v4, which Astrolog and we agreed
+follows houses.
 The v4 houses drop (Astrolog `6235abd`) is vendored: `ephproto.h` 85d21bc8,
 registries 9845fef7, 124/124 fixtures through both readers, their 2,244
 reference rows agree to 0.000002″. `prometheiad` serves kind 6 (all eleven

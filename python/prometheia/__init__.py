@@ -10,8 +10,9 @@ Two ways in:
 
 Where the answers come from, first match wins:
 
-1. ``set_server(url)`` or ``$PROMETHEIA_SERVER``: an ``http(s)://`` URL of a
-   running ``prometheia-json --http``.
+1. ``set_server(url)`` or ``$PROMETHEIA_SERVER``: a ``ws(s)://`` address of a
+   prometheiad (protocol v4, binary), or an ``http(s)://`` URL of a running
+   ``prometheia-json --http``.
 2. ``set_ephe_path(path)`` or ``$PROMETHEIA_EPHEMERIS``: a JPL DE file, or a
    directory holding DE440 (and DE441, used behind it), any ``*.epm``
    small-body catalogs and the SB441 perturber kernel; a local
@@ -36,10 +37,10 @@ class Client:
                  perturbers=()):
         if server:
             if server.startswith(("ws://", "wss://")):
-                raise Error("the binary protocol (ws://) is not in this release; give the "
-                            "http:// address of a prometheia-json --http, or an ephemeris "
-                            "file (docs/PYTHON.md)")
-            self._transport = HttpTransport(server, token=token)
+                from ._binary import BinaryTransport
+                self._transport = BinaryTransport(server, token=token)
+            else:
+                self._transport = HttpTransport(server, token=token)
         else:
             eph, cats, pert = discover(ephemeris)
             self._transport = StdioTransport(eph, executable, list(cats) + list(catalogs),

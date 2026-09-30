@@ -3,6 +3,7 @@
 
     import prometheia.swe as swe          # in place of: import swisseph as swe
     swe.set_ephe_path("ephe")             # a directory with DE440, or a file
+    # or: prometheia.set_server("ws://host:47190") for a prometheiad
     (lon, lat, dist, dlon, dlat, ddist), ret = swe.calc_ut(jd, swe.MARS)
     cusps, ascmc = swe.houses(jd, 47.37, 8.55, b"P")
 

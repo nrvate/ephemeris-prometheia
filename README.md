@@ -143,7 +143,8 @@ releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list:
   refused inside a polar circle. [docs/HOUSES.md](docs/HOUSES.md).
 - **Python** — `python/prometheia`, pure Python with no C extension:
   `prometheia.swe` is shaped like pyswisseph, so chart code migrates by
-  changing its import. It talks to `prometheia-json` over stdio or HTTP.
+  changing its import. It talks to `prometheia-json` over stdio or HTTP,
+  or to `prometheiad` in protocol v4.
   [docs/PYTHON.md](docs/PYTHON.md).
 - **Client-server cross-testing** — the reference client against
   `prometheiad` and the Astrolog project's own server, refereed by JPL

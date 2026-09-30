@@ -294,9 +294,12 @@ class Arithmetic(unittest.TestCase):
 
 
 class Transport(unittest.TestCase):
-    def test_binary_server_is_not_in_this_release(self):
+    def test_server_addresses(self):
+        # ws:// is the binary protocol, connected on first use; http:// JSON.
+        prometheia.Client(server="ws://127.0.0.1:1").close()
+        prometheia.Client(server="http://127.0.0.1:1").close()
         with self.assertRaises(prometheia.Error):
-            prometheia.Client(server="ws://127.0.0.1:47190")
+            prometheia.Client(server="ftp://127.0.0.1:1")
 
     def test_no_ephemeris_is_an_error(self):
         with self.assertRaises(prometheia.Error):

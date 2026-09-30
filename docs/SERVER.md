@@ -372,7 +372,7 @@ does with them:
   | 6 ambiguous | a star name several stars answer equally | the name is ambiguous |
   | 7 numerical | a small body's integration failed | the computation failed numerically |
   | 8 internal | anything else | internal error |
-  | 9 undefined here | a house point where its system has none: Placidus or Koch inside a polar circle, any point at a pole, a degenerate instant | the server's sentence (docs/HOUSES.md) |
+  | 9 undefined here | a house point where its system has none: Placidus or Koch inside a polar circle, any point at a pole, a degenerate instant | this house system has no cusps here: inside a polar circle, at a pole, or where the ecliptic lies along one of its circles |
 
   Whole-request refusals are ERROR 11: a zodiac, sidereal plane or
   correction mask this server does not advertise.

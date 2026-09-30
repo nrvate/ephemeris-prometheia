@@ -45,6 +45,9 @@ documented, not that it is frozen.
   - Our reported rates match our positions' derivative to 0.008″/day;
     pyswisseph's depart from its own by up to 0.11″/day, and 9.9″/day
     topocentric.
+  - It speaks protocol v4 to `prometheiad` directly (`ws://`, `wss://`),
+    with its own WebSocket client. Its answers are identical to stdio's on
+    the same DE440.
 
 ## 0.7.3 — 2026-09-29
 

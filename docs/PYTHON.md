@@ -16,10 +16,11 @@ cusps, ascmc = swe.houses(jd, 47.37, 8.55, b"P")
 ```
 
 **State (2026-09-29):**
-- **Done:** phases 1–3 (houses in the engine, the JSON `houses` tool, this
-  package over stdio and HTTP).
-- **Not done:** the binary transport (phase 4). `prometheiad` already serves
-  houses as protocol v4 object kind 6 (Astrolog's drop `6235abd`, vendored).
+- **Done:** all five phases: houses in the engine, the JSON `houses` tool,
+  this package over stdio and HTTP, the binary transport (protocol v4 to
+  `prometheiad`), and houses as v4 object kind 6 (Astrolog's drop `6235abd`).
+- **Not done:** time conversion over v4, which Astrolog and we agreed
+  follows houses.
 
 ## Decisions (maintainer, 2026-09-29)
 
@@ -30,7 +31,6 @@ cusps, ascmc = swe.houses(jd, 47.37, 8.55, b"P")
     configuration or environment;
   - otherwise a local `prometheia-json` started as a child over stdio;
   - or plain HTTP to a `prometheia-json --http`.
-  - The binary one is not written yet: a `ws://` address raises and says so.
 - **Where v4 lacks a call, v4 is extended**, by agreement with Astrolog,
   whose specification it is.
   - Houses are object kind 6 (their drop `6235abd`).
@@ -53,9 +53,10 @@ cusps, ascmc = swe.houses(jd, 47.37, 8.55, b"P")
 
 The first match wins:
 
-1. **`set_server(url)`** or `$PROMETHEIA_SERVER`: the `http(s)://` address
-   of a running `prometheia-json --http` (`$PROMETHEIA_TOKEN` for a bearer
-   token).
+1. **`set_server(url)`** or `$PROMETHEIA_SERVER`, with `$PROMETHEIA_TOKEN`
+   for a token:
+   - a `ws://` or `wss://` address of a `prometheiad` (protocol v4, binary);
+   - or the `http(s)://` address of a running `prometheia-json --http`.
 2. **`set_ephe_path(path)`** or `$PROMETHEIA_EPHEMERIS`: a JPL DE file, or a
    directory. In a directory it takes DE440, DE441 (behind DE440), every
    `*.epm` small-body catalog, and the SB441 perturber kernel. Several paths
@@ -65,8 +66,30 @@ The first match wins:
      `$PROMETHEIA_JSON`, then `PATH`, then this repository's `build/`.
    - `swe.close()` stops it.
 
-**Speed** (measured, this machine, loopback stdio):
-- Once running, a call costs 0.22 ms: ten `calc_ut` calls took 2.2 ms.
+**The binary transport** (`_binary.py`, `_v4.py`, `_ws.py`):
+- It speaks protocol v4 over a minimal RFC 6455 client, written here with
+  the standard library.
+- It takes the same tool calls as the JSON transports and answers in their
+  shape, so `prometheia.swe` runs unchanged on it.
+- **Held to stdio:** its answers are identical, bit for bit, to the stdio
+  transport's on the same DE440 (`python/tests/test_binary_live.py`).
+  - The test covers every planet and lunar point, the frames, topocentric,
+    heliocentric, sidereal and XYZ output, all eleven house systems,
+    stars, nodes and apsides.
+- **What v4 does not carry is refused by name:**
+  - A clock time (`utc_to_jd`, an ISO time): it needs the leap-second
+    table, and the v4 time message agreed with Astrolog follows houses.
+    `deltat` answers, from the rows' ΔT column.
+  - A bare name that is not a planet or lunar point, on `Client`. v4 names
+    objects by kind, so a star or asteroid is named as `{"star": …}` or
+    `{"asteroid": …}`, as `prometheia.swe` already does.
+- **Checked offline:** the messages it encodes pass our independent v4
+  reader, and Astrolog's houses conformance messages decode
+  (`python/tests/test_v4_offline.py`).
+
+**Speed** (measured, this machine, loopback):
+- Once running, a call costs 0.22 ms over stdio: ten `calc_ut` calls took
+  2.2 ms. Over the binary protocol it costs 0.245 ms.
 - Startup is 0.18 s with DE440 alone, 3.0 s with DE441 behind it, and 4.8 s
   with DE441, the full SBDB catalog and the perturber kernel.
 - `Client.positions` answers many objects and instants in one call.
@@ -162,8 +185,11 @@ difference of its own positions (h = 1e-3 day).
   - the flag translation and answer shapes against a scripted client;
   - calendar arithmetic;
   - `split_deg` against observed pyswisseph outputs;
-  - a live run against `build/prometheia-json` on DE440, which skips when
-    either is absent.
+  - a live run against `build/prometheia-json` on DE440;
+  - the binary transport against a `prometheiad` it starts, held to stdio's
+    answers;
+  - the v4 codec against our independent reader.
+  - The live tests skip when the binaries or DE440 are absent.
 - **`tools/check/pyswe_oracle.py`**, run by `tools/scheduled.sh` when
   pyswisseph is installed in `.venv-oracle`.
 
@@ -173,8 +199,7 @@ difference of its own positions (h = 1e-3 day).
 2. **`houses` in the JSON API and MCP** (done, [JSON_API.md](JSON_API.md),
    "Houses").
 3. **This package over stdio and HTTP** (done).
-4. **The binary transport:** a WebSocket client and v4 codec in Python,
-   checked against Astrolog's conformance fixtures.
-5. **Protocol v4 houses (kind 6).** Served by `prometheiad` (done;
-   [SERVER.md](SERVER.md), "House points"). The Python client speaks it
-   with phase 4. Time conversion follows, by agreement with Astrolog.
+4. **The binary transport** (done).
+5. **Protocol v4 houses (kind 6)** (done: `prometheiad`,
+   [SERVER.md](SERVER.md) "House points", and the binary transport).
+   Time conversion over v4 follows, by agreement with Astrolog.

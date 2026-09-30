@@ -684,7 +684,7 @@ def parse_payload(version, mtype, request_id, payload):
         r.str8("serverName")
         r.str8("engine")
         r.str8("datasetId")
-        tlvs = r.tlv(set(range(0x0001, 0x0015)), "WELCOME TLV")
+        tlvs = r.tlv(set(range(0x0001, 0x0017)), "WELCOME TLV")
         r.done("WELCOME")
         missing = [t for t in (1, 2, 3, 4, 5, 6, 8, 9) if t not in tlvs]
         if missing:
