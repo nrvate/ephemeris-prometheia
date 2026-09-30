@@ -758,7 +758,9 @@ std::string error_code(const Error& e) {
     const std::string& m = e.message;
     if (e.code == ErrorCode::CoverageError)
         return "outside-coverage";
-    if (m.find("inside the polar circle") != std::string::npos)
+    // A house system refused inside a polar circle, or at an instant when the
+    // ecliptic lies along one of its defining circles (docs/HOUSES.md).
+    if (m.find("cusps are undefined") != std::string::npos)
         return "undefined-at-latitude";
     if (m.find("numerical failure") != std::string::npos ||
         m.find("integration failed") != std::string::npos)

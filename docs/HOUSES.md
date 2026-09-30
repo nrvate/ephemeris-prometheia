@@ -84,6 +84,16 @@ date (66.56° in 2000).
   - There, the pole heights j/3·tan φ can themselves exceed 90° − ε. The
     definition gives no rule for reordering, so we do not reorder.
 
+## Where nothing is defined
+
+- **At a pole** (|φ| = 90°) there is no meridian, and the longitude, and so
+  the ARMC, is arbitrary. Every system is refused.
+- **At an instant when the ecliptic lies along a defining circle** (the
+  horizon, the prime vertical, or one of a system's own circles), the
+  intersection that circle defines does not exist. That system is refused
+  for that instant, with the same code the JSON tool gives the polar
+  refusal. It happens only on a polar circle's edge.
+
 ## Sidereal houses
 
 - Houses are sidereal on the ecliptic of date only. Every longitude is less
