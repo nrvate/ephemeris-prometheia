@@ -242,6 +242,57 @@ does not have. The server relies on this — it installs a request's Delta T
 model per compute slice and restores the default with an RAII guard, so a
 model never outlives the request that asked for it.
 
+### Which lunar tidal acceleration the tables assume
+
+A ΔT reconstruction from lunar observations is tied to the lunar ephemeris
+it was reduced with, through that ephemeris's tidal acceleration ṅ (its
+secular acceleration in mean longitude). Using it with a Moon of a
+different ṅ calls for the correction ΔT′ = ΔT − 0.91072 (ṅ − ṅ₀) T² s, T in
+centuries from 1955.0. That is the form of the NASA Five Millennium Canon
+pages, `eclipse.gsfc.nasa.gov/LEcat5/secular.html`; 0.91072 = 1/(2 ×
+0.549″/s). We apply none. What each branch is tied to, checked 2026-10-25
+after Astrolog's ΔT finding (CROSS-TEST.md):
+
+- **Stephenson, Morrison & Hohenkerk (2016), before 1657:** "The values of
+  ΔT derived in this paper should be used in conjunction with the lunar
+  ephemeris JPL DE430, or with other ephemerides in which the tidal
+  acceleration is close to the value of −25.82″ cy⁻² implicit in the JPL
+  ephemeris" (§3a). Folkner et al. (2014, IPN 42-196) give that value:
+  −25.82 ± 0.03″/cy² for DE430 and −25.80 for DE431. The 2021 addendum's ṅ
+  has not been read here.
+- **USNO, 1657 onward:** the page cites McCarthy & Babcock (1986) and
+  states no ṅ. That the series sits on the −26.0″/cy² scale of earlier
+  occultation reductions is an inference from secondary sources, not
+  confirmed.
+- **DE440 and DE441:** no primary source states a ṅ. Park et al. (2021,
+  AJ 161:105) call the tidal acceleration implicit in the force model, and
+  the DE header carries the dissipation parameters (`K2M`, `TAUM`), not ṅ.
+  The −25.936″/cy² sometimes quoted for DE440 has no primary origin we
+  could find. The two files' Moons also differ:
+
+  | year | DE441 − DE440, lunar longitude |
+  |---|---:|
+  | 1550 | +0.434″ |
+  | 1800 | +0.024″ |
+  | 1900 | +0.0024″ |
+  | 2000 | +0.0004″ |
+  | 2100 | +0.005″ |
+  | 2650 | +0.050″ |
+
+  Over 1900–2100 that is a parabola with Δṅ ≈ +0.0073″/cy² (rms
+  0.0002″). Over the whole span it is not.
+
+What follows, as estimates:
+- If the USNO branch is on −26.0 and DE440's Moon is near DE430's −25.82,
+  then from 1657 to 1955 our UT answers carry the Moon about ½ Δṅ T² off.
+  That is −1.5 s of ΔT (0.8″ of lunar longitude) at 1657, −0.39 s at 1800
+  and −0.05 s at 1900. USNO's own stated uncertainty there is larger:
+  ±12 s at 1657 and ±1.9 s at 1800.
+- The spline branch is consistent with DE430 by its authors' statement.
+- Nothing is changed until the USNO series' ṅ is sourced. The decision is
+  open, and the protocol's proposed lunar-tidal TLV (absent when unknown)
+  would carry the same unknown.
+
 ### Refreshing the tables
 
 `tools/gen/gen_smh_delta_t.py` builds `src/delta_t_smh_table.inc` from
