@@ -22,8 +22,10 @@ Their session is `astrolog-fc`. They sent asks A–F; status:
 - **A, embedding (blocked them): done.** See [EMBEDDING.md](EMBEDDING.md):
   `embed/sources.txt` contract 1, `embed/prometheia.mk`, and
   `tools/check/embedtest.py` in `scheduled.sh`.
-- **B, zstd on Windows and macOS:** open. The compress path is used only
-  by the catalog writer.
+- **B, zstd on Windows and macOS:** the maintainer decided, 2026-10-25:
+  zstd stays an external library everywhere, taken from the platform's
+  package manager (vcpkg, Homebrew), and is not vendored. Contract 1
+  stands.
 - **C, MSVC and Apple clang:** never built. The audit's blockers are
   removed, and the fallbacks are tested on Linux (EMBEDDING.md,
   "Platforms"). Astrolog's GitHub runners will make the first real build

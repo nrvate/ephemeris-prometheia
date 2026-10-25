@@ -66,7 +66,10 @@ parent has to do something new beyond compiling the list.
   ([HYPOTHETICALS.md](HYPOTHETICALS.md)).
 - **Dependencies:**
   - `libzstd`: its header for `src/catalog.cpp`, and the library at link
-    time.
+    time. It stays an ordinary external dependency on every platform: the
+    distribution's package on Linux, vcpkg on Windows, Homebrew on macOS.
+    Point `PROMETHEIA_ZSTD_CFLAGS` and `PROMETHEIA_ZSTD_LIBS` at it when it
+    is off the default paths.
   - The C++ standard library and `libm`.
   - No threads, sockets or other system libraries.
 - **Link:** with the C++ compiler driver, or add the C++ runtime yourself.
