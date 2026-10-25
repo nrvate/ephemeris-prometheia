@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# libprometheia's translation units, for a parent project that builds the
+# library with its own build system (docs/EMBEDDING.md). CMakeLists.txt
+# builds the library from exactly this list, so it cannot drift from what
+# CMake compiles.
+#
+# Format, which is itself the contract and changes only with the number:
+#   - the line "contract N" names the contract version;
+#   - every line beginning "src/" is one C++20 source, relative to the
+#     repository root;
+#   - every other line is commentary.
+# A file renamed or added here needs nothing from a parent that reads the
+# list. A change to what a parent must do besides compiling the list (an
+# include directory, a required flag, a dependency) raises the number.
+contract 1
+
+src/c_api.cpp
+src/catalog.cpp
+src/cbor.cpp
+src/de.cpp
+src/elements.cpp
+src/engine.cpp
+src/frames.cpp
+src/houses.cpp
+src/hypotheticals.cpp
+src/kepler.cpp
+src/segments.cpp
+src/spk.cpp
+src/stars.cpp
+src/time.cpp

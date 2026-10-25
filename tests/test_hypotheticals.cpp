@@ -383,6 +383,11 @@ TEST_CASE("the_shipped_element_set_parses") {
     std::fclose(f);
     auto r = hypotheticals::parse(text, "data/hypotheticals.jsonl");
     CHECK_MESSAGE(r.ok(), r.error().message);
+    // The compiled-in copy is the committed src/hypotheticals_shipped.inc
+    // (docs/EMBEDDING.md: no generation step for a parent build), so it can
+    // fall behind the data file. Regenerate with gen_hypotheticals_inc.py.
+    CHECK_MESSAGE(hypotheticals::shipped() == text,
+                  "src/hypotheticals_shipped.inc is stale: run tools/gen/gen_hypotheticals_inc.py");
 }
 
 TEST_CASE("named_hypotheticals_compute_as_their_elements_and_later_files_win") {

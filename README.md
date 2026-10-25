@@ -192,6 +192,10 @@ cd build && ctest
 Requires C++20, CMake ≥ 3.20, `libzstd` and `pkg-config`; OpenSSL, if found, enables wss:// in `prometheiad`. Sanitizer build:
 `-DPROMETHEIA_SANITIZE=ON`.
 
+A project with its own makefiles can build the library from source with
+no CMake: it compiles the files `embed/sources.txt` lists, or includes
+`embed/prometheia.mk` ([docs/EMBEDDING.md](docs/EMBEDDING.md), contract 1).
+
 Install (library, C and C++ headers, `ephem`, `prometheia-info`,
 `prometheia-convert`, and a relocatable pkg-config file):
 

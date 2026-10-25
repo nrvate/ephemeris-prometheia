@@ -54,6 +54,9 @@ prometheia_calc(eph, PROMETHEIA_EARTH, jd_tt, &opts, &r, &err);
 prometheia_engine_close(eph);
 ```
 
+To build the library inside another project (a git submodule, plain make,
+no CMake), see [EMBEDDING.md](EMBEDDING.md).
+
 The fixed-star functions (`prometheia_star_find`, `_lookup`, `_info`,
 `prometheia_calc_star`, `prometheia_constellation_at`) are described in
 [STARS.md](STARS.md).

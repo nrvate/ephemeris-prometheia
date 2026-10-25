@@ -173,7 +173,10 @@ therefore override any shipped default without editing it.
 ## Named bodies
 
 The element set this library ships is `data/hypotheticals.jsonl`, compiled
-in. Every entry comes from a source clean under the data policy in
+in as `src/hypotheticals_shipped.inc`. That file is committed, so that a
+parent build needs no generation step ([EMBEDDING.md](EMBEDDING.md)).
+`tools/gen/gen_hypotheticals_inc.py` regenerates it, and
+`test_hypotheticals` fails if it falls behind the data file. Every entry comes from a source clean under the data policy in
 [DESIGN.md](DESIGN.md), which for these bodies means the original
 publication. Each entry is transcribed from a page image, not from OCR, and
 wherever the source prints a position it derived from its own elements, a

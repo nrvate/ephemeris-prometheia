@@ -78,6 +78,18 @@ say "scheduled checks, $stamp, $(git -C "$repo" rev-parse --short HEAD)"
 # not compile has told nobody anything.
 step "gate" "$repo/tools/gate.sh"
 
+# The embedding contract (docs/EMBEDDING.md): the library built from
+# embed/sources.txt through embed/prometheia.mk by a scratch parent makefile,
+# with no CMake, then held to build/ephem's answers row for row. Six seconds
+# of compiling per compiler, which is why it is here and not in the gate.
+step "embed contract (g++)" python3 "$repo/tools/check/embedtest.py" --cxx g++ --cc gcc
+if command -v clang++-14 >/dev/null && command -v clang-14 >/dev/null; then
+    step "embed contract (clang 14)" python3 "$repo/tools/check/embedtest.py" \
+        --cxx clang++-14 --cc clang-14
+else
+    skipped+=("embed contract (clang 14): no clang++-14 on PATH")
+fi
+
 # corrapplied.py's own assertions. No daemon and no ephemeris -- it is here
 # rather than in the gate only because eight scripted servers take about
 # twenty seconds, which a pre-commit gate should not spend.

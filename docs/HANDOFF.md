@@ -1,4 +1,4 @@
-# Handoff — where the work stands (2026-09-29, evening)
+# Handoff — where the work stands (2026-10-25)
 
 A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
@@ -6,7 +6,35 @@ working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
 
-## Resume here (state at 2026-09-29, evening)
+## Resume here (state at 2026-10-25)
+
+**Astrolog is adopting Prometheia** (their maintainer's direction,
+2026-10-25). Prometheia becomes their default ephemeris source, Swiss stays
+selectable, and they build against a required Prometheia checkout, likely a
+git submodule. Linux comes first, then Windows and macOS. They are removing
+`astrolog-ephd`. Their `tools/ephsrv-prometheia.sh` keeps running their v4
+client against our `prometheiad`. The paths we read stay where they are:
+`ephsrv/ephproto.h`, `conformance/`, `registries.json` and
+`houses-rows.tsv`. `crosstest.py`'s default Swiss reference
+(`astrolog-ephd`) will stop being rebuilt on their side.
+
+Their session is `astrolog-fc`. They sent asks A–F; status:
+- **A, embedding (blocked them): done.** See [EMBEDDING.md](EMBEDDING.md):
+  `embed/sources.txt` contract 1, `embed/prometheia.mk`, and
+  `tools/check/embedtest.py` in `scheduled.sh`.
+- **B, zstd on Windows and macOS:** open. The compress path is used only
+  by the catalog writer.
+- **C, MSVC and Apple clang:** never built. The audit's blockers are listed
+  in EMBEDDING.md, "Platforms".
+- **D, the smallest bundle:** measured, answer pending:
+  - a 69-body named catalog is 7.0 KB;
+  - DE440s costs 10.9 MB per century;
+  - the perturber kernel costs 3.8 MB per century for all 16 bodies.
+- **E, before 1550:** DE441 costs about 93 MB per millennium and there is
+  no analytic fallback. A product call for the maintainer.
+- **F:** nothing needed now.
+
+### State at 2026-09-29, evening
 
 `initial` = `origin/initial`, gate green, `tools/scheduled.sh` green;
 **v0.7.3 published** (library 0.7.3, C ABI 6; `prometheiad` 0.11.0). Nothing

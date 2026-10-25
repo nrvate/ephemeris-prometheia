@@ -17,36 +17,19 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-add_library(prometheia
-  src/c_api.cpp
-  src/catalog.cpp
-  src/cbor.cpp
-  src/de.cpp
-  src/elements.cpp
-  src/engine.cpp
-  src/houses.cpp
-  src/hypotheticals.cpp
-  src/segments.cpp
-  src/spk.cpp
-  src/stars.cpp
-  src/frames.cpp
-  src/kepler.cpp
-  src/time.cpp)
+# The library's sources are the list a parent project builds from
+# (embed/sources.txt, docs/EMBEDDING.md), so the two cannot drift. No source
+# is generated at build time: the shipped hypothetical-body set is committed
+# as src/hypotheticals_shipped.inc (tools/gen/gen_hypotheticals_inc.py), and
+# test_hypotheticals holds it to data/hypotheticals.jsonl.
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/embed/sources.txt PROMETHEIA_LIB_SOURCES REGEX "^src/")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_SOURCE_DIR}/embed/sources.txt)
+add_library(prometheia ${PROMETHEIA_LIB_SOURCES})
 target_include_directories(prometheia PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(prometheia PUBLIC PkgConfig::ZSTD)
-
-# The shipped hypothetical-body element set (docs/HYPOTHETICALS.md) is compiled
-# in from data/hypotheticals.jsonl, read at configure time and re-read whenever
-# the file changes; the engine parses it with the same reader an operator's
-# element file goes through.
-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/data/hypotheticals.jsonl PROMETHEIA_HYPOTHETICALS_JSONL)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-  ${CMAKE_CURRENT_SOURCE_DIR}/data/hypotheticals.jsonl)
-configure_file(src/hypotheticals_shipped.inc.in
-  ${CMAKE_CURRENT_BINARY_DIR}/generated/hypotheticals_shipped.inc @ONLY)
-target_include_directories(prometheia PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_compile_options(prometheia PRIVATE -Wall -Wextra -Werror)
 # No fused multiply-adds: a result must not depend on whether a compiler fused
 # a*b+c, which differs between scalar and vector code and between targets.

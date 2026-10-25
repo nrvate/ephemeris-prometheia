@@ -72,6 +72,7 @@ TOOLS = {
 
     # Run by tools/scheduled.sh.
     "corrtest.py": ("scheduled", ""),
+    "embedtest.py": ("scheduled", ""),
     "crossruntest.py": ("scheduled", ""),
     "starstest.py": ("scheduled", ""),
     "loadselftest.py": ("scheduled", ""),
