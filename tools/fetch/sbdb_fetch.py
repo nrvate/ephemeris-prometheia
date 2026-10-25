@@ -131,6 +131,16 @@ def fetch_page(kind: str, fields: list[str], limit_from: int, page_size: int,
     return doc
 
 
+class SbdbRefusal(RuntimeError):
+    """SBDB answered, and refused this one object (not found, ambiguous): a
+    fact about the designation, so a run over many continues past it. A
+    transport failure is not one of these and still stops the run."""
+
+
+class UnusableCovariance(ValueError):
+    """The orbit publishes a covariance the overlay cannot use."""
+
+
 def fetch_single(spkid, covariance: bool = False) -> dict:
     """One body, full precision, via the single-object endpoint. `spkid` may
     be any SBDB search string (designation, number, name)."""
@@ -139,10 +149,10 @@ def fetch_single(spkid, covariance: bool = False) -> dict:
         params.append(("cov", "mat"))
     doc = http_get_json(f"{SINGLE_URL}?{urllib.parse.urlencode(params)}")
     if "code" in doc and doc.get("code") not in (200, None):
-        raise RuntimeError(f"SBDB error for {spkid}: {doc.get('message', doc)}")
+        raise SbdbRefusal(f"SBDB error for {spkid}: {doc.get('message', doc)}")
     if "object" not in doc:
-        raise RuntimeError(f"SBDB found no unique object for {spkid!r}: "
-                           f"{doc.get('message') or list(doc.keys())}")
+        raise SbdbRefusal(f"SBDB found no unique object for {spkid!r}: "
+                          f"{doc.get('message') or list(doc.keys())}")
     return doc
 
 
@@ -150,13 +160,18 @@ def covariance_cells(doc: dict) -> list[str]:
     """The COV_FIELDS cells of one sbdb.api response, or empty cells when the
     orbit publishes no covariance. Extra labels beyond the six elements
     (non-gravitational parameters) are marginalized by dropping their rows
-    and columns; the six must come first, in COV_LABELS order."""
+    and columns; the six must come first, in COV_LABELS order.
+
+    Raises UnusableCovariance when a covariance is published but cannot be
+    used: other labels, or no element values at the covariance's own epoch
+    (JPL publishes the "A/" objects' covariances with an empty element
+    list, 2026-10-25), which the overlay needs to place it."""
     cov = (doc.get("orbit") or {}).get("covariance")
     if not cov:
         return [""] * len(COV_FIELDS)
     labels = cov.get("labels") or []
     if labels[:6] != COV_LABELS:
-        raise RuntimeError(f"unexpected covariance labels {labels}")
+        raise UnusableCovariance(f"unexpected covariance labels {labels}")
     values = {e.get("name"): e.get("value") for e in cov.get("elements") or []}
     cells = [str(cov.get("epoch", ""))]
     for name in ("e", "q", "tp", "om", "w", "i"):
@@ -166,7 +181,8 @@ def covariance_cells(doc: dict) -> list[str]:
         for j in range(i, 6):
             cells.append(str(data[i][j]).strip())
     if any(c == "" for c in cells):
-        raise RuntimeError("incomplete covariance block")
+        missing = "no element values at its epoch" if not values else "incomplete block"
+        raise UnusableCovariance(f"covariance published with {missing}")
     return cells
 
 
@@ -447,25 +463,42 @@ def covariance(args) -> int:
 
     started = utc_now()
     fetched = 0
+    refused = []
     for des in wanted:
         if des in manifest["fetched"]:
             continue
         if fetched and args.delay > 0:
             time.sleep(args.delay)
-        doc = fetch_single(des, covariance=True)
         fetched += 1
-        row = sbdb_single_to_row(doc) + covariance_cells(doc)
+        # One body's refusal or unusable covariance costs only that body.
+        try:
+            doc = fetch_single(des, covariance=True)
+        except SbdbRefusal as e:
+            refused.append(des)
+            print(f"  {des}: REFUSED, not written: {e}", file=sys.stderr)
+            continue
+        orb = doc.get("orbit", {})
+        unusable = None
+        try:
+            cov_cells = covariance_cells(doc)
+        except UnusableCovariance as e:
+            unusable = str(e)
+            cov_cells = [""] * len(COV_FIELDS)
+        row = sbdb_single_to_row(doc) + cov_cells
         with shard.open("a", encoding="utf-8", newline="") as fh:
             fh.write("\t".join(row) + "\n")
-        orb = doc.get("orbit", {})
         manifest["fetched"][des] = {
             "spkid": doc["object"].get("spkid"),
             "orbit_id": orb.get("orbit_id"),
             "covariance_epoch": (orb.get("covariance") or {}).get("epoch"),
             "fetched_at_utc": utc_now(),
         }
+        if unusable:
+            manifest["fetched"][des]["covariance_unusable"] = unusable
         manifest_path.write_text(json.dumps(manifest, indent=1))
-        note = "" if orb.get("covariance") else " (no covariance published)"
+        note = ("" if orb.get("covariance") and not unusable else
+                f" (covariance not used: {unusable})" if unusable else
+                " (no covariance published)")
         print(f"  {des}: spkid {doc['object'].get('spkid')} orbit {orb.get('orbit_id')}{note}")
 
     write_provenance(out_dir, {
@@ -482,6 +515,10 @@ def covariance(args) -> int:
         "tool": "prometheia-fetch 0.1.0",
     })
     print(f"covariance overlay: {len(manifest['fetched'])} bodies -> {shard}")
+    if refused:
+        print(f"{len(refused)} designation(s) refused by SBDB and not written: "
+              f"{', '.join(refused)}", file=sys.stderr)
+        return 1
     return 0
 
 

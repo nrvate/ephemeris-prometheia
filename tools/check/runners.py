@@ -69,6 +69,7 @@ TOOLS = {
     "fixturestest.py": ("gate", ""),
     "runners.py": ("gate", ""),
     "runnerstest.py": ("gate", ""),
+    "fetchtest.py": ("gate", ""),
 
     # Run by tools/scheduled.sh.
     "corrtest.py": ("scheduled", ""),

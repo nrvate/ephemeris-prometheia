@@ -257,6 +257,18 @@ python3 tools/fetch/sbdb_fetch.py --out-dir cov-raw --covariance-file mine.txt
   `sigma_arcsec`; bodies without a covariance answer none.
 - Etiquette as for delta refetches: one request at a time, `--delay`
   (2 s) between them, resumable through `manifest-covariance.json`.
+- **One body costs only itself** (since 2026-10-25; Astrolog found a run
+  dying at its first `A/` object):
+  - A covariance published but unusable is written as none, and the
+    manifest entry's `covariance_unusable` says why. Every `A/` object
+    is like this: JPL publishes its matrix and labels with an empty
+    element list, and its covariance epoch is not the orbit's, so there
+    is nothing to place the matrix on.
+  - A designation SBDB refuses (not found, ambiguous) is reported and
+    skipped, and the run exits 1 having written the rest.
+  - A transport failure still stops the run.
+  - `tools/check/fetchtest.py` (gate) holds all three against scripted
+    answers.
 - Proper names: `sbdb.api` has no bare name field; the row's `name` is
   derived from `shortname` minus the designation ("1 Ceres" → "Ceres"),
   matching the bulk query (this also fixed delta overlays, which carried
@@ -411,4 +423,5 @@ include it.
 | M5 (built) | Horizons observer tables + vectors → `tests/horizons_corpus.inc` | a verification fixture, refreshed deliberately — not part of release ingestion; see VALIDATION.md |
 | later | SBDB non-grav params `A1`/`A2`/`A3` | needed for long-arc comet integration |
 | later | SBDB `albedo`, `rot_per`, GM, taxonomy | physical-param extension of the record |
+| later | SBDB `prov_des`, a numbered body's principal provisional designation, as a lookup alias | not fetched today, so `1998 SL92` does not find 887120, though the number does (Astrolog, 2026-10-25). It needs a full re-pull and an alias in the record; deferred by the maintainer. Superseded designations (`2022 WX37`, now `2026 EU43`) are not in that field either |
 | later | delta catalogs (SBDB change feeds are not offered — diff via `full-prec` re-pull of changed designations) | overlay strategy makes this cheap |

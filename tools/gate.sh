@@ -100,6 +100,12 @@ step python3 tools/check/ratestest.py
 echo "== fixture reader (ephproto4_fixtures.py, by assertion)"
 step python3 tools/check/fixturestest.py
 
+# sbdb_fetch.py's covariance overlay against scripted SBDB answers: one
+# body's unusable covariance or refusal costs only that body. No request
+# leaves the machine.
+echo "== covariance fetch (sbdb_fetch.py, by assertion)"
+step python3 tools/check/fetchtest.py
+
 # Everything above asks whether a check can go red. This asks whether
 # anything runs it: every tool under tools/check/ is either invoked by a
 # runner or carries a reason why nothing invokes it. The Astrolog side found
