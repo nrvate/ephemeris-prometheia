@@ -251,7 +251,9 @@ different ṅ calls for the correction ΔT′ = ΔT − 0.91072 (ṅ − ṅ₀)
 centuries from 1955.0. That is the form of the NASA Five Millennium Canon
 pages, `eclipse.gsfc.nasa.gov/LEcat5/secular.html`; 0.91072 = 1/(2 ×
 0.549″/s). We apply none. What each branch is tied to, checked 2026-10-25
-after Astrolog's ΔT finding (CROSS-TEST.md):
+after Astrolog found their server route stating a ΔT for DE431's −25.80″/cy²
+while their library route used −25.936 (0.0375 s at 1900; the client's
+choice, not the server's):
 
 - **Stephenson, Morrison & Hohenkerk (2016), before 1657:** "The values of
   ΔT derived in this paper should be used in conjunction with the lunar
