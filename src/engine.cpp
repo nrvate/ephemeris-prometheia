@@ -484,6 +484,25 @@ public:
         return false;
     }
 
+    // The span the chain answers without a gap: the first member's, grown
+    // by every member that meets it (DE440 then DE441 is DE441's span; DE440
+    // then a cut of DE441 ending at 1550 is 1000-2650).
+    std::pair<double, double> span() const override {
+        auto [lo, hi] = members_.front()->span();
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (const auto& m : members_) {
+                const auto [a, b] = m->span();
+                if (a <= hi && b >= lo && (a < lo || b > hi)) {
+                    lo = std::min(lo, a);
+                    hi = std::max(hi, b);
+                    grew = true;
+                }
+            }
+        }
+        return {lo, hi};
+    }
+
     const std::vector<std::unique_ptr<Source>>& members() const { return members_; }
 
     // The member that answers at this instant, for provenance.
@@ -652,10 +671,41 @@ public:
         head_ = 0;
     }
 
+    // The span the tables can reach: the planetary ephemeris's, narrowed to
+    // the asteroid kernel's when one is attached. Blocks stop at its ends,
+    // and the engine gives small-body memos the same limits.
+    std::pair<double, double> span() const {
+        auto [lo, hi] = source_->span();
+        if (asteroid_source_) {
+            const auto [a, b] = asteroid_source_->span();
+            lo = std::max(lo, a);
+            hi = std::min(hi, b);
+        }
+        return {lo, hi};
+    }
+
+    // Ends a failure once the engine has refused the request that met it
+    // and dropped what that request integrated. The tables themselves are
+    // whole: a block is added only after all its samples are read.
+    void clear_failure() {
+        if (ok_)
+            return;
+        if (ids_.empty()) {
+            reset();
+            return;
+        }
+        ok_ = true;
+        error_.clear();
+        error_code_ = ErrorCode::Ok;
+    }
+
     // PerturberStates. ensure() builds the table on first use and then
-    // extends coverage; a failure (no masses at all, or the ephemeris
-    // does not cover the epoch) is sticky and makes every later state
-    // read zero — the engine refuses results after checking ok().
+    // extends coverage. A failure (no masses at all, or an instant past the
+    // span) makes every state read zero until clear_failure(): the engine
+    // checks ok() after each integration, refuses that request, discards
+    // the trajectory it touched and clears the failure (2026-10-25: it used
+    // to stay for the engine's life, so one request near 1550 broke every
+    // catalog body for every later one).
     void ensure(double t) override {
         if (!ok_)
             return;
@@ -785,9 +835,20 @@ private:
     // (or, on the very first block, is the probe epoch itself).
     void extend(double days) {
         const double from = days > 0.0 ? hi_ : lo_;
-        const double to = from + days;
+        const auto [span_lo, span_hi] = span();
+        const double to =
+            days > 0.0 ? std::min(from + days, span_hi) : std::max(from + days, span_lo);
+        if (!(days > 0.0 ? to > from : to < from)) {
+            char buf[200];
+            std::snprintf(buf, sizeof buf,
+                          "a catalog body is integrated only where the planetary ephemeris and "
+                          "perturbers reach: JD %.1f .. %.1f TDB",
+                          span_lo, span_hi);
+            fail(ErrorCode::CoverageError, buf);
+            return;
+        }
         const int n = kBlockSamples;
-        const double step = days / double(n);
+        const double step = (to - from) / double(n);
         const size_t nb = ids_.size();
         // block[i * nb + b]: sample i of the block (i = 0 is the boundary).
         // Epochs outer, bodies inner: the ephemeris keeps one record (every
@@ -1456,10 +1517,25 @@ struct Engine::Impl {
             slot = std::move(built).value();
         }
         const State s = slot.memo->at(jd_tdb);
-        if (!perturbers.ok())
-            return make_error(perturbers.error_code(), perturbers.error());
-        if (!std::isfinite(s.pos.x) || !std::isfinite(s.vel.x) ||
-            jd_tdb < slot.memo->coverage_lo() || jd_tdb > slot.memo->coverage_hi())
+        if (!perturbers.ok()) {
+            // This request is refused, and nothing it integrated is kept: the
+            // window that met the failure ran on zeroed perturber states.
+            Error e = make_error(perturbers.error_code(), perturbers.error());
+            perturbers.clear_failure();
+            small_bodies.erase(uint64_t(id));
+            sigma_tracks.erase(uint64_t(id));
+            return e;
+        }
+        if (jd_tdb < slot.memo->coverage_lo() || jd_tdb > slot.memo->coverage_hi()) {
+            const auto [lo, hi] = perturbers.span();
+            char buf[200];
+            std::snprintf(buf, sizeof buf,
+                          "JD %.6f TDB: a catalog body is integrated only where the planetary "
+                          "ephemeris and perturbers reach, JD %.1f .. %.1f",
+                          jd_tdb, lo, hi);
+            return make_error(ErrorCode::CoverageError, buf);
+        }
+        if (!std::isfinite(s.pos.x) || !std::isfinite(s.vel.x))
             return make_error(ErrorCode::ArgumentError,
                               "integration failed for body " + std::to_string(id));
         const double p[3] = {s.pos.x, s.pos.y, s.pos.z};
@@ -1517,6 +1593,8 @@ struct Engine::Impl {
         b.force = force_for(int(rec.spkid));
         b.memo = std::make_unique<WindowMemo<BarycentricForce>>(b.force.get(), IntegrateOptions{});
         b.memo->set_seed(seed.value(), rec.epoch_jtdb);
+        const auto [lo, hi] = perturbers.span();
+        b.memo->set_limits(lo, hi);
         return b;
     }
 
@@ -1605,6 +1683,8 @@ struct Engine::Impl {
                 auto memo = std::make_unique<WindowMemo<BarycentricForce>>(track_force.get(),
                                                                            IntegrateOptions{});
                 memo->set_seed(seed.value(), t0);
+                const auto [lo, hi] = perturbers.span();
+                memo->set_limits(lo, hi);
                 (sign > 0 ? col.plus : col.minus) = std::move(memo);
             }
             columns.push_back(std::move(col));
@@ -1644,7 +1724,13 @@ struct Engine::Impl {
         const double jd_tdb = tdb.tdb_from_tt(jd_tt);
         const double t_ret = jd_tdb - tau;
         double cov[6];
-        if (!tracks->covariance_at(t_ret, cov) || !perturbers.ok())
+        const bool reached = tracks->covariance_at(t_ret, cov);
+        if (!perturbers.ok()) {
+            perturbers.clear_failure(); // as for the body itself, above
+            sigma_tracks.erase(uint64_t(id));
+            return std::nullopt;
+        }
+        if (!reached)
             return std::nullopt;
 
         // Line of sight and distance, ICRF (the covariance's frame).

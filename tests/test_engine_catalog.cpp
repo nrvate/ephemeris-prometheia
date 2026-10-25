@@ -374,6 +374,45 @@ TEST_CASE("engine_overlay_speeds_and_consistency") {
     CHECK(again.value().pos.dist_au == body_geo.value().pos.dist_au);
 }
 
+// A kernel whose Jupiter ends 30 years after J2000 while its Sun and Earth
+// run 60: the perturber tables fail inside the span the file reports. That
+// request is refused, and nothing sticks: before 2026-10-25 the failure
+// stayed for the engine's life and refused every later instant.
+TEST_CASE("engine_perturber_failure_refuses_one_request_and_does_not_stick") {
+    TempFile tf_kernel("cat-short-jupiter");
+    TempFile tf_cold("cat-short-jupiter-cold");
+    TempFile tf_cat("cat-short-jupiter-cat");
+    std::vector<synth::LinearBody> bodies(std::begin(synth::kBodies), std::end(synth::kBodies));
+    bodies[2].half_span = 30.0 * 365.25 * synth::kDay; // the Jupiter barycentre
+    synth::write_linear_spk(tf_kernel.path, bodies);
+    synth::write_linear_spk(tf_cold.path, bodies);
+    const std::string cat = write_catalog(tf_cat, kEls.a);
+    auto open = [&](const TempFile& k) {
+        auto e = Engine::open(k.path.string());
+        REQUIRE(e.ok());
+        REQUIRE(e.value().add_catalog(cat).ok());
+        return std::move(e).value();
+    };
+    const double later = kEpoch + 400.0;
+    Engine cold = open(tf_cold);
+    auto want = cold.calc(int(kSpkid), later, CalcOptions::geometric());
+    REQUIRE(want.ok());
+
+    Engine e = open(tf_kernel);
+    // 2040: past Jupiter's 2030, inside the file's 2060.
+    auto past = e.calc(int(kSpkid), kJ2000 + 40.0 * 365.25, CalcOptions::geometric());
+    REQUIRE(!past.ok());
+    CHECK(past.error().code == ErrorCode::CoverageError);
+    for (int pass = 0; pass < 2; ++pass) {
+        auto got = e.calc(int(kSpkid), later, CalcOptions::geometric());
+        REQUIRE(got.ok());
+        CHECK(got.value().pos.lon_deg == want.value().pos.lon_deg);
+        CHECK(got.value().pos.lat_deg == want.value().pos.lat_deg);
+        CHECK(got.value().pos.dist_au == want.value().pos.dist_au);
+        CHECK(!e.calc(int(kSpkid), kJ2000 + 40.0 * 365.25, CalcOptions::geometric()).ok());
+    }
+}
+
 TEST_CASE("engine_overlay_provenance_and_errors") {
     TempFile tf_kernel("cat-err-k");
     TempFile tf_cat("cat-err-c");
@@ -1278,6 +1317,58 @@ TEST_CASE("de440_orbit_points_carry_the_observer_velocity_term") {
     const Position g2 =
         at(5, OrbitPoint::AscendingNode, OrbitElements::Osculating, CalcOptions::geometric());
     CHECK(sep(g1, g2) == 0.0);
+}
+
+// A request the integration cannot reach (Astrolog's report, 2026-10-25)
+// used to fail sticky: the shared perturber tables stayed failed for the
+// engine's life, so every catalog body refused every later instant. And a
+// request inside the span but within one integration window of its start
+// was refused, because the window crossed the file's first epoch.
+TEST_CASE("de440_catalog_edge_requests_neither_fail_inside_nor_stick") {
+    const std::string de = env_or("PROMETHEIA_DE440", std::string(PROMETHEIA_SOURCE_DIR) +
+                                                          "/ephe/linux_p1550p2650.440");
+    const std::string kernel =
+        env_or("PROMETHEIA_SB441_DE440SPAN",
+               std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/sb441-n16-de440span.bsp");
+    if (access(de.c_str(), F_OK) != 0 || access(kernel.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s or %s not present\n", de.c_str(), kernel.c_str());
+        return;
+    }
+    const std::string cat = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
+    auto open = [&] {
+        auto e = Engine::open(de);
+        REQUIRE(e.ok());
+        REQUIRE(e.value().add_catalog(cat).ok());
+        REQUIRE(e.value().add_perturbers(kernel).ok());
+        return std::move(e).value();
+    };
+    constexpr int kCeres = 20000001, kPallas = 20000002;
+    constexpr double kLater = 2448060.0; // 1990
+    Engine cold = open();
+    auto want_c = cold.calc(kCeres, kLater, CalcOptions{});
+    auto want_p = cold.calc(kPallas, kLater, CalcOptions{});
+    REQUIRE((want_c.ok() && want_p.ok()));
+
+    Engine e = open();
+    // Inside DE440's span, 115 days after its first epoch: answered now.
+    CHECK(e.calc(kCeres, 2287300.0, CalcOptions{}).ok());
+    // So close to the first epoch that the light-time instant precedes it:
+    // refused, as a coverage error naming the span.
+    auto edge = e.calc(kCeres, 2287184.501, CalcOptions{});
+    REQUIRE(!edge.ok());
+    CHECK(edge.error().code == ErrorCode::CoverageError);
+    // And nothing stuck: both bodies answer later instants to the bit.
+    for (int pass = 0; pass < 2; ++pass) {
+        auto c = e.calc(kCeres, kLater, CalcOptions{});
+        auto p = e.calc(kPallas, kLater, CalcOptions{});
+        REQUIRE((c.ok() && p.ok()));
+        CHECK(c.value().pos.lon_deg == want_c.value().pos.lon_deg);
+        CHECK(c.value().pos.lat_deg == want_c.value().pos.lat_deg);
+        CHECK(c.value().pos.dist_au == want_c.value().pos.dist_au);
+        CHECK(p.value().pos.lon_deg == want_p.value().pos.lon_deg);
+        CHECK(p.value().pos.lat_deg == want_p.value().pos.lat_deg);
+        CHECK(e.calc(kCeres, 2287184.501, CalcOptions{}).error().code == ErrorCode::CoverageError);
+    }
 }
 
 } // namespace

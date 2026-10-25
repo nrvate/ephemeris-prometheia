@@ -438,7 +438,21 @@ not indexed (address those by their NAIF IDs).
   and gains 20–500× at ±100 yr ([VALIDATION.md](VALIDATION.md)). Twelve
   more perturbers make integration ~2× slower.
 - **Memo:** one M2 `WindowMemo` per body — year windows of integrated
-  samples, warm evaluations are spline reads. The integration error is
+  samples, warm evaluations are spline reads.
+  - **Windows end where the files end.** A window that would cross the
+    span the planetary ephemeris and perturber kernel reach stops at its
+    edge, and so do the perturber tables' blocks. An instant inside that
+    span is answered however the window grid falls, and one outside it,
+    including a light-time instant, is a coverage error naming the span.
+  - **A failure is one request's.** If the perturber tables fail (a
+    kernel whose bodies end at different instants), that request is
+    refused, the body's trajectory and uncertainty tracks are discarded,
+    and the tables recover; the next request integrates afresh.
+  - **Before 2026-10-25,** in both respects, a request within a window of
+    DE440's first epoch was refused 115 days inside the file. The failure
+    then stayed for the engine's life and refused every catalog body at
+    every later instant. Astrolog found it; `de440_catalog_edge_*` and
+    `engine_perturber_failure_*` in `test_engine_catalog` hold both fixes. The integration error is
   ~1e-8 AU over ±26 yr (0.001″); practical accuracy is set by the
   catalog's elements. Each force evaluation reads all perturber tables through one
   interval lookup: the tables share uniformly spaced epochs, so the

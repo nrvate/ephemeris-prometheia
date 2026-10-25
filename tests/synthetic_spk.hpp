@@ -33,6 +33,9 @@ struct LinearBody {
     double p[3];    // km at et = 0
     double v[3];    // km/s
     int center = 0; // NAIF id of the segment's center
+    // Half the segment's span around et = 0, in seconds; 0 is kHalfSpan.
+    // A shorter one makes a kernel whose bodies end at different instants.
+    double half_span = 0.0;
 };
 
 // Sun, Earth and Jupiter-system barycentre, all wrt the barycentre.
@@ -67,21 +70,22 @@ std::string write_linear_spk(const fs::path& path, const std::vector<LinearBody>
     std::vector<std::pair<int, int>> addr;
     for (const LinearBody& b : bodies) {
         const int begin = kFirstWord + int(data.out.size() / 8);
+        const double hs = b.half_span > 0.0 ? b.half_span : kHalfSpan;
         // One type-3 record, degree 1: x(tau) = c0 + c1 tau, tau = et / R.
-        data.f64(0.0);       // MID
-        data.f64(kHalfSpan); // RADIUS
+        data.f64(0.0); // MID
+        data.f64(hs);  // RADIUS
         for (int c = 0; c < 3; ++c) {
             data.f64(b.p[c]);
-            data.f64(b.v[c] * kHalfSpan);
+            data.f64(b.v[c] * hs);
         }
         for (int c = 0; c < 3; ++c) {
             data.f64(b.v[c]);
             data.f64(0.0);
         }
-        data.f64(-kHalfSpan);      // INIT
-        data.f64(2.0 * kHalfSpan); // INTLEN
-        data.f64(2.0 + 6 * 2);     // RSIZE
-        data.f64(1.0);             // N
+        data.f64(-hs);         // INIT
+        data.f64(2.0 * hs);    // INTLEN
+        data.f64(2.0 + 6 * 2); // RSIZE
+        data.f64(1.0);         // N
         addr.push_back({begin, kFirstWord + int(data.out.size() / 8) - 1});
     }
     Writer f;
@@ -102,8 +106,9 @@ std::string write_linear_spk(const fs::path& path, const std::vector<LinearBody>
     f.f64(0.0);
     f.f64(double(bodies.size()));
     for (size_t i = 0; i < bodies.size(); ++i) {
-        f.f64(-kHalfSpan);
-        f.f64(kHalfSpan);
+        const double hs = bodies[i].half_span > 0.0 ? bodies[i].half_span : kHalfSpan;
+        f.f64(-hs);
+        f.f64(hs);
         f.i32(bodies[i].id);
         f.i32(bodies[i].center);
         f.i32(1);

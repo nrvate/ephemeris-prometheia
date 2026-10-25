@@ -10,8 +10,10 @@
 #ifndef PROMETHEIA_MEMO_HPP
 #define PROMETHEIA_MEMO_HPP
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include <prometheia/forces.hpp>
@@ -47,6 +49,15 @@ public:
         bwd_.clear();
         fwd_.push_back(make_sample(t, s));
         bwd_.push_back(make_sample(t, s));
+    }
+
+    // The span the force model can be evaluated over (the planetary and
+    // perturber files'). A window that would cross a limit ends at it, so
+    // an instant inside the span is reached however the window grid falls;
+    // past a limit at() integrates nothing and coverage stops there.
+    void set_limits(double lo, double hi) {
+        limit_lo_ = lo;
+        limit_hi_ = hi;
     }
 
     // Position/velocity at time t; integrates only when coverage doesn't
@@ -231,14 +242,16 @@ private:
     }
 
     bool extend_forward() {
-        const double w = cfg_.window_days;
-        const double to = hi_ + w;
+        if (!(hi_ < limit_hi_))
+            return false;
+        const double to = std::min(hi_ + cfg_.window_days, limit_hi_);
         return integrate_window(hi_, to, true);
     }
 
     bool extend_backward() {
-        const double w = cfg_.window_days;
-        const double to = lo_ - w;
+        if (!(lo_ > limit_lo_))
+            return false;
+        const double to = std::max(lo_ - cfg_.window_days, limit_lo_);
         return integrate_window(lo_, to, false);
     }
 
@@ -248,6 +261,8 @@ private:
     State seed_{};
     double seed_t_ = 0.0;
     double lo_ = 0.0, hi_ = 0.0;
+    double limit_lo_ = -std::numeric_limits<double>::infinity();
+    double limit_hi_ = std::numeric_limits<double>::infinity();
     std::vector<TrajSample> fwd_, bwd_;
     Stats stats_;
 };
