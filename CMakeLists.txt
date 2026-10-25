@@ -221,6 +221,9 @@ target_link_libraries(prometheia-ut1 PRIVATE prometheia)
 add_executable(prometheia-spk-trim tools/spktrim/spk_trim_main.cpp)
 target_link_libraries(prometheia-spk-trim PRIVATE prometheia)
 
+add_executable(prometheia-de-trim tools/detrim/de_trim_main.cpp)
+target_link_libraries(prometheia-de-trim PRIVATE prometheia)
+
 # ephem: the command-line consumer of the C interface, in strict C99.
 add_executable(ephem tools/ephem/ephem.c)
 target_link_libraries(ephem PRIVATE prometheia m)
@@ -233,6 +236,7 @@ add_dependencies(test_ephem ephem)
 # Install: the library, the public headers (C++ and C), the tools and a
 # pkg-config file. `cmake --install build --prefix /usr/local`.
 install(TARGETS prometheia ephem prometheia-info prometheia-convert prometheia-spk-trim
+  prometheia-de-trim
   prometheiad prometheia-wire-client
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -18,8 +18,14 @@ against pinned SHA-256s:
   * `--probe` sends HEAD requests only, to confirm names and sizes before a
     large download is started;
   * a derived file (the kernel cut to DE440's span, made by
-    build/prometheia-spk-trim) is made after its source and verified
+    build/prometheia-spk-trim; DE441 cut to the centuries before DE440, made
+    by build/prometheia-de-trim) is made after its source and verified
     against its own pin, so either file can be checked on any machine.
+
+DE441's cuts are for a client that answers before 1550 but cannot ship
+2.8 GB: loaded behind DE440 (add_ephemeris), linux_p1000p1550.441 (51.1 MB)
+or linux_m3000p1550.441 (423.0 MB) answer exactly as the whole of DE441 does
+over their span (docs/DE.md, "Cutting a span").
 
 Which to fetch: with DE440 alone the cut kernel suffices (1550-2650). A
 small body more than 100 years from its element epoch is refused without
@@ -84,14 +90,24 @@ SETS = {
     ],
 }
 
-# Files made from a fetched one, per set: (name, source, prometheia-spk-trim
-# arguments, pinned sha256). The cut is bit-identical to the source inside
-# its span (docs/SPK.md), and its comment names no tool version, so the pin
+# Files made from a fetched one, per set: (name, source, tool in build/, its
+# arguments, pinned sha256). Each cut is bit-identical to its source inside
+# its span (docs/SPK.md, docs/DE.md) and names no tool version, so the pin
 # holds across releases.
 DERIVED = {
     "sb441": [
-        ("sb441-n16-de440span.bsp", "sb441-n16.bsp", ["--from", "2287184.5", "--to", "2688976.5"],
+        ("sb441-n16-de440span.bsp", "sb441-n16.bsp", "prometheia-spk-trim",
+         ["--from", "2287184.5", "--to", "2688976.5"],
          "e7b67e3281583f53115849e74993d76da08c974f987916c9293541f9a0147f09"),
+    ],
+    # 1000-01-01 and -3000-01-01 (Julian calendar) up to DE440's first epoch.
+    "de441": [
+        ("linux_p1000p1550.441", "linux_m13000p17000.441", "prometheia-de-trim",
+         ["--from", "2086307.5", "--to", "2287184.5"],
+         "19661f2c7946105cbd0832aad71089520eb3038b915975092542c4680f507cbf"),
+        ("linux_m3000p1550.441", "linux_m13000p17000.441", "prometheia-de-trim",
+         ["--from", "625307.5", "--to", "2287184.5"],
+         "73001e4703b538f2896317b21b37f5599f48d098564c63d20fc70a87c8a9e9b6"),
     ],
 }
 # Cuts made before the comment dropped the tool version (2026-09-29): the same
@@ -107,9 +123,9 @@ def url_of(de, name):
 def derive(directory, sets, force, verify_only):
     """Make (or, with verify_only, check) each derived file; count failures."""
     bad = 0
-    trim = os.path.join(REPO, "build", "prometheia-spk-trim")
     for de in sets:
-        for name, source, args, pin in DERIVED.get(de, []):
+        for name, source, tool, args, pin in DERIVED.get(de, []):
+            trim = os.path.join(REPO, "build", tool)
             path, src = os.path.join(directory, name), os.path.join(directory, source)
             if verify_only:
                 if not os.path.exists(path):
@@ -131,7 +147,7 @@ def derive(directory, sets, force, verify_only):
                 continue
             if not os.access(trim, os.X_OK):
                 print(f"cannot make {name}: {trim} is not built "
-                      "(cmake --build build --target prometheia-spk-trim)")
+                      f"(cmake --build build --target {tool})")
                 bad += 1
                 continue
             part = path + ".part"
@@ -207,8 +223,8 @@ def main():
         for de, name, pin in todo:
             print(f"{url_of(de, name)}\n  pinned {pin or '(not pinned)'}")
         for de in sets:
-            for name, source, trim_args, pin in DERIVED.get(de, []):
-                print(f"{name} (made from {source}: prometheia-spk-trim {' '.join(trim_args)})"
+            for name, source, tool, trim_args, pin in DERIVED.get(de, []):
+                print(f"{name} (made from {source}: {tool} {' '.join(trim_args)})"
                       f"\n  pinned {pin}")
         return 0
     if not args.dir:

@@ -35,9 +35,10 @@ Their session is `astrolog-fc`. They sent asks A–F; status:
   - DE440s costs 10.9 MB per century;
   - the perturber kernel costs 3.8 MB per century for all 16 bodies.
 - **E, before 1550:** maintainer's decision, 2026-10-25: **cut DE441
-  spans.** A committed tool will cut the DE441 binary to a span, with
-  checksums, offered as an optional download. There will be no analytic
-  fallback. DE441 costs about 93 MB per millennium (est).
+  spans**, with no analytic fallback. Done: `prometheia-de-trim`, and
+  `de_fetch.py --only de441` makes two pinned cuts. They are
+  `linux_p1000p1550.441` (51.1 MB) and `linux_m3000p1550.441` (423.0 MB),
+  each bit-identical to DE441 behind DE440 (DE.md, "Cutting a span").
 - **F:** nothing needed now.
 
 ### State at 2026-09-29, evening

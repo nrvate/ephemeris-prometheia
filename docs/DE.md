@@ -100,6 +100,59 @@ over 30,000 years. Inside DE440's span JPL recommends DE440.
   over 1550–2650 and are refused outside it rather than extrapolated
   (ENGINE.md).
 
+## Cutting a span
+
+DE441 is 2.79 GB for 30,000 years, and a client that wants the centuries
+before 1550 needs only some of it. `prometheia-de-trim <in> <out> --from JD
+--to JD` (`de::trim`) cuts any DE binary to the whole 32-day records
+covering a TDB span, clamped to the file's own span:
+- both header records are copied verbatim, except the start and end epochs
+  (SS), which are rewritten in the file's own byte order;
+- the data records are copied byte for byte;
+- the title lines still name the source's span. The binary SS is the
+  coverage, and provenance names the file that answered.
+
+`tools/fetch/de_fetch.py --only de441` makes two pinned cuts from DE441.
+Both are made to end where DE440 begins, so they are loaded behind DE440:
+
+| file | span | size |
+|---|---|---:|
+| `linux_p1000p1550.441` | 1000-01-01 to DE440's start (JD 2086288.5 .. 2287184.5) | 51.1 MB |
+| `linux_m3000p1550.441` | −3000-01-01 to DE440's start (JD 625296.5 .. 2287184.5) | 423.0 MB |
+
+That is 93 MB per millennium: 8,144 bytes per 32-day record. A cut is
+byte-identical when made again, which is what its pin rests on.
+
+**Measured (2026-10-25)**, against the whole of DE441:
+- `linux_p1000p1550.441` answers exactly as the source in geometric ICRF
+  states of eleven bodies on every record boundary of its span: 69,036
+  rows, bit for bit. 12,000 apparent rows inside records are identical too.
+- Loaded behind DE440, each cut gives the same apparent positions, Sun
+  through Pluto, as DE440 with the whole of DE441 behind it: 19,500 rows
+  over 1000–1550 and 160,000 over −3000–1550, bit for bit.
+- An instant outside the cut is refused with `PROMETHEIA_ERROR_COVERAGE`
+  naming the cut's span.
+- `test_de` holds a cut to its source to the bit in both byte orders
+  (`de_trim_synthetic_both_byte_orders`) and on DE440 itself
+  (`de440_real_trim_is_bit_identical`). A wrong record injected into the
+  cut makes both fail.
+
+As with any file, an instant within about a minute of a cut's edge can
+be refused. The engine reads 1/4096 day either side for some answers, and
+TT becomes TDB.
+
+**Record selection is exact** (since 2026-10-25). The reader used to pick
+the record as `floor((t − SS) / interval)`. That quotient rounds according
+to the size of t − SS, so within an ulp of a record boundary the record
+picked depended on where the file starts. A cut of DE441 then chose the
+neighbouring record at 52 of 6,276 boundary instants, up to 3.4 m. The
+record is now the one whose [start, start + interval) holds t, compared
+exactly: SS + j × interval is a multiple of 0.5, far inside double
+precision. The change moved nothing in DE440: 69,036 boundary rows and
+33,000 rows inside records are identical. In the whole of DE441 it moved
+those same 52 boundary instants, by up to 3.4 m, where two adjacent JPL
+records meet.
+
 ## Byte map
 
 Both files — the 1981 DE200 and the 2021 DE440 — use one self-describing
@@ -179,7 +232,8 @@ positions differ from DE440 by ~1.1 × 10⁶ km; barycentric ones agree to
 
 ## Evaluation
 
-For a target at time *t*: record `j = floor((t − SS) / interval)`;
+For a target at time *t*: record `j`, the one whose `[SS + j·interval,
+SS + (j+1)·interval)` holds *t*, compared exactly ("Cutting a span");
 subinterval `s` of width `interval / nsubint`; normalised argument
 `τ = 2(t − t_sub_start)/width − 1`. Within a subinterval the layout is
 component-major. Value `Σ c_k T_k(τ)`, rate `Σ c_k k U_{k−1}(τ) · 2/width`.

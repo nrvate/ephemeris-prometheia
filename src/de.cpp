@@ -338,6 +338,17 @@ Result<void> DeFile::state(Body body, double jed, double out[6]) const {
     uint64_t j = uint64_t((jed - header_.start_jed) / header_.interval_days);
     if (j >= header_.record_count)
         j = header_.record_count - 1;
+    // The quotient rounds by the size of jed - SS, so within an ulp of a
+    // record boundary the estimate depended on where the file starts, and a
+    // cut of DE441 (de::trim) picked the neighbouring record at 52 of 6,276
+    // boundary instants (up to 3.4 m). The record is the one whose
+    // [start, start + interval) holds jed, compared exactly: SS + j*interval
+    // is a multiple of 0.5 far inside double precision.
+    while (j > 0 && jed < header_.start_jed + double(j) * header_.interval_days)
+        --j;
+    while (j + 1 < header_.record_count &&
+           jed >= header_.start_jed + double(j + 1) * header_.interval_days)
+        ++j;
     Result<void> loaded = load_record(j);
     if (!loaded.ok())
         return loaded;
@@ -457,6 +468,64 @@ Result<void> DeFile::relative_state(Target target, Target center, double jed, do
         return r;
     subtract(out, c);
     return {};
+}
+
+Result<TrimResult> trim(const std::string& in_path, const std::string& out_path, double jed0,
+                        double jed1) {
+    auto opened = DeFile::open(in_path);
+    if (!opened.ok())
+        return opened.error();
+    const Header& h = opened.value().header();
+    if (!std::isfinite(jed0) || !std::isfinite(jed1) || !(jed1 > jed0))
+        return make_error(ErrorCode::ArgumentError, "trim span must be finite with end > start");
+    const double lo = std::max(jed0, h.start_jed), hi = std::min(jed1, h.end_jed);
+    if (!(hi > lo)) {
+        return make_error(ErrorCode::CoverageError, "trim span does not overlap '" + in_path +
+                                                        "' [" + std::to_string(h.start_jed) + ", " +
+                                                        std::to_string(h.end_jed) + "]");
+    }
+    const uint64_t first = uint64_t(std::floor((lo - h.start_jed) / h.interval_days));
+    const uint64_t last = std::min<uint64_t>(
+        h.record_count, uint64_t(std::ceil((hi - h.start_jed) / h.interval_days)));
+    TrimResult cut;
+    cut.records = last - first;
+    cut.start_jed = h.start_jed + double(first) * h.interval_days;
+    cut.end_jed = h.start_jed + double(last) * h.interval_days;
+
+    std::ifstream in(in_path, std::ios::binary);
+    std::ofstream out(out_path, std::ios::binary | std::ios::trunc);
+    if (!in || !out)
+        return make_error(ErrorCode::IoError,
+                          "cannot open '" + in_path + "' or '" + out_path + "'");
+    const uint64_t rec_len = uint64_t(h.record_doubles) * 8;
+    std::string rec;
+    if (!read_at(in, 0, rec, size_t(rec_len)))
+        return make_error(ErrorCode::IoError, "cannot read the header of '" + in_path + "'");
+    // SS start and end, in the file's byte order.
+    const auto put = [&](size_t off, double v) {
+        uint64_t bits = std::bit_cast<uint64_t>(v);
+        for (int i = 0; i < 8; ++i) {
+            const int shift = h.byte_swapped ? 8 * (7 - i) : 8 * i;
+            rec[off + size_t(i)] = char(uint8_t(bits >> shift));
+        }
+    };
+    put(kEpochOffset, cut.start_jed);
+    put(kEpochOffset + 8, cut.end_jed);
+    out.write(rec.data(), std::streamsize(rec.size()));
+    if (!read_at(in, rec_len, rec, size_t(rec_len)))
+        return make_error(ErrorCode::IoError, "cannot read the constants of '" + in_path + "'");
+    out.write(rec.data(), std::streamsize(rec.size()));
+    for (uint64_t j = first; j < last && out; ++j) {
+        if (!read_at(in, (j + 2) * rec_len, rec, size_t(rec_len)))
+            return make_error(ErrorCode::CorruptionError, "truncated data record " +
+                                                              std::to_string(j) + " in '" +
+                                                              in_path + "'");
+        out.write(rec.data(), std::streamsize(rec.size()));
+    }
+    out.close();
+    if (!out)
+        return make_error(ErrorCode::IoError, "short write to '" + out_path + "'");
+    return cut;
 }
 
 } // namespace prometheia::de

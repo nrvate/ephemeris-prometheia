@@ -906,4 +906,81 @@ TEST_CASE("de200_vs_de440_geocentric_directions") {
     CHECK(worst_pluto < 20.0);
 }
 
+// de::trim (docs/DE.md, "Cutting a span"): every state inside the cut is the
+// source's to the bit, on record boundaries as well as inside records, and the
+// cut refuses what it no longer covers.
+void check_trim_matches(const DeFile& src, const std::string& cut_path, double lo, double hi) {
+    DeFile cut = open_ok(cut_path);
+    const de::Header& h = cut.header();
+    CHECK(h.start_jed == lo);
+    CHECK(h.end_jed == hi);
+    CHECK(h.record_count == uint64_t((hi - lo) / h.interval_days));
+    CHECK(fs::file_size(cut_path) == (h.record_count + 2) * uint64_t(h.record_doubles) * 8);
+    // Over [lo, hi): at hi itself the cut's last record answers, where the
+    // source has a next record starting there and takes it.
+    int compared = 0;
+    const double last = hi == src.header().end_jed ? hi : std::nextafter(hi, 0.0);
+    for (double jed = lo; jed <= last; jed = std::min(last, jed + h.interval_days / 16.0)) {
+        for (int b = 1; b <= de::kColumnCount; ++b) {
+            if (!src.has_body(Body(b)))
+                continue;
+            double want[6], got[6];
+            REQUIRE(src.state(Body(b), jed, want).ok());
+            REQUIRE(cut.state(Body(b), jed, got).ok());
+            for (int i = 0; i < 6; ++i)
+                CHECK(got[i] == want[i]);
+            ++compared;
+        }
+        if (jed == last)
+            break;
+    }
+    CHECK(compared > 0);
+    double out[6];
+    auto before = cut.state(Body::Mercury, std::nextafter(lo, 0.0), out);
+    CHECK((!before.ok() && before.error().code == ErrorCode::CoverageError));
+    auto after = cut.state(Body::Mercury, std::nextafter(hi, 1e300), out);
+    CHECK((!after.ok() && after.error().code == ErrorCode::CoverageError));
+}
+
+TEST_CASE("de_trim_synthetic_both_byte_orders") {
+    const fs::path dir = temp_dir();
+    for (bool big : {false, true}) {
+        const std::string src_path = write_modern(dir / (big ? "be.eph" : "le.eph"), big);
+        DeFile src = open_ok(src_path);
+        // Inside the middle record: the cut is that record, whole.
+        const std::string cut_path = (dir / (big ? "be-cut.eph" : "le-cut.eph")).string();
+        auto cut = de::trim(src_path, cut_path, kSynSS + 40.0, kSynSS + 50.0);
+        REQUIRE(cut.ok());
+        CHECK(cut.value().records == 1);
+        CHECK(DeFile::open(cut_path).value().header().byte_swapped == big);
+        check_trim_matches(src, cut_path, kSynSS + kSynNN, kSynSS + 2 * kSynNN);
+        // A span wider than the file is clamped to it.
+        auto all = de::trim(src_path, cut_path, kSynSS - 1000.0, kSynSS + 1000.0);
+        REQUIRE(all.ok());
+        CHECK(all.value().records == uint64_t(kSynRecords));
+        check_trim_matches(src, cut_path, kSynSS, kSynSS + kSynRecords * kSynNN);
+    }
+    const std::string src_path = (dir / "le.eph").string();
+    auto none = de::trim(src_path, (dir / "none.eph").string(), kSynSS - 100.0, kSynSS - 50.0);
+    CHECK((!none.ok() && none.error().code == ErrorCode::CoverageError));
+    auto backwards = de::trim(src_path, (dir / "none.eph").string(), kSynSS + 50.0, kSynSS);
+    CHECK((!backwards.ok() && backwards.error().code == ErrorCode::ArgumentError));
+}
+
+TEST_CASE("de440_real_trim_is_bit_identical") {
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    DeFile src = open_ok(kDe440Path);
+    const fs::path dir = temp_dir();
+    const std::string cut_path = (dir / "de440-cut.440").string();
+    // About two years around J2000: 23 records of DE440's 12,556.
+    auto cut = de::trim(kDe440Path, cut_path, 2451180.0, 2451910.0);
+    REQUIRE(cut.ok());
+    const double lo = 2287184.5 + 32.0 * std::floor((2451180.0 - 2287184.5) / 32.0);
+    check_trim_matches(src, cut_path, lo, lo + 32.0 * double(cut.value().records));
+    std::printf("  DE440 cut: %llu records, JD %.1f .. %.1f\n",
+                static_cast<unsigned long long>(cut.value().records), cut.value().start_jed,
+                cut.value().end_jed);
+}
+
 } // namespace

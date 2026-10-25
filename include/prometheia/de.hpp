@@ -132,6 +132,20 @@ private:
     mutable std::vector<double> cache_;
 };
 
+// A DE binary cut to the whole data records covering [jed0, jed1] TDB,
+// clamped to the file's own span (docs/DE.md, "Cutting a span"). Both header
+// records are copied verbatim except the start and end epochs (SS), in the
+// file's own byte order, and the data records are copied byte for byte, so
+// every state inside the cut is the source's to the bit. The title lines
+// still name the source's span: the binary SS is the coverage.
+struct TrimResult {
+    double start_jed = 0.0;
+    double end_jed = 0.0;
+    uint64_t records = 0;
+};
+Result<TrimResult> trim(const std::string& in_path, const std::string& out_path, double jed0,
+                        double jed1);
+
 } // namespace prometheia::de
 
 #endif // PROMETHEIA_DE_HPP
