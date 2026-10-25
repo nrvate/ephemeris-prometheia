@@ -30,7 +30,9 @@ Their session is `astrolog-fc`. They sent asks A–F; status:
   removed, and the fallbacks are tested on Linux (EMBEDDING.md,
   "Platforms"). Astrolog's GitHub runners will make the first real build
   and send us the output.
-- **D, the smallest bundle:** measured, answer pending:
+- **D, the smallest bundle:** `prometheia-catalog-subset` cuts a named
+  catalog from the full one (INGESTION.md, "A catalog of named bodies");
+  Astrolog's exact list is still to come. Measured:
   - a 69-body named catalog is 7.0 KB;
   - DE440s costs 10.9 MB per century;
   - the perturber kernel costs 3.8 MB per century for all 16 bodies.

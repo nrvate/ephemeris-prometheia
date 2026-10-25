@@ -202,6 +202,9 @@ target_link_libraries(prometheia-catalog-bench PRIVATE prometheia Threads::Threa
 add_executable(prometheia-convert tools/convert/convert_main.cpp)
 target_link_libraries(prometheia-convert PRIVATE prometheia)
 
+add_executable(prometheia-catalog-subset tools/convert/subset_main.cpp)
+target_link_libraries(prometheia-catalog-subset PRIVATE prometheia)
+
 add_executable(prometheia-info tools/info/info_main.cpp)
 target_link_libraries(prometheia-info PRIVATE prometheia)
 
@@ -229,6 +232,11 @@ add_executable(ephem tools/ephem/ephem.c)
 target_link_libraries(ephem PRIVATE prometheia m)
 target_compile_options(ephem PRIVATE -Wall -Wextra -pedantic -Werror)
 
+prometheia_test(catalog_subset tests/test_catalog_subset.cpp)
+target_compile_definitions(test_catalog_subset PRIVATE
+  SUBSET_BIN="$<TARGET_FILE:prometheia-catalog-subset>")
+add_dependencies(test_catalog_subset prometheia-catalog-subset)
+
 prometheia_test(ephem tests/test_ephem.cpp)
 target_compile_definitions(test_ephem PRIVATE EPHEM_BIN="$<TARGET_FILE:ephem>")
 add_dependencies(test_ephem ephem)
@@ -236,7 +244,7 @@ add_dependencies(test_ephem ephem)
 # Install: the library, the public headers (C++ and C), the tools and a
 # pkg-config file. `cmake --install build --prefix /usr/local`.
 install(TARGETS prometheia ephem prometheia-info prometheia-convert prometheia-spk-trim
-  prometheia-de-trim
+  prometheia-de-trim prometheia-catalog-subset
   prometheiad prometheia-wire-client
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

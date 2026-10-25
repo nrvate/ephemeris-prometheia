@@ -175,6 +175,33 @@ python3 tools/fetch/sbdb_fetch.py --out-dir sbdb-raw-100 --kinds a \
 Measured: 100 bodies, 9,919 bytes total (99 B/body is fixed-overhead
 dominated at this size; steady-state is ~25 B/record at 50k scale).
 
+## A catalog of named bodies
+
+A client that ships a few named bodies, as Astrolog does, cuts them from a
+full catalog rather than shipping 1.5 million:
+
+```sh
+./build/prometheia-catalog-subset sbdb-full-20260916.epm bodies.txt -o named.epm
+```
+
+- **The list** has one body per line: its number or primary designation
+  as SBDB gives it (`1`, `2060`, `2002 AW197`) or its name (`Ceres`),
+  matched ASCII case-insensitively. `#` starts a comment.
+- **Nothing is guessed.** A line that matches no body, or more than one,
+  stops the cut and is named with its line number.
+- **Each record is copied as the source has it.** The metadata is the
+  source's, plus `subset_of` and `subset_of_records`. No time or tool
+  version is recorded, so the same catalog and list always give the same
+  bytes, and a shipped cut can be pinned.
+- **Measured (2026-10-25)** on `sbdb-full-20260916.epm`, with (1)–(29),
+  Chiron and twelve outer bodies (Pholus through Gonggong):
+  - 42 bodies came to 4,629 bytes in 1.2 s;
+  - ten of them at five epochs over 2026–2066, with the perturber kernel,
+    gave answers identical to the full catalog's;
+  - `test_catalog_subset` holds a cut to its source field by field.
+- **The perturber kernel** is still needed more than 100 years from the
+  elements' epoch, as for any catalog ("Asteroid perturber kernel", below).
+
 ## Asteroid perturber kernel
 
 The small-body force model can include JPL's 16 most massive main-belt
