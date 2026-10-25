@@ -12,6 +12,16 @@
 #include <limits>
 #include <vector>
 
+// The floating-point modes the library's numbers cannot survive, refused at
+// compile time rather than answered slightly wrong (docs/EMBEDDING.md). GCC
+// and Clang define __FAST_MATH__ under -ffast-math and -Ofast; MSVC defines
+// _M_FP_FAST under /fp:fast and _M_FP_CONTRACT under /fp:contract. Clang's
+// default contraction has no macro, which is why -ffp-contract=off is
+// required in words as well.
+#if defined(__FAST_MATH__) || defined(_M_FP_FAST) || defined(_M_FP_CONTRACT)
+#error "Prometheia must be built without fast-math or FP contraction (docs/EMBEDDING.md)"
+#endif
+
 namespace prometheia::frames {
 namespace {
 
@@ -220,7 +230,46 @@ using MultipleTables = MultipleTablesT<double>;
 // lane does exactly the scalar operations in the scalar order (the build
 // never fuses a multiply and an add: -ffp-contract=off), so each node's
 // result is the scalar one to the bit, for about the cost of one.
+//
+// The vector type is a GCC/Clang extension. Elsewhere (MSVC), and under
+// PROMETHEIA_PORTABLE_FALLBACKS so that Linux builds can test it
+// (tools/check/embedtest.py), it is a struct doing the same lane-wise
+// operations, which is the same arithmetic without the shared instruction.
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(PROMETHEIA_PORTABLE_FALLBACKS)
 typedef double Pair __attribute__((vector_size(16)));
+#else
+struct Pair {
+    double v[2];
+    double operator[](int i) const { return v[i]; }
+};
+inline Pair operator+(Pair a, Pair b) {
+    return Pair{a.v[0] + b.v[0], a.v[1] + b.v[1]};
+}
+inline Pair operator-(Pair a, Pair b) {
+    return Pair{a.v[0] - b.v[0], a.v[1] - b.v[1]};
+}
+inline Pair operator*(Pair a, Pair b) {
+    return Pair{a.v[0] * b.v[0], a.v[1] * b.v[1]};
+}
+inline Pair operator+(double a, Pair b) {
+    return Pair{a + b.v[0], a + b.v[1]};
+}
+inline Pair operator*(double a, Pair b) {
+    return Pair{a * b.v[0], a * b.v[1]};
+}
+inline Pair operator*(Pair a, double b) {
+    return Pair{a.v[0] * b, a.v[1] * b};
+}
+inline Pair operator/(Pair a, double b) {
+    return Pair{a.v[0] / b, a.v[1] / b};
+}
+inline Pair& operator+=(Pair& a, Pair b) {
+    return a = a + b;
+}
+inline Pair& operator*=(Pair& a, double b) {
+    return a = a * b;
+}
+#endif
 
 inline double splat(double x, double) {
     return x;

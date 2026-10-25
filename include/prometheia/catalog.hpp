@@ -15,6 +15,7 @@
 #ifndef PROMETHEIA_CATALOG_HPP
 #define PROMETHEIA_CATALOG_HPP
 
+#include <cstdint>
 #include <cstdio>
 #include <functional>
 #include <optional>

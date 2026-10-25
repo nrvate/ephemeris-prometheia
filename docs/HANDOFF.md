@@ -24,14 +24,18 @@ Their session is `astrolog-fc`. They sent asks A–F; status:
   `tools/check/embedtest.py` in `scheduled.sh`.
 - **B, zstd on Windows and macOS:** open. The compress path is used only
   by the catalog writer.
-- **C, MSVC and Apple clang:** never built. The audit's blockers are listed
-  in EMBEDDING.md, "Platforms".
+- **C, MSVC and Apple clang:** never built. The audit's blockers are
+  removed, and the fallbacks are tested on Linux (EMBEDDING.md,
+  "Platforms"). Astrolog's GitHub runners will make the first real build
+  and send us the output.
 - **D, the smallest bundle:** measured, answer pending:
   - a 69-body named catalog is 7.0 KB;
   - DE440s costs 10.9 MB per century;
   - the perturber kernel costs 3.8 MB per century for all 16 bodies.
-- **E, before 1550:** DE441 costs about 93 MB per millennium and there is
-  no analytic fallback. A product call for the maintainer.
+- **E, before 1550:** maintainer's decision, 2026-10-25: **cut DE441
+  spans.** A committed tool will cut the DE441 binary to a span, with
+  checksums, offered as an optional download. There will be no analytic
+  fallback. DE441 costs about 93 MB per millennium (est).
 - **F:** nothing needed now.
 
 ### State at 2026-09-29, evening

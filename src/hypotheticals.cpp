@@ -8,7 +8,11 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <locale>
+#include <sstream>
+#include <string>
 #include <utility>
+#include <version>
 
 namespace prometheia::hypotheticals {
 
@@ -283,10 +287,27 @@ private:
         }
         const char* first = s_.data() + start;
         const char* last = s_.data() + i_;
-        const auto r = std::from_chars(first, last, out);
-        if (r.ec != std::errc() || r.ptr != last || !std::isfinite(out))
+        if (!to_double(first, last, out) || !std::isfinite(out))
             return fail("number out of range");
         return true;
+    }
+
+    // Floating-point from_chars where the library has it. Apple's libc++
+    // long did not, so elsewhere (and under PROMETHEIA_PORTABLE_FALLBACKS,
+    // which tests this path on Linux) a stream in the classic locale reads
+    // it: correctly rounded too, and immune to the process locale's
+    // decimal comma.
+    static bool to_double(const char* first, const char* last, double& out) {
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L &&                                \
+    !defined(PROMETHEIA_PORTABLE_FALLBACKS)
+        const auto r = std::from_chars(first, last, out);
+        return r.ec == std::errc() && r.ptr == last;
+#else
+        std::istringstream in(std::string(first, last));
+        in.imbue(std::locale::classic());
+        in >> out;
+        return !in.fail() && in.peek() == std::char_traits<char>::eof();
+#endif
     }
 
     std::string_view s_;

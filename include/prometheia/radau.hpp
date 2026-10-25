@@ -16,6 +16,8 @@
 #ifndef PROMETHEIA_RADAU_HPP
 #define PROMETHEIA_RADAU_HPP
 
+#include <cstdint>
+
 #include <prometheia/error.hpp>
 #include <prometheia/integrator.hpp>
 

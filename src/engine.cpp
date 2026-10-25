@@ -2336,9 +2336,9 @@ struct Engine::Impl {
                 r = apsis_model(t, apogee, lon_model);
                 if (!r)
                     return r;
-                out[apogee].push_back(
-                    {t, std::remainder(std::atan2(v[1], v[0]) - lon_model, 2.0 * M_PI),
-                     std::asin(v[2] / rr), rr});
+                out[apogee].push_back({t,
+                                       std::remainder(std::atan2(v[1], v[0]) - lon_model, kTwoPi),
+                                       std::asin(v[2] / rr), rr});
             }
             ta = tb;
             ya = yb;
@@ -2362,9 +2362,9 @@ struct Engine::Impl {
         matmul(e1, bias, m);
         apply(m, g, v);
         const double ref = natural_apsides::mean_apse(t, apogee);
-        lon = ref + natural_apsides::model(
-                        apogee ? natural_apsides::kApogeeModel : natural_apsides::kPerigeeModel,
-                        std::remainder(std::atan2(v[1], v[0]) - ref, 2.0 * M_PI));
+        lon = ref + natural_apsides::model(apogee ? natural_apsides::kApogeeModel
+                                                  : natural_apsides::kPerigeeModel,
+                                           std::remainder(std::atan2(v[1], v[0]) - ref, kTwoPi));
         return {};
     }
 

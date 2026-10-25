@@ -2,7 +2,10 @@
 #include <prometheia/catalog.hpp>
 
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -20,6 +23,24 @@ constexpr size_t kIndexEntrySize = 40; // 4x u64, 2x u32
 constexpr uint8_t kKnownFlagMask =
     uint8_t(RecordFlags::kSigmas | RecordFlags::kHg | RecordFlags::kDiameter |
             RecordFlags::kHasName | RecordFlags::kCovariance);
+
+// File offsets in 64 bits: long is 32 bits on Windows, and a full catalog
+// can pass 2 GB. Elsewhere long is the platform's 64-bit offset already.
+int seek_to(std::FILE* f, uint64_t off, int whence) {
+#if defined(_WIN32)
+    return _fseeki64(f, static_cast<long long>(off), whence);
+#else
+    return std::fseek(f, static_cast<long>(off), whence);
+#endif
+}
+
+int64_t tell(std::FILE* f) {
+#if defined(_WIN32)
+    return _ftelli64(f);
+#else
+    return std::ftell(f);
+#endif
+}
 
 bool body_class_valid(uint8_t c) {
     return c == uint8_t(BodyClass::Asteroid) || c == uint8_t(BodyClass::Comet) ||
@@ -380,16 +401,16 @@ Result<Reader> Reader::open(const std::string& path) {
     if (r.f_ == nullptr) {
         return make_error(ErrorCode::IoError, "cannot open '" + path + "' for reading");
     }
-    if (std::fseek(r.f_, 0, SEEK_END) != 0) {
+    if (seek_to(r.f_, 0, SEEK_END) != 0) {
         return make_error(ErrorCode::IoError, "seek failed");
     }
-    const long fsize = std::ftell(r.f_);
-    if (fsize < long(kHeaderSize + kFooterSize)) {
+    const int64_t fsize = tell(r.f_);
+    if (fsize < int64_t(kHeaderSize + kFooterSize)) {
         return make_error(ErrorCode::FormatError, "file too small to be EPM1");
     }
 
     auto read_at = [&](uint64_t off, size_t n, std::string& buf) -> Result<void> {
-        if (std::fseek(r.f_, long(off), SEEK_SET) != 0)
+        if (seek_to(r.f_, off, SEEK_SET) != 0)
             return make_error(ErrorCode::IoError, "seek failed");
         buf.resize(n);
         if (std::fread(buf.data(), 1, n, r.f_) != n)
@@ -496,7 +517,7 @@ Result<const std::string*> Reader::load_chunk(uint64_t chunk_index) const {
     }
     const ChunkEntry& e = entries_[size_t(chunk_index)];
     std::string stored;
-    if (std::fseek(f_, long(e.data_offset), SEEK_SET) != 0)
+    if (seek_to(f_, e.data_offset, SEEK_SET) != 0)
         return make_error(ErrorCode::IoError, "seek to chunk failed");
     stored.resize(size_t(e.stored_size));
     if (std::fread(stored.data(), 1, stored.size(), f_) != stored.size())

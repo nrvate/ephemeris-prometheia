@@ -24,7 +24,13 @@ Assertions (each fires on the defect it names):
                     (not evaluated, and said so, when DE440 or build/ephem is
                     absent).
 
-Usage: embedtest.py [--cxx CXX] [--cc CC] [--keep DIR] [-j N] [--list-assertions]
+With --extra-cxxflags=-DPROMETHEIA_PORTABLE_FALLBACKS the library is built
+on the code paths a compiler without GCC's vector extension or a library
+without floating-point from_chars takes (MSVC, Apple's libc++), and held to
+the same answers: the nearest this machine can come to those platforms.
+
+Usage: embedtest.py [--cxx CXX] [--cc CC] [--extra-cxxflags FLAGS] [--keep DIR] [-j N]
+                    [--list-assertions]
 Run by tools/scheduled.sh: compiling the library takes too long for the gate.
 """
 import argparse
@@ -102,6 +108,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--cxx", default=os.environ.get("CXX", "g++"))
     ap.add_argument("--cc", default=os.environ.get("CC", "gcc"))
+    ap.add_argument("--extra-cxxflags", default="",
+                    help="PROMETHEIA_EXTRA_CXXFLAGS for the library's compile lines")
     ap.add_argument("--keep", help="build in this directory and leave it")
     ap.add_argument("-j", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--ephemeris", default=os.path.join(ROOT, "ephe", "linux_p1550p2650.440"))
@@ -117,7 +125,8 @@ def main():
     try:
         with open(os.path.join(work, "Makefile"), "w") as f:
             f.write(PARENT.format(root=ROOT, poison=POISON))
-        make = ["make", "--no-print-directory", f"CXX={args.cxx}", f"CC={args.cc}"]
+        make = ["make", "--no-print-directory", f"CXX={args.cxx}", f"CC={args.cc}",
+                f"PROMETHEIA_EXTRA_CXXFLAGS={args.extra_cxxflags}"]
 
         # A fragment make cannot read at all is the first thing a parent
         # would see, so it is reported here rather than raised.
@@ -171,7 +180,7 @@ def main():
             asserts.judge("numbers-differ", bool(diff) or bool(failed) or rows <= len(QUERIES),
                           f"numbers-differ: {len(QUERIES)} queries, {rows} lines; differ: {diff}; "
                           f"failed: {failed}", into=fails)
-            print(f"{args.cxx}: {len(QUERIES)} queries, {rows} CSV lines compared with build/ephem")
+            print(f"{args.cxx} {args.extra_cxxflags}: {len(QUERIES)} queries, {rows} CSV lines compared with build/ephem")
     finally:
         if not args.keep:
             shutil.rmtree(work, ignore_errors=True)

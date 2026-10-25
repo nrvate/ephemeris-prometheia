@@ -26,12 +26,13 @@ inline constexpr int kTerms = 2 * kHarmonics + 1;
 // less the IAU 2006 general precession in longitude. It only has to be the
 // same function in the fit and the evaluation; the model absorbs the rest.
 inline double mean_apse(double jd_tt, bool apogee) {
+    constexpr double kPi = 3.14159265358979323846; // M_PI is not ISO C++
     double phi[14];
     frames::fundamental_arguments(jd_tt, phi);
     const double T = (jd_tt - 2451545.0) / 36525.0;
-    const double p_a = (5028.796195 * T + 1.1054348 * T * T) / 3600.0 * M_PI / 180.0;
+    const double p_a = (5028.796195 * T + 1.1054348 * T * T) / 3600.0 * kPi / 180.0;
     const double varpi = phi[11] + phi[13] - phi[9] - p_a; // L - l
-    return apogee ? varpi + M_PI : varpi;
+    return apogee ? varpi + kPi : varpi;
 }
 
 // The model's value (radians) at elongation d = lon(Sun) - mean_apse, both in

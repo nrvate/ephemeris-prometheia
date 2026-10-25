@@ -89,6 +89,10 @@ if command -v clang++-14 >/dev/null && command -v clang-14 >/dev/null; then
 else
     skipped+=("embed contract (clang 14): no clang++-14 on PATH")
 fi
+# The paths MSVC and Apple's libc++ take (EMBEDDING.md, "Platforms"),
+# compiled here and held to the same answers.
+step "embed contract (portable fallbacks)" python3 "$repo/tools/check/embedtest.py" \
+    --cxx g++ --cc gcc --extra-cxxflags=-DPROMETHEIA_PORTABLE_FALLBACKS
 
 # corrapplied.py's own assertions. No daemon and no ephemeris -- it is here
 # rather than in the gate only because eight scripted servers take about

@@ -2,6 +2,7 @@
 #include <prometheia/cbor.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 

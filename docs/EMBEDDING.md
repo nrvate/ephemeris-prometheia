@@ -47,12 +47,20 @@ parent has to do something new beyond compiling the list.
     gave 459 fused instructions with contraction on and none with it off.
     That would change results by platform.
   - No `-ffast-math`, `-Ofast` or any `-funsafe-math-*` flag.
+  - With MSVC: `/fp:precise`, which is the default, and never `/fp:fast`
+    or `/fp:contract`. Microsoft documents that from Visual Studio 2022
+    (17.0) on, `/fp:precise` generates no contractions on any platform.
+  - `src/frames.cpp` refuses to compile when the compiler says fast math
+    or contraction is on (`__FAST_MATH__`, `_M_FP_FAST`, `_M_FP_CONTRACT`).
+    Clang's default contraction defines no macro, so for Clang the
+    requirement above has to be followed by hand.
 - **Optimisation level:** any. The library's answers do not depend on it,
   measured with GCC 11.4 and Clang 14 on x86-64 with libstdc++:
   `embedtest.py` builds at `-O2`, and its 94 CSV rows at `%.17g` are
   identical to CMake's `-O3` build.
 - **Defines:** none. The library has no `assert`, so `NDEBUG` changes
-  nothing.
+  nothing. `PROMETHEIA_PORTABLE_FALLBACKS` is for testing only: it selects
+  on Linux the code paths MSVC and Apple's libc++ take (see "Platforms").
 - **Generated files:** none. The one data file compiled in, the shipped
   hypothetical-body set, is committed as `src/hypotheticals_shipped.inc`
   ([HYPOTHETICALS.md](HYPOTHETICALS.md)).
@@ -133,26 +141,44 @@ through zstd.
 
 Each assertion was shown to fire by a fault injected into the fragment:
 - passing the parent's `CXXFLAGS` through;
-- `-ffast-math` in the library;
+- `-ffast-math` in the library (which `src/frames.cpp` now also refuses
+  to compile);
 - not restoring the default goal;
 - dropping a source;
 - a wrong manifest path.
 
-`tools/scheduled.sh` runs the test with GCC, and again with Clang 14 when
-`clang++-14` is present. That takes about six seconds per compiler on this
-machine, which is too long for the gate.
+`tools/scheduled.sh` runs the test three times, about six seconds each on
+this machine, which is too long for the gate:
+- with GCC;
+- with Clang 14, when `clang++-14` is present;
+- with GCC and `--extra-cxxflags=-DPROMETHEIA_PORTABLE_FALLBACKS`. This
+  run builds the non-GCC code paths. Its 94 rows equal the CMake build
+  too. A one-ulp fault injected into each fallback in turn fires
+  `numbers-differ`, which proves the queries reach both.
 
 ## Platforms
 
 - **Linux** (GCC 11.4, Clang 14, x86-64): built and measured as above.
-- **Windows (MSVC) and macOS (Apple clang)**: never built. A read-through
-  audit and a strict-mode MinGW compile found these blockers:
-  - `M_PI` used without `_USE_MATH_DEFINES` (`src/engine.cpp`,
-    `src/natural_apsides.hpp`);
-  - a GCC vector extension in the two-node nutation kernel
-    (`src/frames.cpp`);
-  - floating-point `std::from_chars` (`src/hypotheticals.cpp`), which
-    Apple's libc++ is believed to lack.
+- **Windows (MSVC) and macOS (Apple clang)**: **never built.** A
+  read-through audit and a strict-mode MinGW compile found these blockers,
+  and each has been removed:
+  - `M_PI`, which is not ISO C++ and needs `_USE_MATH_DEFINES` on MSVC. The
+    library uses its own constants now.
+  - The GCC vector extension in the two-node nutation kernel
+    (`src/frames.cpp`). Other compilers get a two-lane struct doing the same
+    operations in the same order.
+  - Floating-point `std::from_chars` (`src/hypotheticals.cpp`), which
+    Apple's libc++ long lacked. Where `__cpp_lib_to_chars` is not
+    advertised, a classic-locale stream reads the number.
+  - Catalog offsets through a 32-bit `long` on Windows. The catalog reader
+    uses `_fseeki64` and `_ftelli64` there.
+  - Headers reached only transitively (`<cstdint>`).
 
-  Until they are fixed and a build on each platform has been run, nothing
-  in this document is claimed for either.
+  The two fallbacks are built and checked on Linux (above). The first real
+  MSVC or Apple build is still to come; until it has run, nothing in this
+  document is claimed for either platform. `CMakeLists.txt` passes
+  GCC-style flags and needs pkg-config for zstd, so on Windows the source
+  list is the way in, not CMake.
+- **Across platforms**, `sin`, `cos`, `atan2` and the like come from each
+  platform's own maths library and may differ in the last ulp. Compare
+  answers between platforms with a tolerance, not bit for bit.
