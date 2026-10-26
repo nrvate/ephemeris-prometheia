@@ -65,9 +65,9 @@ Later the same day, from Astrolog's use (all fixed, tested and pushed):
   their draft of the lunar-tidal WELCOME TLV (one value per coverage span,
   absent meaning unknown; we send it absent, TIME.md).
 
-**Disk:** `/nvmraid` is 99% full (3.5 GB free on 2026-10-25). Large data
-goes to `/nvm/work/ephe`, linked into `ephe/`: DE441 and its two cuts live
-there. `de_fetch.py --dir ephe --verify` passes with all three.
+**Disk:** `/nvmraid` is tight: 3.5 GB free at one point on 2026-10-25,
+20 GB after the maintainer cleared space. Large data goes to
+`/nvm/work/ephe`, linked into `ephe/`: DE441 and its two cuts live there. `de_fetch.py --dir ephe --verify` passes with all three.
 
 ### State at 2026-09-29, evening
 
