@@ -471,6 +471,18 @@ public:
     };
     std::vector<EphemerisSpan> ephemeris_spans() const;
 
+    // The small-body catalogs in the order they were added (a later one wins
+    // for a body both carry), each with the path it was added by and its
+    // record count; and the distinct bodies they answer between them. With
+    // one catalog that is its record count; with several it takes a pass
+    // over their indexes the first time, and is kept until add_catalog().
+    struct CatalogInfo {
+        std::string path;
+        uint64_t bodies = 0;
+    };
+    std::vector<CatalogInfo> catalogs() const;
+    Result<uint64_t> catalog_bodies() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

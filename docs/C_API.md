@@ -65,6 +65,18 @@ start or end a few days outside the years in its name. DE440 with
 `source` string lives until the next call of `_span` or
 `prometheia_engine_add_ephemeris()`.
 
+**Which catalogs are loaded** (added after 0.7.3; ABI version unchanged).
+`prometheia_engine_catalog_count` and `prometheia_engine_catalog_info(engine,
+i, &bodies, &path, &err)` give each small-body catalog in the order it was
+added, with its record count and the path it was added by. A later catalog
+wins for a body both carry. `prometheia_engine_catalog_bodies(engine,
+&bodies, &err)` gives the distinct bodies they answer between them. With one
+catalog that is its record count. With several it takes one pass over their
+indexes, kept until a catalog is added: 0.37 s for the 1,567,167-body
+catalog with a 100-body sample stacked on it (2026-10-25). This replaces
+parsing the `[N bodies]` text of a result's `source`, whose wording is not
+a contract.
+
 To build the library inside another project (a git submodule, plain make,
 no CMake), see [EMBEDDING.md](EMBEDDING.md).
 

@@ -1182,6 +1182,8 @@ struct Engine::Impl {
     // integrated on demand from the catalog's osculating elements with
     // the barycentric force model and memoized per body.
     std::vector<std::unique_ptr<catalog::Reader>> catalogs;
+    std::vector<std::string> catalog_paths;          // as add_catalog() was given them
+    mutable std::optional<uint64_t> distinct_bodies; // catalog_bodies(), until add_catalog()
     PerturberSet perturbers;
     std::unordered_map<uint64_t, SmallBody> small_bodies;
     // Decoding a catalog record walks its chunk from the start, so a body
@@ -3228,6 +3230,8 @@ Result<void> Engine::add_catalog(const std::string& path) {
         return fe.error();
 
     impl_->catalogs.push_back(std::make_unique<catalog::Reader>(std::move(r).value()));
+    impl_->catalog_paths.push_back(path);
+    impl_->distinct_bodies.reset();
     impl_->name_indexes.emplace_back();
     // A newer catalog may carry revised elements for bodies already
     // integrated: drop the memoized trajectories and uncertainty tracks,
@@ -3597,6 +3601,35 @@ std::vector<Engine::EphemerisSpan> Engine::ephemeris_spans() const {
         out.push_back({m->description, a, b});
     }
     return out;
+}
+
+std::vector<Engine::CatalogInfo> Engine::catalogs() const {
+    std::vector<CatalogInfo> out;
+    if (!impl_)
+        return out;
+    for (size_t i = 0; i < impl_->catalogs.size(); ++i)
+        out.push_back({impl_->catalog_paths[i], impl_->catalogs[i]->record_count()});
+    return out;
+}
+
+Result<uint64_t> Engine::catalog_bodies() const {
+    if (!impl_ || impl_->catalogs.empty())
+        return uint64_t{0};
+    if (impl_->catalogs.size() == 1)
+        return impl_->catalogs.front()->record_count(); // the writer keeps SPK-IDs unique
+    if (impl_->distinct_bodies)
+        return *impl_->distinct_bodies;
+    std::vector<uint64_t> ids;
+    for (const auto& c : impl_->catalogs) {
+        ids.reserve(ids.size() + size_t(c->record_count()));
+        auto each =
+            c->for_each_name([&](uint64_t spkid, const catalog::Names&) { ids.push_back(spkid); });
+        if (!each)
+            return each.error();
+    }
+    std::sort(ids.begin(), ids.end());
+    impl_->distinct_bodies = uint64_t(std::unique(ids.begin(), ids.end()) - ids.begin());
+    return *impl_->distinct_bodies;
 }
 
 } // namespace prometheia

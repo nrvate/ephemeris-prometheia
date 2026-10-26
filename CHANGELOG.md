@@ -18,6 +18,10 @@ documented, not that it is frozen.
   `prometheia_engine_ephemeris_span`, asked for by Astrolog for their
   Ephemeris Settings dialog. The ABI version is unchanged, as no layout
   changed.
+- **C API: which catalogs are loaded** ([docs/C_API.md](docs/C_API.md)):
+  `prometheia_engine_catalog_count`, `_catalog_info` (record count and path,
+  in load order) and `_catalog_bodies` (distinct bodies across them), asked
+  for by Astrolog. The ABI version is unchanged.
 - **`prometheia-catalog-subset --skip-missing`** names a list line that
   matches nothing and goes on.
 - **Fixed: GCC 13 builds** (found by Astrolog on Ubuntu 24.04):

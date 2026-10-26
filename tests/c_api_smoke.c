@@ -46,6 +46,13 @@ int prometheia_c_smoke(const char* kernel_path) {
                 PROMETHEIA_ERROR_ARGUMENT)
             return 41;
     }
+    /* No catalog loaded: none, and no bodies. */
+    {
+        int bodies = -1;
+        if (prometheia_engine_catalog_count(engine) != 0 ||
+            prometheia_engine_catalog_bodies(engine, &bodies, &err) != PROMETHEIA_OK || bodies != 0)
+            return 42;
+    }
 
     /* Defaults, then a geometric J2000 equatorial request. */
     if (prometheia_calc(engine, PROMETHEIA_SUN, 2451545.0, NULL, &res, NULL) != PROMETHEIA_OK ||

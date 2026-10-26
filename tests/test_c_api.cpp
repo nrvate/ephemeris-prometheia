@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <unistd.h>
 
@@ -189,6 +190,51 @@ TEST_CASE("c_api_ephemeris_spans_match_engine") {
     CHECK(prometheia_engine_ephemeris_count(nullptr) == 0);
     CHECK(prometheia_engine_ephemeris_span(nullptr, 0, &a, &b, nullptr, &err) ==
           PROMETHEIA_ERROR_ARGUMENT);
+}
+
+// prometheia_engine_catalog_count/_info/_bodies: the catalogs in the order
+// added, and the distinct bodies between them, held to an independent union.
+TEST_CASE("c_api_catalogs_and_distinct_bodies") {
+    TempFile tf("capi-cats");
+    synth::write_linear_spk(tf.path);
+    const std::string a = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
+    const std::string b = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/covariance-7.epm";
+    CHandle c;
+    prometheia_error err;
+    REQUIRE(prometheia_engine_open(tf.path.c_str(), &c.e, &err) == PROMETHEIA_OK);
+    int n = -1;
+    CHECK(prometheia_engine_catalog_count(c.e) == 0);
+    REQUIRE(prometheia_engine_catalog_bodies(c.e, &n, &err) == PROMETHEIA_OK);
+    CHECK(n == 0);
+    REQUIRE(prometheia_engine_add_catalog(c.e, a.c_str(), &err) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_catalog_bodies(c.e, &n, &err) == PROMETHEIA_OK);
+    CHECK(n == 100);
+    REQUIRE(prometheia_engine_add_catalog(c.e, b.c_str(), &err) == PROMETHEIA_OK);
+    CHECK(prometheia_engine_catalog_count(c.e) == 2);
+
+    std::set<uint64_t> both;
+    for (const std::string& path : {a, b}) {
+        auto r = catalog::Reader::open(path);
+        REQUIRE(r.ok());
+        int bodies = -1;
+        const char* got = nullptr;
+        const int i = path == a ? 0 : 1;
+        REQUIRE(prometheia_engine_catalog_info(c.e, i, &bodies, &got, &err) == PROMETHEIA_OK);
+        CHECK(bodies == int(r.value().record_count()));
+        CHECK(std::string(got) == path);
+        CHECK(r.value()
+                  .for_each_name([&](uint64_t id, const catalog::Names&) { both.insert(id); })
+                  .ok());
+    }
+    REQUIRE(prometheia_engine_catalog_bodies(c.e, &n, &err) == PROMETHEIA_OK);
+    CHECK(n == int(both.size()));
+    CHECK((n > 100 && n < 107)); // they overlap, and one adds a body: neither first nor sum
+    int x = 0;
+    CHECK(prometheia_engine_catalog_info(c.e, 2, &x, nullptr, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_engine_catalog_info(c.e, 0, nullptr, nullptr, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_engine_catalog_count(nullptr) == 0);
+    CHECK(prometheia_engine_catalog_bodies(nullptr, &x, &err) == PROMETHEIA_ERROR_ARGUMENT);
 }
 
 TEST_CASE("c_api_matches_engine_bit_for_bit") {

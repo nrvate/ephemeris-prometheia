@@ -235,6 +235,26 @@ PROMETHEIA_API prometheia_status prometheia_engine_ephemeris_span(const promethe
                                                                   prometheia_error* err);
 
 /*
+ * The small-body catalogs in the order they were added: how many (0 for
+ * NULL); each one's record count and the path it was added by (a later
+ * catalog wins for a body both carry); and the distinct bodies they answer
+ * between them. With several catalogs, the first call of _bodies takes a
+ * pass over their indexes and keeps the answer until a catalog is added.
+ * *path, when asked for, is valid until the next call of _catalog_info or
+ * prometheia_engine_add_catalog(). An index out of range is
+ * PROMETHEIA_ERROR_ARGUMENT. Added after library 0.7.3; the ABI version is
+ * unchanged, as no layout changed.
+ */
+PROMETHEIA_API int prometheia_engine_catalog_count(const prometheia_engine* engine);
+PROMETHEIA_API prometheia_status prometheia_engine_catalog_info(const prometheia_engine* engine,
+                                                                int index, int* bodies,
+                                                                const char** path,
+                                                                prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_engine_catalog_bodies(const prometheia_engine* engine,
+                                                                  int* bodies,
+                                                                  prometheia_error* err);
+
+/*
  * Adds a small-body catalog (an EPM1 container). Newest catalog wins for
  * bodies and names several catalogs carry. Invalidates the source
  * strings of earlier results.

@@ -42,6 +42,8 @@ struct prometheia_engine {
     // What prometheia_engine_ephemeris_span() last returned, so that its
     // source string outlives the call.
     mutable std::vector<Engine::EphemerisSpan> spans;
+    // The same for prometheia_engine_catalog_info()'s path.
+    mutable std::vector<Engine::CatalogInfo> catalogs;
 };
 
 namespace {
@@ -305,7 +307,7 @@ prometheia_status prometheia_engine_open(const char* path, prometheia_engine** o
         auto e = Engine::open(path);
         if (!e)
             return report(err, e.error());
-        *out = new prometheia_engine{std::move(e).value(), {}, {}};
+        *out = new prometheia_engine{std::move(e).value(), {}, {}, {}};
         return succeed(err);
     });
 }
@@ -344,6 +346,47 @@ prometheia_status prometheia_engine_ephemeris_span(const prometheia_engine* engi
         *last_jd_tdb = s.last_jd_tdb;
         if (source)
             *source = s.source.c_str();
+        return succeed(err);
+    });
+}
+
+int prometheia_engine_catalog_count(const prometheia_engine* engine) {
+    if (!engine)
+        return 0;
+    return int(engine->engine.catalogs().size());
+}
+
+prometheia_status prometheia_engine_catalog_info(const prometheia_engine* engine, int index,
+                                                 int* bodies, const char** path,
+                                                 prometheia_error* err) {
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!bodies)
+        return argument(err, "bodies output is NULL");
+    return guarded(err, [&] {
+        engine->catalogs = engine->engine.catalogs();
+        if (index < 0 || size_t(index) >= engine->catalogs.size())
+            return argument(err,
+                            ("catalog index " + std::to_string(index) + " out of range").c_str());
+        const Engine::CatalogInfo& c = engine->catalogs[size_t(index)];
+        *bodies = int(c.bodies);
+        if (path)
+            *path = c.path.c_str();
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_engine_catalog_bodies(const prometheia_engine* engine, int* bodies,
+                                                   prometheia_error* err) {
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!bodies)
+        return argument(err, "bodies output is NULL");
+    return guarded(err, [&] {
+        auto n = engine->engine.catalog_bodies();
+        if (!n)
+            return report(err, n.error());
+        *bodies = int(n.value());
         return succeed(err);
     });
 }
