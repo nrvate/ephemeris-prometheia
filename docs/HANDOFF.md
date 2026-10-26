@@ -43,6 +43,32 @@ Their session is `astrolog-fc`. They sent asks A–F; status:
   each bit-identical to DE441 behind DE440 (DE.md, "Cutting a span").
 - **F:** nothing needed now.
 
+Later the same day, from Astrolog's use (all fixed, tested and pushed):
+- **A catalog body near a file's edge** was refused well inside the file,
+  and the failure then stuck for every catalog body, for the engine's
+  life (ENGINE.md, "Memo"; `f94fd56`).
+- **`sbdb_fetch.py --covariance`** died at the first `A/` object. Now one
+  body costs only itself (INGESTION.md, "Orbit covariance"; `6f18eb0`).
+- **The catalog is current to 2026-10-25.** `--refresh-since` folded into
+  the base gives `sbdb-20260916-refresh-20261025.epm` (1,567,167 records,
+  sha256 beside it). It replaced `sbdb-full-20260916.epm`, which is
+  removed and can be rebuilt from `sbdb-raw-full/`. The MCP config
+  (user scope) serves the new file (`5a0101e`). Astrolog's
+  `ephsrv-prometheia.sh` and `qttest.cpp` still named the old file when
+  told.
+- **Maintainer decisions:**
+  - the next catalog update is a full pull;
+  - looking a body up by its pre-numbering provisional designation
+    (`prov_des`) is deferred (INGESTION.md, "Future ingestion paths");
+  - no bundling of open-source dependencies.
+- **Waiting on Astrolog:** their first MSVC/macOS compiler output, and
+  their draft of the lunar-tidal WELCOME TLV (one value per coverage span,
+  absent meaning unknown; we send it absent, TIME.md).
+
+**Disk:** `/nvmraid` is 99% full (3.5 GB free on 2026-10-25). Large data
+goes to `/nvm/work/ephe`, linked into `ephe/`: DE441 and its two cuts live
+there. `de_fetch.py --dir ephe --verify` passes with all three.
+
 ### State at 2026-09-29, evening
 
 `initial` = `origin/initial`, gate green, `tools/scheduled.sh` green;
@@ -63,8 +89,8 @@ hash in the same tool batch as the commit.
 **Focus: solar-system objects.** Fixed stars are parked
 ([STARS_BACKLOG.md](STARS_BACKLOG.md)); don't raise them.
 
-**Data on this machine.** DE440 in `ephe/`. DE441 is in `/nvm/work/ephe/`,
-linked into `ephe/`. SB441-N16 (full and the 1550–2650 cut) is in `ephe/`.
+**Data on this machine.** DE440 in `ephe/`. DE441 and its two cuts
+(DE.md, "Cutting a span") are in `/nvm/work/ephe/`, linked into `ephe/`. SB441-N16 (full and the 1550–2650 cut) is in `ephe/`.
 All are fetched and verified by `tools/fetch/de_fetch.py`
 (`--only de440|de441|sb441`, `--verify`). The TDB series is generated from
 the pinned ERFA `dtdb.c` in `erfa-raw/` by `tools/gen/gen_tdb_series.py`.
