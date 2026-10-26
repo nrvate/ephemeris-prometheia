@@ -903,12 +903,23 @@ TEST_CASE("perturber_kernel_matches_independent_integration") {
     const double t = kEpoch + 400.0;
     auto before = e.calc(20000002, t, bary_geom_icrf());
     REQUIRE(before.ok());
+    // Seen from 20000002 before the masses arrive: that observer's state is
+    // memoized at t, and must not outlive add_perturbers.
+    CalcOptions from_other = bary_geom_icrf();
+    from_other.center = Center::Body;
+    from_other.center_body = 20000002;
+    REQUIRE(e.calc(20000001, t, from_other).ok());
 
     CHECK(e.add_perturbers(tf_ast.path.string()).ok());
     auto self = e.calc(20000001, t, bary_geom_icrf());
     auto other = e.calc(20000002, t, bary_geom_icrf());
+    auto seen = e.calc(20000001, t, from_other);
     REQUIRE(self.ok());
     REQUIRE(other.ok());
+    REQUIRE(seen.ok());
+    for (int i = 0; i < 3; ++i)
+        CHECK(std::abs(seen.value().pos.xyz_au[i] -
+                       (self.value().pos.xyz_au[i] - other.value().pos.xyz_au[i])) < 1e-12);
     CHECK(std::string(other.value().provenance.source).find("asteroid perturbers") !=
           std::string::npos);
 

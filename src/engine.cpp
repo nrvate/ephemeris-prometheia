@@ -3142,6 +3142,7 @@ Result<void> Engine::add_ephemeris(const std::string& path) {
     impl_->apsis_blocks.clear();
     impl_->apsis_k_lo = 1;
     impl_->apsis_k_hi = 0;
+    impl_->forget_observers();
     return {};
 }
 
@@ -3239,6 +3240,7 @@ Result<void> Engine::add_catalog(const std::string& path) {
     impl_->small_bodies.clear();
     impl_->record_cache.clear();
     impl_->sigma_tracks.clear();
+    impl_->forget_observers(); // an observer may be one of those bodies
     impl_->refresh_overlay_source();
     return {};
 }
@@ -3266,10 +3268,12 @@ Result<void> Engine::add_perturbers(const std::string& path) {
     impl_->perturber_note_ =
         " + " + std::to_string(n_massive) + " " + impl_->asteroids->description;
     impl_->refresh_overlay_source();
-    // Every trajectory integrated so far lacked these masses.
+    // Every trajectory integrated so far lacked these masses, and so did
+    // any observer placed on one.
     impl_->small_bodies.clear();
     impl_->record_cache.clear();
     impl_->sigma_tracks.clear();
+    impl_->forget_observers();
     return {};
 }
 
