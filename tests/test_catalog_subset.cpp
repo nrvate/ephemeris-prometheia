@@ -12,10 +12,12 @@
 #include <unistd.h>
 
 #include <prometheia/catalog.hpp>
+#include <prometheia/cbor.hpp>
 
 #include <doctest/doctest.h>
 
 using namespace prometheia;
+using prometheia::CborValue;
 namespace fs = std::filesystem;
 
 namespace {
@@ -30,11 +32,12 @@ std::string slurp(const fs::path& path) {
     return std::string(std::istreambuf_iterator<char>(f), {});
 }
 
-int run_subset(const fs::path& list, const fs::path& out, std::string& err) {
+int run_subset(const fs::path& list, const fs::path& out, std::string& err,
+               const std::string& overlays = "") {
     const fs::path err_path = temp_path("stderr");
     const std::string cmd = std::string(SUBSET_BIN) + " " + PROMETHEIA_SOURCE_DIR +
-                            "/tests/data/sample-100.epm " + list.string() + " -o " + out.string() +
-                            " >/dev/null 2>" + err_path.string();
+                            "/tests/data/sample-100.epm " + overlays + list.string() + " -o " +
+                            out.string() + " >/dev/null 2>" + err_path.string();
     const int st = std::system(cmd.c_str());
     err = slurp(err_path);
     fs::remove(err_path);
@@ -101,4 +104,58 @@ TEST_CASE("catalog_subset_copies_exactly_the_listed_bodies") {
     fs::remove(list);
     fs::remove(out);
     fs::remove(again);
+}
+
+// A base and an overlay, as the engine stacks them: the overlay's record of
+// a body replaces the base's whole, names included, so a body renamed there
+// answers to its new name only and carries the overlay's orbit.
+TEST_CASE("catalog_subset_stacks_overlays_newest_wins") {
+    const std::string source = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
+    auto src = catalog::Reader::open(source);
+    REQUIRE(src.ok());
+    auto ceres = src.value().lookup(20000001);
+    REQUIRE(ceres.ok());
+    catalog::Record renamed = ceres.value();
+    renamed.a_au += 1e-6;
+
+    const fs::path overlay = temp_path("overlay.epm"), list = temp_path("stack.txt"),
+                   out = temp_path("stack.epm");
+    {
+        auto w = catalog::Writer::create(overlay.string(), catalog::WriterOptions{});
+        REQUIRE(w.ok());
+        REQUIRE(w.value().add(renamed, "1", "Ceres Renamed").ok());
+        REQUIRE(w.value().finish(CborValue::make_map()).ok());
+    }
+    std::string err;
+    write(list, "Ceres Renamed\nPallas\n");
+    REQUIRE(run_subset(list, out, err, overlay.string() + " ") == 0);
+    auto cut = catalog::Reader::open(out.string());
+    REQUIRE(cut.ok());
+    CHECK(cut.value().record_count() == 2);
+    auto got = cut.value().lookup(20000001);
+    REQUIRE(got.ok());
+    CHECK(got.value().a_au == renamed.a_au);
+    CHECK(catalog::record_names(cut.value().name_pool(), got.value()).name == "Ceres Renamed");
+
+    // --all folds the overlay into the base: every body, the newest record
+    // of each, in one catalog that needs nothing stacked.
+    REQUIRE(run_subset("--all", out, err, overlay.string() + " ") == 0);
+    auto folded = catalog::Reader::open(out.string());
+    REQUIRE(folded.ok());
+    CHECK(folded.value().record_count() == src.value().record_count());
+    auto f = folded.value().lookup(20000001);
+    REQUIRE(f.ok());
+    CHECK(f.value().a_au == renamed.a_au);
+    auto pallas = folded.value().lookup(20000002);
+    REQUIRE(pallas.ok());
+    CHECK(pallas.value().a_au == src.value().lookup(20000002).value().a_au);
+
+    // The base's old name no longer names anything.
+    write(list, "Ceres\n");
+    CHECK(run_subset(list, out, err, overlay.string() + " ") == 1);
+    CHECK(err.find("'Ceres' matches no body") != std::string::npos);
+
+    fs::remove(overlay);
+    fs::remove(list);
+    fs::remove(out);
 }

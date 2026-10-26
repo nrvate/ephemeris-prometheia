@@ -181,9 +181,15 @@ A client that ships a few named bodies, as Astrolog does, cuts them from a
 full catalog rather than shipping 1.5 million:
 
 ```sh
-./build/prometheia-catalog-subset sbdb-full-20260916.epm bodies.txt -o named.epm
+./build/prometheia-catalog-subset sbdb-20260916-refresh-20261025.epm bodies.txt -o named.epm
 ```
 
+- **Several catalogs stack** as the engine stacks them, the newest record
+  of a body winning whole, names included. A body renamed in an overlay
+  answers to its new name only. `--all` keeps every body, which is the
+  fold that brings a base up to date ("Freshness", tier 2a). Measured: a
+  cut of Geyagugv, Ceres, Chiron and Eris from base + refresh answers
+  bit-identically to loading the two catalogs directly.
 - **The list** has one body per line: its number or primary designation
   as SBDB gives it (`1`, `2060`, `2002 AW197`) or its name (`Ceres`),
   matched ASCII case-insensitively. `#` starts a comment.
@@ -288,10 +294,14 @@ orbit. (Overlay mechanics land with the engine, M4.)
 SBDB is a **living database, not a release train**: JPL's orbit-determination
 pipelines fold in new astrometry continuously (observations flow
 observatory → MPC daily batches → JPL; solutions refresh within hours for
-active objects), and SBDB exposes **no change feed, webhook, or
-modified-since filter** (verified against the filter docs 2026-09-16).
-Freshness is therefore *our* mechanism, and the tiered machinery below is
-**implemented in `prometheia-fetch`** as a first-class intended use case.
+active objects). SBDB has no change feed or webhook. It does filter on the
+orbit's solution date, which the 2026-09-16 reading of its documentation
+missed and Astrolog found on 2026-10-25: `sb-cdata` accepts
+`soln_date|GT|<date>`. Measured: 2,041 asteroids re-solved after
+2026-09-15; `name|DF` (has a name) gives 26,606; their `OR` gives 28,527,
+the sum less the overlap, so the server applies both. Freshness is still
+*our* mechanism, and the tiered machinery below is **implemented in
+`prometheia-fetch`**.
 
 **Three observing tiers, each sized to its patience:**
 
@@ -329,6 +339,47 @@ Freshness is therefore *our* mechanism, and the tiered machinery below is
    never crosses a comparison. The single-object `kind` is a subtype code
    (`an`/`au`/`cn`/`cu` = numbered/unnumbered asteroid/comet); the
    converter classifies by leading letter.
+
+2a. **Refresh since the base (any cadence, two requests):** one
+   full-precision sweep of every body re-solved since a date, OR named, OR
+   numbered after the base's highest number. A naming or renaming moves no
+   orbit, so neither the `orbit_id` diff nor a date filter alone would
+   bring the name; the `name|DF` term brings every named body every time.
+
+   ```sh
+   sbdb_fetch.py --out-dir sbdb-raw-refresh-20261025 \
+                 --refresh-since 2026-09-16 --numbered-after 895910
+   prometheia-convert sbdb-raw-refresh-20261025 -o sbdb-refresh-20261025.epm
+   # Fold it into the base: one up-to-date catalog, nothing to stack.
+   prometheia-catalog-subset sbdb-full-20260916.epm sbdb-refresh-20261025.epm \
+       --all -o sbdb-20260916-refresh-20261025.epm
+   ```
+
+   The fold keeps every body, the newest record of each. That is the data
+   brought up to date: the catalog consumers load and cut from, with no
+   overlay beside it. On 2026-10-25 it took 2.5 minutes and gave
+   `sbdb-20260916-refresh-20261025.epm`: 1,567,167 records, 136,742,821
+   bytes, sha256 `8a29feb9…a23f`. Ten bodies at three epochs answered
+   identically from it and from base + overlay loaded together. That
+   file replaced `sbdb-full-20260916.epm` on this machine. The 09-16
+   catalog can be rebuilt from `sbdb-raw-full/` with `prometheia-convert`,
+   and the overlay from `sbdb-raw-refresh-20261025/`. The next update is
+   a full pull (maintainer, 2026-10-25).
+
+   - `--numbered-after` is the base's highest asteroid number (895910 for
+     `sbdb-full-20260916`). Numbered asteroids are SPK-ID 20000000 + number,
+     so the range term catches a numbering whether or not the orbit was
+     re-solved. None had happened by 2026-10-25.
+   - The date is compared a day early, because SBDB keeps `soln_date` in
+     Pacific local time.
+   - Measured on 2026-10-25 against the 09-16 base: 28,527 asteroids and
+     3,969 comets in 10 s, two requests. The converter kept 30,840; the
+     skipped comets lack `a`/`e`, as in the base. The overlay is 2.95 MB.
+   - With it stacked on the base, 768325 answers to `Geyagugv` (named in
+     WGSBN Bulletin 6 #17, 2026-10-19), which the base alone does not.
+   - **Not caught:** deletions and merged designations. A body numbered
+     after the base also keeps its old provisional record in the base,
+     under the old SPK-ID, until the next base.
 
 3. **Consolidated base (weekly/monthly):** the full 33-page pull as the
    authoritative base catalog; tiers 1–2 produce small overlay catalogs

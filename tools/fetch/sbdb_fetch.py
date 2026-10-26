@@ -24,6 +24,14 @@ Modes:
                          See docs/INGESTION.md, "Freshness".
   --sb-class CEN,TJN   — hot-subset sweeps by SBDB orbit class (composable
                          with --fields / full-prec for tier-1 polling).
+  --refresh-since DATE — one full-precision sweep of every body whose orbit
+                         was re-solved since DATE (soln_date, a day earlier
+                         than asked: SBDB keeps it as Pacific local time),
+                         OR that has a proper name (namings and renamings
+                         move no orbit), OR, with --numbered-after N, that
+                         was numbered after N. Standard 21-column shards, so
+                         prometheia-convert makes the overlay .epm that keeps
+                         a base current. See docs/INGESTION.md, "Freshness".
   --covariance DES...  — on-demand full orbit covariance: one sbdb.api
                          request per designation (cov=mat), written as a
                          covariance overlay shard (the 20 standard columns
@@ -56,7 +64,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -113,7 +121,7 @@ def http_get_json(url: str, tries: int = 4) -> dict:
 
 
 def fetch_page(kind: str, fields: list[str], limit_from: int, page_size: int,
-               full_prec: bool, sb_class: str = "") -> dict:
+               full_prec: bool, sb_class: str = "", sb_cdata: str = "") -> dict:
     params = [
         ("fields", ",".join(fields)),
         ("sb-kind", kind),
@@ -122,6 +130,8 @@ def fetch_page(kind: str, fields: list[str], limit_from: int, page_size: int,
     ]
     if sb_class:
         params.append(("sb-class", sb_class))
+    if sb_cdata:
+        params.append(("sb-cdata", sb_cdata))
     if full_prec:
         params.append(("full-prec", "1"))
     url = f"{BASE_URL}?{urllib.parse.urlencode(params)}"
@@ -285,6 +295,7 @@ def sweep(args, fields: list[str], manifest_name: str, shard_prefix: str,
         "kinds": kinds,
         "page_size": args.page_size,
         "sb_class": args.sb_class,
+        "sb_cdata": getattr(args, "sb_cdata", ""),
         "pages": [],
     }
     if manifest_path.exists():
@@ -292,7 +303,8 @@ def sweep(args, fields: list[str], manifest_name: str, shard_prefix: str,
         if (old.get("schema") == manifest["schema"]
                 and old.get("fields") == fields
                 and old.get("page_size") == args.page_size
-                and old.get("sb_class") == args.sb_class):
+                and old.get("sb_class") == args.sb_class
+                and old.get("sb_cdata", "") == manifest["sb_cdata"]):
             manifest = old
         else:
             print("manifest mismatch; starting fresh", file=sys.stderr)
@@ -309,7 +321,7 @@ def sweep(args, fields: list[str], manifest_name: str, shard_prefix: str,
             if args.max_pages and pages_this_kind >= args.max_pages:
                 break
             doc = fetch_page(kind, fields, limit_from, args.page_size,
-                             args.full_prec, args.sb_class)
+                             args.full_prec, args.sb_class, manifest["sb_cdata"])
             rows = doc.get("data", [])
             total = int(doc.get("count", 0))
             print(f"kind {kind}: rows {limit_from}..{limit_from + len(rows)} "
@@ -353,6 +365,7 @@ def sweep(args, fields: list[str], manifest_name: str, shard_prefix: str,
             "kinds": ",".join(kinds),
             "page_size": str(args.page_size),
             "sb_class": args.sb_class,
+            "sb_cdata": manifest["sb_cdata"],
             "pages": str(len(manifest["pages"])),
             "count": str(max((p["total_reported"] for p in manifest["pages"]),
                              default=0)),
@@ -437,6 +450,18 @@ def delta(args) -> int:
     })
     print(f"delta complete: {len(delta_manifest['fetched'])} bodies -> {shard}")
     return 0
+
+
+def refresh_constraint(since: str, numbered_after: int) -> str:
+    """The sb-cdata of a refresh sweep. soln_date is compared a day early:
+    SBDB stores it as Pacific local time, so a solution made late on the
+    base's date (UTC) can carry the previous date."""
+    day = datetime.strptime(since, "%Y-%m-%d") - timedelta(days=1)
+    terms = [f"soln_date|GT|{day:%Y-%m-%d}", "name|DF"]
+    if numbered_after > 0:
+        # Numbered asteroids are SPK-ID 20000000 + number.
+        terms.append(f"spkid|RG|{20000000 + numbered_after + 1}|29999999")
+    return json.dumps({"OR": terms}, separators=(",", ":"))
 
 
 def covariance(args) -> int:
@@ -547,6 +572,12 @@ def main() -> int:
     ap.add_argument("--max-delta", type=int, default=1000,
                     help="refetch at most this many changed bodies per delta "
                          "run; beyond it, insist on a full pull (default 1000)")
+    ap.add_argument("--refresh-since", default="",
+                    help="YYYY-MM-DD: sweep bodies re-solved since then, every named "
+                         "body, and (with --numbered-after) every newly numbered one")
+    ap.add_argument("--numbered-after", type=int, default=0,
+                    help="the base catalog's highest asteroid number (895910 for "
+                         "sbdb-full-20260916): numbered bodies above it are refreshed")
     ap.add_argument("--covariance", nargs="*", default=[],
                     help="designations to fetch full orbit covariance for "
                          "(one sbdb.api request each)")
@@ -565,6 +596,10 @@ def main() -> int:
     if args.slim:
         sweep(args, SLIM_FIELDS, "manifest-slim.json", "slim-", provenance=False)
         return 0
+
+    args.sb_cdata = ""
+    if args.refresh_since:
+        args.sb_cdata = refresh_constraint(args.refresh_since, args.numbered_after)
 
     sweep(args, [f.strip() for f in args.fields.split(",") if f.strip()],
           "manifest.json", "part-", provenance=True)
