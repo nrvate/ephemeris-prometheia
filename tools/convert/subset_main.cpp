@@ -10,12 +10,13 @@
 // The list has one body per line: its number or primary designation as SBDB
 // gives it ("1", "2060", "2002 AW197") or its name ("Ceres"), matched ASCII
 // case-insensitively; '#' starts a comment. A line that matches no body, or
-// more than one, stops the cut and is named: nothing is guessed.
+// more than one, stops the cut and is named: nothing is guessed. With
+// --skip-missing such a line is named and left out, and the cut goes on.
 //
 // With --all and no list it keeps every body: a refresh overlay folded into
 // its base, written as one up-to-date catalog that needs nothing stacked.
 //
-// Usage: prometheia-catalog-subset <in.epm>... <list.txt> -o <out.epm>
+// Usage: prometheia-catalog-subset <in.epm>... <list.txt> -o <out.epm> [--skip-missing]
 //        prometheia-catalog-subset <in.epm>... --all -o <out.epm>
 #include <algorithm>
 #include <cctype>
@@ -54,7 +55,7 @@ std::string strip(const std::string& s) {
 
 void usage(const char* argv0) {
     std::fprintf(stderr,
-                 "usage: %s <in.epm>... <list.txt> -o <out.epm>\n"
+                 "usage: %s <in.epm>... <list.txt> -o <out.epm> [--skip-missing]\n"
                  "       %s <in.epm>... --all -o <out.epm>\n",
                  argv0, argv0);
 }
@@ -64,11 +65,13 @@ void usage(const char* argv0) {
 int main(int argc, char** argv) {
     std::vector<std::string> positional;
     std::string out_path;
-    bool all = false;
+    bool all = false, skip_missing = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--all") {
             all = true;
+        } else if (a == "--skip-missing") {
+            skip_missing = true;
         } else if (a == "-o" && i + 1 < argc) {
             out_path = argv[++i];
         } else if (a == "-h" || a == "--help") {
@@ -155,8 +158,8 @@ int main(int argc, char** argv) {
         }
     }
     for (const std::string& p : problems)
-        std::fprintf(stderr, "%s\n", p.c_str());
-    if (!problems.empty())
+        std::fprintf(stderr, "%s%s\n", p.c_str(), skip_missing ? " (skipped)" : "");
+    if (!problems.empty() && !skip_missing)
         return 1;
     if (wanted.empty()) {
         std::fprintf(stderr, "%s names no body\n", list_path.c_str());

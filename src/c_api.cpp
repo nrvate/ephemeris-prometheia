@@ -39,6 +39,9 @@ public:
 struct prometheia_engine {
     Engine engine;
     CallbackDeltaT delta_t;
+    // What prometheia_engine_ephemeris_span() last returned, so that its
+    // source string outlives the call.
+    mutable std::vector<Engine::EphemerisSpan> spans;
 };
 
 namespace {
@@ -302,7 +305,7 @@ prometheia_status prometheia_engine_open(const char* path, prometheia_engine** o
         auto e = Engine::open(path);
         if (!e)
             return report(err, e.error());
-        *out = new prometheia_engine{std::move(e).value(), {}};
+        *out = new prometheia_engine{std::move(e).value(), {}, {}};
         return succeed(err);
     });
 }
@@ -316,6 +319,33 @@ const char* prometheia_engine_source(const prometheia_engine* engine) {
         return "";
     const std::string_view s = engine->engine.source();
     return s.empty() ? "" : s.data();
+}
+
+int prometheia_engine_ephemeris_count(const prometheia_engine* engine) {
+    if (!engine)
+        return 0;
+    return int(engine->engine.ephemeris_spans().size());
+}
+
+prometheia_status prometheia_engine_ephemeris_span(const prometheia_engine* engine, int index,
+                                                   double* first_jd_tdb, double* last_jd_tdb,
+                                                   const char** source, prometheia_error* err) {
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!first_jd_tdb || !last_jd_tdb)
+        return argument(err, "span outputs are NULL");
+    return guarded(err, [&] {
+        engine->spans = engine->engine.ephemeris_spans();
+        if (index < 0 || size_t(index) >= engine->spans.size())
+            return argument(err,
+                            ("ephemeris index " + std::to_string(index) + " out of range").c_str());
+        const Engine::EphemerisSpan& s = engine->spans[size_t(index)];
+        *first_jd_tdb = s.first_jd_tdb;
+        *last_jd_tdb = s.last_jd_tdb;
+        if (source)
+            *source = s.source.c_str();
+        return succeed(err);
+    });
 }
 
 prometheia_status prometheia_engine_add_catalog(prometheia_engine* engine, const char* path,

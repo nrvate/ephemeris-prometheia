@@ -194,7 +194,9 @@ full catalog rather than shipping 1.5 million:
   as SBDB gives it (`1`, `2060`, `2002 AW197`) or its name (`Ceres`),
   matched ASCII case-insensitively. `#` starts a comment.
 - **Nothing is guessed.** A line that matches no body, or more than one,
-  stops the cut and is named with its line number.
+  stops the cut and is named with its line number. With `--skip-missing`,
+  such a line is named, marked `(skipped)` and left out, and the cut goes
+  on. That is for a list of thousands cut from a catalog that has moved.
 - **Each record is copied as the source has it.** The metadata is the
   source's, plus `subset_of` and `subset_of_records`. No time or tool
   version is recorded, so the same catalog and list always give the same

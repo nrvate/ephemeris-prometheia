@@ -100,6 +100,22 @@ TEST_CASE("catalog_subset_copies_exactly_the_listed_bodies") {
     write(list, "Ceres\nNo Such Body\n");
     CHECK(run_subset(list, again, err) == 1);
     CHECK(err.find(":2: 'No Such Body' matches no body") != std::string::npos);
+    // --skip-missing names it and cuts the rest.
+    {
+        const fs::path err_path = temp_path("stderr-skip");
+        const std::string cmd = std::string(SUBSET_BIN) + " " + PROMETHEIA_SOURCE_DIR +
+                                "/tests/data/sample-100.epm " + list.string() + " -o " +
+                                again.string() + " --skip-missing >/dev/null 2>" +
+                                err_path.string();
+        const int st = std::system(cmd.c_str());
+        CHECK((WIFEXITED(st) && WEXITSTATUS(st) == 0));
+        CHECK(slurp(err_path).find("'No Such Body' matches no body (skipped)") !=
+              std::string::npos);
+        fs::remove(err_path);
+        auto skipped = catalog::Reader::open(again.string());
+        REQUIRE(skipped.ok());
+        CHECK(skipped.value().record_count() == 1);
+    }
 
     fs::remove(list);
     fs::remove(out);

@@ -218,6 +218,23 @@ PROMETHEIA_API void prometheia_engine_close(prometheia_engine* engine);
 PROMETHEIA_API const char* prometheia_engine_source(const prometheia_engine* engine);
 
 /*
+ * The planetary ephemeris files in the order they answer: how many (0 for
+ * NULL), and each one's span as JD (TDB), first and last, with its
+ * description. A cut DE file covers whole 32-day records, so its span can
+ * run a few days past the years in its name; this is the span it answers.
+ * *source, when asked for, is valid until the next call of this function or
+ * prometheia_engine_add_ephemeris(). An index out of range is
+ * PROMETHEIA_ERROR_ARGUMENT. Added after library 0.7.3; the ABI version is
+ * unchanged, as no layout changed.
+ */
+PROMETHEIA_API int prometheia_engine_ephemeris_count(const prometheia_engine* engine);
+PROMETHEIA_API prometheia_status prometheia_engine_ephemeris_span(const prometheia_engine* engine,
+                                                                  int index, double* first_jd_tdb,
+                                                                  double* last_jd_tdb,
+                                                                  const char** source,
+                                                                  prometheia_error* err);
+
+/*
  * Adds a small-body catalog (an EPM1 container). Newest catalog wins for
  * bodies and names several catalogs carry. Invalidates the source
  * strings of earlier results.

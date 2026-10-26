@@ -155,6 +155,42 @@ TEST_CASE("c_api_open_errors") {
     CHECK(std::strlen(err.message) == PROMETHEIA_ERROR_MESSAGE_SIZE - 1);
 }
 
+// prometheia_engine_ephemeris_count/_span: the engine's ephemeris_spans(),
+// in consulting order, through the C interface.
+TEST_CASE("c_api_ephemeris_spans_match_engine") {
+    TempFile tf("capi-spans");
+    synth::write_linear_spk(tf.path);
+    auto cpp = Engine::open(tf.path.string());
+    REQUIRE(cpp.ok());
+    REQUIRE(cpp.value().add_ephemeris(tf.path.string()).ok());
+    CHandle c;
+    prometheia_error err;
+    REQUIRE(prometheia_engine_open(tf.path.c_str(), &c.e, &err) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_add_ephemeris(c.e, tf.path.c_str(), &err) == PROMETHEIA_OK);
+    const auto want = cpp.value().ephemeris_spans();
+    REQUIRE(want.size() == 2);
+    CHECK(prometheia_engine_ephemeris_count(c.e) == 2);
+    for (int i = 0; i < 2; ++i) {
+        double first = 0.0, last = 0.0;
+        const char* what = nullptr;
+        REQUIRE(prometheia_engine_ephemeris_span(c.e, i, &first, &last, &what, &err) ==
+                PROMETHEIA_OK);
+        CHECK(first == want[size_t(i)].first_jd_tdb);
+        CHECK(last == want[size_t(i)].last_jd_tdb);
+        CHECK(std::string(what) == want[size_t(i)].source);
+    }
+    double a = 0.0, b = 0.0;
+    CHECK(prometheia_engine_ephemeris_span(c.e, 2, &a, &b, nullptr, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_engine_ephemeris_span(c.e, -1, &a, &b, nullptr, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_engine_ephemeris_span(c.e, 0, nullptr, &b, nullptr, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_engine_ephemeris_count(nullptr) == 0);
+    CHECK(prometheia_engine_ephemeris_span(nullptr, 0, &a, &b, nullptr, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+}
+
 TEST_CASE("c_api_matches_engine_bit_for_bit") {
     TempFile tf("capi-bits");
     synth::write_linear_spk(tf.path);

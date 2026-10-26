@@ -54,6 +54,17 @@ prometheia_calc(eph, PROMETHEIA_EARTH, jd_tt, &opts, &r, &err);
 prometheia_engine_close(eph);
 ```
 
+**Which years the loaded files answer** (added after 0.7.3; ABI version
+unchanged, as no layout changed). `prometheia_engine_ephemeris_count` and
+`prometheia_engine_ephemeris_span(engine, i, &first_jd_tdb, &last_jd_tdb,
+&source, &err)` give each planetary file in the order it answers, with the
+span it covers. A cut DE file covers whole 32-day records, so its span can
+start or end a few days outside the years in its name. DE440 with
+`linux_p1000p1550.441` behind it reports JD 2287184.5 .. 2688976.5 and
+2086288.5 .. 2287184.5: the cut starts 19 days before 1000-01-01. The
+`source` string lives until the next call of `_span` or
+`prometheia_engine_add_ephemeris()`.
+
 To build the library inside another project (a git submodule, plain make,
 no CMake), see [EMBEDDING.md](EMBEDDING.md).
 

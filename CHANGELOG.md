@@ -13,6 +13,13 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **C API: which years the loaded files answer**
+  ([docs/C_API.md](docs/C_API.md)): `prometheia_engine_ephemeris_count` and
+  `prometheia_engine_ephemeris_span`, asked for by Astrolog for their
+  Ephemeris Settings dialog. The ABI version is unchanged, as no layout
+  changed.
+- **`prometheia-catalog-subset --skip-missing`** names a list line that
+  matches nothing and goes on.
 - **Fixed: GCC 13 builds** (found by Astrolog on Ubuntu 24.04):
   - `src/frames.cpp` used `uint8_t` without `<cstdint>`, which GCC 13's
     libstdc++ no longer includes transitively.
