@@ -14,7 +14,7 @@ This is a release-time ingestion step (docs/INGESTION.md): run it before
 tagging, rebuild, run the tests, and commit the regenerated tables.
 
 Network etiquette (docs/DESIGN.md): strictly sequential requests, a pause
-between them, an identifying User-Agent, and backoff-only retries.
+between them, a generic User-Agent, and backoff-only retries.
 
 Usage:
   gen_earth_orientation.py --fetch --raw-dir eop-raw        # download + generate
@@ -32,8 +32,7 @@ import urllib.request
 
 BASE_URL = "https://maia.usno.navy.mil/ser7/"
 SOURCES = ["historic_deltat.data", "deltat.data", "tai-utc.dat"]
-USER_AGENT = ("prometheia-gen/0.1.0 "
-              "(Ephemeris Prometheia release data refresh; sequential, 3 small files)")
+USER_AGENT = "curl/8.5.0"  # generic: nothing that identifies us (CLAUDE.md)
 REQUEST_PAUSE_S = 3.0
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

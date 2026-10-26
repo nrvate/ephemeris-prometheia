@@ -10,7 +10,7 @@ perturber kernel"). None is committed -- DE441 is ~2.6 GB, the full kernel
 against pinned SHA-256s:
 
   * strictly sequential, one file at a time, a pause between requests;
-  * an identifying User-Agent;
+  * a generic User-Agent, nothing that identifies us;
   * streamed to `<file>.part` and renamed only when whole, hashing as it
     goes, so an interrupted pull never leaves a plausible-looking file;
   * retries only on transport errors and 5xx, with backoff (a 4xx means the
@@ -57,8 +57,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetchlog  # noqa: E402
 
-USER_AGENT = ("prometheia-fetch/0.1.0 (Ephemeris Prometheia; JPL ephemeris files; "
-              "strictly sequential, one file at a time)")
+USER_AGENT = "curl/8.5.0"  # generic: nothing that identifies us (CLAUDE.md)
 BASE = "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/"
 # A set's files live under BASE + set name, unless named here.
 SET_URL = {"sb441": "https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/"}

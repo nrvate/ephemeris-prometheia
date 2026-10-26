@@ -29,7 +29,7 @@ import urllib.request
 URL = "https://raw.githubusercontent.com/liberfa/erfa/v2.0.1/src/dtdb.c"
 NAME = "dtdb.c"
 SHA256 = "228bd7c7c1c88dda44c29a076f289c968f64d77a2dc389138b03ab5d1d442105"
-USER_AGENT = "prometheia-gen/0.1.0 (Ephemeris Prometheia; one-time fetch of ERFA dtdb.c)"
+USER_AGENT = "curl/8.5.0"  # generic: nothing that identifies us (CLAUDE.md)
 # The first row of each power of t (Julian millennia), 0-based, from dtdb.c's
 # evaluation loops (474 T^0 terms, 205 T^1, 85 T^2, 20 T^3, 3 T^4).
 GROUPS = [0, 474, 679, 764, 784, 787]

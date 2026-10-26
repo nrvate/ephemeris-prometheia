@@ -45,8 +45,8 @@ Server etiquette (deliberate policy — do not "optimize" away):
     threads, no connection pools, no pipelining.
   - --delay (default 2 s) sleeps between requests, including per-object
     delta fetches.
-  - The User-Agent identifies this tool so JPL's operators can see what is
-    polling them and at what rate.
+  - The User-Agent is generic and says nothing about us (CLAUDE.md); the
+    pacing is what keeps us polite.
   - Retries back off exponentially (5, 10, 20, 40 s) and never speed up.
   - Development pulls stay tiny (--page-size 100 --max-pages 1); full
     pulls are deliberate, announced runs. Never a build side effect.
@@ -93,9 +93,7 @@ COV_LABELS = ["e", "q", "tp", "node", "peri", "i"]
 COV_FIELDS = (["cov_epoch", "cov_e", "cov_q", "cov_tp", "cov_om", "cov_w", "cov_i"] +
               [f"cov_{i}{j}" for i in range(6) for j in range(i, 6)])
 
-USER_AGENT = ("prometheia-fetch/0.1.0 "
-              "(Ephemeris Prometheia catalog build; strictly sequential, "
-              "rate-limited bulk pull)")
+USER_AGENT = "curl/8.5.0"  # generic: nothing that identifies us (CLAUDE.md)
 
 
 def utc_now() -> str:

@@ -32,7 +32,7 @@ URL = "https://ndownloader.figshare.com/files/26513569"
 ZIP_NAME = "rspa20200776_si_002.zip"
 ZIP_SHA256 = "1a649a163aa0e0e91a177a8b0dcd280aa0afadba715e9467cc030a0586d2cf37"
 MEMBER = "Table-S15.2020.txt"
-USER_AGENT = "prometheia-gen/0.1.0 (Ephemeris Prometheia; one-time fetch of a CC BY supplement)"
+USER_AGENT = "curl/8.5.0"  # generic: nothing that identifies us (CLAUDE.md)
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(REPO, "src", "delta_t_smh_table.inc")

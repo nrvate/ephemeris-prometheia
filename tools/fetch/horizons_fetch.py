@@ -3,7 +3,7 @@
 """Fetch the M5 JPL Horizons verification corpus (raw responses).
 
 Every request the corpus needs is declared below. The tool runs them strictly
-sequentially, with a pause between requests, an identifying User-Agent,
+sequentially, with a pause between requests, a generic User-Agent,
 and backoff-only retries (docs/DESIGN.md, server etiquette). Responses are
 cached verbatim under --raw-dir (gitignored), one JSON file per request,
 together with a manifest of URL, retrieval time and SHA-256. Re-running
@@ -31,8 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetchlog  # noqa: E402  (one timestamped line per GET)
 
 API = "https://ssd.jpl.nasa.gov/api/horizons.api"
-USER_AGENT = ("prometheia-fetch/0.1.0 "
-              "(Ephemeris Prometheia M5 verification corpus; sequential, ~40 requests)")
+USER_AGENT = "curl/8.5.0"  # generic: nothing that identifies us (CLAUDE.md)
 PAUSE_S = 5.0
 
 # --- Epochs (JD) --------------------------------------------------------------

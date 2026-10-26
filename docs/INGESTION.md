@@ -58,7 +58,7 @@ GET https://ssd-api.jpl.nasa.gov/sbdb_query.api
 Headers on the wire:
 
 ```
-User-Agent: prometheia-fetch/0.1.0 (Ephemeris Prometheia catalog build; strictly sequential, rate-limited bulk pull)
+User-Agent: curl/8.5.0
 Accept-Encoding: identity
 Connection: close
 ```
@@ -109,7 +109,7 @@ Per page, one file `part-<kind>-<limit_from:09d>.tsv`:
 ### Etiquette (binding; full policy in DESIGN.md)
 
 Strictly sequential — one request in flight, no threads or pools. ≥2 s
-between pages (`--delay`), more for big pulls. Identifying User-Agent.
+between pages (`--delay`), more for big pulls. A generic User-Agent, nothing that identifies us.
 Backoff-only retries. Development pulls stay tiny (`--page-size 100
 --max-pages 1`); a full-catalog pull (~34 asteroid pages + 1 comet page ≈
 350 MB, 5–10 min) is a deliberate, announced run, never a build side
@@ -460,7 +460,7 @@ the committed tables differ from the sources, so a release checklist can
 gate on it. The retrieval date alone never counts as a change.
 
 The fetch follows the same etiquette as SBDB: one request at a time, a
-3 s pause, a `prometheia-gen/<version>` User-Agent, and backoff-only
+3 s pause, a generic User-Agent, and backoff-only
 retries. `eop-raw/` is gitignored.
 
 **What a stale table costs:** ΔT beyond the last sample is extrapolated

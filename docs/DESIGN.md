@@ -112,8 +112,9 @@ tool and script in this repo, and for anyone running them:
   connection pools. `sbdb_fetch.py` enforces this structurally.
 - **Rate-limited:** ≥2 s between page requests (`--delay`), and the more
   patient the bulk pull, the larger the delay should be.
-- **Identify yourself:** the fetcher sends a descriptive User-Agent so
-  operators can see what is polling and why.
+- **User-Agent:** generic (`curl/8.5.0`), naming nothing about us.
+  Superseded 2026-10-26: the fetchers had sent a descriptive one naming
+  the project; the maintainer ruled that requests leak nothing about us.
 - **Back off on errors** (5, 10, 20, 40 s) — retries never speed up.
 - **Small pages by default** in development; full-catalog pulls are
   deliberate, announced runs, not side effects of a build.

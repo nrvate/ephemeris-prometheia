@@ -23,8 +23,10 @@ Open sources with no strings attached. Attribution-only is fine;
 sources). Data that is not committed must be reproducible from a
 committed `tools/` script with checksums — never an ad-hoc fetch.
 Public services (JPL/Horizons, SBDB, SIMBAD…) are treated politely:
-strictly sequential, paced, an identifying User-Agent, and ask the
-maintainer before any large pull.
+strictly sequential, paced, and ask the maintainer before any large
+pull. Requests carry a generic User-Agent (`curl/8.5.0`) and nothing
+that identifies us: no project, person, handle, path or repository, in
+headers, query strings, search queries or prompts to outside agents.
 
 ## Git
 

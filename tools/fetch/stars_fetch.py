@@ -3,7 +3,7 @@
 """Fetch the source data of the fixed-star catalog (docs/STARS.md).
 
 Every source is declared below with its terms. The tool fetches strictly
-sequentially, with a pause between requests, an identifying User-Agent and
+sequentially, with a pause between requests, a generic User-Agent and
 backoff-only retries. Files are cached verbatim under --raw-dir (gitignored),
 with a manifest of URL, retrieval time, size and SHA-256. A cached file is
 not fetched again; --force refetches.
@@ -36,8 +36,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetchlog  # noqa: E402  (one timestamped line per GET)
 
-USER_AGENT = ("prometheia-fetch/0.1.0 "
-              "(Ephemeris Prometheia fixed-star catalog; sequential, 26 requests)")
+USER_AGENT = "curl/8.5.0"  # generic: nothing that identifies us (CLAUDE.md)
 PAUSE_S = 5.0
 
 CDS = "https://cdsarc.cds.unistra.fr/ftp/"
