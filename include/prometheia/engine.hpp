@@ -35,6 +35,7 @@
 #ifndef PROMETHEIA_ENGINE_HPP
 #define PROMETHEIA_ENGINE_HPP
 
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>

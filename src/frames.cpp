@@ -7,9 +7,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <vector>
 
 // The floating-point modes the library's numbers cannot survive, refused at
@@ -922,7 +924,9 @@ void NutationInterpolator::at(double jd_tt, double& dpsi, double& deps) {
         pair(index + 1); // walking forward
     else if (miss_a)
         pair(index - 1); // walking backward
-    double a[6], b[6];
+    // Zeroed only for GCC 13's -Wmaybe-uninitialized, which cannot see the
+    // copies below fill every element; the values are the copies'.
+    double a[6] = {}, b[6] = {};
     std::copy(node(index).n, node(index).n + 6, a);
     std::copy(node(index + 1).n, node(index + 1).n + 6, b);
     const double h = kNodeSpacingDays;

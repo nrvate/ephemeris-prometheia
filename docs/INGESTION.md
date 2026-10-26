@@ -377,7 +377,10 @@ the sum less the overlap, so the server applies both. Freshness is still
      skipped comets lack `a`/`e`, as in the base. The overlay is 2.95 MB.
    - With it stacked on the base, 768325 answers to `Geyagugv` (named in
      WGSBN Bulletin 6 #17, 2026-10-19), which the base alone does not.
-   - **Not caught:** deletions and merged designations. A body numbered
+   - **Not caught:** deletions and merged designations. Nor are orbits
+     that are the MPC's (`MPC:mpo`, orbit ids like `E2026U79`): SBDB gives
+     them a null `soln_date`, so no date can select them. Astrolog found
+     16 at condition code ≤ 4, among them 2014 FG62 and 2026 BY16. A body numbered
      after the base also keeps its old provisional record in the base,
      under the old SPK-ID, until the next base.
 

@@ -9,8 +9,11 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <new>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "prometheia/engine.hpp"

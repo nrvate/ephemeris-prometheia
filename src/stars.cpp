@@ -8,7 +8,12 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
+#include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "prometheia/frames.hpp"
 

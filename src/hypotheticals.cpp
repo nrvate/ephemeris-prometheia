@@ -7,11 +7,15 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <locale>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
+#include <vector>
 #include <version>
 
 namespace prometheia::hypotheticals {

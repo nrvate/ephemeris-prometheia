@@ -13,6 +13,13 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Fixed: GCC 13 builds** (found by Astrolog on Ubuntu 24.04):
+  - `src/frames.cpp` used `uint8_t` without `<cstdint>`, which GCC 13's
+    libstdc++ no longer includes transitively.
+  - Every standard header the library uses is now included directly.
+  - Also fixed: a GCC 13 `-Werror` false positive and a redundant move.
+  - All 14 sources compile with GCC 13.3 `-Wall -Wextra -Werror`, with
+    identical answers.
 - **Embedding without CMake** ([docs/EMBEDDING.md](docs/EMBEDDING.md)):
   - `embed/sources.txt` (contract 1) lists the library's sources, and
     CMake builds from the same list.

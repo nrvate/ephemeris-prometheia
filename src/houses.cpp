@@ -11,7 +11,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace prometheia::houses {
 

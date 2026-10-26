@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include <cstddef>
+#include <functional>
 #include <prometheia/catalog.hpp>
 
 #include <cmath>
@@ -6,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -466,7 +469,7 @@ Result<Reader> Reader::open(const std::string& path) {
         return Result<Reader>(e.error());
     auto meta = cbor_decode(meta_bytes.data(), meta_bytes.size());
     if (!meta)
-        return Result<Reader>(std::move(meta.error()));
+        return Result<Reader>(meta.error());
     r.metadata_ = std::move(meta.value());
 
     r.entries_.resize(size_t(chunk_count));

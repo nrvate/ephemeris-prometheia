@@ -8,6 +8,7 @@
 #ifndef PROMETHEIA_FORCES_HPP
 #define PROMETHEIA_FORCES_HPP
 
+#include <cmath>
 #include <cstddef>
 
 #include <vector>

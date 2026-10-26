@@ -9,6 +9,11 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <ios>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "prometheia/chebyshev.hpp"
 

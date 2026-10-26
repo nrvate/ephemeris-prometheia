@@ -162,6 +162,9 @@ this machine, which is too long for the gate:
 ## Platforms
 
 - **Linux** (GCC 11.4, Clang 14, x86-64): built and measured as above.
+- **Linux, GCC 13.3** (Ubuntu 24.04, in a container, 2026-10-25): all 14
+  sources compile with `-Wall -Wextra -Werror`. `ephem` built through
+  `prometheia.mk` gives the same 41 CSV lines as our GCC 11 build.
 - **Windows (MSVC) and macOS (Apple clang)**: **never built.** A
   read-through audit and a strict-mode MinGW compile found these blockers,
   and each has been removed:
@@ -175,11 +178,20 @@ this machine, which is too long for the gate:
     advertised, a classic-locale stream reads the number.
   - Catalog offsets through a 32-bit `long` on Windows. The catalog reader
     uses `_fseeki64` and `_ftelli64` there.
-  - Headers reached only transitively (`<cstdint>`).
+  - Headers reached only transitively. The first pass added `<cstdint>`
+    where the audit named it and missed `src/frames.cpp`. GCC 13's
+    libstdc++ no longer pulls `<cstdint>` in, so Astrolog's Ubuntu 24.04
+    build failed there. `clang-include-cleaner` then added every standard
+    header the library uses but did not include directly: 51 lines in 18
+    files.
 
-  The two fallbacks are built and checked on Linux (above). The first real
-  MSVC or Apple build is still to come; until it has run, nothing in this
-  document is claimed for either platform. `CMakeLists.txt` passes
+  The two fallbacks are built and checked on Linux (above).
+  - **MSVC 2022** compiled all 14 sources with no errors (Astrolog's
+    Windows job, 2026-10-25): `cl /std:c++20 /permissive- /Zc:__cplusplus
+    /EHsc /MD /O2 /W3`, against vcpkg's `zstd:x64-windows-static-md`. The
+    only warnings were C4996, the CRT's deprecation of `fopen` and
+    `strncpy`. Nothing has been run there yet, so no number is claimed.
+  - **Apple clang** has not been built. `CMakeLists.txt` passes
   GCC-style flags and needs pkg-config for zstd, so on Windows the source
   list is the way in, not CMake.
 - **Across platforms**, `sin`, `cos`, `atan2` and the like come from each

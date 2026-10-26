@@ -20,6 +20,7 @@
 #ifndef PROMETHEIA_SPK_HPP
 #define PROMETHEIA_SPK_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <string>

@@ -10,6 +10,7 @@
 #ifndef PROMETHEIA_CBOR_HPP
 #define PROMETHEIA_CBOR_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
