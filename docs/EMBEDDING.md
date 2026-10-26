@@ -190,8 +190,20 @@ this machine, which is too long for the gate:
     Windows job, 2026-10-25): `cl /std:c++20 /permissive- /Zc:__cplusplus
     /EHsc /MD /O2 /W3`, against vcpkg's `zstd:x64-windows-static-md`. The
     only warnings were C4996, the CRT's deprecation of `fopen` and
-    `strncpy`. Nothing has been run there yet, so no number is claimed.
-  - **Apple clang** has not been built. `CMakeLists.txt` passes
+    `strncpy`.
+  - **Run on Windows** (Astrolog's release dry run 6, 2026-10-25, our
+    `624c96d`, Qt 6.8.3 on a GitHub Windows runner), against the shipped
+    data: the 1900–2100 DE441 cut, a 13,808-body catalog, and the 1900–2100
+    cut of sb441-n16.
+    - Their suite passed 6,469 checks with none failing.
+    - Their 63 oracle lines for the Prometheia legs are identical to the
+      same legs on Linux (GCC 11), printed to 0.0001″. The legs cover
+      bodies at three epochs, topocentric, heliocentric, sidereal, nodes and
+      apogees under several masks, a catalog body, a star, and UT1.
+    - That is agreement at four decimals of an arcsecond, not a
+      bit-for-bit comparison of the doubles, which nobody has made.
+  - **Apple clang, arm64**: Astrolog's macOS leg in the same run was green.
+    No numbers from it have been compared here. `CMakeLists.txt` passes
   GCC-style flags and needs pkg-config for zstd, so on Windows the source
   list is the way in, not CMake.
 - **Across platforms**, `sin`, `cos`, `atan2` and the like come from each
