@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""prometheia.swe over protocol v4 against a real prometheiad, held to the
-stdio transport's answers on the same DE440: the two must be identical,
-since the same engine answers both.
+"""prometheia.Client over protocol v4 against a real prometheiad, held to the
+stdio transport's answers on the same DE440: the two must agree on every field
+the binary answer carries, since the same engine answers both.
 
 Skips without build/prometheiad, build/prometheia-json and
 ephe/linux_p1550p2650.440. About a second."""
@@ -13,12 +13,33 @@ import time
 import unittest
 
 import prometheia
-from prometheia import swe
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 DAEMON = os.path.join(REPO, "build", "prometheiad")
 JSON = os.environ.get("PROMETHEIA_JSON", os.path.join(REPO, "build", "prometheia-json"))
 DE440 = os.environ.get("PROMETHEIA_DE440", os.path.join(REPO, "ephe", "linux_p1550p2650.440"))
+
+
+def same_rows(binary, stdio):
+    """Every row of the binary answer equals the stdio row on the binary row's keys."""
+    if len(binary["results"]) != len(stdio["results"]):
+        return False
+    for rb, rs in zip(binary["results"], stdio["results"]):
+        if rb.get("error") != rs.get("error") or len(rb.get("rows", [])) != len(rs.get("rows", [])):
+            return False
+        for xb, xs in zip(rb.get("rows", []), rs.get("rows", [])):
+            if not subset(xb, xs):
+                return False
+    return True
+
+
+def subset(a, b):
+    if isinstance(a, dict):
+        # The time block differs in spelling (jd_ut1 here, jd_tt and utc there); ΔT is shared.
+        return all(k in b and subset(v, b[k]) for k, v in a.items()
+                   if k != "time") and ("delta_t_s" not in a.get("time", {}) or
+                                        a["time"]["delta_t_s"] == b["time"].get("delta_t_s"))
+    return same(a, b)
 
 
 def same(a, b):
@@ -64,54 +85,58 @@ class Binary(unittest.TestCase):
         cls.daemon.wait()
 
     def both(self, fn):
-        prometheia._default = self.binary
-        a = fn()
-        prometheia._default = self.stdio
-        b = fn()
-        prometheia._default = None
-        return a, b
+        return fn(self.binary), fn(self.stdio)
 
     def test_identical_to_stdio(self):
-        swe.set_topo(8.55, 47.37, 500.0)
-        swe.set_sid_mode(swe.SIDM_LAHIRI)
-        calls = [lambda b=b: swe.calc_ut(2451545.0, b) for b in
-                 (swe.SUN, swe.MOON, swe.MERCURY, swe.MARS, swe.PLUTO, swe.MEAN_NODE,
-                  swe.TRUE_NODE, swe.MEAN_APOG, swe.OSCU_APOG, swe.INTP_APOG, swe.INTP_PERG)]
-        calls += [
-            lambda: swe.calc(2461300.5, swe.VENUS, swe.FLG_SPEED | swe.FLG_EQUATORIAL
-                             | swe.FLG_J2000),
-            lambda: swe.calc_ut(2451545.0, swe.MOON, swe.FLG_SPEED | swe.FLG_TOPOCTR),
-            lambda: swe.calc_ut(2451545.0, swe.MARS, swe.FLG_SPEED | swe.FLG_HELCTR),
-            lambda: swe.calc_ut(2451545.0, swe.JUPITER, swe.FLG_SPEED | swe.FLG_SIDEREAL),
-            lambda: swe.calc_ut(2451545.0, swe.SATURN, swe.FLG_TRUEPOS | swe.FLG_NOABERR
-                                | swe.FLG_NOGDEFL | swe.FLG_XYZ),
-            lambda: swe.get_ayanamsa_ut(2451545.0),
-            lambda: swe.get_ayanamsa_ex_ut(2451545.0, 0),
-            lambda: swe.deltat(2451545.0),
-            lambda: swe.sidtime(2451545.0),
-            lambda: swe.fixstar2_ut("Spica", 2451545.0),
-            lambda: swe.nod_aps_ut(2451545.0, swe.MARS, swe.NODBIT_MEAN),
-        ]
-        calls += [lambda h=h: swe.houses(2451545.0, 47.37, 8.55, h.encode())
+        t = {"jd_ut1": 2451545.0}
+        site = {"lon_deg": 8.55, "lat_deg": 47.37, "height_m": 500.0}
+        bodies = ["Sun", "Moon", "Mercury", "Mars", "Pluto", "mean node", "true node",
+                  "Lilith", "true Lilith", "natural apogee", "natural perigee"]
+        calls = [lambda c: c.positions(time=t, objects=bodies),
+                 lambda c: c.positions(time=t, objects=bodies, zodiac="lahiri"),
+                 lambda c: c.positions(time={"jd_tt": 2461300.5}, objects=["Venus"],
+                                       coordinates="equatorial", frame="j2000"),
+                 lambda c: c.positions(time=t, objects=["Moon"], observer="topocentric",
+                                       site=site),
+                 lambda c: c.positions(time=t, objects=["Mars"], observer="heliocentric"),
+                 lambda c: c.positions(time=t, objects=["Saturn"], corrections=[], observer="heliocentric",
+                                       coordinates="ecliptic"),
+                 lambda c: c.positions(time=t, objects=[{"star": "Spica"}]),
+                 lambda c: c.positions(time=t, objects=[
+                     {"point": "ascending-node", "of": "Mars", "method": "mean"}]),
+                 lambda c: c.houses(time=t, site={"lon_deg": 18.4, "lat_deg": -33.9},
+                                    systems=["W"], zodiac="lahiri"),
+                 lambda c: c.houses(time=t, site={"lon_deg": 0.0, "lat_deg": 70.0},
+                                    systems=["R"])]
+        # One system per call: v4 bounds the objects in a request (WELCOME), 16 points each.
+        calls += [lambda c, h=h: c.houses(time=t, site=site, zodiac="lahiri", systems=[h])
                   for h in "PKORCAWBMXT"]
-        calls += [lambda: swe.houses_ex(2451545.0, -33.9, 18.4, b"W", swe.FLG_SIDEREAL),
-                  lambda: swe.houses(2451545.0, 70.0, 0.0, b"R")]
         for fn in calls:
-            a, b = self.both(fn)
-            self.assertTrue(same(a, b), (a, b))
+            try:
+                a, b = self.both(fn)
+            except prometheia.Error as e:
+                self.fail("a call both transports should answer was refused: %s" % e)
+            self.assertTrue(same_rows(a, b), (a, b))
 
     def test_refusals(self):
-        prometheia._default = self.binary
-        with self.assertRaises(swe.Error) as e:
-            swe.houses(2451545.0, 70.0, 0.0, b"P")
-        self.assertEqual(e.exception.code, "undefined-at-latitude")
-        self.assertIn("polar circle", str(e.exception))
-        with self.assertRaises(swe.Error) as e:
-            swe.utc_to_jd(2000, 1, 1, 12, 0, 0.0)  # a clock time: not in v4 yet
+        t = {"jd_ut1": 2451545.0}
+        polar = {"lon_deg": 0.0, "lat_deg": 70.0}
+        for c in (self.binary, self.stdio):
+            err = c.houses(time=t, site=polar, systems=["placidus"])["results"][0]["error"]
+            self.assertEqual(err["code"], "undefined-at-latitude")
+            self.assertIn("polar circle", err["message"])
+            err = c.positions(time=t, objects=[{"asteroid": "2060"}])["results"][0]["error"]
+            self.assertTrue(err["message"])  # no catalog on this server: refused, not zeros
+        err = self.stdio.positions(time=t, objects=["Chiron"])["results"][0]["error"]
+        self.assertIn("catalog", err["message"])
+        with self.assertRaises(prometheia.Error) as e:
+            self.binary.convert_time(time="2000-01-01T12:00:00Z")  # a clock time: not in v4 yet
         self.assertIn("leap-second", str(e.exception))
-        with self.assertRaises(swe.Error):
-            swe.calc_ut(2451545.0, swe.CHIRON)  # no catalog on this server
-        prometheia._default = None
+
+    def test_batch_and_errors_carry_the_servers_sentence(self):
+        out = self.stdio.positions(time={"jd_ut1": 2451545.0}, objects=["Sun", "Moon", "Mars"])
+        self.assertEqual([r["object"]["resolved"] for r in out["results"]],
+                         ["Sun", "Moon", "Mars"])
 
     def test_capabilities(self):
         w = self.binary.capabilities()

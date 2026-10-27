@@ -1,12 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Ephemeris Prometheia from Python, with no C extension (docs/PYTHON.md).
 
-Two ways in:
-
-- ``prometheia.swe``: shaped like pyswisseph, so chart code migrates by
-  changing its import (``import prometheia.swe as swe``).
-- ``prometheia.Client``: the JSON tools as they are (docs/JSON_API.md), a
-  whole chart or a series in one call, every answer with its provenance.
+``prometheia.Client`` gives the JSON tools as they are (docs/JSON_API.md), a
+whole chart or a series in one call, every answer with its provenance.
 
 Where the answers come from, first match wins:
 
@@ -96,7 +92,7 @@ def set_ephe_path(path):
 
 
 def default_client():
-    """The client prometheia.swe uses, made on first need from the settings above."""
+    """The client made on first need from the settings above."""
     global _default
     if _default is None:
         if _server:

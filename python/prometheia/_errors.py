@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""The package's one exception type (``prometheia.swe.Error`` is this class)."""
+"""The package's one exception type."""
 
 
 class Error(Exception):

@@ -13,6 +13,9 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Removed: `prometheia.swe`**, the pyswisseph-shaped Python module, with
+  its tests and the pyswisseph oracle (`tools/check/pyswe_oracle.py`).
+  `prometheia.Client` stays, on every transport ([docs/PYTHON.md](docs/PYTHON.md)).
 - **C API: which years the loaded files answer**
   ([docs/C_API.md](docs/C_API.md)): `prometheia_engine_ephemeris_count` and
   `prometheia_engine_ephemeris_span`, asked for by Astrolog for their

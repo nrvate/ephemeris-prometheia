@@ -4,7 +4,7 @@
 BinaryTransport takes the same calls as the stdio and HTTP transports --
 positions, houses, convert_time, lookup, capabilities, with the JSON tools'
 arguments -- asks them as v4 messages, and answers in the JSON tools' shape,
-so prometheia.swe does not know which transport it is on.
+so a caller does not know which transport it is on.
 
 What v4 does not carry is refused by name, never approximated:
 - a clock time (UTC): v4 takes Julian dates in UT1, TT or TDB, and

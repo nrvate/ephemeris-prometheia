@@ -102,6 +102,11 @@ no code read or reused — see Cleanroom policy):
 11. **Naming:** repo slug `ephemeris-prometheia`, library `libprometheia`,
     namespace `prometheia`, tools `prometheia-*`, future daemon
     `prometheiad`, container magic `EPM1`.
+12. **Consumers are Prometheia-shaped** (maintainer, 2026-10-26, with the
+    astromcp port): no Swiss-shaped shim, facade or look-alike API, here or
+    in a consumer. `prometheia.swe`, the pyswisseph-shaped module of
+    2026-09-29, was removed with its pyswisseph oracle on 2026-10-27;
+    Python callers use `prometheia.Client` ([PYTHON.md](PYTHON.md)).
 
 ## Data-source etiquette (binding)
 
