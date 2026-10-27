@@ -407,8 +407,12 @@ not indexed (address those by their NAIF IDs).
   Moon split from the Earth-Moon barycentre by EMRAT. States are
   sampled from the engine's own ephemeris onto cubic-Hermite tables,
   128 samples per 365.25-day block, extended lazily as integration
-  windows march; masses the opened ephemeris does not carry are skipped
-  (a kernel without the Moon perturbs without it). GMs come from the
+  windows march. Every sample sits on one fixed grid, J2000 + j·365.25/128
+  days (a dyadic step, so each epoch is exact), cut to the files' span
+  with a sample at each edge, and which masses act is probed once at a
+  fixed epoch (J2000, or the span's middle when the span lacks it). Masses
+  the opened ephemeris does not carry are skipped (a kernel without the
+  Moon perturbs without it). GMs come from the
   ephemeris's own constants when it publishes them (DE headers carry
   GM1…GM9, GMB, GMS in AU³/day²), else the DE440 values in `forces.hpp`
   (relative differences ~1e-9). The Sun also contributes its
@@ -444,6 +448,22 @@ not indexed (address those by their NAIF IDs).
     edge, and so do the perturber tables' blocks. An instant inside that
     span is answered however the window grid falls, and one outside it,
     including a light-time instant, is a coverage error naming the span.
+  - **An answer does not depend on history.** The perturber tables'
+    samples sit on the fixed grid above, so which body or instant an
+    engine met first changes nothing: two engines asked in different
+    orders agree bit for bit (`engine_catalog_answers_independent_of_history`).
+    Until 2026-10-27 the tables were anchored at the first instant asked
+    for, and on the refreshed catalog, whose records carry many epochs,
+    asking for a comet first moved Eros by up to 159 m, Vesta 30 m and
+    Ceres 21 m (1900–2100, measured 2026-10-27). Pinning the grid
+    moved every catalog answer once, by rounding-level differences that
+    the dynamics amplify: 0–6 m in 2026 and up to 301 m (Eros) between
+    1600 and 2600, all below 0.001″ for the asteroids measured. Bodies whose
+    orbits magnify any difference moved more: Comet Encke up to 150 km
+    (0.011″), and Apophis, past its 2029 Earth encounter, by degrees.
+    Apophis's answer far from its epoch was already set by the order of
+    requests and is not determined by its elements there. (VALIDATION.md,
+    "Small bodies", has the measurement.)
   - **A failure is one request's.** If the perturber tables fail (a
     kernel whose bodies end at different instants), that request is
     refused, the body's trajectory and uncertainty tracks are discarded,

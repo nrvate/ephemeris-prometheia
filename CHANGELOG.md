@@ -13,6 +13,14 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Catalog answers no longer depend on request order**
+  ([docs/ENGINE.md](docs/ENGINE.md), "Memo"). The perturber tables were
+  anchored at the first instant an engine was asked for, so asking for a
+  comet first moved Eros by up to 159 m. They now sit on one fixed grid.
+  Every catalog answer moves once, by 0–6 m in 2026 and below 0.001″ for
+  the asteroids measured 1600–2600. Comets and chaotic orbits move more,
+  such as Apophis past 2029 ([docs/VALIDATION.md](docs/VALIDATION.md),
+  "Small bodies").
 - **Removed: `prometheia.swe`**, the pyswisseph-shaped Python module, with
   its tests and the pyswisseph oracle (`tools/check/pyswe_oracle.py`).
   `prometheia.Client` stays, on every transport ([docs/PYTHON.md](docs/PYTHON.md)).

@@ -955,6 +955,49 @@ TEST_CASE("perturber_kernel_matches_independent_integration") {
     CHECK(std::sqrt(d_self) < 1e-8);  // the body never perturbs itself
 }
 
+// The perturber tables sit on one fixed grid, so an answer never depends on
+// which body or instant the engine met first. Before the grid was pinned
+// the tables were anchored at the first instant asked for, and asking for
+// a comet first moved Eros by up to 159 m on the refreshed catalog, whose
+// records carry many epochs (docs/ENGINE.md, "Memo").
+TEST_CASE("engine_catalog_answers_independent_of_history") {
+    TempFile tf_kernel("hist-k");
+    TempFile tf_cat("hist-c");
+    synth::write_linear_spk(tf_kernel.path);
+    const double kOtherEpoch = kEpoch - 3000.3; // off any grid of kEpoch's
+    {
+        auto w = catalog::Writer::create(tf_cat.path.string(), catalog::WriterOptions{});
+        REQUIRE(w.ok());
+        catalog::Record r1 = make_record(kEls.a);
+        catalog::Record r2 = make_record(kEls.a * 1.3);
+        r2.spkid = 20000002;
+        r2.epoch_jtdb = kOtherEpoch;
+        CHECK(w.value().add(r1, "1").ok());
+        CHECK(w.value().add(r2, "2").ok());
+        CHECK(w.value().finish(CborValue::make_map()).ok());
+    }
+    auto open = [&] {
+        auto e = Engine::open(tf_kernel.path.string());
+        REQUIRE(e.ok());
+        REQUIRE(e.value().add_catalog(tf_cat.path.string()).ok());
+        return std::move(e).value();
+    };
+    auto same = [](const Result<CalcResult>& x, const Result<CalcResult>& y) {
+        REQUIRE(x.ok());
+        REQUIRE(y.ok());
+        for (int i = 0; i < 3; ++i)
+            CHECK(x.value().pos.xyz_au[i] == y.value().pos.xyz_au[i]);
+    };
+    const double t1 = kEpoch + 400.0, t2 = kOtherEpoch + 17.0;
+    Engine a = open(), b = open();
+    auto a2 = a.calc(20000002, t2, bary_geom_icrf());
+    auto a1 = a.calc(20000001, t1, bary_geom_icrf());
+    auto b1 = b.calc(20000001, t1, bary_geom_icrf());
+    auto b2 = b.calc(20000002, t2, bary_geom_icrf());
+    same(a1, b1);
+    same(a2, b2);
+}
+
 TEST_CASE("lookup_pdes_name_case") {
     TempFile tf_kernel("lkp-1-k");
     TempFile tf_cat("lkp-1-c");

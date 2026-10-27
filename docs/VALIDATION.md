@@ -138,6 +138,30 @@ and 0.3–19″ at 5000. Without a perturber kernel they differ by 12–67″,
 to arcminutes, not degrees, because the perturbations are largely
 periodic.
 
+**Pinning the perturber grid (2026-10-27).** The perturber tables' samples
+now sit on one fixed grid instead of starting at the first instant an engine
+was asked for (ENGINE.md, "Memo"). Every figure in this section was re-run
+afterwards (`horizons_small_bodies*`, `horizons_sigma_calibration`,
+`horizons_small_bodies_centuries`) and is unchanged at its printed
+precision. The change moved each catalog answer once. Measured against the
+previous build on DE440, SB441-N16 and the refreshed catalog, with one
+process per body and instant:
+
+| body | 2026 | worst of six instants, 1600–2598 | geocentric apparent, worst |
+|---|---:|---:|---:|
+| Ceres, Pallas, Juno, Vesta, Hygiea | ≤ 1.04 m | 62 m | 0.00006″ |
+| Eros | 1.1 m | 301 m | 0.0007″ |
+| Chiron, Pholus, Sedna, Eris, Makemake | 0 m | 4.4 m | < 0.000001″ |
+| 1P/Halley | 5.5 m | 43 km | 0.0006″ |
+| 2P/Encke | 1.1 m | 151 km | 0.011″ |
+| Apophis | 5.7 m | 0.45 AU (2670000.5) | 19° |
+
+Apophis's 2029 Earth encounter magnifies any difference. Before the pin,
+its answer away from its epoch already changed with the order of requests,
+by the same mechanism. Before the pin, asking for a comet first moved Eros
+by up to 159 m, Vesta 30 m and Ceres 21 m (1900–2100). After it, the
+answer is the same whatever came first.
+
 **Where the integration refuses:** with a kernel loaded, an instant outside
 its span is a coverage error naming the kernel's span (per-object errCode
 3, JSON `outside-coverage`). The trimmed `sb441-n16-de440span.bsp` covers

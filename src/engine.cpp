@@ -651,6 +651,15 @@ constexpr int kPerturberIds[] = {10, 199, 299, 399, 301, 4, 5, 6, 7, 8, 9};
 // With kBlockSamples per block the Hermite interpolation error of even
 // Mercury (~2600 km) enters the asteroid's acceleration at the 1e-15
 // level of the Sun's — orders below every tolerance the engine works to.
+//
+// Every sample sits on one fixed grid, J2000 + j·h with h = kBlockDays /
+// kBlockSamples (a dyadic step, so every epoch is exact), cut to the
+// files' span with a sample exactly at each edge; block b holds j =
+// 128b .. 128(b + 1). Which masses act is probed once, at a fixed epoch.
+// So a table's values, and every answer integrated through it, do not
+// depend on which body or instant the engine met first. (They did until
+// 2026-10-27: the blocks were anchored at the first instant asked for,
+// and Eros moved by up to 159 m with the order of requests.)
 class PerturberSet final : public PerturberStates {
 public:
     void attach(Source* s) { source_ = s; }
@@ -792,6 +801,10 @@ public:
 private:
     static constexpr double kBlockDays = 365.25;
     static constexpr int kBlockSamples = 128;
+    static constexpr double kGridEpoch = 2451545.0;                 // J2000 TDB
+    static constexpr double kGridStep = kBlockDays / kBlockSamples; // 1461/512 d, exact
+
+    static double grid_time(long j) { return kGridEpoch + double(j) * kGridStep; }
 
     void fail(ErrorCode code, std::string msg) {
         if (ok_) {
@@ -803,9 +816,14 @@ private:
 
     void build(double t) {
         built_ = true;
+        // Membership is probed at J2000 when the span holds it, else at the
+        // span's middle: never at the instant that happened to come first.
+        const auto [span_lo, span_hi] = span();
+        const double probe =
+            span_lo < kGridEpoch && kGridEpoch < span_hi ? kGridEpoch : 0.5 * (span_lo + span_hi);
         for (int id : kPerturberIds) {
             double st[6];
-            if (source_->barycentric(id, t, st).ok()) {
+            if (source_->barycentric(id, probe, st).ok()) {
                 if (id == body::kSun)
                     sun_index_ = long(ids_.size());
                 ids_.push_back(id);
@@ -817,7 +835,7 @@ private:
             for (int id : asteroid_ids_) {
                 double st[6];
                 const double mu = gm_or_builtin(asteroid_source_, id);
-                if (mu > 0.0 && asteroid_source_->barycentric(id, t, st).ok()) {
+                if (mu > 0.0 && asteroid_source_->barycentric(id, probe, st).ok()) {
                     ids_.push_back(id);
                     sources_.push_back(asteroid_source_);
                     mus_.push_back(mu);
@@ -826,51 +844,80 @@ private:
         }
         if (ids_.empty()) {
             fail(ErrorCode::CoverageError,
-                 "the ephemeris carries none of the perturbing masses at JD " + std::to_string(t) +
-                     " (outside its coverage?)");
+                 "the ephemeris carries none of the perturbing masses at JD " +
+                     std::to_string(probe) + " (outside its coverage?)");
             return;
         }
-        lo_ = hi_ = t; // no samples yet; extend() seeds both directions
-        extend(kBlockDays);
-        extend(-kBlockDays);
+        // The first block is the one holding t; at a block's start that is
+        // also the block before, which is the one inside the span at its end.
+        long b = long(std::floor((t - kGridEpoch) / kBlockDays));
+        if (grid_time(b * kBlockSamples) >= span_hi)
+            --b;
+        lo_block_ = hi_block_ = b;
+        add_block(b, true);
     }
 
     // Grows coverage by one block in the given direction (positive =
-    // forward). The block boundary sample is shared with the existing rows
-    // (or, on the very first block, is the probe epoch itself).
+    // forward): the grid block after the last one held, or before the first.
     void extend(double days) {
-        const double from = days > 0.0 ? hi_ : lo_;
+        if (days > 0.0) {
+            if (add_block(hi_block_ + 1, true))
+                ++hi_block_;
+        } else if (add_block(lo_block_ - 1, false)) {
+            --lo_block_;
+        }
+    }
+
+    // Samples grid block b, cut to the span, and joins it to the rows: at
+    // the end when forward, else in front. A sample the rows already hold
+    // (the shared block boundary) is not read twice. False, with the
+    // failure set, when the block lies outside the span or a read fails.
+    bool add_block(long b, bool forward) {
         const auto [span_lo, span_hi] = span();
-        const double to =
-            days > 0.0 ? std::min(from + days, span_hi) : std::max(from + days, span_lo);
-        if (!(days > 0.0 ? to > from : to < from)) {
+        const int n = kBlockSamples;
+        const double a = grid_time(b * n), z = grid_time((b + 1) * n);
+        if (!(z > span_lo && a < span_hi)) {
             char buf[200];
             std::snprintf(buf, sizeof buf,
                           "a catalog body is integrated only where the planetary ephemeris and "
                           "perturbers reach: JD %.1f .. %.1f TDB",
                           span_lo, span_hi);
             fail(ErrorCode::CoverageError, buf);
-            return;
+            return false;
         }
-        const int n = kBlockSamples;
-        const double step = (to - from) / double(n);
-        const size_t nb = ids_.size();
-        // block[i * nb + b]: sample i of the block (i = 0 is the boundary).
-        // Epochs outer, bodies inner: the ephemeris keeps one record (every
-        // body, 32 days in DE440) decoded, so this reads each record once
-        // where bodies-outer read the block's dozen records once per body.
-        std::vector<TrajSample> block(size_t(n + 1) * nb);
+        std::vector<double> times;
+        times.reserve(size_t(n) + 3);
+        if (a < span_lo)
+            times.push_back(span_lo);
         for (int i = 0; i <= n; ++i) {
-            for (size_t b = 0; b < nb; ++b) {
-                const double tt = from + step * double(i);
+            const double tt = grid_time(b * n + i);
+            if (tt >= span_lo && tt <= span_hi)
+                times.push_back(tt);
+        }
+        if (z > span_hi && times.back() < span_hi)
+            times.push_back(span_hi);
+        if (rows() > 0) {
+            if (forward && times.front() == row_time(rows() - 1))
+                times.erase(times.begin());
+            else if (!forward && times.back() == row_time(0))
+                times.pop_back();
+        }
+        const size_t nb = ids_.size();
+        // block[i * nb + b]: sample i of the block. Epochs outer, bodies
+        // inner: the ephemeris keeps one record (every body, 32 days in
+        // DE440) decoded, so this reads each record once where bodies-outer
+        // read the block's dozen records once per body.
+        std::vector<TrajSample> block(times.size() * nb);
+        for (size_t i = 0; i < times.size(); ++i) {
+            for (size_t k = 0; k < nb; ++k) {
                 double st[6];
-                auto r = sources_[b]->barycentric(ids_[b], tt, st);
+                auto r = sources_[k]->barycentric(ids_[k], times[i], st);
                 if (!r) {
                     fail(r.error().code, r.error().message);
-                    return;
+                    return false;
                 }
-                TrajSample& p = block[size_t(i) * nb + b];
-                p.t = tt;
+                TrajSample& p = block[i * nb + k];
+                p.t = times[i];
                 p.px = st[0] / kAuKm;
                 p.py = st[1] / kAuKm;
                 p.pz = st[2] / kAuKm;
@@ -879,19 +926,15 @@ private:
                 p.vz = st[5] / kAuKm;
             }
         }
-        const int first = rows() == 0 ? 0 : 1; // skip the shared boundary
-        if (days > 0.0) {
-            for (int i = first; i <= n; ++i)
-                grid_.insert(grid_.end(), block.begin() + i * nb, block.begin() + (i + 1) * nb);
-            hi_ = to;
+        if (forward) {
+            grid_.insert(grid_.end(), block.begin(), block.end());
         } else {
-            // Backward samples run from the boundary down to `to`; the new
-            // rows go in front, ascending, into the headroom kept there. Only
-            // when that runs out is the grid moved, into twice the room, so a
-            // backward march costs what a forward one does. (Inserting at the
-            // front moved the whole grid every block: 46% of a 1,000-instant
-            // backward query, 2026-09-19.)
-            const size_t k = size_t(n + 1 - first) * nb;
+            // The new rows go in front, ascending, into the headroom kept
+            // there. Only when that runs out is the grid moved, into twice
+            // the room, so a backward march costs what a forward one does.
+            // (Inserting at the front moved the whole grid every block: 46%
+            // of a 1,000-instant backward query, 2026-09-19.)
+            const size_t k = block.size();
             if (head_ < k) {
                 const size_t used = grid_.size() - head_;
                 const size_t room = std::max(k, used);
@@ -902,11 +945,11 @@ private:
                 head_ = room;
             }
             head_ -= k;
-            auto dst = grid_.begin() + std::ptrdiff_t(head_);
-            for (int i = n; i >= first; --i)
-                dst = std::copy(block.begin() + i * nb, block.begin() + (i + 1) * nb, dst);
-            lo_ = to;
+            std::copy(block.begin(), block.end(), grid_.begin() + std::ptrdiff_t(head_));
         }
+        lo_ = row_time(0);
+        hi_ = row_time(rows() - 1);
+        return true;
     }
 
     // Cubic Hermite weights for one epoch within [ta, tb].
@@ -995,9 +1038,10 @@ private:
     bool built_ = false;
     std::string error_;
     ErrorCode error_code_ = ErrorCode::Ok;
-    double lo_ = 0.0, hi_ = 0.0;
-    std::vector<int> ids_;         // NAIF ids of the masses, table order
-    std::vector<Source*> sources_; // where each mass's states come from
+    double lo_ = 0.0, hi_ = 0.0;       // first and last row epochs
+    long lo_block_ = 0, hi_block_ = 0; // grid blocks held, inclusive
+    std::vector<int> ids_;             // NAIF ids of the masses, table order
+    std::vector<Source*> sources_;     // where each mass's states come from
     Source* asteroid_source_ = nullptr;
     std::vector<int> asteroid_ids_;
     // Rows of ids_.size() samples, ascending epochs, from grid_[head_]; the
