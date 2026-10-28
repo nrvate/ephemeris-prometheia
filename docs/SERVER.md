@@ -560,13 +560,13 @@ two sides agreed these semantics:
   segments is ERROR 11, and rows are the way to ask.
 - **Orbit points** lie on the mean ecliptic of date whatever the profile's
   frame, which gives only their coordinates (§3.5a as amended 2026-09-18),
-  heliocentric
-  for planets and geocentric for the Moon (the Sun has none on the wire,
-  per-object error 2, though the engine and the JSON tools answer it), and
-  take the profile's corrections
-  exactly as a body does (3.5a): they are interoperable applied in full or
-  not at all ([ORBIT-POINTS.md](ORBIT-POINTS.md)). A mean model must name
-  itself in the object's source string.
+  heliocentric for planets and geocentric for the Moon (the Sun has none on
+  the wire, per-object error 2, though the engine and the JSON tools answer
+  it), and take the profile's corrections exactly as a body does (3.5a):
+  they are interoperable applied in full or not at all
+  ([ORBIT-POINTS.md](ORBIT-POINTS.md)). A mean model must name itself in
+  the object's source string. Ours do not yet: a mean point's source is
+  the ephemeris's description alone (found 2026-10-27, open).
 - **Fixed stars** have a normative name grammar (IAU name, Bayer with
   component numbers, Flamsteed, HR/HD/HIP). An ambiguous name is a per-object
   error rather than a silent choice, and an object without a parallax
