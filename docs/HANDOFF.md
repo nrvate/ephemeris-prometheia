@@ -8,7 +8,8 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Resume here (state at 2026-10-28)
 
-**astromcp's port plan, Part A, has landed through A-14.** The plan is
+**astromcp's port plan, Part A, has landed through A-15 and A-17; A-16 is
+in progress.** The plan is
 `docs/prometheia_port_plan.md` on astromcp's `prometheia` branch. Its
 coordinator is the astromcp session. Astrolog's session hears about every
 change to the C ABI, the wire or `.epm` before it lands.
@@ -51,17 +52,47 @@ change to the C ABI, the wire or `.epm` before it lands.
   - locally: 1246 with 0 failed, and the charts at 1905, 2026 and 2099
     are byte-identical.
 
+**Landed later on 2026-10-28** (the maintainer said go on A-15):
+- A-15: the C dataset API (`prometheia_dataset_*`,
+  `prometheia_context_open`) and the perturber tables and apsis passages
+  shared per corpus (`8a3a059`; C_API.md, "Datasets and threads"; ENGINE.md,
+  "Threads").
+  - Answers are bit-identical to before.
+  - A context with a catalog body followed for 11 years costs 354 KB,
+    down from 2,848 KB.
+  - `test_c_dataset` runs six contexts against one engine; `tools/tsan.sh`
+    is clean.
+  - Astrolog reviewed the signatures first and pinned `6bb89ed`: 1246 with
+    0 failed, and the charts are byte-identical.
+- prometheiad: one corpus for every event loop (`6bb89ed`). The dataset
+  digest reads in 64 KiB blocks (`08f8e62`): 135 → 40 MB at `--threads 8`
+  with the full catalog (SERVER.md, "Event loops").
+- `rise_set` takes an orbit point as a direction from the Earth's centre,
+  with no parallax (`2b657ea`). astromcp found the true node 233 s late;
+  it is now 0.04 s from swetest.
+- test_catalog's temporary files carry the pid (`bda3ebd`), so two gates
+  at once do not collide.
+- A-17 coverage: Python reaches every C call except the engine open and
+  `_add_*` calls, which `Dataset` replaces (`fabc804`). The wheel against
+  an installed library was checked on 2026-10-27, so A-17 is done.
+
 **Next:**
-- **A-15 is paused** until the maintainer says go. Its scope:
-  - shared perturber and apsis blocks;
-  - the C dataset API: `prometheia_dataset_open`, `_add_*`, `_freeze`,
-    `_close` and `prometheia_context_open(dataset)`. It is additive, and
-    its exact signatures go to Astrolog before it lands;
-  - `prometheiad` moves to one dataset with one context per event loop;
-  - the stress test also runs through C;
-  - the bench must show no loss on the single-thread path.
-  - Size: M–L in the plan's own estimate.
-- Then A-16 (segments through C, for the scan kernel) and A-17 coverage.
+- **A-16, segments through C, is in progress** in a helper session
+  (`ephemeris-prometheia-b6`, branch `a16-segments-c` in its own worktree).
+  - Astrolog reviewed the signatures. The destructor is
+    `prometheia_segments_close`, and `layout->stride` is authoritative.
+  - `err_arcsec` is an angular separation, with its sampling stated.
+  - A segment bound goes at every step the engine knows of, such as the
+    DE440/DE441 handover.
+  - A near-zero distance is ARGUMENT, and a refused instant fails the
+    whole fit.
+  - The limits are documented, and position is not continuous across a
+    bound.
+  - It lands through this tree once its gate passes. With it, Part A is
+    complete.
+- **Helper session.** The maintainer started `ephemeris-prometheia-b6` to
+  take self-contained work in its own worktree. Its commits are picked in
+  here. Its gates and ours must not overlap: ask before each one.
 
 **Open:**
 - Heliacal: only sighting records can settle the offset from swetest.
