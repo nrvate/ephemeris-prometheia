@@ -446,7 +446,7 @@ Result<void> write_spk(const std::string& path, const std::string& internal_name
     out += data;
     pad_record(out);
 
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    std::ofstream f(io::native_path(path), std::ios::binary | std::ios::trunc);
     if (!f)
         return make_error(ErrorCode::IoError, "cannot create '" + path + "'");
     f.write(out.data(), std::streamsize(out.size()));

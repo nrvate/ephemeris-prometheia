@@ -3290,10 +3290,11 @@ Engine& Engine::operator=(Engine&&) noexcept = default;
 Result<std::unique_ptr<Source>> open_ephemeris_source(const std::string& path) {
     char magic[8] = {};
     {
-        std::ifstream f(path, std::ios::binary);
-        if (!f)
-            return make_error(ErrorCode::IoError, "cannot open " + path);
-        f.read(magic, sizeof magic);
+        auto f = io::RandomAccessFile::open(path); // the readers' own open: wide on Windows
+        if (!f.ok())
+            return f.error();
+        if (auto r = f.value().read_at(0, magic, sizeof magic); !r.ok())
+            return r.error();
     }
     if (std::memcmp(magic, "DAF/SPK ", 8) == 0) {
         auto s = spk::SpkFile::open(path);
@@ -3422,7 +3423,7 @@ Result<void> Corpus::add_perturbers(const std::string& path) {
 Result<void> Corpus::add_hypotheticals(const std::string& path) {
     if (frozen())
         return frozen_error();
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(io::native_path(path), std::ios::binary);
     if (!f)
         return make_error(ErrorCode::IoError, "cannot open " + path);
     const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

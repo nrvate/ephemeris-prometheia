@@ -13,6 +13,15 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Fixed: non-ASCII paths on Windows, for every open.** The catalog
+  writer, `de::trim`, `spk::write_spk`, the engine's sniff of an
+  ephemeris's kind and `add_hypotheticals` opened their files in the ANSI
+  code page. A cut could not be written to a non-ASCII path, and
+  `Engine::open` could not open one. They now use `io::open_file` and
+  `io::native_path`, which widen the UTF-8 path on Windows, and
+  `RandomAccessFile`. Checked under Wine (docs/EMBEDDING.md, "Platforms").
+  Astrolog's MSVC run of the readers (A-12) passed: all sources compiled,
+  6,477 checks, and 71 numeric lines equal to Linux.
 - **Fixed: the build for macOS below 26.** The object registry (A-9)
   called floating-point `std::to_chars` and `std::from_chars`, which Apple's
   libc++ marks unavailable below macOS 13.3 and 26.0. Astrolog's macOS 12

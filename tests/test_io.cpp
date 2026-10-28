@@ -82,6 +82,28 @@ TEST_CASE("io_reads_at_offsets") {
     CHECK(RandomAccessFile::open(t.path.string() + ".missing").error().code == ErrorCode::IoError);
 }
 
+TEST_CASE("io_writers_and_readers_take_utf8_paths") {
+    // The writers open through open_file and native_path, the readers through
+    // RandomAccessFile: one UTF-8 name, written and read back. On Windows the
+    // name is widened for _wfopen and CreateFileW (docs/EMBEDDING.md,
+    // "Platforms"); here it is bytes.
+    TempPath t("utf8");
+    const fs::path named = t.path.parent_path() / (t.path.filename().string() + "-Ünïcödé-ε");
+    const std::string utf8 = named.string();
+    std::FILE* f = prometheia::io::open_file(utf8, "wb");
+    REQUIRE(f);
+    std::fputs("by open_file", f);
+    std::fclose(f);
+    CHECK(prometheia::io::native_path(utf8) == named);
+    auto r = RandomAccessFile::open(utf8);
+    REQUIRE(r.ok());
+    char buf[13] = {};
+    CHECK(r.value().read_exact(0, buf, 12));
+    CHECK(std::string(buf) == "by open_file");
+    std::error_code ec;
+    fs::remove(named, ec);
+}
+
 TEST_CASE("io_one_file_from_two_threads") {
     // Two threads read interleaved offsets through the same object: with a
     // shared file position (seek, then read) they would read each other's

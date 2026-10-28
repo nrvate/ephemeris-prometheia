@@ -225,7 +225,7 @@ Result<Writer> Writer::create(const std::string& path, WriterOptions options) {
         return make_error(ErrorCode::ArgumentError, "chunk_records must be nonzero");
     }
     Writer w;
-    w.f_ = std::fopen(path.c_str(), "wb");
+    w.f_ = io::open_file(path, "wb");
     if (w.f_ == nullptr) {
         return make_error(ErrorCode::IoError, "cannot open '" + path + "' for writing");
     }

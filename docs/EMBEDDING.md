@@ -200,6 +200,24 @@ this machine, which is too long for the gate:
     built natively on Linux. Plain `fopen` of that path fails under Wine.
     Wine is not Windows, and that run covered no read over 1 GiB and no
     second thread.
+  - **MSVC** built the readers at our `2fdab7d` on Astrolog's release dry
+    run 40640400077 (GitHub's Windows runner, Qt 6.8.3). Every source
+    compiled, `io.cpp` and `registry.cpp` with no warning. Their suite
+    passed 6,477 checks with none failing, and its 71 lines carrying
+    numbers equal a Linux GCC 11 run to the printed digit. The catalog-body
+    lines were compared across two catalog files, the full SBDB one on
+    Linux and Astrolog's shipped subset on Windows.
+  - **The writers and the remaining opens** took the path in the ANSI code
+    page until 2026-10-28: the catalog writer (`fopen`), `de::trim` and
+    `spk::write_spk` (`std::ofstream`), the engine's sniff of an
+    ephemeris's kind, and `add_hypotheticals` (`std::ifstream`). So a
+    cutter could not write to a non-ASCII path, and `Engine::open` could
+    not open one, though the readers behind it could. They now go through
+    `io::open_file` and `io::native_path`, which widen the UTF-8 path on
+    Windows, and through `RandomAccessFile`. Built with mingw-w64 (GCC 10)
+    and run under Wine: `open_file` wrote and `RandomAccessFile` read back a
+    file at `C:\users\Public\Ünïcödé-ε\éphéméride.bin`, where a narrow
+    `fopen` of the same path fails.
   - Headers reached only transitively. The first pass added `<cstdint>`
     where the audit named it and missed `src/frames.cpp`. GCC 13's
     libstdc++ no longer pulls `<cstdint>` in, so Astrolog's Ubuntu 24.04

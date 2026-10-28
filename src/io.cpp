@@ -21,6 +21,24 @@
 
 namespace prometheia::io {
 
+std::filesystem::path native_path(const std::string& utf8_path) {
+#if defined(_WIN32)
+    // A char8_t string is read as UTF-8 and widened.
+    return std::filesystem::path(std::u8string(utf8_path.begin(), utf8_path.end()));
+#else
+    return std::filesystem::path(utf8_path);
+#endif
+}
+
+std::FILE* open_file(const std::string& utf8_path, const char* mode) {
+#if defined(_WIN32)
+    const std::wstring wmode(mode, mode + std::char_traits<char>::length(mode));
+    return _wfopen(native_path(utf8_path).c_str(), wmode.c_str());
+#else
+    return std::fopen(utf8_path.c_str(), mode);
+#endif
+}
+
 RandomAccessFile::RandomAccessFile(RandomAccessFile&& other) noexcept
 #if defined(_WIN32)
     : handle_(std::exchange(other.handle_, nullptr)),

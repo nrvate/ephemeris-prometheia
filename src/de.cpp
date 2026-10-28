@@ -500,7 +500,7 @@ Result<TrimResult> trim(const std::string& in_path, const std::string& out_path,
     if (!in_file.ok())
         return in_file.error();
     const io::RandomAccessFile& in = in_file.value();
-    std::ofstream out(out_path, std::ios::binary | std::ios::trunc);
+    std::ofstream out(io::native_path(out_path), std::ios::binary | std::ios::trunc);
     if (!out)
         return make_error(ErrorCode::IoError, "cannot open '" + out_path + "'");
     const uint64_t rec_len = uint64_t(h.record_doubles) * 8;

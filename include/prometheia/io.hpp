@@ -1,21 +1,32 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // prometheia::io — a file read at explicit offsets, for the DE, SPK and
-// catalog readers. POSIX: open(2) and pread(2), retried on EINTR, with
-// 64-bit offsets. Windows: CreateFileW on the UTF-8 path widened (so a path
-// outside the ANSI code page opens) and ReadFile with an OVERLAPPED offset.
-// No file position is kept, so one file may be read from several threads at
-// once; each read is complete in itself.
+// catalog readers; and the paths the writers open (native_path, open_file). POSIX: open(2) and
+// pread(2), retried on EINTR, with 64-bit offsets. Windows: CreateFileW on the UTF-8 path widened
+// (so a path outside the ANSI code page opens) and ReadFile with an OVERLAPPED offset. No file
+// position is kept, so one file may be read from several threads at once; each read is complete in
+// itself.
 #ifndef PROMETHEIA_IO_HPP
 #define PROMETHEIA_IO_HPP
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
 #include <string>
 
 #include "prometheia/error.hpp"
 
 namespace prometheia::io {
+
+// Paths in the library are UTF-8. The platform's form of one: on Windows the
+// string widened, so a name outside the ANSI code page opens (a narrow
+// fopen or fstream there reads it in the ANSI code page); elsewhere its
+// bytes. For std::fstream and std::filesystem calls.
+std::filesystem::path native_path(const std::string& utf8_path);
+
+// std::fopen on native_path (_wfopen on Windows). nullptr when it fails.
+std::FILE* open_file(const std::string& utf8_path, const char* mode);
 
 class RandomAccessFile {
 public:
