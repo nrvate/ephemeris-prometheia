@@ -182,7 +182,7 @@ A client that ships a few named bodies, as Astrolog does, cuts them from a
 full catalog rather than shipping 1.5 million:
 
 ```sh
-./build/prometheia-catalog-subset sbdb-20260916-refresh-20261025.epm bodies.txt -o named.epm
+./build/prometheia-catalog-subset sbdb-20261027.epm bodies.txt -o named.epm
 ```
 
 - **Several catalogs stack** as the engine stacks them, the newest record
@@ -373,6 +373,14 @@ the sum less the overlap, so the server applies both. Freshness is still
    catalog can be rebuilt from `sbdb-raw-full/` with `prometheia-convert`,
    and the overlay from `sbdb-raw-refresh-20261025/`. The next update is
    a full pull (maintainer, 2026-10-25).
+   - **Superseded on 2026-10-27 by a full pull** (maintainer), the first
+     with `full_name` (`sbdb-raw-full-20261027/`, 33 requests). Converted,
+     it is `sbdb-20261027.epm`, EPM1 1.2: 1,580,028 records, 147,254,154
+     bytes (93.2 B/body), sha256 `1dd348aa…59919` beside it. 1,763 rows were
+     skipped, the same as the September base. 895,910 numbered bodies carry
+     their old provisional designation, and every record its orbit class.
+     The 2026-10-25 file was removed and can be rebuilt from its raw
+     directories.
 
    - `--numbered-after` is the base's highest asteroid number (895910 for
      `sbdb-full-20260916`). Numbered asteroids are SPK-ID 20000000 + number,
