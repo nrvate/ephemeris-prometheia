@@ -65,6 +65,23 @@ struct ParseOutcome {
     std::string bad_class; // an SBDB orbit class the format's table does not hold
 };
 
+// A numbered asteroid's principal provisional designation, from SBDB's
+// full_name: "523671 (2013 FZ27)", "136199 Eris (2003 UB313)", "1 Ceres (A801
+// AA)" -- the text in the final parentheses. Only for a numbered body (pdes
+// all digits): a comet's parentheses hold its name ("C/2020 F3 (NEOWISE)"),
+// and an unnumbered body's designation is its pdes already.
+std::string provisional_of(const std::string& pdes, const std::string& full_name) {
+    if (pdes.empty() || pdes.find_first_not_of("0123456789") != std::string::npos)
+        return {};
+    const size_t close = full_name.find_last_not_of(' ');
+    if (close == std::string::npos || full_name[close] != ')')
+        return {};
+    const size_t open = full_name.rfind('(', close);
+    if (open == std::string::npos || close - open < 2)
+        return {};
+    return full_name.substr(open + 1, close - open - 1);
+}
+
 double parse_double_or(const std::string& s, double fallback) {
     if (s.empty())
         return fallback;
@@ -192,7 +209,7 @@ ParseOutcome parse_row(const std::vector<std::string>& cols, const FieldMap& fm,
     }
     out.pdes = col("pdes");
     out.name = col("name");
-    out.prov_des = col("prov_des");
+    out.prov_des = provisional_of(out.pdes, col("full_name"));
     out.record = r;
     out.ok = true;
     return out;

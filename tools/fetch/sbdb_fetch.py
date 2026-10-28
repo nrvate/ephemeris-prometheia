@@ -74,7 +74,7 @@ BASE_URL = "https://ssd-api.jpl.nasa.gov/sbdb_query.api"
 SINGLE_URL = "https://ssd-api.jpl.nasa.gov/sbdb.api"
 
 DEFAULT_FIELDS = [
-    "spkid", "pdes", "name", "prov_des", "class", "epoch",
+    "spkid", "pdes", "name", "full_name", "class", "epoch",
     "e", "a", "i", "om", "w", "ma",
     "sigma_e", "sigma_a", "sigma_i", "sigma_om", "sigma_w", "sigma_ma",
     "H", "G", "diameter",
@@ -195,7 +195,7 @@ def covariance_cells(doc: dict) -> list[str]:
 
 
 def sbdb_single_to_row(doc: dict) -> list[str]:
-    """Flatten a sbdb.api response into one sbdb-raw v1 TSV row (21 cols,
+    """Flatten a sbdb.api response into one sbdb-raw v1 TSV row (22 cols,
     kind first). Missing values become empty cells, matching query-API
     null handling."""
     obj = doc.get("object", {})
@@ -245,6 +245,7 @@ def sbdb_single_to_row(doc: dict) -> list[str]:
         clean(obj.get("spkid")),
         des,
         proper,
+        clean(obj.get("fullname")),
         clean(orbit_class),
         clean(orb.get("epoch")),
     ]
