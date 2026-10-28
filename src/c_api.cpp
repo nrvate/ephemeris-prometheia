@@ -2203,7 +2203,9 @@ double clenshaw(const double* c, int n, double u) {
 }
 
 // Where the engine's answer steps inside (from, to): where a second planetary
-// file takes over. The observer's reads hand over at the instant the engine
+// file takes over. That is the only step source today (docs/SEGMENTS.md):
+// a feature that adds records valid for a range of dates must add their
+// boundaries here in the same change. The observer's reads hand over at the instant the engine
 // names another file as the source, found to adjacent doubles by bisection
 // from each span edge (the edges are TDB; the engine's own TT -> TDB decides
 // the instant). The body's reads hand over one light time later. Files with

@@ -226,3 +226,12 @@ over 10,000 random instants, both ends included. "Eval" is one
   time later. It holds 0.001″ up to both bounds from either side
   (`c_segments_steps_and_refusals`). With the cuts disabled, the same fit
   is refused, at 0.34″.
+- **No other source steps.** A catalog body has one record, the newest
+  catalog's, for all instants. A hypothetical has one definition. Stars
+  and mean elements are analytic, and the interpolated apsides are a C1
+  Hermite. A file that runs out mid-span is no step: the engine refuses
+  there, and the fit fails as a whole. **A feature that adds records valid
+  for a range of dates must teach the fit their boundaries in the same
+  change** (`segment_cuts` in `src/c_api.cpp`), or a step no sample lands
+  near becomes a silent error. Astrolog's review asked for this rule to be
+  written down (2026-10-28).
