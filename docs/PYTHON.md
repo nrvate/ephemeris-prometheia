@@ -230,6 +230,19 @@ the extension. PIC was measured on the engine bench at a geometric mean of
 - Linux is built and tested. macOS and Windows are untested.
 - Not on PyPI. Publishing there is a separate decision.
 
+## Solar eclipses
+
+`Context.solar_eclipse_next(jd_start, kinds=None, *, backward=False,
+k_umbra=None, k_penumbra=None, sun_radius_km=None)` returns a
+`SolarEclipse` (kind, central, saros, TT and UT1 of greatest eclipse, gamma,
+magnitude, obscuration, the greatest-eclipse point, path width, contacts,
+`elements` as a `Besselian`); `solar_eclipse_where(jd_tt)` a `SolarWhere`
+(centre line and the umbra's limits, `axis_hits` False when it misses);
+`solar_eclipse_local_next(jd_start, lon_deg, lat_deg, height_m=0.0)` a
+`SolarLocal` (C1-C4 as lists, None for a contact that is missing or below the
+horizon). `jd_start` and `jd_tt` are TT; `kinds` are `SOLAR_KINDS` names.
+Method and validation: [SOLAR_ECLIPSES.md](SOLAR_ECLIPSES.md).
+
 ## Tests
 
 - **`python/tests`**, run by `tools/gate.sh` with ResourceWarnings as errors:

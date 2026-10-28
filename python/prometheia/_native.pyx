@@ -282,6 +282,145 @@ cdef class Event:
         return "Event(jd_ut1=%r, outcome=%r)" % (self.jd_ut1, self.outcome)
 
 
+# ---- Solar eclipses (docs/SOLAR_ECLIPSES.md) --------------------------------
+
+SOLAR_KINDS = {"partial": c.PROMETHEIA_SOLAR_PARTIAL, "annular": c.PROMETHEIA_SOLAR_ANNULAR,
+               "total": c.PROMETHEIA_SOLAR_TOTAL, "hybrid": c.PROMETHEIA_SOLAR_HYBRID}
+
+
+cdef int solar_kinds(object kinds) except -1:
+    if kinds is None:
+        return 0
+    if isinstance(kinds, str):
+        kinds = [kinds]
+    cdef int k = 0
+    for name in kinds:
+        k |= word(SOLAR_KINDS, name, "eclipse kind")
+    return k
+
+
+cdef void solar_opts(c.prometheia_solar_eclipse_options* o, object k_umbra, object k_penumbra,
+                     object sun_radius_km):
+    c.prometheia_solar_eclipse_options_init(o)
+    if k_umbra is not None:
+        o.k_umbra = k_umbra
+    if k_penumbra is not None:
+        o.k_penumbra = k_penumbra
+    if sun_radius_km is not None:
+        o.sun_radius_km = sun_radius_km
+
+
+class Besselian:
+    """The Besselian elements at an instant: x, y (Earth equatorial radii),
+    d and mu (degrees), l1, l2 (radii; l2 < 0 is total), tan_f1, tan_f2."""
+    __slots__ = ("x", "y", "d_deg", "mu_deg", "l1", "l2", "tan_f1", "tan_f2")
+
+    def __init__(self, x, y, d_deg, mu_deg, l1, l2, tan_f1, tan_f2):
+        self.x, self.y, self.d_deg, self.mu_deg = x, y, d_deg, mu_deg
+        self.l1, self.l2, self.tan_f1, self.tan_f2 = l1, l2, tan_f1, tan_f2
+
+    def __repr__(self):
+        return "Besselian(x=%r, y=%r, d_deg=%r, mu_deg=%r, l1=%r, l2=%r)" % (
+            self.x, self.y, self.d_deg, self.mu_deg, self.l1, self.l2)
+
+
+cdef object besselian_of(const c.prometheia_besselian* b):
+    return Besselian(b.x, b.y, b.d_deg, b.mu_deg, b.l1, b.l2, b.tan_f1, b.tan_f2)
+
+
+cdef str solar_kind_name(int t):
+    if t & c.PROMETHEIA_SOLAR_HYBRID:
+        return "hybrid"
+    if t & c.PROMETHEIA_SOLAR_TOTAL:
+        return "total"
+    if t & c.PROMETHEIA_SOLAR_ANNULAR:
+        return "annular"
+    return "partial" if t & c.PROMETHEIA_SOLAR_PARTIAL else "none"
+
+
+cdef object solar_central(int t):
+    if t & c.PROMETHEIA_SOLAR_CENTRAL:
+        return True
+    return False if t & c.PROMETHEIA_SOLAR_NONCENTRAL else None
+
+
+class SolarEclipse:
+    """A whole solar eclipse. kind is "partial", "annular", "total" or
+    "hybrid"; central is True/False for the umbral kinds (None for partial);
+    type is the PROMETHEIA_SOLAR_* bits. Times are Julian dates (TT, UT1);
+    None marks what does not exist. magnitude is NASA's canon convention
+    (Moon/Sun diameter ratio when central), magnitude_covered the fraction of
+    the diameter covered. lat_deg/lon_deg: the point of greatest eclipse."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __repr__(self):
+        return "SolarEclipse(%s, max_tt=%r, gamma=%r, saros=%r)" % (
+            self.kind, self.max_tt, self.gamma, self.saros)
+
+
+cdef object solar_eclipse_of(const c.prometheia_solar_eclipse* g):
+    return SolarEclipse(
+        type=g.type, kind=solar_kind_name(g.type), central=solar_central(g.type), saros=g.saros,
+        lunation=g.lunation, max_tt=g.max_tt, max_ut1=g.max_ut1, gamma=g.gamma,
+        magnitude=g.magnitude, magnitude_covered=g.magnitude_covered,
+        obscuration=g.obscuration, lat_deg=g.lat_deg, lon_deg=g.lon_deg,
+        sun_alt_deg=g.sun_alt_deg, sun_az_deg=g.sun_az_deg,
+        path_width_km=nan_none(g.path_width_km),
+        central_duration_s=nan_none(g.central_duration_s), p1_tt=nan_none(g.p1_tt),
+        u1_tt=nan_none(g.u1_tt), c1_tt=nan_none(g.c1_tt), c2_tt=nan_none(g.c2_tt),
+        u4_tt=nan_none(g.u4_tt), p4_tt=nan_none(g.p4_tt), elements=besselian_of(&g.elements))
+
+
+class SolarWhere:
+    """The shadow axis on the ground at an instant (Context.solar_eclipse_where).
+    When axis_hits is False every other field but the elements is None."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __repr__(self):
+        return "SolarWhere(axis_hits=%r, lat_deg=%r, lon_deg=%r)" % (
+            self.axis_hits, self.lat_deg, self.lon_deg)
+
+
+cdef object solar_where_of(const c.prometheia_solar_where* w):
+    return SolarWhere(
+        jd_tt=w.jd_tt, jd_ut1=w.jd_ut1, axis_hits=bool(w.axis_hits),
+        kind=solar_kind_name(w.type) if w.axis_hits else None,
+        lat_deg=nan_none(w.lat_deg), lon_deg=nan_none(w.lon_deg),
+        north_lat_deg=nan_none(w.north_lat_deg), north_lon_deg=nan_none(w.north_lon_deg),
+        south_lat_deg=nan_none(w.south_lat_deg), south_lon_deg=nan_none(w.south_lon_deg),
+        sun_alt_deg=nan_none(w.sun_alt_deg), path_width_km=nan_none(w.path_width_km),
+        central_duration_s=nan_none(w.central_duration_s), magnitude=nan_none(w.magnitude),
+        obscuration=nan_none(w.obscuration), elements=besselian_of(&w.elements))
+
+
+class SolarLocal:
+    """What a site sees of an eclipse (Context.solar_eclipse_local_next).
+    contact_tt/ut1 (C1..C4) are None for a contact that does not happen or is
+    below the horizon; contact_alt_deg/az_deg are None only where it does not
+    happen. visible_max says whether the Sun is up at maximum."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __repr__(self):
+        return "SolarLocal(%s, max_tt=%r, magnitude=%r)" % (self.kind, self.max_tt,
+                                                           self.magnitude)
+
+
+cdef object solar_local_of(const c.prometheia_solar_local* l):
+    return SolarLocal(
+        type=l.type, kind=solar_kind_name(l.type), saros=l.saros, lunation=l.lunation,
+        contact_tt=[nan_none(l.contact_tt[i]) for i in range(4)],
+        contact_ut1=[nan_none(l.contact_ut1[i]) for i in range(4)],
+        contact_alt_deg=[nan_none(l.contact_alt_deg[i]) for i in range(4)],
+        contact_az_deg=[nan_none(l.contact_az_deg[i]) for i in range(4)],
+        max_tt=l.max_tt, max_ut1=l.max_ut1, max_alt_deg=l.max_alt_deg, max_az_deg=l.max_az_deg,
+        visible_max=bool(l.visible_max), magnitude=l.magnitude, obscuration=l.obscuration,
+        diameter_ratio=l.diameter_ratio, duration_s=nan_none(l.duration_s), gamma=l.gamma,
+        global_max_tt=l.global_max_tt)
+
+
 KINDS = {"planet": c.PROMETHEIA_KIND_PLANET, "moon": c.PROMETHEIA_KIND_MOON,
          "lunar-point": c.PROMETHEIA_KIND_LUNAR_POINT,
          "orbit-point": c.PROMETHEIA_KIND_ORBIT_POINT,
@@ -770,6 +909,65 @@ cdef class Context:
         r.apparent_altitude_deg = tuple([nan_none(out.apparent_altitude_deg[k])
                                          for k in range(7)])
         return r
+    def solar_eclipse_next(self, double jd_start, kinds=None, *, bint backward=False,
+                           k_umbra=None, k_penumbra=None, sun_radius_km=None):
+        """The next solar eclipse after jd_start (a TT Julian date; the last
+        before it, with backward), of the given kinds (SOLAR_KINDS names, one
+        or several; default all). Greatest eclipse is the axis' nearest
+        approach to the Earth's centre (docs/SOLAR_ECLIPSES.md). k_umbra and
+        k_penumbra are the Moon's radius over the Earth's (NASA's 0.272281
+        and 0.272488 by default)."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef c.prometheia_solar_eclipse_options o
+        solar_opts(&o, k_umbra, k_penumbra, sun_radius_km)
+        cdef int k = solar_kinds(kinds)
+        cdef c.prometheia_solar_eclipse out
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_solar_eclipse_next_ex(e, jd_start, k, backward, &o, &out, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return solar_eclipse_of(&out)
+
+    def solar_eclipse_where(self, double jd_tt, *, k_umbra=None, k_penumbra=None,
+                            sun_radius_km=None):
+        """The shadow axis on the ground at a TT instant: the centre line and
+        the umbra's limits across the track. axis_hits is False when it
+        misses the Earth; the rest is then None."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef c.prometheia_solar_eclipse_options o
+        solar_opts(&o, k_umbra, k_penumbra, sun_radius_km)
+        cdef c.prometheia_solar_where out
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_solar_eclipse_where_ex(e, jd_tt, &o, &out, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return solar_where_of(&out)
+
+    def solar_eclipse_local_next(self, double jd_start, double lon_deg, double lat_deg,
+                                 double height_m=0.0, *, bint backward=False, k_umbra=None,
+                                 k_penumbra=None, sun_radius_km=None):
+        """The next solar eclipse after jd_start (TT; the last before it, with
+        backward) seen from a site in some phase with the Sun above the
+        horizon: contacts C1-C4 (None where missing or below the horizon),
+        maximum, magnitude and obscuration."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef c.prometheia_solar_eclipse_options o
+        solar_opts(&o, k_umbra, k_penumbra, sun_radius_km)
+        cdef c.prometheia_site site
+        site.lon_deg, site.lat_deg, site.height_m = lon_deg, lat_deg, height_m
+        cdef c.prometheia_solar_local out
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_solar_eclipse_local_next_ex(e, jd_start, &site, backward, &o, &out,
+                                                          &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return solar_local_of(&out)
 
     def lookup(self, str name):
         """A catalog body's SPK-ID from its designation or name ("1",

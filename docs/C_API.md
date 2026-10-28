@@ -282,6 +282,40 @@ prometheia_calc_object(eph, &obj, jd_tt, &opts, &r, &err);
 - The registry's indexes are built on first use and kept by the engine
   handle until a catalog is added. REGISTRY.md has the measured cost.
 
+## Solar eclipses
+
+Method, validation and limits: [SOLAR_ECLIPSES.md](SOLAR_ECLIPSES.md).
+Additive: no existing struct or function changed (ABI version unchanged).
+
+- `prometheia_solar_eclipse_next(engine, jd_start, kinds, backward, out, err)`:
+  the next eclipse after `jd_start` (a **TT** Julian date; the last before it
+  with `backward`) whose kind is among `kinds` (`PROMETHEIA_SOLAR_PARTIAL`,
+  `_ANNULAR`, `_TOTAL`, `_HYBRID`, or'ed; 0 or `_ALL_KINDS` for any).
+  `prometheia_solar_eclipse` carries the type bits (one kind plus
+  `_CENTRAL` or `_NONCENTRAL` for umbral kinds), TT and UT1 of greatest
+  eclipse, gamma, magnitude (NASA's convention) and `magnitude_covered`,
+  obscuration, the greatest-eclipse point and the Sun's altitude and azimuth
+  there, path width and central duration, the six first/last contacts
+  (`p1 u1 c1 c2 u4 p4`, TT, NaN where absent), saros, lunation and the
+  Besselian elements (`prometheia_besselian`). `NOT_FOUND` if none within
+  about 240 years.
+- `prometheia_solar_eclipse_where(engine, jd_tt, out, err)`: the shadow axis
+  on the ground at an instant: `axis_hits`, the centre line, the umbra's
+  north and south limits, path width, duration, Sun altitude, magnitude and
+  obscuration there. NaN throughout when the axis misses the Earth.
+- `prometheia_solar_eclipse_local_next(engine, jd_start, site, backward, out,
+  err)` with `prometheia_site {lon_deg, lat_deg, height_m}`: the next
+  eclipse seen from the site with the Sun up in some phase.
+  `prometheia_solar_local` has C1-C4 and the maximum in TT and UT1, their
+  altitudes and azimuths, `visible_max`, magnitude, obscuration, the Moon/Sun
+  diameter ratio, the C2-C3 duration, saros. A contact below the horizon or
+  not happening has NaN times.
+- Each has an `_ex` form taking a `const prometheia_solar_eclipse_options*`
+  (`k_umbra`, `k_penumbra`, `sun_radius_km`; NULL or
+  `prometheia_solar_eclipse_options_init` for NASA's 0.272281, 0.272488,
+  696000 km; swetest's is 0.2725076 for both). Delta T is the engine's,
+  including one installed with `prometheia_engine_set_delta_t`.
+
 ## Conventions
 
 - **Handles.** `prometheia_engine_open` creates an opaque engine and

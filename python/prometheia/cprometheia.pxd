@@ -600,6 +600,22 @@ cdef extern from "prometheia/prometheia.h" nogil:
         double lat_deg
         double height_m
 
+    # Solar eclipses
+    int PROMETHEIA_SOLAR_PARTIAL
+    int PROMETHEIA_SOLAR_ANNULAR
+    int PROMETHEIA_SOLAR_TOTAL
+    int PROMETHEIA_SOLAR_HYBRID
+    int PROMETHEIA_SOLAR_ALL_KINDS
+    int PROMETHEIA_SOLAR_CENTRAL
+    int PROMETHEIA_SOLAR_NONCENTRAL
+
+    ctypedef struct prometheia_solar_eclipse_options:
+        double k_umbra
+        double k_penumbra
+        double sun_radius_km
+
+    void prometheia_solar_eclipse_options_init(prometheia_solar_eclipse_options* opts) noexcept
+
     ctypedef struct prometheia_lunar_eclipse_local:
         prometheia_lunar_eclipse eclipse
         double altitude_deg[7]
@@ -613,3 +629,96 @@ cdef extern from "prometheia/prometheia.h" nogil:
                                                   const prometheia_site* site,
                                                   prometheia_lunar_eclipse_local* out,
                                                   prometheia_error* err) noexcept
+    ctypedef struct prometheia_besselian:
+        double x
+        double y
+        double d_deg
+        double mu_deg
+        double l1
+        double l2
+        double tan_f1
+        double tan_f2
+
+    ctypedef struct prometheia_solar_eclipse:
+        int type
+        int saros
+        long long lunation
+        double max_tt
+        double max_ut1
+        double gamma
+        double magnitude
+        double magnitude_covered
+        double obscuration
+        double lat_deg
+        double lon_deg
+        double sun_alt_deg
+        double sun_az_deg
+        double path_width_km
+        double central_duration_s
+        double p1_tt
+        double u1_tt
+        double c1_tt
+        double c2_tt
+        double u4_tt
+        double p4_tt
+        prometheia_besselian elements
+
+    ctypedef struct prometheia_solar_where:
+        double jd_tt
+        double jd_ut1
+        int axis_hits
+        int type
+        double lat_deg
+        double lon_deg
+        double north_lat_deg
+        double north_lon_deg
+        double south_lat_deg
+        double south_lon_deg
+        double sun_alt_deg
+        double path_width_km
+        double central_duration_s
+        double magnitude
+        double obscuration
+        prometheia_besselian elements
+
+    ctypedef struct prometheia_solar_local:
+        int type
+        int saros
+        long long lunation
+        double contact_tt[4]
+        double contact_ut1[4]
+        double contact_alt_deg[4]
+        double contact_az_deg[4]
+        double max_tt
+        double max_ut1
+        double max_alt_deg
+        double max_az_deg
+        int visible_max
+        double magnitude
+        double obscuration
+        double diameter_ratio
+        double duration_s
+        double gamma
+        double global_max_tt
+
+    prometheia_status prometheia_solar_eclipse_next(prometheia_engine* engine, double jd_start,
+                                                    int kinds, int backward,
+                                                    prometheia_solar_eclipse* out,
+                                                    prometheia_error* err) noexcept
+    prometheia_status prometheia_solar_eclipse_next_ex(
+        prometheia_engine* engine, double jd_start, int kinds, int backward,
+        const prometheia_solar_eclipse_options* options, prometheia_solar_eclipse* out,
+        prometheia_error* err) noexcept
+    prometheia_status prometheia_solar_eclipse_where(prometheia_engine* engine, double jd_tt,
+                                                     prometheia_solar_where* out,
+                                                     prometheia_error* err) noexcept
+    prometheia_status prometheia_solar_eclipse_where_ex(
+        prometheia_engine* engine, double jd_tt, const prometheia_solar_eclipse_options* options,
+        prometheia_solar_where* out, prometheia_error* err) noexcept
+    prometheia_status prometheia_solar_eclipse_local_next(
+        prometheia_engine* engine, double jd_start, const prometheia_site* site,
+        int backward, prometheia_solar_local* out, prometheia_error* err) noexcept
+    prometheia_status prometheia_solar_eclipse_local_next_ex(
+        prometheia_engine* engine, double jd_start, const prometheia_site* site,
+        int backward, const prometheia_solar_eclipse_options* options,
+        prometheia_solar_local* out, prometheia_error* err) noexcept

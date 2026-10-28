@@ -41,6 +41,22 @@ documented, not that it is frozen.
   and `_at` (ABI unchanged), Python `Context.lunar_eclipse_next` and
   `lunar_eclipse_at`, and the engine `Engine::delta_t_seconds`.
   `tools/fetch/eclipse_fetch.py` fetches the canon for the comparison.
+- **Solar eclipses** ([docs/SOLAR_ECLIPSES.md](docs/SOLAR_ECLIPSES.md)), A-7
+  of astromcp's port plan: global circumstances, the shadow axis on the
+  ground at an instant (centre line and umbral limits), and local
+  circumstances with contacts C1-C4, magnitude and obscuration, from
+  Besselian elements computed from the engine's Sun and Moon. Measured
+  against NASA's canon over 1900-2099: all 452 eclipses found, kind,
+  central flag and saros agree on all, greatest eclipse within 0.54 s, gamma
+  within 0.00006, magnitude within 0.00008, Besselian x, y within 3.1e-5
+  Earth radii; against swetest 2026-2027 (with its lunar radius) magnitudes
+  to 0.0001 and local maxima to 0.4 s. The lunar radius is an option (NASA's
+  by default). C API: `prometheia_solar_eclipse_next`, `_where`,
+  `_local_next` (and `_ex` forms), purely additive (ABI unchanged). Python:
+  `Context.solar_eclipse_next`, `solar_eclipse_where`,
+  `solar_eclipse_local_next`. `tools/fetch/solar_eclipse_fetch.py` fetches
+  NASA's tables for the env-gated tests.
+
 - **The object registry** ([docs/REGISTRY.md](docs/REGISTRY.md)), A-9 of
   astromcp's port plan. One id scheme covers every object: `naif:`, `sb:`,
   `orbit:`, `hyp:` and `star:`. Numbered bodies keep their id across

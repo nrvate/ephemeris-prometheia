@@ -1611,3 +1611,218 @@ prometheia_status prometheia_lunar_eclipse_at(prometheia_engine* engine, double 
 }
 
 } // extern "C"
+
+// ---- Solar eclipses (docs/SOLAR_ECLIPSES.md) --------------------------------
+
+#include "prometheia/solar_eclipse.hpp"
+
+namespace {
+
+namespace se = prometheia::solar_eclipse;
+
+bool solar_options(prometheia_engine* engine, const prometheia_solar_eclipse_options* in,
+                   se::Options& out, prometheia_error* err, prometheia_status& st) {
+    if (in) {
+        if (!(in->k_umbra > 0.0 && in->k_umbra < 1.0 && in->k_penumbra > 0.0 &&
+              in->k_penumbra < 1.0 && in->sun_radius_km > 0.0)) {
+            st = argument(err,
+                          "lunar radius ratios must be in (0, 1) and the Sun's radius positive");
+            return false;
+        }
+        out.k_umbra = in->k_umbra;
+        out.k_penumbra = in->k_penumbra;
+        out.sun_radius_km = in->sun_radius_km;
+    }
+    // The engine's Delta T, so the Earth's rotation here is the one calc_ut uses.
+    out.delta_t = engine->delta_t.fn ? &engine->delta_t : nullptr;
+    return true;
+}
+
+void fill_besselian(const se::Besselian& b, prometheia_besselian& o) {
+    o.x = b.x;
+    o.y = b.y;
+    o.d_deg = b.d_rad / kDegToRad;
+    o.mu_deg = b.mu_rad / kDegToRad;
+    o.l1 = b.l1;
+    o.l2 = b.l2;
+    o.tan_f1 = b.tan_f1;
+    o.tan_f2 = b.tan_f2;
+}
+
+} // namespace
+
+extern "C" {
+
+void prometheia_solar_eclipse_options_init(prometheia_solar_eclipse_options* opts) {
+    if (!opts)
+        return;
+    const se::Options d;
+    opts->k_umbra = d.k_umbra;
+    opts->k_penumbra = d.k_penumbra;
+    opts->sun_radius_km = d.sun_radius_km;
+}
+
+prometheia_status prometheia_solar_eclipse_next_ex(prometheia_engine* engine, double jd_start,
+                                                   int kinds, int backward,
+                                                   const prometheia_solar_eclipse_options* options,
+                                                   prometheia_solar_eclipse* out,
+                                                   prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!out)
+        return argument(err, "output is NULL");
+    if (kinds < 0 || kinds > PROMETHEIA_SOLAR_ALL_KINDS)
+        return argument(err, "kinds out of range");
+    se::Options o;
+    prometheia_status st = PROMETHEIA_OK;
+    if (!solar_options(engine, options, o, err, st))
+        return st;
+    return guarded(err, [&] {
+        auto r = se::next_global(engine->engine, jd_start, unsigned(kinds), backward != 0, o);
+        if (!r.ok())
+            return report(err, r.error());
+        const se::Global& g = r.value();
+        out->type = int(g.type);
+        out->saros = g.saros;
+        out->lunation = g.lunation;
+        out->max_tt = g.max_tt;
+        out->max_ut1 = g.max_ut1;
+        out->gamma = g.gamma;
+        out->magnitude = g.magnitude;
+        out->magnitude_covered = g.magnitude_covered;
+        out->obscuration = g.obscuration;
+        out->lat_deg = g.greatest.lat_deg;
+        out->lon_deg = g.greatest.lon_deg;
+        out->sun_alt_deg = g.sun_alt_deg;
+        out->sun_az_deg = g.sun_az_deg;
+        out->path_width_km = g.path_width_km;
+        out->central_duration_s = g.central_duration_s;
+        out->p1_tt = g.p1_tt;
+        out->u1_tt = g.u1_tt;
+        out->c1_tt = g.c1_tt;
+        out->c2_tt = g.c2_tt;
+        out->u4_tt = g.u4_tt;
+        out->p4_tt = g.p4_tt;
+        fill_besselian(g.elements, out->elements);
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_solar_eclipse_next(prometheia_engine* engine, double jd_start,
+                                                int kinds, int backward,
+                                                prometheia_solar_eclipse* out,
+                                                prometheia_error* err) {
+    return prometheia_solar_eclipse_next_ex(engine, jd_start, kinds, backward, nullptr, out, err);
+}
+
+prometheia_status prometheia_solar_eclipse_where_ex(prometheia_engine* engine, double jd_tt,
+                                                    const prometheia_solar_eclipse_options* options,
+                                                    prometheia_solar_where* out,
+                                                    prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!out)
+        return argument(err, "output is NULL");
+    if (!std::isfinite(jd_tt))
+        return argument(err, "jd is not finite");
+    se::Options o;
+    prometheia_status st = PROMETHEIA_OK;
+    if (!solar_options(engine, options, o, err, st))
+        return st;
+    return guarded(err, [&] {
+        auto r = se::where(engine->engine, jd_tt, o);
+        if (!r.ok())
+            return report(err, r.error());
+        const se::Where& w = r.value();
+        out->jd_tt = w.jd_tt;
+        out->jd_ut1 = w.jd_ut1;
+        out->axis_hits = w.axis_hits ? 1 : 0;
+        out->type = int(w.type);
+        out->lat_deg = w.central.lat_deg;
+        out->lon_deg = w.central.lon_deg;
+        out->north_lat_deg = w.north_limit.lat_deg;
+        out->north_lon_deg = w.north_limit.lon_deg;
+        out->south_lat_deg = w.south_limit.lat_deg;
+        out->south_lon_deg = w.south_limit.lon_deg;
+        out->sun_alt_deg = w.sun_alt_deg;
+        out->path_width_km = w.path_width_km;
+        out->central_duration_s = w.central_duration_s;
+        out->magnitude = w.magnitude;
+        out->obscuration = w.obscuration;
+        fill_besselian(w.elements, out->elements);
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_solar_eclipse_where(prometheia_engine* engine, double jd_tt,
+                                                 prometheia_solar_where* out,
+                                                 prometheia_error* err) {
+    return prometheia_solar_eclipse_where_ex(engine, jd_tt, nullptr, out, err);
+}
+
+prometheia_status
+prometheia_solar_eclipse_local_next_ex(prometheia_engine* engine, double jd_start,
+                                       const prometheia_site* site, int backward,
+                                       const prometheia_solar_eclipse_options* options,
+                                       prometheia_solar_local* out, prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!site)
+        return argument(err, "site is NULL");
+    if (!out)
+        return argument(err, "output is NULL");
+    if (!std::isfinite(jd_start))
+        return argument(err, "jd is not finite");
+    if (!(std::fabs(site->lat_deg) <= 90.0) || !std::isfinite(site->lon_deg) ||
+        !std::isfinite(site->height_m))
+        return argument(err, "site out of range");
+    se::Options o;
+    prometheia_status st = PROMETHEIA_OK;
+    if (!solar_options(engine, options, o, err, st))
+        return st;
+    return guarded(err, [&] {
+        const frames::GeoSite gs{site->lon_deg * kDegToRad, site->lat_deg * kDegToRad,
+                                 site->height_m};
+        auto r = se::local_next(engine->engine, jd_start, gs, backward != 0, o);
+        if (!r.ok())
+            return report(err, r.error());
+        const se::Local& l = r.value();
+        out->type = int(l.type);
+        out->saros = l.saros;
+        out->lunation = l.lunation;
+        for (int i = 0; i < 4; ++i) {
+            out->contact_tt[i] = l.contact_tt[i];
+            out->contact_ut1[i] = l.contact_ut1[i];
+            out->contact_alt_deg[i] = l.contact_alt_deg[i];
+            out->contact_az_deg[i] = l.contact_az_deg[i];
+        }
+        out->max_tt = l.max_tt;
+        out->max_ut1 = l.max_ut1;
+        out->max_alt_deg = l.max_alt_deg;
+        out->max_az_deg = l.max_az_deg;
+        out->visible_max = l.visible_max ? 1 : 0;
+        out->magnitude = l.magnitude;
+        out->obscuration = l.obscuration;
+        out->diameter_ratio = l.diameter_ratio;
+        out->duration_s = l.duration_s;
+        out->gamma = l.gamma;
+        out->global_max_tt = l.global_max_tt;
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_solar_eclipse_local_next(prometheia_engine* engine, double jd_start,
+                                                      const prometheia_site* site, int backward,
+                                                      prometheia_solar_local* out,
+                                                      prometheia_error* err) {
+    return prometheia_solar_eclipse_local_next_ex(engine, jd_start, site, backward, nullptr, out,
+                                                  err);
+}
+
+} // extern "C"

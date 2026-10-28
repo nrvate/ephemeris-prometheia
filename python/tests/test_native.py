@@ -304,6 +304,31 @@ class Engine(unittest.TestCase):
         self.assertIsNone(ctx.lunar_eclipse_at(e.jd_max_tt).altitude_deg[0])
         with self.assertRaises(prometheia.Error):
             ctx.lunar_eclipse_next(2461042.5, kinds="annular")
+    def test_solar_eclipses(self):
+        ctx = self.ds.local()
+        start = 2461253.5  # 2026-08-01 0h
+        g = ctx.solar_eclipse_next(start, "total")
+        self.assertEqual((g.kind, g.central, g.saros), ("total", True, 126))
+        self.assertAlmostEqual(g.max_ut1, 2461265.2403, places=3)
+        self.assertLess(g.elements.l2, 0.0)
+        self.assertEqual(ctx.solar_eclipse_next(start, ["hybrid", "annular"]).kind, "annular")
+        self.assertEqual(ctx.solar_eclipse_next(start + 30, backward=True).lunation, 329)
+        w = ctx.solar_eclipse_where(g.max_tt)
+        self.assertTrue(w.axis_hits)
+        self.assertEqual(w.kind, "total")
+        self.assertGreater(w.north_lat_deg, w.lat_deg)
+        miss = ctx.solar_eclipse_where(g.max_tt + 0.5)
+        self.assertFalse(miss.axis_hits)
+        self.assertIsNone(miss.lat_deg)
+        loc = ctx.solar_eclipse_local_next(start - 40, 13.405, 52.52, 34.0)
+        self.assertEqual(loc.kind, "partial")
+        self.assertIsNone(loc.contact_tt[3])  # the Sun sets first
+        self.assertIsNone(loc.contact_tt[1])
+        self.assertLess(abs(loc.magnitude - 0.8739), 1e-3)
+        with self.assertRaises(prometheia.Error):
+            ctx.solar_eclipse_next(start, "lunar")
+        with self.assertRaises(prometheia.Error):
+            ctx.solar_eclipse_next(start, k_penumbra=2.0)
 
     def test_rise_set(self):
         import math

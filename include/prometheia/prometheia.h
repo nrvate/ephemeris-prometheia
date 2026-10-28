@@ -1026,7 +1026,9 @@ typedef struct prometheia_lunar_eclipse {
 } prometheia_lunar_eclipse;
 
 /* A place on the WGS84 ellipsoid: geodetic longitude (east positive) and
- * latitude in degrees, height in metres. */
+ * latitude in degrees, height in metres. The eclipse calls take their site
+ * here because they take no prometheia_options; a position call's site is
+ * the options' site_lon_deg, site_lat_deg and site_height_m. */
 typedef struct prometheia_site {
     double lon_deg, lat_deg, height_m;
 } prometheia_site;
@@ -1067,6 +1069,126 @@ PROMETHEIA_API prometheia_status prometheia_lunar_eclipse_at(prometheia_engine* 
                                                              const prometheia_site* site,
                                                              prometheia_lunar_eclipse_local* out,
                                                              prometheia_error* err);
+/* ---- Solar eclipses (docs/SOLAR_ECLIPSES.md) ------------------------------ */
+
+/* Type bits. An eclipse is exactly one of the four kinds, plus CENTRAL or
+ * NONCENTRAL for the three umbral kinds (a partial eclipse has neither). */
+#define PROMETHEIA_SOLAR_PARTIAL 1
+#define PROMETHEIA_SOLAR_ANNULAR 2
+#define PROMETHEIA_SOLAR_TOTAL 4
+#define PROMETHEIA_SOLAR_HYBRID 8 /* l2 changes sign along the central line */
+#define PROMETHEIA_SOLAR_ALL_KINDS 15
+#define PROMETHEIA_SOLAR_CENTRAL 16    /* the shadow axis meets the Earth */
+#define PROMETHEIA_SOLAR_NONCENTRAL 32 /* the umbra touches it, its axis misses */
+
+/* The Moon's radius over the Earth's, for the umbra and the penumbra, and the
+ * Sun's radius. prometheia_solar_eclipse_options_init gives NASA's canon
+ * values (0.272281, 0.272488, 696000 km); swetest uses 0.2725076 for both. */
+typedef struct prometheia_solar_eclipse_options {
+    double k_umbra;
+    double k_penumbra;
+    double sun_radius_km;
+} prometheia_solar_eclipse_options;
+
+PROMETHEIA_API void prometheia_solar_eclipse_options_init(prometheia_solar_eclipse_options* opts);
+
+/* The Besselian elements x, y (Earth equatorial radii), d, mu (degrees), l1,
+ * l2 (radii; l2 < 0: total) and tan f1, tan f2. */
+typedef struct prometheia_besselian {
+    double x, y, d_deg, mu_deg, l1, l2, tan_f1, tan_f2;
+} prometheia_besselian;
+
+/* A whole eclipse. Times are Julian dates, TT and UT1. NaN marks what does not
+ * exist (no umbra, no central phase, no path). */
+typedef struct prometheia_solar_eclipse {
+    int type;                       /* PROMETHEIA_SOLAR_* bits */
+    int saros;                      /* van den Bergh's series number */
+    long long lunation;             /* NASA's: 0 at the new moon of 2000-01-06 */
+    double max_tt, max_ut1;         /* greatest eclipse: the axis nearest the Earth's centre */
+    double gamma;                   /* that distance, radii, negative south of the centre */
+    double magnitude;               /* NASA canon: covered fraction of the diameter (partial and
+                                       non-central), Moon/Sun diameter ratio (central) */
+    double magnitude_covered;       /* fraction of the Sun's diameter covered, always */
+    double obscuration;             /* fraction of the Sun's disc covered */
+    double lat_deg, lon_deg;        /* the greatest-eclipse point (the nearest limb point if the
+                                       axis misses the Earth) */
+    double sun_alt_deg, sun_az_deg; /* geometric, there */
+    double path_width_km;           /* umbral path width at greatest eclipse */
+    double central_duration_s;      /* totality or annularity on the centre line */
+    double p1_tt, u1_tt, c1_tt, c2_tt, u4_tt, p4_tt; /* penumbra, umbra, axis: first/last touch */
+    prometheia_besselian elements;                   /* at max_tt */
+} prometheia_solar_eclipse;
+
+/* The next eclipse whose greatest-eclipse instant is after jd_start (a TT
+ * Julian date) -- the last before it, with backward -- of a kind in `kinds`
+ * (PROMETHEIA_SOLAR_* kind bits; 0 means all). PROMETHEIA_ERROR_NOT_FOUND if
+ * none turns up within ~240 years. The _ex form takes the lunar radius options
+ * (NULL: the defaults). */
+PROMETHEIA_API prometheia_status prometheia_solar_eclipse_next(prometheia_engine* engine,
+                                                               double jd_start, int kinds,
+                                                               int backward,
+                                                               prometheia_solar_eclipse* out,
+                                                               prometheia_error* err);
+PROMETHEIA_API prometheia_status
+prometheia_solar_eclipse_next_ex(prometheia_engine* engine, double jd_start, int kinds,
+                                 int backward, const prometheia_solar_eclipse_options* options,
+                                 prometheia_solar_eclipse* out, prometheia_error* err);
+
+/* The shadow axis on the ground at a TT instant. axis_hits is 0 when it misses
+ * the Earth, and every other field is then NaN (type 0). */
+typedef struct prometheia_solar_where {
+    double jd_tt, jd_ut1;
+    int axis_hits;
+    int type;                            /* TOTAL or ANNULAR at the axis point */
+    double lat_deg, lon_deg;             /* the centre line */
+    double north_lat_deg, north_lon_deg; /* the umbra's limits across the track */
+    double south_lat_deg, south_lon_deg;
+    double sun_alt_deg;
+    double path_width_km;
+    double central_duration_s;
+    double magnitude, obscuration; /* at the axis point */
+    prometheia_besselian elements;
+} prometheia_solar_where;
+
+PROMETHEIA_API prometheia_status prometheia_solar_eclipse_where(prometheia_engine* engine,
+                                                                double jd_tt,
+                                                                prometheia_solar_where* out,
+                                                                prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_solar_eclipse_where_ex(
+    prometheia_engine* engine, double jd_tt, const prometheia_solar_eclipse_options* options,
+    prometheia_solar_where* out, prometheia_error* err);
+
+/* What one site sees. contact_* index 0..3 is C1..C4 (C2 and C3 only where
+ * the Moon covers the Sun's centre line: total or annular); a contact that
+ * does not happen, or falls with the Sun's centre below the geometric horizon,
+ * has NaN times (its altitude and azimuth are still given when it happens).
+ * The maximum is always reported; visible_max says whether the Sun is up. */
+typedef struct prometheia_solar_local {
+    int type; /* PARTIAL, ANNULAR or TOTAL, as seen here */
+    int saros;
+    long long lunation;
+    double contact_tt[4], contact_ut1[4];
+    double contact_alt_deg[4], contact_az_deg[4];
+    double max_tt, max_ut1;
+    double max_alt_deg, max_az_deg;
+    int visible_max;
+    double magnitude;      /* fraction of the Sun's diameter covered */
+    double obscuration;    /* fraction of the Sun's disc covered */
+    double diameter_ratio; /* Moon / Sun apparent diameters */
+    double duration_s;     /* C2 to C3; NaN if either is missing */
+    double gamma;          /* of the global eclipse */
+    double global_max_tt;
+} prometheia_solar_local;
+
+/* The next eclipse (the last, with backward) after jd_start (TT) that is seen
+ * from the site in some phase with the Sun above the horizon. */
+PROMETHEIA_API prometheia_status prometheia_solar_eclipse_local_next(
+    prometheia_engine* engine, double jd_start, const prometheia_site* site, int backward,
+    prometheia_solar_local* out, prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_solar_eclipse_local_next_ex(
+    prometheia_engine* engine, double jd_start, const prometheia_site* site, int backward,
+    const prometheia_solar_eclipse_options* options, prometheia_solar_local* out,
+    prometheia_error* err);
 
 #ifdef __cplusplus
 }

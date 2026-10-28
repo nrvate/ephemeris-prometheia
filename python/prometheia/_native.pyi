@@ -23,6 +23,7 @@ EVENTS: dict[str, int]
 LIMBS: dict[str, int]
 OUTCOMES: dict[int, str]
 KINDS: dict[str, int]
+SOLAR_KINDS: dict[str, int]
 Object = Union[int, str, Tuple[Literal["star"], Union[int, str]],
                Tuple[Literal["hypothetical"], str], Tuple[Literal["orbit-point"], int, str, str]]
 
@@ -110,6 +111,86 @@ class Horizontal:
     apparent_altitude_deg: float
     hour_angle_deg: float
 
+class Besselian:
+    """The Besselian elements at an instant (docs/SOLAR_ECLIPSES.md)."""
+    x: float
+    y: float
+    d_deg: float
+    mu_deg: float
+    l1: float
+    l2: float
+    tan_f1: float
+    tan_f2: float
+
+class SolarEclipse:
+    """A whole solar eclipse (Context.solar_eclipse_next). None marks what does
+    not exist; times are Julian dates."""
+    type: int
+    kind: Literal["partial", "annular", "total", "hybrid"]
+    central: Optional[bool]
+    saros: int
+    lunation: int
+    max_tt: float
+    max_ut1: float
+    gamma: float
+    magnitude: float
+    magnitude_covered: float
+    obscuration: float
+    lat_deg: float
+    lon_deg: float
+    sun_alt_deg: float
+    sun_az_deg: float
+    path_width_km: Optional[float]
+    central_duration_s: Optional[float]
+    p1_tt: Optional[float]
+    u1_tt: Optional[float]
+    c1_tt: Optional[float]
+    c2_tt: Optional[float]
+    u4_tt: Optional[float]
+    p4_tt: Optional[float]
+    elements: Besselian
+
+class SolarWhere:
+    """The shadow axis on the ground (Context.solar_eclipse_where)."""
+    jd_tt: float
+    jd_ut1: float
+    axis_hits: bool
+    kind: Optional[Literal["annular", "total"]]
+    lat_deg: Optional[float]
+    lon_deg: Optional[float]
+    north_lat_deg: Optional[float]
+    north_lon_deg: Optional[float]
+    south_lat_deg: Optional[float]
+    south_lon_deg: Optional[float]
+    sun_alt_deg: Optional[float]
+    path_width_km: Optional[float]
+    central_duration_s: Optional[float]
+    magnitude: Optional[float]
+    obscuration: Optional[float]
+    elements: Besselian
+
+class SolarLocal:
+    """What a site sees (Context.solar_eclipse_local_next); contacts are C1..C4."""
+    type: int
+    kind: Literal["partial", "annular", "total"]
+    saros: int
+    lunation: int
+    contact_tt: list[Optional[float]]
+    contact_ut1: list[Optional[float]]
+    contact_alt_deg: list[Optional[float]]
+    contact_az_deg: list[Optional[float]]
+    max_tt: float
+    max_ut1: float
+    max_alt_deg: float
+    max_az_deg: float
+    visible_max: bool
+    magnitude: float
+    obscuration: float
+    diameter_ratio: float
+    duration_s: Optional[float]
+    gamma: float
+    global_max_tt: float
+
 class Event:
     jd_ut1: float
     outcome: Literal["found", "always-above", "always-below", "not-in-window"]
@@ -173,6 +254,18 @@ class Context:
                            backward: bool = False) -> LunarEclipse: ...
     def lunar_eclipse_at(self, jd_max: float,
                          site: Optional[Sequence[float]] = None) -> LunarEclipseLocal: ...
+    def solar_eclipse_next(self, jd_start: float, kinds: Union[None, str, Sequence[str]] = None,
+                           *, backward: bool = False, k_umbra: Optional[float] = None,
+                           k_penumbra: Optional[float] = None,
+                           sun_radius_km: Optional[float] = None) -> SolarEclipse: ...
+    def solar_eclipse_where(self, jd_tt: float, *, k_umbra: Optional[float] = None,
+                            k_penumbra: Optional[float] = None,
+                            sun_radius_km: Optional[float] = None) -> SolarWhere: ...
+    def solar_eclipse_local_next(self, jd_start: float, lon_deg: float, lat_deg: float,
+                                 height_m: float = 0.0, *, backward: bool = False,
+                                 k_umbra: Optional[float] = None,
+                                 k_penumbra: Optional[float] = None,
+                                 sun_radius_km: Optional[float] = None) -> SolarLocal: ...
     def lookup(self, name: str) -> int: ...
     def phenomena(self, body: Object, jd: float, options: Optional[Options] = None,
                   scale: Scale = "tt") -> Phenomena: ...
