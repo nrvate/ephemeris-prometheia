@@ -19,6 +19,10 @@ POINTS: dict[str, int]
 METHODS: dict[str, int]
 HOUSE_SYSTEMS: dict[str, int]
 BODIES: dict[str, int]
+EVENTS: dict[str, int]
+LIMBS: dict[str, int]
+OUTCOMES: dict[int, str]
+Object = Union[int, Tuple[Literal["star"], Union[int, str]], Tuple[Literal["hypothetical"], str]]
 
 class Options:
     """What a position call means, in the JSON tools' words; built once."""
@@ -61,6 +65,10 @@ class Horizontal:
     apparent_altitude_deg: float
     hour_angle_deg: float
 
+class Event:
+    jd_ut1: float
+    outcome: Literal["found", "always-above", "always-below", "not-in-window"]
+
 class Context:
     """One engine over a Dataset's files, for the thread that made it."""
     dataset: "Dataset"
@@ -91,6 +99,11 @@ class Context:
                                    apparent: bool = True, atmosphere: Atmosphere = None,
                                    height_m: float = 0.0,
                                    options: Optional[Options] = None) -> Tuple[float, float]: ...
+    def rise_set(self, object: Object, event: str, jd_ut1_start: float, lon_deg: float,
+                 lat_deg: float, height_m: float = 0.0, *, limb: str = "upper",
+                 refraction: bool = True, atmosphere: Atmosphere = "standard",
+                 dip_height_m: float = 0.0, window_days: float = 2.0, backward: bool = False,
+                 options: Optional[Options] = None) -> Event: ...
     def lookup(self, name: str) -> int: ...
     def hypotheticals(self) -> list[str]: ...
     def ephemeris_spans(self) -> list[Tuple[str, float, float]]: ...

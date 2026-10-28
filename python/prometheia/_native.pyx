@@ -71,6 +71,14 @@ HOUSE_SYSTEMS = {"placidus": c.PROMETHEIA_HOUSES_PLACIDUS, "koch": c.PROMETHEIA_
                  "morinus": c.PROMETHEIA_HOUSES_MORINUS,
                  "meridian": c.PROMETHEIA_HOUSES_MERIDIAN,
                  "topocentric": c.PROMETHEIA_HOUSES_TOPOCENTRIC}
+EVENTS = {"rise": c.PROMETHEIA_EVENT_RISE, "set": c.PROMETHEIA_EVENT_SET,
+          "upper-transit": c.PROMETHEIA_EVENT_UPPER_TRANSIT,
+          "lower-transit": c.PROMETHEIA_EVENT_LOWER_TRANSIT}
+LIMBS = {"upper": c.PROMETHEIA_LIMB_UPPER, "centre": c.PROMETHEIA_LIMB_CENTRE,
+         "lower": c.PROMETHEIA_LIMB_LOWER}
+OUTCOMES = {c.PROMETHEIA_OUTCOME_FOUND: "found", c.PROMETHEIA_OUTCOME_ALWAYS_ABOVE: "always-above",
+            c.PROMETHEIA_OUTCOME_ALWAYS_BELOW: "always-below",
+            c.PROMETHEIA_OUTCOME_NOT_IN_WINDOW: "not-in-window"}
 BODIES = {"sun": c.PROMETHEIA_SUN, "moon": c.PROMETHEIA_MOON, "mercury": c.PROMETHEIA_MERCURY,
           "venus": c.PROMETHEIA_VENUS, "earth": c.PROMETHEIA_EARTH, "mars": c.PROMETHEIA_MARS,
           "jupiter": c.PROMETHEIA_JUPITER, "saturn": c.PROMETHEIA_SATURN,
@@ -260,6 +268,36 @@ cdef int atmosphere_of(object atmosphere, c.prometheia_atmosphere* out) except -
         raise Error('an atmosphere is None, "standard", (pressure_hpa, temperature_c) or '
                     '{"pressure_hpa", "temperature_c"}', code="argument")
     return 1
+
+
+cdef class Event:
+    """An event search's answer: jd_ut1 (NaN unless found), and outcome:
+    "found", "always-above", "always-below" or "not-in-window"."""
+    cdef readonly double jd_ut1
+    cdef readonly str outcome
+
+    def __repr__(self):
+        return "Event(jd_ut1=%r, outcome=%r)" % (self.jd_ut1, self.outcome)
+
+
+cdef int object_of(object obj, c.prometheia_object* out, list keep) except -1:
+    """A body by NAIF id (int); ("star", index or name); ("hypothetical",
+    token). keep holds the token's bytes while the call runs."""
+    memset(out, 0, sizeof(out[0]))
+    if isinstance(obj, int):
+        out.kind, out.id = c.PROMETHEIA_OBJECT_BODY, obj
+        return 0
+    if isinstance(obj, tuple) and len(obj) == 2 and obj[0] == "star":
+        out.kind = c.PROMETHEIA_OBJECT_STAR
+        out.id = obj[1] if isinstance(obj[1], int) else star_find(obj[1])
+        return 0
+    if isinstance(obj, tuple) and len(obj) == 2 and obj[0] == "hypothetical":
+        token = str(obj[1]).encode("utf-8")
+        keep.append(token)
+        out.kind, out.token = c.PROMETHEIA_OBJECT_HYPOTHETICAL, token
+        return 0
+    raise Error('an object is a NAIF id, ("star", index or name) or ("hypothetical", token)',
+                code="argument")
 
 
 cdef bint is_ut(str scale) except -1:
@@ -465,6 +503,43 @@ cdef class Context:
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
         return ra, dec
+
+    def rise_set(self, object, str event, double jd_ut1_start, double lon_deg, double lat_deg,
+                 double height_m=0.0, *, str limb="upper", bint refraction=True,
+                 atmosphere="standard", double dip_height_m=0.0, double window_days=2.0,
+                 bint backward=False, Options options=None):
+        """The first rise, set, upper- or lower-transit (EVENTS) strictly
+        after jd_ut1_start (before, with backward) within window_days, at a
+        site; height_m gives the parallax, dip_height_m the dip (default 0:
+        the mathematical horizon). object is a NAIF id, ("star", index or
+        name) or ("hypothetical", token). A window with no such event is
+        not an error: see Event.outcome."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef const c.prometheia_options* o = opts_of(options)
+        cdef c.prometheia_object obj
+        cdef list keep = []
+        object_of(object, &obj, keep)
+        cdef int ev = word(EVENTS, event, "event")
+        cdef c.prometheia_rise_set_options ro
+        c.prometheia_rise_set_options_init(&ro)
+        ro.limb = word(LIMBS, limb, "limb")
+        ro.refraction = refraction
+        if atmosphere is None:
+            ro.refraction = 0
+        else:
+            atmosphere_of(atmosphere, &ro.atmosphere)
+        ro.dip_height_m, ro.window_days, ro.backward = dip_height_m, window_days, backward
+        cdef c.prometheia_event out
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_rise_set_ut(e, &obj, ev, jd_ut1_start, lon_deg, lat_deg, height_m,
+                                          &ro, o, &out, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        cdef Event result = Event.__new__(Event)
+        result.jd_ut1, result.outcome = out.jd_ut1, OUTCOMES[out.outcome]
+        return result
 
     def lookup(self, str name):
         """A catalog body's SPK-ID from its designation or name ("1",

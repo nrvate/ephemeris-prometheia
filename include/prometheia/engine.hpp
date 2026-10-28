@@ -497,6 +497,42 @@ public:
                                   const frames::Atmosphere* atmosphere,
                                   Precession precession = Precession::Vondrak2011);
 
+    // Something to find events of: a body by NAIF id or catalog SPK-ID, a
+    // star by catalog index, or a hypothetical body by token.
+    struct ObjectRef {
+        enum class Kind { Body, Star, Hypothetical } kind = Kind::Body;
+        long id = 0;
+        std::string token;
+    };
+
+    // Rise, set and transit (docs/ENGINE.md, "Rise, set and transit").
+    enum class Event { Rise, Set, UpperTransit, LowerTransit };
+    struct RiseSetOptions {
+        int limb = 1;                  // +1 upper, 0 centre, -1 lower
+        bool refraction = true;        // Bennett, with `atmosphere`
+        frames::Atmosphere atmosphere; // 1013.25 hPa, 15 C
+        double dip_height_m = 0.0;     // the eye above the sea horizon
+        double window_days = 2.0;      // how far to look
+        bool backward = false;         // the last event before the start
+        Precession precession = Precession::Vondrak2011;
+    };
+    // jd_ut1 is the event when it falls in the window, else NaN: the limb
+    // stayed above (or below) the horizon throughout, or the other event
+    // was the only one there.
+    enum class Outcome { Found, AlwaysAbove, AlwaysBelow, NotInWindow };
+    struct EventResult {
+        double jd_ut1 = 0.0; // NaN unless Found
+        Outcome outcome = Outcome::Found;
+    };
+    // The first event strictly after jd_ut1_start (before, with backward)
+    // at a site. The position is the topocentric apparent one from the site
+    // (its height gives the parallax). Rise and set are where the limb's
+    // true altitude is -dip - R(-dip), so the apparent limb is on the
+    // observer's horizon; without refraction, -dip. Transits are where the
+    // local apparent hour angle is 0 or 180 deg.
+    Result<EventResult> rise_set_ut(const ObjectRef& object, Event event, double jd_ut1_start,
+                                    const frames::GeoSite& site, const RiseSetOptions& opts);
+
     // Delta T model for UT inputs and topocentric Earth rotation. Not
     // owned; nullptr restores the default (time::ObservedDeltaT).
     void set_delta_t_model(const time::DeltaTModel* model);

@@ -375,6 +375,66 @@ or designation). Space motion, parallax, the Sun's deflection and aberration
 lead into the same output frames and zodiacs as bodies. The details and the
 validation against ERFA (0.34 mas) are in [STARS.md](STARS.md).
 
+## Rise, set and transit
+
+`Engine::rise_set_ut(object, event, jd_ut1_start, site, options)`, the C
+API's `prometheia_rise_set_ut` and the binding's `Context.rise_set` (added
+2026-10-27). The object is a body (NAIF id or catalog SPK-ID), a star or a
+hypothetical body. The event is a rise, a set, or an upper or lower transit.
+The answer is the first event strictly after the start (or the last before
+it), within a window of days.
+
+- **The position** is the topocentric apparent one from the site, the
+  Moon's parallax included. The site's height gives that parallax. The
+  local apparent hour angle is GAST plus the east longitude, with TT from
+  the engine's ΔT ([FRAMES.md](FRAMES.md), "The horizon").
+- **Rise and set** are where the limb's true altitude is h0 = −dip −
+  R(−dip). The apparent limb is then on the observer's horizon.
+  - R is Bennett's refraction at the atmosphere given. Without refraction,
+    h0 = −dip.
+  - The dip comes from `dip_height_m`, the eye's height above a sea
+    horizon. By default it is 0, the mathematical horizon, whatever the
+    site's height: a mountain observer has no sea horizon.
+  - The limb is the centre, or the centre plus or minus the semi-diameter
+    asin(radius/distance). The radii are the Sun's IAU 2015 B3 nominal
+    695,700 km and the mean radii of Archinal et al. 2018 for the Moon and
+    the planets. Mars to Pluto are answered as system barycentres, and the
+    disc is the planet's. A star, catalog body or hypothetical has no disc.
+- **Transits** are where the hour angle is 0° (upper) or 180° (lower).
+- **The search.**
+  - Transits come first. The hour angle advances monotonically, so its
+    crossings are found at hourly steps and bisected, and none is missed.
+  - The altitude's extremum near each transit is then found by
+    golden-section search over two hours either side. The declination
+    drifts between transits, the Moon's most.
+  - A rise lies between a minimum and the next maximum, and a set between a
+    maximum and the next minimum, where the altitude crosses h0. Each is
+    bisected to under 0.0001 s.
+  - So a Sun that clears the horizon for seconds is found. An earlier
+    design scanned altitude at 10-minute steps, and the Astrolog side showed
+    in review that it would step over such a day (2026-10-27).
+  - `de440_rise_set_finds_a_sun_up_for_minutes` finds the latitude where
+    the Sun just reaches the horizon on 2026-01-15 (69.757°N at 19°E). A
+    hair south of it the Sun is up for 1.8 s, and the day before it is
+    always below.
+- **No event in the window** is not an error. The outcome says whether the
+  limb stayed above or below the horizon throughout, read from the window's
+  own extrema and its two ends, or whether only the other event fell there.
+  The time is then NaN, never a plausible date.
+- **Against `swetest`.** The oracle is the printed times recorded in the
+  astromcp port plan's research runs, at 47°N 8°E, sea level, 1013.25 hPa
+  and 15 °C (`de440_rise_set_and_transit_match_swetest`).
+  - Transits, and the unrefracted disc centre, agree to **0.03 s**.
+  - The refracted upper limb of the Sun, Moon, Venus and Sirius sits
+    2.1–2.8 s from `swetest`, earlier at rise and later at set on every
+    body. That is a constant difference of about 22″ in the refraction
+    taken at the horizon (ours is Bennett for an apparent altitude of 0,
+    33.97′ at standard air), not the geometry or the time scale.
+  - The polar cases agree: at 75°N no rise or set on 20 June, 20 December
+    or 1 May; at 70°N a rise and a set on 1 May and none on 20 May; at 66°N
+    a Moon that rises on 22 March and does not set.
+- **Cost:** about 2 ms a call with a two-day window (24 calls in 53 ms).
+
 ## Small bodies: the catalog overlay
 
 `add_catalog(path)` stacks EPM1 containers ([FORMAT.md](FORMAT.md));

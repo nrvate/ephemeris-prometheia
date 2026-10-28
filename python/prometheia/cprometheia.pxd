@@ -408,6 +408,52 @@ cdef extern from "prometheia/prometheia.h" nogil:
                                             double height_m, double* out_deg,
                                             prometheia_error* err) noexcept
 
+    # Rise, set and transit
+    int PROMETHEIA_OBJECT_BODY
+    int PROMETHEIA_OBJECT_STAR
+    int PROMETHEIA_OBJECT_HYPOTHETICAL
+
+    ctypedef struct prometheia_object:
+        int kind
+        int id
+        const char* token
+
+    int PROMETHEIA_EVENT_RISE
+    int PROMETHEIA_EVENT_SET
+    int PROMETHEIA_EVENT_UPPER_TRANSIT
+    int PROMETHEIA_EVENT_LOWER_TRANSIT
+    int PROMETHEIA_LIMB_UPPER
+    int PROMETHEIA_LIMB_CENTRE
+    int PROMETHEIA_LIMB_LOWER
+
+    ctypedef struct prometheia_rise_set_options:
+        int limb
+        int refraction
+        prometheia_atmosphere atmosphere
+        double dip_height_m
+        double window_days
+        int backward
+
+    void prometheia_rise_set_options_init(prometheia_rise_set_options* options) noexcept
+
+    int PROMETHEIA_OUTCOME_FOUND
+    int PROMETHEIA_OUTCOME_ALWAYS_ABOVE
+    int PROMETHEIA_OUTCOME_ALWAYS_BELOW
+    int PROMETHEIA_OUTCOME_NOT_IN_WINDOW
+
+    ctypedef struct prometheia_event:
+        double jd_ut1
+        int outcome
+
+    prometheia_status prometheia_rise_set_ut(prometheia_engine* engine,
+                                             const prometheia_object* object, int event,
+                                             double jd_ut1_start, double lon_deg, double lat_deg,
+                                             double height_m,
+                                             const prometheia_rise_set_options* options,
+                                             const prometheia_options* opts,
+                                             prometheia_event* out,
+                                             prometheia_error* err) noexcept
+
     # Time scales
     double prometheia_jd_from_ymdhms(int year, int month, int day, int hour, int minute,
                                      double second) noexcept

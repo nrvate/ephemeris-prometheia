@@ -291,6 +291,15 @@ bool precession_of(const prometheia_options* opts, Precession& p, prometheia_err
     return true;
 }
 
+static_assert(PROMETHEIA_EVENT_RISE == int(Engine::Event::Rise));
+static_assert(PROMETHEIA_EVENT_SET == int(Engine::Event::Set));
+static_assert(PROMETHEIA_EVENT_UPPER_TRANSIT == int(Engine::Event::UpperTransit));
+static_assert(PROMETHEIA_EVENT_LOWER_TRANSIT == int(Engine::Event::LowerTransit));
+static_assert(PROMETHEIA_OUTCOME_FOUND == int(Engine::Outcome::Found));
+static_assert(PROMETHEIA_OUTCOME_ALWAYS_ABOVE == int(Engine::Outcome::AlwaysAbove));
+static_assert(PROMETHEIA_OUTCOME_ALWAYS_BELOW == int(Engine::Outcome::AlwaysBelow));
+static_assert(PROMETHEIA_OUTCOME_NOT_IN_WINDOW == int(Engine::Outcome::NotInWindow));
+
 // NUL-terminated copy, truncated to fit.
 void copy_string(char* dst, size_t cap, std::string_view src) {
     if (cap == 0)
@@ -1058,6 +1067,74 @@ prometheia_status prometheia_refraction(double altitude_deg, int from,
                    ? frames::refraction_from_true_deg(altitude_deg, air, dip)
                    : frames::refraction_from_apparent_deg(altitude_deg, air, dip);
     return succeed(err);
+}
+
+void prometheia_rise_set_options_init(prometheia_rise_set_options* options) {
+    if (!options)
+        return;
+    const Engine::RiseSetOptions d;
+    options->limb = d.limb;
+    options->refraction = d.refraction;
+    options->atmosphere.pressure_hpa = d.atmosphere.pressure_hpa;
+    options->atmosphere.temperature_c = d.atmosphere.temperature_c;
+    options->dip_height_m = d.dip_height_m;
+    options->window_days = d.window_days;
+    options->backward = d.backward;
+}
+
+prometheia_status prometheia_rise_set_ut(prometheia_engine* engine, const prometheia_object* object,
+                                         int event, double jd_ut1_start, double lon_deg,
+                                         double lat_deg, double height_m,
+                                         const prometheia_rise_set_options* options,
+                                         const prometheia_options* opts, prometheia_event* out,
+                                         prometheia_error* err) {
+    if (out) {
+        out->jd_ut1 = std::nan("");
+        out->outcome = PROMETHEIA_OUTCOME_NOT_IN_WINDOW;
+    }
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!object)
+        return argument(err, "object is NULL");
+    if (!out)
+        return argument(err, "event output is NULL");
+    if (object->kind < PROMETHEIA_OBJECT_BODY || object->kind > PROMETHEIA_OBJECT_HYPOTHETICAL)
+        return argument(err, "object kind out of range");
+    if (object->kind == PROMETHEIA_OBJECT_HYPOTHETICAL && !object->token)
+        return argument(err, "a hypothetical object needs a token");
+    if (event < PROMETHEIA_EVENT_RISE || event > PROMETHEIA_EVENT_LOWER_TRANSIT)
+        return argument(err, "event out of range");
+    Precession p{};
+    if (prometheia_status st; !precession_of(opts, p, err, st))
+        return st;
+    return guarded(err, [&] {
+        Engine::ObjectRef ref;
+        ref.kind = object->kind == PROMETHEIA_OBJECT_STAR ? Engine::ObjectRef::Kind::Star
+                   : object->kind == PROMETHEIA_OBJECT_HYPOTHETICAL
+                       ? Engine::ObjectRef::Kind::Hypothetical
+                       : Engine::ObjectRef::Kind::Body;
+        ref.id = object->id;
+        if (object->token)
+            ref.token = object->token;
+        Engine::RiseSetOptions ro;
+        if (options) {
+            ro.limb = options->limb;
+            ro.refraction = options->refraction != 0;
+            ro.atmosphere = {options->atmosphere.pressure_hpa, options->atmosphere.temperature_c};
+            ro.dip_height_m = options->dip_height_m;
+            ro.window_days = options->window_days;
+            ro.backward = options->backward != 0;
+        }
+        ro.precession = p;
+        const frames::GeoSite site{lon_deg * kDegToRad, lat_deg * kDegToRad, height_m};
+        auto r = engine->engine.rise_set_ut(ref, static_cast<Engine::Event>(event), jd_ut1_start,
+                                            site, ro);
+        if (!r)
+            return report(err, r.error());
+        out->jd_ut1 = r.value().jd_ut1;
+        out->outcome = int(r.value().outcome);
+        return succeed(err);
+    });
 }
 
 const char* prometheia_constellation_at(double ra_deg, double dec_deg) {

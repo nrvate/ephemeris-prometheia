@@ -123,6 +123,11 @@ the C++ engine's, bit for bit.
   - `houses(system, jd, lon, lat, options)`;
   - `sidereal_time(jd_ut1, "mean"|"apparent")` and
     `obliquity(jd_tt, "mean"|"true")`;
+  - `rise_set(object, event, jd_ut1_start, lon, lat, height_m=0, *,
+    limb=, refraction=, atmosphere=, dip_height_m=, window_days=,
+    backward=)` returns an `Event` (`jd_ut1`, NaN unless `outcome` is
+    `"found"`). The object is a NAIF id, `("star", index or name)` or
+    `("hypothetical", token)`;
   - `horizontal(jd_ut1, lon, lat, ra, dec, atmosphere=None, height_m=0)`
     and `equatorial_from_horizontal(…)`. The azimuth runs from north
     through east. An atmosphere is `"standard"`, `(hPa, °C)` or a dict, and

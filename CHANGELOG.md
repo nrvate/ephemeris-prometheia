@@ -13,6 +13,17 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Rise, set and transit** ([docs/ENGINE.md](docs/ENGINE.md), "Rise, set and
+  transit"):
+  - of a body, star or hypothetical at a site, with the limb, refraction
+    and dip as options;
+  - transits are found first and the altitude extrema next to them, so no
+    short day is stepped over (a Sun up for 1.8 s is found);
+  - no event in the window is an outcome with a NaN time, not an error.
+  - Against `swetest`'s printed times: transits and the unrefracted centre
+    to 0.03 s, the refracted upper limb within 2.8 s.
+  - In the engine, the C API (`prometheia_rise_set_ut`; ABI unchanged,
+    announced to Astrolog first) and the binding.
 - **The horizon and refraction** ([docs/FRAMES.md](docs/FRAMES.md), "The
   horizon"):
   - azimuth (from north through east) and altitude from a direction of date,

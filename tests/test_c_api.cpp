@@ -1097,4 +1097,96 @@ TEST_CASE("c_api_horizon_matches_engine") {
                                                    &err) == PROMETHEIA_ERROR_ARGUMENT);
 }
 
+TEST_CASE("c_api_rise_set_matches_engine") {
+    TempFile tf("capi-rise");
+    synth::write_linear_spk(tf.path);
+    auto cpp = Engine::open(tf.path.string());
+    CHandle c;
+    CHECK(prometheia_engine_open(tf.path.c_str(), &c.e, nullptr) == PROMETHEIA_OK);
+    if (!cpp.ok() || !c.e)
+        return;
+    prometheia_rise_set_options ro;
+    prometheia_rise_set_options_init(&ro);
+    const Engine::RiseSetOptions d;
+    CHECK(ro.limb == d.limb);
+    CHECK(ro.refraction == 1);
+    CHECK(ro.window_days == d.window_days);
+    CHECK(ro.dip_height_m == 0.0);
+    const int spica = int(stars::find("Spica").value());
+    const prometheia_object objects[] = {{PROMETHEIA_OBJECT_BODY, 10, nullptr},
+                                         {PROMETHEIA_OBJECT_STAR, spica, nullptr},
+                                         {PROMETHEIA_OBJECT_HYPOTHETICAL, 0, "cupido"}};
+    int found = 0;
+    for (const prometheia_object& obj : objects) {
+        for (int ev = PROMETHEIA_EVENT_RISE; ev <= PROMETHEIA_EVENT_LOWER_TRANSIT; ++ev) {
+            for (int limb : {PROMETHEIA_LIMB_UPPER, PROMETHEIA_LIMB_CENTRE}) {
+                for (int back : {0, 1}) {
+                    prometheia_rise_set_options o = ro;
+                    o.limb = limb;
+                    o.backward = back;
+                    o.refraction = limb == PROMETHEIA_LIMB_UPPER;
+                    o.dip_height_m = limb == PROMETHEIA_LIMB_UPPER ? 0.0 : 50.0;
+                    prometheia_event out;
+                    REQUIRE(prometheia_rise_set_ut(c.e, &obj, ev, kJ2000 + 0.1, 8.55, 47.37, 400.0,
+                                                   &o, nullptr, &out, nullptr) == PROMETHEIA_OK);
+                    Engine::ObjectRef ref;
+                    ref.kind = obj.kind == PROMETHEIA_OBJECT_STAR ? Engine::ObjectRef::Kind::Star
+                               : obj.kind == PROMETHEIA_OBJECT_HYPOTHETICAL
+                                   ? Engine::ObjectRef::Kind::Hypothetical
+                                   : Engine::ObjectRef::Kind::Body;
+                    ref.id = obj.id;
+                    if (obj.token)
+                        ref.token = obj.token;
+                    Engine::RiseSetOptions co;
+                    co.limb = limb;
+                    co.backward = back;
+                    co.refraction = o.refraction;
+                    co.dip_height_m = o.dip_height_m;
+                    auto r =
+                        cpp.value().rise_set_ut(ref, static_cast<Engine::Event>(ev), kJ2000 + 0.1,
+                                                {8.55 * kDegToRad, 47.37 * kDegToRad, 400.0}, co);
+                    REQUIRE(r.ok());
+                    CHECK(out.outcome == int(r.value().outcome));
+                    if (out.outcome == PROMETHEIA_OUTCOME_FOUND) {
+                        ++found;
+                        CHECK(out.jd_ut1 == r.value().jd_ut1);
+                        CHECK((back ? out.jd_ut1 < kJ2000 + 0.1 : out.jd_ut1 > kJ2000 + 0.1));
+                    } else {
+                        CHECK(std::isnan(out.jd_ut1));
+                    }
+                }
+            }
+        }
+    }
+    CHECK(found > 0);
+
+    prometheia_event out;
+    prometheia_error err;
+    const prometheia_object sun{PROMETHEIA_OBJECT_BODY, 10, nullptr};
+    const prometheia_object bad_kind{7, 0, nullptr},
+        no_token{PROMETHEIA_OBJECT_HYPOTHETICAL, 0, nullptr};
+    CHECK(prometheia_rise_set_ut(c.e, &bad_kind, 0, kJ2000, 0.0, 0.0, 0.0, nullptr, nullptr, &out,
+                                 &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(std::isnan(out.jd_ut1));
+    CHECK(prometheia_rise_set_ut(c.e, &no_token, 0, kJ2000, 0.0, 0.0, 0.0, nullptr, nullptr, &out,
+                                 &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_rise_set_ut(c.e, &sun, 4, kJ2000, 0.0, 0.0, 0.0, nullptr, nullptr, &out,
+                                 &err) == PROMETHEIA_ERROR_ARGUMENT);
+    prometheia_rise_set_options o = ro;
+    o.limb = 2;
+    CHECK(prometheia_rise_set_ut(c.e, &sun, 0, kJ2000, 0.0, 0.0, 0.0, &o, nullptr, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    o = ro;
+    o.window_days = 0.0;
+    CHECK(prometheia_rise_set_ut(c.e, &sun, 0, kJ2000, 0.0, 0.0, 0.0, &o, nullptr, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    o = ro;
+    o.dip_height_m = -1.0;
+    CHECK(prometheia_rise_set_ut(c.e, &sun, 0, kJ2000, 0.0, 0.0, 0.0, &o, nullptr, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    const prometheia_object unknown{PROMETHEIA_OBJECT_HYPOTHETICAL, 0, "no-such"};
+    CHECK(prometheia_rise_set_ut(c.e, &unknown, 0, kJ2000, 0.0, 0.0, 0.0, nullptr, nullptr, &out,
+                                 &err) == PROMETHEIA_ERROR_NOT_FOUND);
+}
+
 } // namespace

@@ -743,6 +743,82 @@ PROMETHEIA_API prometheia_status prometheia_refraction(double altitude_deg, int 
                                                        double height_m, double* out_deg,
                                                        prometheia_error* err);
 
+/* ---- Rise, set and transit (after 0.7.3) ------------------------------------
+ *
+ * docs/ENGINE.md, "Rise, set and transit". Added after library 0.7.3; the ABI
+ * version is unchanged, as no existing layout changed.
+ */
+
+/* What to find events of. */
+#define PROMETHEIA_OBJECT_BODY 0         /* id: a NAIF id, or a catalog SPK-ID */
+#define PROMETHEIA_OBJECT_STAR 1         /* id: a star catalog index */
+#define PROMETHEIA_OBJECT_HYPOTHETICAL 2 /* token: a hypothetical body's */
+typedef struct prometheia_object {
+    int kind;          /* PROMETHEIA_OBJECT_* */
+    int id;            /* BODY, STAR */
+    const char* token; /* HYPOTHETICAL */
+} prometheia_object;
+
+#define PROMETHEIA_EVENT_RISE 0
+#define PROMETHEIA_EVENT_SET 1
+#define PROMETHEIA_EVENT_UPPER_TRANSIT 2
+#define PROMETHEIA_EVENT_LOWER_TRANSIT 3
+
+#define PROMETHEIA_LIMB_UPPER 1
+#define PROMETHEIA_LIMB_CENTRE 0
+#define PROMETHEIA_LIMB_LOWER (-1)
+
+/* prometheia_rise_set_options_init gives the defaults below. */
+typedef struct prometheia_rise_set_options {
+    int limb;                         /* PROMETHEIA_LIMB_*, default UPPER */
+    int refraction;                   /* nonzero: Bennett, with `atmosphere` (default 1) */
+    prometheia_atmosphere atmosphere; /* default 1013.25 hPa, 15 C */
+    /* The eye's height above a sea horizon, for its dip (1.76' sqrt(h)).
+     * Default 0: the mathematical horizon, whatever the site's height. */
+    double dip_height_m;
+    double window_days; /* how far to look, > 0 and <= 3660; default 2 */
+    int backward;       /* nonzero: the last event before the start */
+} prometheia_rise_set_options;
+
+PROMETHEIA_API void prometheia_rise_set_options_init(prometheia_rise_set_options* options);
+
+#define PROMETHEIA_OUTCOME_FOUND 0
+#define PROMETHEIA_OUTCOME_ALWAYS_ABOVE 1  /* the limb stayed above the horizon */
+#define PROMETHEIA_OUTCOME_ALWAYS_BELOW 2  /* ... below it */
+#define PROMETHEIA_OUTCOME_NOT_IN_WINDOW 3 /* both sides, but not this event */
+
+typedef struct prometheia_event {
+    double jd_ut1; /* the event, UT1; NaN unless FOUND */
+    int outcome;   /* PROMETHEIA_OUTCOME_* */
+} prometheia_event;
+
+/*
+ * The first event strictly after jd_ut1_start (the last before it, with
+ * backward) within the window, at a site: geodetic lon_deg (east positive)
+ * and lat_deg, and height_m above the ellipsoid, which gives the parallax
+ * and no dip. A window with no such event is still PROMETHEIA_OK, and the
+ * outcome says why.
+ *
+ * The position is the topocentric apparent one from the site, the Moon's
+ * parallax included, with TT from the engine's Delta T (the observed model,
+ * or a function installed with prometheia_engine_set_delta_t). Only
+ * opts->precession enters (NULL: the default).
+ *   - Rise and set: the limb's true altitude is -dip - R(-dip), so the
+ *     apparent limb is on the observer's horizon; without refraction, -dip.
+ *   - The limb is the centre plus or minus the semi-diameter asin(radius /
+ *     distance), from IAU radii for the Sun, the Moon and the planets; a
+ *     star, catalog body or hypothetical has none.
+ *   - Transits are where the local apparent hour angle is 0 (upper) or
+ *     180 deg (lower).
+ *   - Transits are found first and none is missed. A rise or set is then
+ *     sought between the altitude extrema next to them, so even a Sun up for
+ *     a few seconds is found.
+ */
+PROMETHEIA_API prometheia_status prometheia_rise_set_ut(
+    prometheia_engine* engine, const prometheia_object* object, int event, double jd_ut1_start,
+    double lon_deg, double lat_deg, double height_m, const prometheia_rise_set_options* options,
+    const prometheia_options* opts, prometheia_event* out, prometheia_error* err);
+
 /* ---- Time scales (docs/TIME.md) -------------------------------------------- */
 
 /* JD of a proleptic Gregorian date and wall-clock time, in whatever

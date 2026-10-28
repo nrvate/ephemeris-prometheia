@@ -20,6 +20,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <tuple>
 #include <unistd.h>
 #include <vector>
 
@@ -29,6 +30,7 @@
 #include <prometheia/forces.hpp>
 #include <prometheia/frames.hpp>
 #include <prometheia/stars.hpp>
+#include <prometheia/time.hpp>
 
 #include "synthetic_spk.hpp"
 #include <doctest/doctest.h>
@@ -1473,3 +1475,187 @@ TEST_CASE("de440_binary_and_spk_agree_through_engine") {
 }
 
 } // namespace
+
+// ---- Rise, set and transit (DE440) -----------------------------------------
+
+namespace {
+
+constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+
+double ut_of(int y, int m, int d, int hh, int mm, double ss) {
+    return time::jd_from_ymdhms(y, m, d, hh, mm, ss);
+}
+
+Engine::ObjectRef body_ref(long id) {
+    return {Engine::ObjectRef::Kind::Body, id, {}};
+}
+
+} // namespace
+
+TEST_CASE("de440_rise_set_and_transit_match_swetest") {
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    REQUIRE(opened.ok());
+    Engine& e = opened.value();
+    // swetest's printed times (UT), recorded by the astromcp port plan's
+    // research runs at 47N 8E, sea level, 1013.25 hPa, 15 C. Transits and
+    // the unrefracted disc centre agree to 0.1 s. The refracted upper limb
+    // sits 2-3 s from swetest's on every body, earlier at rise and later at
+    // set: a constant ~22" difference in the refraction taken at the
+    // horizon (ours: Bennett for an apparent altitude of 0, 33.97'), not
+    // the geometry or the time scale.
+    const frames::GeoSite site{8.0 * kDegToRad, 47.0 * kDegToRad, 0.0};
+    using Ev = Engine::Event;
+    struct Row {
+        long body;
+        int star; // -1: a body
+        Ev event;
+        bool centre_no_refraction;
+        int y, m, d;
+        double want; // seconds of the UT day
+    };
+    const int sirius = int(stars::find("Sirius").value());
+    const Row rows[] = {
+        {10, -1, Ev::Rise, false, 2026, 3, 20, 5 * 3600 + 31 * 60 + 19.8},
+        {10, -1, Ev::Set, false, 2026, 3, 20, 17 * 3600 + 40 * 60 + 24.7},
+        {10, -1, Ev::UpperTransit, false, 2026, 3, 20, 11 * 3600 + 35 * 60 + 26.5},
+        {10, -1, Ev::LowerTransit, false, 2026, 3, 20, 23 * 3600 + 35 * 60 + 17.6},
+        {10, -1, Ev::Rise, true, 2026, 3, 20, 5 * 3600 + 36 * 60 + 10.6},
+        {10, -1, Ev::Set, true, 2026, 3, 20, 17 * 3600 + 35 * 60 + 33.2},
+        {301, -1, Ev::Rise, false, 2026, 3, 20, 5 * 3600 + 50 * 60 + 30.3},
+        {301, -1, Ev::Set, false, 2026, 3, 20, 19 * 3600 + 50 * 60 + 31.0},
+        {299, -1, Ev::Rise, false, 2026, 6, 1, 5 * 3600 + 57 * 60 + 20.5},
+        {299, -1, Ev::Set, false, 2026, 6, 1, 21 * 3600 + 59 * 60 + 10.7},
+        {0, sirius, Ev::Rise, false, 2026, 6, 1, 8 * 3600 + 46 * 60 + 35.7},
+        {0, sirius, Ev::Set, false, 2026, 6, 1, 18 * 3600 + 21 * 60 + 34.7},
+    };
+    double worst_exact = 0.0, worst_refracted = 0.0;
+    for (const Row& r : rows) {
+        Engine::RiseSetOptions o;
+        if (r.centre_no_refraction) {
+            o.limb = 0;
+            o.refraction = false;
+        }
+        const Engine::ObjectRef ref =
+            r.star >= 0 ? Engine::ObjectRef{Engine::ObjectRef::Kind::Star, r.star, {}}
+                        : body_ref(r.body);
+        const double day = ut_of(r.y, r.m, r.d, 0, 0, 0.0);
+        auto got = e.rise_set_ut(ref, r.event, day, site, o);
+        REQUIRE(got.ok());
+        REQUIRE(got.value().outcome == Engine::Outcome::Found);
+        const double d = std::fabs((got.value().jd_ut1 - day) * 86400.0 - r.want);
+        const bool exact =
+            r.centre_no_refraction || r.event == Ev::UpperTransit || r.event == Ev::LowerTransit;
+        CHECK_MESSAGE(d < (exact ? 0.2 : 3.0), "body ", r.body, " star ", r.star, ": ", d, " s");
+        (exact ? worst_exact : worst_refracted) =
+            std::max(exact ? worst_exact : worst_refracted, d);
+    }
+    std::printf("  rise/set vs swetest: transits and unrefracted centre %.2f s, refracted upper "
+                "limb %.2f s\n",
+                worst_exact, worst_refracted);
+
+    // At the instant found, the true upper limb is R(0) below the horizon,
+    // so the apparent one is on it.
+    Engine::RiseSetOptions o;
+    auto rise = e.rise_set_ut(body_ref(10), Ev::Rise, ut_of(2026, 3, 20, 0, 0, 0.0), site, o);
+    REQUIRE(rise.ok());
+    CalcOptions topo;
+    topo.center = Center::Topocentric;
+    topo.site = site;
+    topo.coords = Coords::Equatorial;
+    auto sun = e.calc_ut(10, rise.value().jd_ut1, topo);
+    REQUIRE(sun.ok());
+    auto h = e.horizontal_ut(rise.value().jd_ut1, site, sun.value().pos.lon_deg,
+                             sun.value().pos.lat_deg, nullptr);
+    REQUIRE(h.ok());
+    const double sd = std::asin(695700.0 / (sun.value().pos.dist_au * 149597870.7)) / kDegToRad;
+    const double limb = h.value().altitude_deg + sd;
+    CHECK(std::fabs(limb + frames::refraction_from_apparent_deg(0.0, frames::Atmosphere{})) *
+              3600.0 <
+          0.01);
+
+    // Backward: the last sunset before the start, the evening before.
+    o.backward = true;
+    auto before = e.rise_set_ut(body_ref(10), Ev::Set, ut_of(2026, 3, 20, 0, 0, 0.0), site, o);
+    REQUIRE(before.ok());
+    CHECK(before.value().jd_ut1 < ut_of(2026, 3, 20, 0, 0, 0.0));
+    CHECK(before.value().jd_ut1 > ut_of(2026, 3, 19, 17, 0, 0.0));
+}
+
+TEST_CASE("de440_rise_set_at_polar_sites") {
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    REQUIRE(opened.ok());
+    Engine& e = opened.value();
+    using Ev = Engine::Event;
+    using Out = Engine::Outcome;
+    Engine::RiseSetOptions day;
+    day.window_days = 1.0;
+    auto outcome = [&](long body, Ev ev, double lat, int y, int m, int d) {
+        const frames::GeoSite site{8.0 * kDegToRad, lat * kDegToRad, 0.0};
+        auto r = e.rise_set_ut(body_ref(body), ev, ut_of(y, m, d, 0, 0, 0.0), site, day);
+        REQUIRE(r.ok());
+        if (r.value().outcome != Out::Found)
+            CHECK(std::isnan(r.value().jd_ut1));
+        return r.value().outcome;
+    };
+    // The cases swetest gave (the astromcp plan's research runs).
+    for (auto [m, d, want] :
+         {std::tuple{6, 20, Out::AlwaysAbove}, std::tuple{12, 20, Out::AlwaysBelow},
+          std::tuple{5, 1, Out::AlwaysAbove}})
+        for (Ev ev : {Ev::Rise, Ev::Set})
+            CHECK(outcome(10, ev, 75.0, 2026, m, d) == want);
+    CHECK(outcome(10, Ev::Rise, 70.0, 2026, 5, 1) == Out::Found);
+    CHECK(outcome(10, Ev::Set, 70.0, 2026, 5, 1) == Out::Found);
+    CHECK(outcome(10, Ev::Rise, 70.0, 2026, 5, 20) == Out::AlwaysAbove);
+    CHECK(outcome(301, Ev::Rise, 66.0, 2026, 3, 22) == Out::Found);
+    CHECK(outcome(301, Ev::Set, 66.0, 2026, 3, 22) == Out::NotInWindow);
+    // Transits are found at every latitude short of the pole.
+    CHECK(outcome(10, Ev::UpperTransit, 89.0, 2026, 12, 20) == Out::Found);
+}
+
+TEST_CASE("de440_rise_set_finds_a_sun_up_for_minutes") {
+    // Where the Sun first returns after the polar night it clears the
+    // horizon for a few minutes; a 10-minute scan of altitude stepped over
+    // the whole day (the Astrolog side's review, 2026-10-27). Find the
+    // latitude where the Sun's highest point on 2026-01-15 just reaches
+    // the horizon, go a hair south of it, and the rise and set there must be
+    // minutes apart, with the day before always below.
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    REQUIRE(opened.ok());
+    Engine& e = opened.value();
+    using Ev = Engine::Event;
+    Engine::RiseSetOptions day;
+    day.window_days = 1.0;
+    const double jan15 = ut_of(2026, 1, 15, 0, 0, 0.0);
+    auto up = [&](double lat, double jd) {
+        const frames::GeoSite site{19.0 * kDegToRad, lat * kDegToRad, 0.0};
+        return e.rise_set_ut(body_ref(10), Ev::Rise, jd, site, day).value().outcome ==
+               Engine::Outcome::Found;
+    };
+    double south = 60.0, north = 75.0; // up at 60, never at 75
+    REQUIRE(up(south, jan15));
+    REQUIRE(!up(north, jan15));
+    while (north - south > 1e-7) {
+        const double m = 0.5 * (south + north);
+        (up(m, jan15) ? south : north) = m;
+    }
+    const frames::GeoSite site{19.0 * kDegToRad, south * kDegToRad, 0.0};
+    auto rise = e.rise_set_ut(body_ref(10), Ev::Rise, jan15, site, day);
+    auto set = e.rise_set_ut(body_ref(10), Ev::Set, jan15, site, day);
+    REQUIRE(rise.ok());
+    REQUIRE(set.ok());
+    REQUIRE(rise.value().outcome == Engine::Outcome::Found);
+    REQUIRE(set.value().outcome == Engine::Outcome::Found);
+    const double minutes = (set.value().jd_ut1 - rise.value().jd_ut1) * 1440.0;
+    std::printf("  Sun up %.2f min at %.6f N on 2026-01-15\n", minutes, south);
+    CHECK(minutes > 0.0);
+    CHECK(minutes < 10.0);
+    auto before = e.rise_set_ut(body_ref(10), Ev::Rise, jan15 - 1.0, site, day);
+    REQUIRE(before.ok());
+    CHECK(before.value().outcome == Engine::Outcome::AlwaysBelow);
+}

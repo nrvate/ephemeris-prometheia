@@ -484,3 +484,21 @@ Two consequences, measured on 2026-09-18:
   under the maintainer's `/swe` mount has identical Hamburg rows. So
   Prometheia agrees with what Astrolog users see. Only a deleted file, or a
   binary moved out of its tree, reaches the compiled-in table.
+
+**2026-10-27: Swiss's rise-and-set horizon, described in a message (not
+asked for).** While reviewing the shape of rise, set and transit
+(`Engine::rise_set_ut`), the Astrolog session corrected one of its own
+review points. It checked Swiss's eclipse-and-rising source rather than its
+memory, and described in prose which internal routine the public rising call
+uses, with what horizon height, and how that routine's dip is computed.
+Nothing on this side asked about Swiss behaviour. No Swiss file was opened
+here.
+- **What it touches:** one rule, whether the observer's height sets a dip
+  by default. Prometheia's default, no dip unless `dip_height_m` is given
+  (the mathematical horizon at any site height), was in the shape sent for
+  review before the message. It rests on its own reason: a mountain observer
+  has no sea horizon. It is unchanged.
+- **What was done:** nothing from the message reaches code or docs, and no
+  mapping from Swiss's calls goes into [C_API.md](C_API.md). The Astrolog
+  session was asked to send only printed behaviour and numbers. This entry
+  and the maintainer were told the same day.

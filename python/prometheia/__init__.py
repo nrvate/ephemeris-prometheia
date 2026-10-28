@@ -35,9 +35,10 @@ __all__ = ["Client", "Error", "ToolError", "native"]
 # The native binding's public names, at the top of the package (the
 # extension module itself is an implementation detail); _native.pyi types them.
 try:
-    from ._native import (BODIES, COORDINATES, CORRECTIONS, FRAMES, HOUSE_SYSTEMS, METHODS,
-                          OBSERVERS, POINTS, PRECESSION, SIDEREAL_PLANES, ZODIACS, Context,
-                          Dataset, Horizontal, Houses, Options, Position, abi_version,
+    from ._native import (BODIES, COORDINATES, CORRECTIONS, EVENTS, FRAMES, HOUSE_SYSTEMS, LIMBS,
+                          METHODS, OBSERVERS, OUTCOMES, POINTS, PRECESSION, SIDEREAL_PLANES,
+                          ZODIACS, Context, Dataset, Event, Horizontal, Houses, Options,
+                          Position, abi_version,
                           civil_from_jd, constellation_at, delta_t, ecliptic_to_equatorial,
                           equatorial_to_ecliptic, houses_from_armc, jd_from_ymdhms, refraction,
                           star_count, star_find, star_info, star_lookup, tdb_minus_tt, tt_to_utc,
@@ -46,9 +47,10 @@ except ImportError:  # the extension is not built: the client alone
     native = False
 else:
     native = True
-    __all__ += ["BODIES", "COORDINATES", "CORRECTIONS", "FRAMES", "HOUSE_SYSTEMS", "METHODS",
-                "OBSERVERS", "POINTS", "PRECESSION", "SIDEREAL_PLANES", "ZODIACS", "Context",
-                "Dataset", "Horizontal", "Houses", "Options", "Position", "abi_version",
+    __all__ += ["BODIES", "COORDINATES", "CORRECTIONS", "EVENTS", "FRAMES", "HOUSE_SYSTEMS",
+                "LIMBS", "METHODS", "OBSERVERS", "OUTCOMES", "POINTS", "PRECESSION",
+                "SIDEREAL_PLANES", "ZODIACS", "Context", "Dataset", "Event", "Horizontal",
+                "Houses", "Options", "Position", "abi_version",
                 "civil_from_jd", "constellation_at", "delta_t", "ecliptic_to_equatorial",
                 "equatorial_to_ecliptic", "houses_from_armc", "jd_from_ymdhms", "refraction",
                 "star_count", "star_find", "star_info", "star_lookup", "tdb_minus_tt",

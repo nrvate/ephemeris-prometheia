@@ -73,7 +73,7 @@ class Surface(unittest.TestCase):
         public = {k for k in dir(n) if not k.startswith("_") and k not in (
             "Error", "threading", "Atmosphere")}
         self.assertEqual(public - set(stub), set())  # nothing untyped
-        self.assertEqual(set(stub) - public - {"Scale", "Site", "Atmosphere"}, set())
+        self.assertEqual(set(stub) - public - {"Scale", "Site", "Atmosphere", "Object"}, set())
         for cls, methods in stub.items():
             if methods:
                 real = {m for m in dir(getattr(n, cls)) if not m.startswith("_")}
@@ -283,6 +283,35 @@ class Engine(unittest.TestCase):
             ctx.horizontal(jd_ut1, lon, lat, 0.0, 0.0, atmosphere="thin")
         with self.assertRaises(prometheia.Error):
             n.refraction(5.0, "upward")
+
+    def test_rise_set(self):
+        import math
+        ctx = self.ds.local()
+        start, lon, lat = 2461119.5, 8.0, 47.0  # 2026-03-20 0h UT
+        rise = ctx.rise_set(n.BODIES["sun"], "rise", start, lon, lat)
+        self.assertEqual(rise.outcome, "found")
+        # The swetest time the C++ test holds us to within 3 s.
+        self.assertLess(abs((rise.jd_ut1 - start) * 86400.0 - (5 * 3600 + 31 * 60 + 19.8)), 3.0)
+        # The disc centre without refraction is at the true horizon.
+        geo = ctx.rise_set(n.BODIES["sun"], "rise", start, lon, lat, limb="centre",
+                           atmosphere=None)
+        o = n.Options(observer="topocentric", site=(lon, lat), coordinates="equatorial")
+        sun = ctx.calc(n.BODIES["sun"], geo.jd_ut1, o, scale="ut1")
+        h = ctx.horizontal(geo.jd_ut1, lon, lat, sun.lon_deg, sun.lat_deg)
+        self.assertLess(abs(h.altitude_deg) * 3600.0, 0.01)
+        transit = ctx.rise_set(("star", "Sirius"), "upper-transit", start, lon, lat)
+        self.assertEqual(transit.outcome, "found")
+        cupido = ctx.rise_set(("hypothetical", "cupido"), "set", start, lon, lat)
+        self.assertEqual(cupido.outcome, "found")
+        polar = ctx.rise_set(n.BODIES["sun"], "rise", 2461211.5, lon, 75.0, window_days=1.0)
+        self.assertEqual(polar.outcome, "always-above")
+        self.assertTrue(math.isnan(polar.jd_ut1))
+        before = ctx.rise_set(n.BODIES["sun"], "set", start, lon, lat, backward=True)
+        self.assertLess(before.jd_ut1, start)
+        with self.assertRaises(prometheia.Error):
+            ctx.rise_set(n.BODIES["sun"], "dawn", start, lon, lat)
+        with self.assertRaises(prometheia.Error):
+            ctx.rise_set("Sun", "rise", start, lon, lat)
 
     def test_sidereal_time_is_the_houses_armc(self):
         ctx = self.ds.local()

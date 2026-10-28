@@ -3719,6 +3719,274 @@ Engine::equatorial_from_horizontal_ut(double jd_ut1, const frames::GeoSite& site
     return q;
 }
 
+namespace {
+
+// Mean radii (km), for the limbs: the Sun's IAU 2015 Resolution B3 nominal
+// radius, the others the mean radii of Archinal et al. 2018 (Celest. Mech.
+// Dyn. Astron. 130:22). Mars to Pluto are answered as system barycentres;
+// the disc is the planet's.
+double body_radius_km(long id) {
+    switch (id) {
+    case 10:
+        return 695700.0;
+    case 199:
+        return 2439.4;
+    case 299:
+        return 6051.8;
+    case 301:
+        return 1737.4;
+    case 4:
+    case 499:
+        return 3389.5;
+    case 5:
+    case 599:
+        return 69911.0;
+    case 6:
+    case 699:
+        return 58232.0;
+    case 7:
+    case 799:
+        return 25362.0;
+    case 8:
+    case 899:
+        return 24622.0;
+    case 9:
+    case 999:
+        return 1188.3;
+    default:
+        return 0.0;
+    }
+}
+
+} // namespace
+
+Result<Engine::EventResult> Engine::rise_set_ut(const ObjectRef& object, Event event,
+                                                double jd_ut1_start, const frames::GeoSite& site,
+                                                const RiseSetOptions& ro) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (auto e = horizon_site(site))
+        return *e;
+    if (!std::isfinite(jd_ut1_start) || std::fabs(jd_ut1_start) > 1e8)
+        return make_error(ErrorCode::ArgumentError, "an event search needs a finite start");
+    if (!(ro.window_days > 0.0) || ro.window_days > 3660.0)
+        return make_error(ErrorCode::ArgumentError,
+                          "an event search needs a window of more than 0 and at most 3660 days");
+    if (ro.limb < -1 || ro.limb > 1)
+        return make_error(ErrorCode::ArgumentError, "the limb is +1 upper, 0 centre or -1 lower");
+    if (!std::isfinite(ro.dip_height_m) || ro.dip_height_m < 0.0)
+        return make_error(ErrorCode::ArgumentError, "the dip height is 0 m or more");
+    CalcOptions o;
+    o.center = Center::Topocentric;
+    o.site = site;
+    o.frame = Frame::TrueOfDate;
+    o.coords = Coords::Equatorial;
+    o.precession = ro.precession;
+    o.speed = false;
+    o.sigma = false;
+    auto position = [&](double jd) -> Result<CalcResult> {
+        switch (object.kind) {
+        case ObjectRef::Kind::Star:
+            if (object.id < 0)
+                return make_error(ErrorCode::ArgumentError, "a star index is 0 or more");
+            return calc_star_ut(size_t(object.id), jd, o);
+        case ObjectRef::Kind::Hypothetical:
+            return calc_hypothetical_ut(object.token, jd, o);
+        case ObjectRef::Kind::Body:
+            break;
+        }
+        return calc_ut(int(object.id), jd, o);
+    };
+    const double radius = object.kind == ObjectRef::Kind::Body ? body_radius_km(object.id) : 0.0;
+    const double dip = frames::horizon_dip_deg(ro.dip_height_m);
+    const double h0 =
+        -dip -
+        (ro.refraction ? frames::refraction_from_apparent_deg(-dip, ro.atmosphere, dip) : 0.0);
+    const bool transit = event == Event::UpperTransit || event == Event::LowerTransit;
+    const double h_target = event == Event::LowerTransit ? 180.0 : 0.0;
+    // The function whose upward (rise, transits) or downward (set) zero is
+    // the event: the limb's true altitude less h0, or the hour angle less
+    // the target, wrapped to (-180, 180].
+    std::optional<Error> failure;
+    auto g = [&](double jd) -> double {
+        auto p = position(jd);
+        if (!p) {
+            failure = p.error();
+            return 0.0;
+        }
+        auto st = sidereal_time_ut(jd, true, ro.precession);
+        if (!st) {
+            failure = st.error();
+            return 0.0;
+        }
+        const double ra = p.value().pos.lon_deg, dec = p.value().pos.lat_deg;
+        const double ha = std::fmod(st.value() + site.lon_rad * kRad2Deg - ra, 360.0);
+        if (transit)
+            return std::remainder(ha - h_target, 360.0);
+        double az = 0.0, alt = 0.0;
+        frames::equatorial_to_horizontal(ha / kRad2Deg, dec / kRad2Deg, site.lat_rad, az, alt);
+        double sd = 0.0;
+        if (radius > 0.0) {
+            const double d_km = p.value().pos.dist_au * kAuKm;
+            sd = d_km > radius ? std::asin(radius / d_km) * kRad2Deg : 90.0;
+        }
+        return alt * kRad2Deg + ro.limb * sd - h0;
+    };
+    // Transits first: the hour angle advances monotonically, so a crossing
+    // of 0 or 180 deg is found at any step and none is missed. Between a
+    // lower and an upper transit the altitude climbs from its minimum to
+    // its maximum, each found near its transit (the declination drifts
+    // between them, most for the Moon), so a rise is there exactly when the
+    // minimum is below h0 and the maximum above, however briefly: a Sun
+    // that clears the horizon for a minute is found (the Astrolog side's
+    // review, 2026-10-27). Always above or below come from the extrema.
+    const double dir = ro.backward ? -1.0 : 1.0;
+    const double lo = ro.backward ? jd_ut1_start - ro.window_days : jd_ut1_start;
+    const double hi = ro.backward ? jd_ut1_start : jd_ut1_start + ro.window_days;
+    auto hour_angle = [&](double jd) -> double { // [0, 360)
+        auto p = position(jd);
+        if (!p) {
+            failure = p.error();
+            return 0.0;
+        }
+        auto st = sidereal_time_ut(jd, true, ro.precession);
+        if (!st) {
+            failure = st.error();
+            return 0.0;
+        }
+        double ha = std::fmod(st.value() + site.lon_rad * kRad2Deg - p.value().pos.lon_deg, 360.0);
+        return ha < 0.0 ? ha + 360.0 : ha;
+    };
+    // Every transit (upper: 0, lower: 180) in [lo - 1, hi + 1], in order, by
+    // hourly steps of the unwrapped hour angle and bisection.
+    struct Transit {
+        double jd;
+        bool upper;
+    };
+    std::vector<Transit> transits;
+    {
+        const double step = 1.0 / 24.0;
+        double t0 = lo - 1.0, h0u = hour_angle(t0);
+        if (failure)
+            return *failure;
+        for (double t1 = t0 + step; t0 < hi + 1.0; t1 += step) {
+            const double h1 = hour_angle(t1);
+            if (failure)
+                return *failure;
+            double rise = std::fmod(h1 - h0u + 360.0, 360.0); // advance this step
+            const double h1u = h0u + rise;
+            for (double target : {180.0, 360.0, 540.0}) {
+                if (h0u < target && h1u >= target) {
+                    double a = t0, b = t1;
+                    const double base = h0u;
+                    for (int k = 0; k < 60 && b - a > 1e-9; ++k) {
+                        const double m = 0.5 * (a + b);
+                        const double hm = hour_angle(m);
+                        if (failure)
+                            return *failure;
+                        const double hmu = base + std::fmod(hm - base + 360.0, 360.0);
+                        (hmu >= target ? b : a) = m;
+                    }
+                    transits.push_back({0.5 * (a + b), std::fmod(target, 360.0) == 0.0});
+                }
+            }
+            t0 = t1;
+            h0u = std::fmod(h1u, 360.0);
+        }
+    }
+    auto in_window = [&](double t) {
+        return ro.backward ? (t < jd_ut1_start && t >= lo) : (t > jd_ut1_start && t <= hi);
+    };
+    if (transit) {
+        const bool want_upper = event == Event::UpperTransit;
+        const Transit* best = nullptr;
+        for (const Transit& tr : transits)
+            if (tr.upper == want_upper && in_window(tr.jd) &&
+                (!best || dir * (tr.jd - best->jd) < 0.0))
+                best = &tr;
+        if (best)
+            return EventResult{best->jd, Outcome::Found};
+        return EventResult{std::nan(""), Outcome::NotInWindow};
+    }
+    // The altitude extremum near each transit: golden-section search over
+    // two hours either side, a maximum at an upper transit, a minimum at a
+    // lower one.
+    struct Extremum {
+        double jd, g;
+        bool upper;
+    };
+    std::vector<Extremum> ext;
+    for (const Transit& tr : transits) {
+        const double sign = tr.upper ? 1.0 : -1.0;
+        double a = tr.jd - 2.0 / 24.0, b = tr.jd + 2.0 / 24.0;
+        const double r = 0.6180339887498949;
+        double c = b - r * (b - a), d = a + r * (b - a);
+        double gc = sign * g(c), gd = sign * g(d);
+        for (int k = 0; k < 40 && b - a > 1e-7; ++k) {
+            if (gc > gd) {
+                b = d;
+                d = c;
+                gd = gc;
+                c = b - r * (b - a);
+                gc = sign * g(c);
+            } else {
+                a = c;
+                c = d;
+                gc = gd;
+                d = a + r * (b - a);
+                gd = sign * g(d);
+            }
+        }
+        if (failure)
+            return *failure;
+        const double t = 0.5 * (a + b);
+        ext.push_back({t, g(t), tr.upper});
+        if (failure)
+            return *failure;
+    }
+    // A rise lies between a minimum and the next maximum, a set between a
+    // maximum and the next minimum, where g changes sign.
+    const bool upward = event == Event::Rise;
+    std::optional<double> best;
+    bool any_above = false, any_below = false;
+    // Above or below throughout is read from the window's own extrema and
+    // its two ends, never from a neighbouring day's.
+    for (double t : {lo, hi}) {
+        const double gt = g(t);
+        if (failure)
+            return *failure;
+        (gt > 0.0 ? any_above : any_below) = true;
+    }
+    for (const Extremum& x : ext)
+        if (x.jd >= lo && x.jd <= hi)
+            (x.g > 0.0 ? any_above : any_below) = true;
+    for (size_t k = 0; k + 1 < ext.size(); ++k) {
+        const Extremum &e0 = ext[k], &e1 = ext[k + 1];
+        if (e0.jd > hi || e1.jd < lo)
+            continue;
+        if (e0.upper == e1.upper || e1.upper != upward)
+            continue; // a rise runs from a lower to an upper extremum
+        if (upward ? !(e0.g <= 0.0 && e1.g > 0.0) : !(e0.g > 0.0 && e1.g <= 0.0))
+            continue;
+        double a = e0.jd, b = e1.jd;
+        for (int i = 0; i < 60 && b - a > 1e-9; ++i) { // under 0.0001 s
+            const double m = 0.5 * (a + b);
+            const double gm = g(m);
+            if (failure)
+                return *failure;
+            ((upward ? gm > 0.0 : gm <= 0.0) ? b : a) = m;
+        }
+        const double t = 0.5 * (a + b);
+        if (in_window(t) && (!best || dir * (t - *best) < 0.0))
+            best = t;
+    }
+    if (best)
+        return EventResult{*best, Outcome::Found};
+    return EventResult{std::nan(""), any_above && !any_below   ? Outcome::AlwaysAbove
+                                     : any_below && !any_above ? Outcome::AlwaysBelow
+                                                               : Outcome::NotInWindow};
+}
+
 Result<CalcResult> Engine::calc_orbit_point_ut(int id, OrbitPoint point, OrbitElements elements,
                                                double jd_ut1, const CalcOptions& o) {
     if (!impl_)
