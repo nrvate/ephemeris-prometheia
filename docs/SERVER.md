@@ -561,7 +561,9 @@ two sides agreed these semantics:
 - **Orbit points** lie on the mean ecliptic of date whatever the profile's
   frame, which gives only their coordinates (§3.5a as amended 2026-09-18),
   heliocentric
-  for planets and geocentric for the Moon, and take the profile's corrections
+  for planets and geocentric for the Moon (the Sun has none on the wire,
+  per-object error 2, though the engine and the JSON tools answer it), and
+  take the profile's corrections
   exactly as a body does (3.5a): they are interoperable applied in full or
   not at all ([ORBIT-POINTS.md](ORBIT-POINTS.md)). A mean model must name
   itself in the object's source string.

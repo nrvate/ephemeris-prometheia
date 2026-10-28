@@ -123,8 +123,9 @@ Result<ResolvedObject> resolve_object(const eph::Object& spec, Engine& engine) {
         out.elements = spec.method == 0   ? OrbitElements::Mean
                        : spec.method == 1 ? OrbitElements::Osculating
                                           : OrbitElements::Interpolated;
-        // The Moon's apsides are its perigee and apogee.
-        const char* suffix = spec.naif == 301 && spec.point >= 2
+        // The apsides of a geocentric orbit, the Moon's and the Sun's, are its
+        // perigee and apogee.
+        const char* suffix = (spec.naif == 301 || spec.naif == 10) && spec.point >= 2
                                  ? (spec.point == 2 ? "perigee" : "apogee")
                                  : kPointSuffix[spec.point];
         out.name = body.value().name +

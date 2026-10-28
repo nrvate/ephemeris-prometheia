@@ -309,12 +309,13 @@ PROMETHEIA_API prometheia_status prometheia_calc_ut(prometheia_engine* engine, i
 /*
  * A node or apsis of a body's orbit as a point in space, seen with the
  * options' observer and frame (docs/ENGINE.md, "Nodes and apsides"): the
- * heliocentric orbit (geocentric for the Moon) on the mean ecliptic of
- * date, in every frame (the frame gives the coordinates, not which point
- * it is). The options' corrections apply exactly as to a body -- a node
- * exists to be compared with apparent positions (docs/ORBIT-POINTS.md) --
- * and all three off give the geometric point. Rates by central
- * differences. PROMETHEIA_ERROR_ARGUMENT where the point is undefined.
+ * heliocentric orbit (geocentric for the Moon and the Sun, the Sun's being
+ * the Earth's reflected) on the mean ecliptic of date, in every frame (the
+ * frame gives the coordinates, not which point it is). The options'
+ * corrections apply exactly as to a body -- a node exists to be compared
+ * with apparent positions (docs/ORBIT-POINTS.md) -- and all three off give
+ * the geometric point. Rates by central differences.
+ * PROMETHEIA_ERROR_ARGUMENT where the point is undefined.
  */
 #define PROMETHEIA_ORBIT_ASCENDING_NODE 0
 #define PROMETHEIA_ORBIT_DESCENDING_NODE 1

@@ -381,7 +381,8 @@ public:
 
     // A node or apsis of `body`'s orbit, as a point in space seen by the
     // options' observer in the options' frame (docs/ENGINE.md, "Nodes and
-    // apsides"). The orbit is heliocentric, or geocentric for the Moon, and
+    // apsides"). The orbit is heliocentric, or geocentric for the Moon and
+    // the Sun (the Sun's is the Earth's reflected through the focus), and
     // the ecliptic is the mean ecliptic of date in every frame: the frame
     // gives the coordinates, not which point it is. Corrections apply
     // as sent, exactly as to a body (light time by the point's slow

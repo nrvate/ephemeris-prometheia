@@ -293,10 +293,26 @@ central differences as `calc`.
   - For planets (system barycentres for Mars–Pluto), the Earth, the
     Earth–Moon barycentre and catalog bodies: heliocentric.
   - For the Moon: geocentric.
+  - For the Sun: geocentric, the Earth's heliocentric orbit reflected
+    through the focus. Osculating elements are the Earth's own (399), not
+    the Earth–Moon barycentre's: the geocentre's monthly wobble moves the
+    osculating perihelion by up to 3.1° and the node, on an orbit inclined
+    a few arcseconds to the ecliptic of date, anywhere (DE440, 2026, daily).
+    Mean elements are the barycentre's fit, as for the Earth. The focus is the geocentre, so seen geocentrically with
+    the corrections off each point is the Earth's heliocentric one turned
+    through 180°, at the same distance; the nodes trade places (the Sun
+    goes north where the Earth goes south). With corrections on, the point
+    gets the Sun's own, light time and aberration with no deflection, and
+    they cancel, as on the Moon's points, because the point moves with the
+    Earth. Measured on DE440 over 2026, every five days: the apparent mean
+    perigee and apogee lie within 0.002″ of the Earth's heliocentric
+    points turned through 180°, and the geometric ones match them exactly.
+    Protocol v4 does not serve it: §3.5a gives the Sun no orbit point
+    (per-object error 2), and the server keeps to that until it is amended.
   - `OrbitElements::Interpolated` is the Moon's natural apogee and perigee,
     interpolated between its actual passages
     ([ORBIT-POINTS.md](ORBIT-POINTS.md), "The natural apsides").
-  - The Sun and the barycentre have none (ArgumentError).
+  - The solar-system barycentre has none (ArgumentError).
 - **The reference plane:** the mean ecliptic of date, in every frame. A
   node is where the orbit crosses it; the output frame gives only the
   coordinates the point is expressed in. This is protocol v4 §3.5a as

@@ -2181,12 +2181,14 @@ struct Engine::Impl {
     // cannot hold (computed_point_vector_at).
     Result<void> orbit_point(int id, OrbitPoint point, OrbitElements elements, double jd_tt,
                              double jd_tdb, const CalcOptions& o, double out[3], double dt = 0.0) {
+        if (id == body::kSun && elements != OrbitElements::Interpolated)
+            return sun_orbit_point(point, elements, jd_tt, jd_tdb, o, out, dt);
         if (elements == OrbitElements::Mean)
             return mean_orbit_point(id, point, jd_tt, jd_tdb, o, out, dt);
         if (elements == OrbitElements::Interpolated)
             return natural_apsis(id, point, jd_tdb, out, dt);
-        if (id == body::kSun || id == body::kSolarSystemBary)
-            return make_error(ErrorCode::ArgumentError, "the Sun has no heliocentric orbit");
+        if (id == body::kSolarSystemBary)
+            return make_error(ErrorCode::ArgumentError, "the barycentre has no orbit");
         const int center = id == body::kMoon ? body::kEarth : body::kSun;
         double b[6], c[6];
         auto r = body_barycentric(id, jd_tdb, b, nullptr);
@@ -2227,6 +2229,34 @@ struct Engine::Impl {
             return r;
         for (int i = 0; i < 3; ++i)
             out[i] = c[i] + c[3 + i] * dt + rel_point[i];
+        return {};
+    }
+
+    // The Sun's orbit about the Earth: the Earth's orbit about the Sun (mean
+    // elements: the Earth-Moon barycentre's fit, as for the Earth), reflected
+    // through the focus. The relative position is negated, so each apsis is
+    // the Earth's at the same distance and the nodes trade places (the Sun
+    // goes north where the Earth goes south). The focus is the geocentre, as
+    // for the Moon, so geocentrically and geometrically the point is the
+    // Earth's heliocentric one turned through 180 degrees.
+    Result<void> sun_orbit_point(OrbitPoint point, OrbitElements elements, double jd_tt,
+                                 double jd_tdb, const CalcOptions& o, double out[3], double dt) {
+        const OrbitPoint mirrored = point == OrbitPoint::AscendingNode ? OrbitPoint::DescendingNode
+                                    : point == OrbitPoint::DescendingNode
+                                        ? OrbitPoint::AscendingNode
+                                        : point;
+        double earth_point[3], sun[6], earth[6];
+        auto r = orbit_point(body::kEarth, mirrored, elements, jd_tt, jd_tdb, o, earth_point, dt);
+        if (!r)
+            return r;
+        r = sun_at(jd_tdb, sun);
+        if (!r)
+            return r;
+        r = source->barycentric(body::kEarth, jd_tdb, earth);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = earth[i] + earth[3 + i] * dt - (earth_point[i] - sun[i] - sun[3 + i] * dt);
         return {};
     }
 

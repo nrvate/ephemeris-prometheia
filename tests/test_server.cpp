@@ -759,6 +759,19 @@ TEST_CASE("server_profiles") {
         CHECK(d.meta[1].errCode == eph::kOErrNone);
         CHECK(d.meta[1].rowsOk == 1);
     }
+    SUBCASE("the Sun has no orbit point on the wire (3.5a), though the engine has one") {
+        eph::Request req = base_request(jd, 1);
+        eph::Object peri = body_obj(10);
+        peri.kind = eph::kObjOrbitPoint;
+        peri.point = eph::kPtPeri;
+        peri.method = 0;
+        req.objs = {peri};
+        CHECK(s.on_message(request(req, 98), true));
+        const Data d = join(drain(s));
+        REQUIRE(d.meta.size() == 1);
+        CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
+        CHECK(d.meta[0].rowsOk == 0);
+    }
 }
 
 TEST_CASE("server_time_and_columns") {
@@ -1545,10 +1558,16 @@ TEST_CASE("server_segments") {
         luno.kind = eph::kObjOrbitPoint;
         luno.naif = 301;
         luno.method = eph::kMethOsculating;
-        req.objs = {star, body_obj(5), luno};
+        eph::Object sun_peri = luno; // §3.5a: the Sun has no orbit point on the wire
+        sun_peri.naif = 10;
+        sun_peri.point = eph::kPtPeri;
+        sun_peri.method = 0;
+        req.objs = {star, body_obj(5), luno, sun_peri};
         CHECK(s.on_message(request(req, 5), true));
         const Segments d = join_segs(drain(s));
-        CHECK(d.n_obj == 3);
+        CHECK(d.n_obj == 4);
+        CHECK(d.meta[3].errCode == eph::kOErrUnsupported);
+        CHECK(d.segs[3].empty());
         CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
         CHECK(d.meta[0].rowsOk == 0);
         CHECK(d.segs[0].empty());

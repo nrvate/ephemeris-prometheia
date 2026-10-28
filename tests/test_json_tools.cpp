@@ -416,6 +416,19 @@ TEST_CASE("json_vocabulary_matches_the_registries") {
         CHECK(out["results"][0]["error"]["code"] == "unsupported");
         CHECK_FALSE(out["results"][0].contains("rows"));
     }
+    // The Sun's orbit is geocentric, the Earth's reflected: its apsides are
+    // its perigee and apogee, and its interpolated method is refused.
+    {
+        const Json out =
+            run(e, "positions",
+                {{"time", {{"jd_tt", 2451545.0}}},
+                 {"objects",
+                  {{{"point", "perihelion"}, {"of", "Sun"}},
+                   {{"point", "aphelion"}, {"of", "Sun"}, {"method", "interpolated"}}}}});
+        REQUIRE_MESSAGE(out["results"][0].contains("rows"), out.dump());
+        CHECK(out["results"][0]["object"]["resolved"] == "Sun mean perigee");
+        CHECK(out["results"][1]["error"]["code"] == "unsupported");
+    }
     // §3.5a: a zodiac defined at the instant has no anchor plane, and
     // capabilities says so before the agent asks.
     const Json caps = run(e, "capabilities", Json::object());

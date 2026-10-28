@@ -311,6 +311,14 @@ bool house_undefined(const Error& e) {
 // ---- engine failure -> A.17 -------------------------------------------------
 
 // 3.9a: errors by meaning, not convenience; 3.8: the text names no instant.
+// §3.5a: the Sun has no orbit point on the wire, per-object error 2. The
+// engine answers its geocentric orbit (ENGINE.md, "Nodes and apsides") and
+// the JSON tools serve it; v4 refuses it until §3.5a says otherwise.
+bool sun_orbit_point(const eph::Object& spec) {
+    return spec.kind == eph::kObjOrbitPoint && spec.naif == 10;
+}
+constexpr const char* kSunPointWhy = "the Sun has no orbit point in protocol v4 (3.5a)";
+
 eph::ObjErr obj_err_of(const Error& e) {
     // The code first where it decides: a NotFound message quotes the name the
     // client sent (a star, a designation, a token), and text the client chose
@@ -755,6 +763,11 @@ public:
             }
             if (pf.columns & (eph::kColArmc | eph::kColObliquity)) {
                 t.why = "the ARMC and obliquity columns are answered for house points only";
+                t.code = eph::kOErrUnsupported;
+                continue;
+            }
+            if (sun_orbit_point(req_.objs[o])) {
+                t.why = kSunPointWhy;
                 t.code = eph::kOErrUnsupported;
                 continue;
             }
@@ -1295,6 +1308,11 @@ private:
         }
         if (lunar_osculating) {
             s.why = "the Moon's osculating points swing degrees a day; they are not fitted";
+            s.code = eph::kOErrUnsupported;
+            return;
+        }
+        if (sun_orbit_point(spec)) {
+            s.why = kSunPointWhy;
             s.code = eph::kOErrUnsupported;
             return;
         }

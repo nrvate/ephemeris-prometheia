@@ -499,8 +499,33 @@ TEST_CASE("engine_orbit_points_geometry") {
     CHECK(peri.pos.dist_au <= r + 1e-12);
     CHECK(!peri.sigma_arcsec.has_value());
 
-    // Errors: the Sun has no heliocentric orbit; not open.
-    CHECK(e.calc_orbit_point(body::kSun, OrbitPoint::Perihelion, OrbitElements::Osculating, jd, o)
+    // The Sun's orbit about the Earth is the Earth's about the Sun reflected:
+    // geocentric and geometric, each Sun point is the Earth's heliocentric
+    // point turned through 180 degrees at the same distance, the nodes
+    // trading places. Its natural apsides are refused (the Moon's only).
+    for (OrbitElements el : {OrbitElements::Mean, OrbitElements::Osculating}) {
+        CalcOptions og = o;
+        og.center = Center::Geocentric;
+        const std::pair<OrbitPoint, OrbitPoint> pairs[] = {
+            {OrbitPoint::AscendingNode, OrbitPoint::DescendingNode},
+            {OrbitPoint::DescendingNode, OrbitPoint::AscendingNode},
+            {OrbitPoint::Perihelion, OrbitPoint::Perihelion},
+            {OrbitPoint::Aphelion, OrbitPoint::Aphelion}};
+        for (const auto& [sun_point, earth_point] : pairs) {
+            auto s = e.calc_orbit_point(body::kSun, sun_point, el, jd, og);
+            auto t = e.calc_orbit_point(body::kEarth, earth_point, el, jd, o);
+            REQUIRE_MESSAGE(s.ok(), s.error().message);
+            REQUIRE(t.ok());
+            for (int k = 0; k < 3; ++k)
+                CHECK(std::fabs(s.value().pos.xyz_au[k] + t.value().pos.xyz_au[k]) < 1e-12);
+        }
+    }
+    CHECK(e.calc_orbit_point(body::kSun, OrbitPoint::Perihelion, OrbitElements::Interpolated, jd, o)
+              .error()
+              .code == ErrorCode::ArgumentError);
+    // Errors: the barycentre has no orbit; not open.
+    CHECK(e.calc_orbit_point(body::kSolarSystemBary, OrbitPoint::Perihelion,
+                             OrbitElements::Osculating, jd, o)
               .error()
               .code == ErrorCode::ArgumentError);
     Engine closed;

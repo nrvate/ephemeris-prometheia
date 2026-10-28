@@ -13,6 +13,14 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **The Sun's nodes and apsides** ([docs/ENGINE.md](docs/ENGINE.md), "Nodes
+  and apsides"). `calc_orbit_point` now answers the Sun with its geocentric
+  orbit, which is the Earth's reflected, where it used to refuse it: the
+  mean and osculating methods, in the engine, the C API (ABI unchanged), the
+  JSON tools and the binding. Geometric points are the Earth's
+  heliocentric ones turned through 180°, exactly; apparent points are
+  within 0.002″ of them. v4 still answers per-object error 2, as §3.5a
+  says, until the two maintainers amend it.
 - **The Raman zodiac** ([docs/ENGINE.md](docs/ENGINE.md), "Sidereal output"):
   Raman's own linear rule, (Y − 397) × 50⅓″ (*Hindu Predictive Astrology*,
   1938), reproduced to 0.001″. It is 19″ from `swetest`'s Raman at J2000,
