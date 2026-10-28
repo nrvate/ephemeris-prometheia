@@ -249,6 +249,12 @@ digits cut):
     when asked for. `source` names every ephemeris that answered, since with
     DE441 behind DE440 (`--ephemeris` twice) a series across 1550 or 2650
     uses both ([DE.md](DE.md), "DE441").
+  - `model` names the model behind an answer the ephemeris alone does not
+    fix, and is present only then: a mean orbit point's elements
+    (`mean elements: DE440 secular fit, 1550-2650`; `Moon: Simon et al.
+    1994`) or a natural apsis. A named hypothetical's element set is its
+    `source`, as it always was. Several
+    models across a series are joined with `; `.
   - `precession` appears where it entered the answer: an of-date frame or a
     sidereal zodiac. A tropical answer in ICRF or J2000 axes is the same
     number under either model, and naming one there would claim a

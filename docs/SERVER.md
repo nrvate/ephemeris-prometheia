@@ -294,8 +294,10 @@ does with them:
 - **Orbit points** (kind 1) answer by the engine's `calc_orbit_point`
   (docs/ENGINE.md), points 0-3 by methods mean and osculating, and the
   Moon's apogee and perigee by method 2, interpolated (the natural apsides;
-  WELCOME lists methods 0-2; any other point by method 2 is error 2). The Sun and
-  the barycentre have no orbit (per-object error 2); an undefined point
+  WELCOME lists methods 0-2; any other point by method 2 is error 2). The
+  barycentre has no orbit (per-object error 2). The Sun is answered under
+  methods 0 and 1 as its geocentric orbit, the Earth's reflected (docs/ENGINE.md,
+  "Nodes and apsides"); methods 2-4 for the Sun are error 2. An undefined point
   (a node of an orbit in the ecliptic, an apsis of a circle) is error 5.
 - **Fixed stars** (kind 2) resolve through the compiled-in catalog by
   `stars::find`'s rules ([STARS.md](STARS.md)). A Bayer designation without
@@ -560,13 +562,22 @@ two sides agreed these semantics:
   segments is ERROR 11, and rows are the way to ask.
 - **Orbit points** lie on the mean ecliptic of date whatever the profile's
   frame, which gives only their coordinates (§3.5a as amended 2026-09-18),
-  heliocentric for planets and geocentric for the Moon (the Sun has none on
-  the wire, per-object error 2, though the engine and the JSON tools answer
-  it), and take the profile's corrections exactly as a body does (3.5a):
-  they are interoperable applied in full or not at all
-  ([ORBIT-POINTS.md](ORBIT-POINTS.md)). A mean model must name itself in
-  the object's source string. Ours do not yet: a mean point's source is
-  the ephemeris's description alone (found 2026-10-27, open).
+  heliocentric for planets and geocentric for the Moon (the Sun's is the
+  Earth's reflected through the focus), and take the profile's corrections
+  exactly as a body does (3.5a): they are interoperable applied in full or
+  not at all
+  ([ORBIT-POINTS.md](ORBIT-POINTS.md)). A server-defined model must name
+  itself in the object's source string (§3.4). Ours do, in the three-field
+  form `<engine> | <ephemeris> | <model>`: the engine is WELCOME's string up
+  to its first comma (`Prometheia 0.7.3`), the ephemeris the description it
+  always sent, and the model one of `mean elements: DE440 secular fit,
+  1550-2650` (the planets, the Earth and the Sun), `Moon: Simon et al.
+  1994` (the Moon's mean points), `natural apsides: DE440 passages,
+  harmonic deviation model` (method 2). A named hypothetical's entry is its
+  element set alone, as it always was: that names the set, which is what
+  §3.5a asks, and keeps the bytes Astrolog's fixtures compare.
+  An object computed from the ephemeris alone keeps the ephemeris's
+  description, byte for byte. Rows and segments agree.
 - **Fixed stars** have a normative name grammar (IAU name, Bayer with
   component numbers, Flamsteed, HR/HD/HIP). An ambiguous name is a per-object
   error rather than a silent choice, and an object without a parallax

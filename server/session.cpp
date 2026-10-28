@@ -311,13 +311,19 @@ bool house_undefined(const Error& e) {
 // ---- engine failure -> A.17 -------------------------------------------------
 
 // 3.9a: errors by meaning, not convenience; 3.8: the text names no instant.
-// §3.5a: the Sun has no orbit point on the wire, per-object error 2. The
-// engine answers its geocentric orbit (ENGINE.md, "Nodes and apsides") and
-// the JSON tools serve it; v4 refuses it until §3.5a says otherwise.
-bool sun_orbit_point(const eph::Object& spec) {
-    return spec.kind == eph::kObjOrbitPoint && spec.naif == 10;
+
+// §3.4, the source table: an object whose quantity is server-defined names
+// its model, `<engine> | <ephemeris> | <model>`, the engine as WELCOME's
+// string names it (its name and version, before the first ", "). An object
+// computed from the ephemeris alone keeps the ephemeris's description, as
+// ever.
+std::string source_entry(const ServerConfig& cfg, const Provenance& p) {
+    if (p.model.empty()) {
+        return std::string(p.source);
+    }
+    const size_t cut = cfg.engine.find(", ");
+    return cfg.engine.substr(0, cut) + " | " + std::string(p.source) + " | " + std::string(p.model);
 }
-constexpr const char* kSunPointWhy = "the Sun has no orbit point in protocol v4 (3.5a)";
 
 eph::ObjErr obj_err_of(const Error& e) {
     // The code first where it decides: a NotFound message quotes the name the
@@ -766,11 +772,6 @@ public:
                 t.code = eph::kOErrUnsupported;
                 continue;
             }
-            if (sun_orbit_point(req_.objs[o])) {
-                t.why = kSunPointWhy;
-                t.code = eph::kOErrUnsupported;
-                continue;
-            }
             auto resolved = resolve_object(req_.objs[o], ctx_->engine());
             if (!resolved) {
                 t.why = clean_err_text(resolved.error());
@@ -839,10 +840,10 @@ public:
                 ++s.rows_ok;
                 const CalcResult& cr = res.value();
                 if (s.source_idx < 0) {
-                    auto it =
-                        std::find(ans_->sources.begin(), ans_->sources.end(), cr.provenance.source);
+                    const std::string entry = source_entry(ctx_->config(), cr.provenance);
+                    auto it = std::find(ans_->sources.begin(), ans_->sources.end(), entry);
                     if (it == ans_->sources.end()) {
-                        ans_->sources.emplace_back(cr.provenance.source);
+                        ans_->sources.push_back(entry);
                         it = ans_->sources.end() - 1;
                     }
                     s.source_idx = int(it - ans_->sources.begin());
@@ -1311,11 +1312,6 @@ private:
             s.code = eph::kOErrUnsupported;
             return;
         }
-        if (sun_orbit_point(spec)) {
-            s.why = kSunPointWhy;
-            s.code = eph::kOErrUnsupported;
-            return;
-        }
         if (!resolved) {
             s.why = clean_err_text(resolved.error());
             s.code = obj_err_of(resolved.error());
@@ -1357,7 +1353,7 @@ private:
         const double mid = 0.5 * (params_.jd_from_tt + params_.jd_to_tt);
         if (auto probe = calc_at(ctx_->engine(), s.obj, mid, req_.timeScale,
                                  plans_[req_.objs[obj_index_].profile].opts)) {
-            const std::string source(probe.value().provenance.source);
+            const std::string source = source_entry(ctx_->config(), probe.value().provenance);
             auto it = std::find(ans_->sources.begin(), ans_->sources.end(), source);
             if (it == ans_->sources.end()) {
                 ans_->sources.push_back(source);

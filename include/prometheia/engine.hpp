@@ -267,6 +267,11 @@ struct Provenance {
     int denum = 0;                // DE number when known, else 0
     double light_time_days = 0.0; // tau applied (0 without light_time)
     Precession precession = Precession::Vondrak2011; // the model used
+    // The model behind a quantity the ephemeris alone does not fix: a mean
+    // orbit point's elements, an interpolated apsis. Empty otherwise; a
+    // named hypothetical's element set is its source, as it always was.
+    // A static string, valid while the Engine lives; absent from the C API.
+    std::string_view model;
 };
 
 struct CalcResult {

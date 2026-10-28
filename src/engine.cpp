@@ -302,6 +302,12 @@ constexpr double kMoonMeanInclinationDeg = 5.1453964;
 constexpr double kMoonMeanEccentricity = 0.0549006;
 constexpr double kMoonMeanDistanceKm = 384399.0;
 
+// What a v4 source-table entry names as the model (Provenance::model).
+constexpr std::string_view kPlanetMeanModel = "mean elements: DE440 secular fit, 1550-2650";
+constexpr std::string_view kMoonMeanModel = "Moon: Simon et al. 1994";
+constexpr std::string_view kNaturalApsisModel =
+    "natural apsides: DE440 passages, harmonic deviation model";
+
 class DeSource final : public Source {
 public:
     explicit DeSource(de::DeFile f) : file_(std::move(f)) {
@@ -3437,6 +3443,10 @@ Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitEleme
     res.provenance.denum = answered.denum;
     res.provenance.precession = o.precession;
     res.provenance.light_time_days = tau;
+    if (elements == OrbitElements::Mean)
+        res.provenance.model = id == body::kMoon ? kMoonMeanModel : kPlanetMeanModel;
+    else if (elements == OrbitElements::Interpolated)
+        res.provenance.model = kNaturalApsisModel;
     if (o.sidereal != SiderealMode::Tropical) {
         auto s = impl_->sidereal_shift(o, jd_tt);
         if (!s)

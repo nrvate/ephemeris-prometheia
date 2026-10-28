@@ -39,8 +39,16 @@ documented, not that it is frozen.
   mean and osculating methods, in the engine, the C API (ABI unchanged), the
   JSON tools and the binding. Geometric points are the Earth's
   heliocentric ones turned through 180°, exactly; apparent points are
-  within 0.002″ of them. v4 still answers per-object error 2, as §3.5a
-  says, until the two maintainers amend it.
+  within 0.002″ of them. v4 serves them under methods 0 and 1, rows and
+  segments, as §3.5a now says; methods 2-4 for the Sun are error 2.
+- **Models named in source strings** (§3.4, [docs/SERVER.md](docs/SERVER.md)).
+  `Provenance` gains `model` (C++ only; the C ABI is unchanged), set for
+  mean orbit points (`mean elements: DE440 secular fit, 1550-2650`; the
+  Moon's, `Moon: Simon et al. 1994`) and natural apsides. v4 writes such
+  an object's source entry as `<engine> | <ephemeris> | <model>`. An
+  ephemeris-only object's entry is unchanged, and so is a named
+  hypothetical's, which already names its set. The JSON tools' provenance carries `model` where there is one
+  ([docs/JSON_API.md](docs/JSON_API.md)).
 - **The Raman zodiac** ([docs/ENGINE.md](docs/ENGINE.md), "Sidereal output"):
   Raman's own linear rule, (Y − 397) × 50⅓″ (*Hindu Predictive Astrology*,
   1938), reproduced to 0.001″. It is 19″ from `swetest`'s Raman at J2000,

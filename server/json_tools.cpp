@@ -866,7 +866,7 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
         Json rows = Json::array();
         // Every source the rows used, in first-use order: a series across
         // 1550 or 2650 is answered by two ephemerides, and says so.
-        std::vector<std::string> sources, models;
+        std::vector<std::string> sources, models, named_models;
         const auto note = [](std::vector<std::string>& v, std::string x) {
             if (std::find(v.begin(), v.end(), x) == v.end())
                 v.push_back(std::move(x));
@@ -880,6 +880,8 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
             }
             const CalcResult& cr = c.value();
             note(sources, std::string(cr.provenance.source));
+            if (!cr.provenance.model.empty())
+                note(named_models, std::string(cr.provenance.model));
             note(models,
                  cr.provenance.precession == Precession::Vondrak2011 ? "vondrak2011" : "iau2006");
             Json row;
@@ -921,6 +923,12 @@ Result<Json> positions(Engine& engine, const Context& ctx, const Json& a, ToolEr
                      {"frame", options->frame_words},
                      {"coordinates", o.coords == Coords::Ecliptic ? "ecliptic" : "equatorial"},
                      {"accuracy", accuracy(obj)}};
+        if (!named_models.empty()) {
+            std::string named;
+            for (const std::string& x : named_models)
+                named += (named.empty() ? "" : "; ") + x;
+            prov["model"] = named; // the model behind a mean, interpolated or hypothetical answer
+        }
         if (!options->observer_detail.is_null())
             prov[options->observer_words == "body" ? "center" : "site"] = options->observer_detail;
         if (options->sidereal)

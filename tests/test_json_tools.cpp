@@ -429,6 +429,25 @@ TEST_CASE("json_vocabulary_matches_the_registries") {
         CHECK(out["results"][0]["object"]["resolved"] == "Sun mean perigee");
         CHECK(out["results"][1]["error"]["code"] == "unsupported");
     }
+    // The provenance names the model behind a mean point, and only there.
+    {
+        const Json out =
+            run(e, "positions",
+                {{"time", {{"jd_tt", 2451545.0}}},
+                 {"objects",
+                  {{{"point", "ascending-node"}, {"of", "Moon"}},
+                   {{"point", "ascending-node"}, {"of", "Jupiter"}},
+                   {{"point", "perihelion"}, {"of", "Sun"}},
+                   {{"point", "ascending-node"}, {"of", "Jupiter"}, {"method", "osculating"}},
+                   "Jupiter"}}});
+        REQUIRE_MESSAGE(out["results"][4].contains("rows"), out.dump());
+        CHECK(out["results"][0]["provenance"]["model"] == "Moon: Simon et al. 1994");
+        const char* planets = "mean elements: DE440 secular fit, 1550-2650";
+        CHECK(out["results"][1]["provenance"]["model"] == planets);
+        CHECK(out["results"][2]["provenance"]["model"] == planets);
+        CHECK_FALSE(out["results"][3]["provenance"].contains("model"));
+        CHECK_FALSE(out["results"][4]["provenance"].contains("model"));
+    }
     // §3.5a: a zodiac defined at the instant has no anchor plane, and
     // capabilities says so before the agent asks.
     const Json caps = run(e, "capabilities", Json::object());

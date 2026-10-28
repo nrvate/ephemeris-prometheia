@@ -307,8 +307,8 @@ central differences as `calc`.
     Earth. Measured on DE440 over 2026, every five days: the apparent mean
     perigee and apogee lie within 0.002″ of the Earth's heliocentric
     points turned through 180°, and the geometric ones match them exactly.
-    Protocol v4 does not serve it: §3.5a gives the Sun no orbit point
-    (per-object error 2), and the server keeps to that until it is amended.
+    Protocol v4 serves it under methods 0 and 1 (§3.5a as amended
+    2026-10-27); methods 2-4 for the Sun are error 2.
   - `OrbitElements::Interpolated` is the Moon's natural apogee and perigee,
     interpolated between its actual passages
     ([ORBIT-POINTS.md](ORBIT-POINTS.md), "The natural apsides").

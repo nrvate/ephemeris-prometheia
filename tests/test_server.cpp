@@ -164,9 +164,16 @@ eph::Error error_of(const Reply& r) {
 // A decoded DATA answer: all chunks joined back into object-major columns.
 struct Data {
     std::vector<eph::Meta> meta;
+    std::vector<std::string> sources;
     std::vector<double> cols;
     uint32_t chunks = 0, columns_present = 0;
     int n_cols = 6;
+
+    // The source-table entry of object `o` (empty when it has none).
+    std::string source_of(size_t o) const {
+        const uint8_t i = meta[o].sourceIdx;
+        return i < sources.size() ? sources[i] : std::string();
+    }
 
     const eph::Meta* find(const char* name) const {
         for (const eph::Meta& m : meta) {
@@ -194,6 +201,7 @@ Data join(const std::vector<Reply>& replies) {
         if (c.flags & eph::kChunkMeta) {
             REQUIRE(d.meta.empty());
             d.meta = c.meta;
+            d.sources = c.sources;
             d.columns_present = c.columnsPresent;
             d.n_cols = c.Cols();
             if (d.cols.empty()) {
@@ -759,18 +767,71 @@ TEST_CASE("server_profiles") {
         CHECK(d.meta[1].errCode == eph::kOErrNone);
         CHECK(d.meta[1].rowsOk == 1);
     }
-    SUBCASE("the Sun has no orbit point on the wire (3.5a), though the engine has one") {
+    SUBCASE("the Sun's orbit points are answered under methods 0 and 1 (3.5a as amended)") {
+        for (const uint8_t method : {eph::kMethMean, eph::kMethOsculating}) {
+            eph::Request req = base_request(jd, 1);
+            eph::Object peri = body_obj(10);
+            peri.kind = eph::kObjOrbitPoint;
+            peri.point = eph::kPtPeri;
+            peri.method = method;
+            req.objs = {peri};
+            CHECK(s.on_message(request(req, 98), true));
+            const Data d = join(drain(s));
+            REQUIRE(d.meta.size() == 1);
+            CHECK(d.meta[0].errCode == eph::kOErrNone);
+            CHECK(d.meta[0].rowsOk == 1);
+            CalcOptions o;
+            o.sigma = false;
+            const auto want = check.calc_orbit_point(
+                10, OrbitPoint::Perihelion,
+                method == eph::kMethMean ? OrbitElements::Mean : OrbitElements::Osculating, jd, o);
+            REQUIRE(want.ok());
+            CHECK(d.cols[0] == want.value().pos.lon_deg);
+            CHECK(d.cols[1] == want.value().pos.lat_deg);
+            CHECK(d.cols[2] == want.value().pos.dist_au);
+        }
+        // Methods 2-4 for the Sun are error 2.
+        for (const uint8_t method : {uint8_t(2), uint8_t(3), uint8_t(4)}) {
+            eph::Request req = base_request(jd, 1);
+            eph::Object peri = body_obj(10);
+            peri.kind = eph::kObjOrbitPoint;
+            peri.point = eph::kPtPeri;
+            peri.method = method;
+            req.objs = {peri};
+            CHECK(s.on_message(request(req, 97), true));
+            const auto replies = drain(s);
+            const Data d = join(replies);
+            if (d.meta.empty()) {
+                continue; // refused whole by the codec: not an answer either
+            }
+            CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
+            CHECK(d.meta[0].rowsOk == 0);
+        }
+    }
+    SUBCASE("a mean point names its model in the source table (3.4)") {
+        const auto point = [&](int naif, uint8_t pt) {
+            eph::Object o = body_obj(naif);
+            o.kind = eph::kObjOrbitPoint;
+            o.point = pt;
+            o.method = eph::kMethMean;
+            return o;
+        };
         eph::Request req = base_request(jd, 1);
-        eph::Object peri = body_obj(10);
-        peri.kind = eph::kObjOrbitPoint;
-        peri.point = eph::kPtPeri;
-        peri.method = 0;
-        req.objs = {peri};
-        CHECK(s.on_message(request(req, 98), true));
+        req.objs = {point(301, eph::kPtAscNode), point(5, eph::kPtAscNode), body_obj(5),
+                    point(5, eph::kPtPeri)};
+        req.objs[3].method = eph::kMethOsculating;
+        CHECK(s.on_message(request(req, 96), true));
         const Data d = join(drain(s));
-        REQUIRE(d.meta.size() == 1);
-        CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
-        CHECK(d.meta[0].rowsOk == 0);
+        REQUIRE(d.meta.size() == 4);
+        const std::string engine_id = "Prometheia 0.1.0"; // WELCOME's string up to ", "
+        const std::string ephemeris(check.calc(5, jd).value().provenance.source);
+        CHECK(d.source_of(0) == engine_id + " | " + ephemeris + " | Moon: Simon et al. 1994");
+        CHECK(d.source_of(1) ==
+              engine_id + " | " + ephemeris + " | mean elements: DE440 secular fit, 1550-2650");
+        // An object from the ephemeris alone, and an osculating point, keep the
+        // ephemeris's description, byte for byte.
+        CHECK(d.source_of(2) == ephemeris);
+        CHECK(d.source_of(3) == ephemeris);
     }
 }
 
@@ -1558,16 +1619,20 @@ TEST_CASE("server_segments") {
         luno.kind = eph::kObjOrbitPoint;
         luno.naif = 301;
         luno.method = eph::kMethOsculating;
-        eph::Object sun_peri = luno; // §3.5a: the Sun has no orbit point on the wire
+        eph::Object sun_peri = luno; // §3.5a: the Sun's mean orbit is served, method 2 is not
         sun_peri.naif = 10;
         sun_peri.point = eph::kPtPeri;
         sun_peri.method = 0;
-        req.objs = {star, body_obj(5), luno, sun_peri};
+        eph::Object sun_nat = sun_peri;
+        sun_nat.method = 2;
+        req.objs = {star, body_obj(5), luno, sun_peri, sun_nat};
         CHECK(s.on_message(request(req, 5), true));
         const Segments d = join_segs(drain(s));
-        CHECK(d.n_obj == 4);
-        CHECK(d.meta[3].errCode == eph::kOErrUnsupported);
-        CHECK(d.segs[3].empty());
+        CHECK(d.n_obj == 5);
+        CHECK(d.meta[3].errCode == eph::kOErrNone);
+        CHECK(!d.segs[3].empty());
+        CHECK(d.meta[4].errCode == eph::kOErrUnsupported);
+        CHECK(d.segs[4].empty());
         CHECK(d.meta[0].errCode == eph::kOErrUnsupported);
         CHECK(d.meta[0].rowsOk == 0);
         CHECK(d.segs[0].empty());
@@ -1763,6 +1828,8 @@ TEST_CASE("server_hypotheticals") {
         CHECK(by_name.rowsOk == 3);
         CHECK(by_name.resolvedNaif == eph::kNaifNone); // not a NAIF body
         CHECK(by_name.corrApplied == eph::kCorrMask);  // geocentric: all three
+        // 3.4: the source names the set used, as it always has.
+        CHECK(d.source_of(0) == "Invented for tests");
 
         const eph::Meta& by_elements = d.meta[1];
         CHECK(by_elements.errCode == eph::kOErrNone);
