@@ -230,7 +230,8 @@ this machine, which is too long for the gate:
     Windows job, 2026-10-25): `cl /std:c++20 /permissive- /Zc:__cplusplus
     /EHsc /MD /O2 /W3`, against vcpkg's `zstd:x64-windows-static-md`. The
     only warnings were C4996, the CRT's deprecation of `fopen` and
-    `strncpy`.
+    `strncpy`. The `fopen` one is gone: the catalog writer opens through
+    `io::open_file`, which uses `_wfsopen`, a call MSVC does not deprecate.
   - **Run on Windows** (Astrolog's release dry run 6, 2026-10-25, our
     `624c96d`, Qt 6.8.3 on a GitHub Windows runner), against the shipped
     data: the 1900–2100 DE441 cut, a 13,808-body catalog, and the 1900–2100

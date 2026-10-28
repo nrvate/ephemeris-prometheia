@@ -25,7 +25,7 @@ namespace prometheia::io {
 // bytes. For std::fstream and std::filesystem calls.
 std::filesystem::path native_path(const std::string& utf8_path);
 
-// std::fopen on native_path (_wfopen on Windows). nullptr when it fails.
+// std::fopen on native_path (_wfsopen, shared like fopen, on Windows). nullptr when it fails.
 std::FILE* open_file(const std::string& utf8_path, const char* mode);
 
 class RandomAccessFile {

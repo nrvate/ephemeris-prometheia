@@ -10,6 +10,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <share.h>
 #include <windows.h>
 #else
 #include <cerrno>
@@ -33,7 +34,9 @@ std::filesystem::path native_path(const std::string& utf8_path) {
 std::FILE* open_file(const std::string& utf8_path, const char* mode) {
 #if defined(_WIN32)
     const std::wstring wmode(mode, mode + std::char_traits<char>::length(mode));
-    return _wfopen(native_path(utf8_path).c_str(), wmode.c_str());
+    // _wfsopen, not _wfopen: MSVC deprecates the latter (C4996), and
+    // _SH_DENYNO shares the file as fopen does.
+    return _wfsopen(native_path(utf8_path).c_str(), wmode.c_str(), _SH_DENYNO);
 #else
     return std::fopen(utf8_path.c_str(), mode);
 #endif
