@@ -1,4 +1,4 @@
-# Handoff — where the work stands (2026-10-27)
+# Handoff — where the work stands (2026-10-28)
 
 A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
@@ -6,7 +6,74 @@ working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
 
-## Resume here (state at 2026-10-27)
+## Resume here (state at 2026-10-28)
+
+**astromcp's port plan, Part A, has landed through A-14.** The plan is
+`docs/prometheia_port_plan.md` on astromcp's `prometheia` branch. Its
+coordinator is the astromcp session. Astrolog's session hears about every
+change to the C ABI, the wire or `.epm` before it lands.
+
+**Landed on 2026-10-28, in order:**
+- A-12: positional reads (`io::RandomAccessFile`) for the DE, SPK and
+  catalog readers (`a11531e`).
+- A-13: read cursors. The readers keep no mutable state, and each thread
+  brings its own `DeCursor`, `SpkCursor` or `ChunkCursor` (`e2b8074`).
+- A-8: heliacal visibility after Schaefer (HELIACAL.md; `1508993`,
+  `d816db7`, `94819e4`, `2fdab7d`).
+  - Schaefer 1993's eq. 15c is misprinted, so the twilight term comes
+    from his 1998 revision in S&T.
+  - The default detection margin is 0 (maintainer).
+  - Each event reports how firm its date is: `spread_before_days` and
+    `spread_after_days`, both additive in C.
+  - Against swetest every difference has one sign: we see objects
+    sooner. Stars are 1–6 days early, Mars −11/+21 (HELIACAL.md).
+- A-14: one frozen `Corpus` shared by one engine per thread
+  (`Engine::open_context`; ENGINE.md, "Threads"; `17e9770`).
+  - A context costs 8 KB, now that the nutation cache is lazy.
+  - The single-thread path is +6% (median 3.83 → 4.05 µs).
+  - `tools/tsan.sh` runs the thread suite under TSan.
+- The macOS fix: the registry no longer uses floating-point `to_chars`
+  where the platform lacks it (`7f22dc6`).
+- The Windows fix: every open (the readers, the writers, the hypotheticals
+  file and the format sniff) takes UTF-8 paths through `io::native_path` and
+  `io::open_file` (EMBEDDING.md; `5b21e42`).
+
+**Astrolog has confirmed:**
+- A-12 on MSVC:
+  - no warnings in `io.cpp` or `registry.cpp`;
+  - its suite passes 6477 with 0 failed;
+  - all 71 oracle lines are identical to Linux.
+- A-13 with A-8, pinned at `2fdab7d`: 1246 with 0 failed, and the charts
+  are byte-identical.
+- A-14 with the macOS fix, pinned at `7f22dc6`:
+  - macOS: Xcode 26.6, deployment target 12.0, no diagnostics in
+    `registry.cpp`, and the suite passes 6475 with 0 failed;
+  - locally: 1246 with 0 failed, and the charts at 1905, 2026 and 2099
+    are byte-identical.
+
+**Next:**
+- **A-15 is paused** until the maintainer says go. Its scope:
+  - shared perturber and apsis blocks;
+  - the C dataset API: `prometheia_dataset_open`, `_add_*`, `_freeze`,
+    `_close` and `prometheia_context_open(dataset)`. It is additive, and
+    its exact signatures go to Astrolog before it lands;
+  - `prometheiad` moves to one dataset with one context per event loop;
+  - the stress test also runs through C;
+  - the bench must show no loss on the single-thread path.
+  - Size: M–L in the plan's own estimate.
+- Then A-16 (segments through C, for the scan kernel) and A-17 coverage.
+
+**Open:**
+- Heliacal: only sighting records can settle the offset from swetest.
+  Schaefer 1987 (JHA, 556 sightings) has not been read (HELIACAL.md).
+- `tools/fetch/stars_fetch.py --only simbad-ngc` still waits on SIMBAD.
+  The sandbox cannot reach it, and the edit that declares the source stays
+  uncommitted until the file is pinned.
+
+**Limits** (maintainer): at most 3 sub-agents and 2 CPU-bound jobs at
+once. The machine is shared with the astromcp and Astrolog sessions.
+
+## State at 2026-10-27
 
 **astromcp is porting from Swiss to Prometheia.** Its plan's Part A
 (A-0..A-17) is our work. The peers are the astromcp session, which
@@ -51,7 +118,6 @@ are byte-identical.
 - `tools/fetch/stars_fetch.py --only simbad-ngc`, for NGC 869/884
   (Capulus). The sandbox cannot reach SIMBAD, and the edit declaring the
   source is uncommitted until the file is pinned.
-- Whether `catalog-20261027` keeps GitHub's "Latest" badge over v0.7.3.
 
 **Limits** (maintainer): at most 3 sub-agents and 2 CPU-bound jobs at
 once. The machine is shared with the astromcp and Astrolog sessions.
@@ -256,7 +322,7 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
   A data-only release tagged at `3ed2b9c`. Its asset is `sbdb-20261027.epm`
   (EPM1 1.2, 1,580,028 records, sha256 `1dd348aa…59919`), fetched by
   `tools/fetch/catalog_fetch.py`. GitHub marked it "Latest" in place of
-  v0.7.3, and that is left for the maintainer to decide.
+  v0.7.3; the maintainer gave the badge back to v0.7.3.
 - **v0.7.3**, published 2026-09-29
   (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.7.3).
   - The library and tools are 0.7.3 (C ABI 6, unchanged); `prometheiad` is
