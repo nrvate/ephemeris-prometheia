@@ -182,7 +182,9 @@ method and the measurements.
 - `prometheia_lunar_eclipse_next(engine, jd_start_tt, kinds, backward, &out,
   &err)`: the first eclipse after (before, with `backward`) a TT Julian
   date, of the kinds in the bitmask `PROMETHEIA_LUNAR_ECLIPSE_TOTAL |
-  _PARTIAL | _PENUMBRAL` (0 or other bits: `PROMETHEIA_ERROR_ARGUMENT`).
+  _PARTIAL | _PENUMBRAL` (0: any kind, as for the solar calls; other bits:
+  `PROMETHEIA_ERROR_ARGUMENT`). "After" and "before" are strict, so a
+  caller stepping through a span passes the last result's `jd_max_tt`.
   None within about 160 years is `PROMETHEIA_ERROR_NOT_FOUND`.
 - `prometheia_lunar_eclipse_at(engine, jd_max_tt, &site, &out, &err)`: the
   eclipse whose greatest is within two days, with the Moon's true and

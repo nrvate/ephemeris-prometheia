@@ -77,7 +77,13 @@ TEST_CASE("phenomena_formulas_at_their_published_points") {
     CHECK(body_magnitude(7, u).v == doctest::Approx(-7.110 - 8.4e-4 * 90.0).epsilon(1e-6));
     // The Moon full at its mean distance, 1 au from the Sun.
     CHECK(body_magnitude(301, at(0.0, 1.0, 384400.0 / 149597870.7)).v == doctest::Approx(-12.73));
-    // Out of range: named, not extrapolated.
+    // Out of range: named, not extrapolated. Every name fits the C API's
+    // 64-byte magnitude_model.
+    CHECK(std::isnan(body_magnitude(301, at(120.5)).v));
+    CHECK(std::isfinite(body_magnitude(301, at(120.0)).v));
+    for (long id : {10L, 301L, 199L, 299L, 399L, 4L, 5L, 6L, 7L, 8L, 9L, 3L})
+        for (double a : {0.0, 2.0, 7.0, 13.0, 60.0, 125.0, 140.0, 155.0, 165.0, 179.5})
+            CHECK(body_magnitude(id, at(a)).model.size() < 64);
     CHECK(std::isnan(body_magnitude(299, at(179.5)).v));
     CHECK(std::isnan(body_magnitude(5, at(131.0)).v));
     CHECK(std::isnan(body_magnitude(9, at(1.0)).v));
@@ -132,8 +138,9 @@ TEST_CASE("phenomena_against_swetest") {
             // Willmer's -26.76 at 1 au against swetest's -26.86: a constant.
             CHECK(p.magnitude - f.magnitude == doctest::Approx(0.10).epsilon(0.006));
         } else if (f.naif == 301 && f.phase_angle_deg > 120.0) {
-            // The quartic is unconstrained toward new moon (docs/PHENOMENA.md).
-            CHECK(std::isfinite(p.magnitude));
+            // Past the observations behind the formula: none (docs/PHENOMENA.md).
+            CHECK(std::isnan(p.magnitude));
+            CHECK(p.magnitude_model == "no magnitude: Moon beyond 120 deg (Lane & Irvine 1973)");
         } else {
             worse(worst_mag, f.naif, p.magnitude - f.magnitude);
             CHECK_MESSAGE(std::fabs(p.magnitude - f.magnitude) <= mag_bound.at(f.naif), "naif ",

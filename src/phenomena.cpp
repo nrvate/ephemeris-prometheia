@@ -113,6 +113,11 @@ Magnitude body_magnitude(long naif, const MagnitudeInputs& in) {
         // Willmer 2018, Table 3: V = -26.76 (Vega) at 1 au.
         return {-26.76 + 5.0 * std::log10(in.d_au), "Willmer 2018"};
     case 301: {
+        // The formula rests on whole-disc photometry over 6-120 deg of phase
+        // (Lane & Irvine 1973, AJ 78, 267); beyond, nothing constrains the
+        // quartic, which brightens toward new moon. No number is given there.
+        if (a > 120.0)
+            return none("no magnitude: Moon beyond 120 deg (Lane & Irvine 1973)");
         // Krisciunas & Schaefer 1991 eq. 9, at the mean distance 384,400 km
         // and 1 au; scaled by the inverse squares of the actual ones.
         const double mean_au = 384400.0 / 149597870.7;
@@ -133,7 +138,7 @@ Magnitude body_magnitude(long naif, const MagnitudeInputs& in) {
         if (a < 179.0)
             return {rd + poly(a, {236.05828, -2.81914E+00, 8.39034E-03}),
                     "Mallama & Hilton 2018 eq. 4"};
-        return none("no magnitude: Venus beyond 179 deg phase (Mallama & Hilton 2018)");
+        return none("no magnitude: Venus beyond 179 deg (Mallama & Hilton 2018)");
     case 399:
         return {rd + poly(a, {-3.99, -1.060E-3, 2.054E-4}), "Mallama & Hilton 2018 eq. 5"};
     case 4:
@@ -152,7 +157,7 @@ Magnitude body_magnitude(long naif, const MagnitudeInputs& in) {
                         2.5 * std::log10(poly(x, {1.0, -1.507, -0.363, -0.062, 2.809, -1.876})),
                     "Mallama & Hilton 2018 eq. 9"};
         }
-        return none("no magnitude: Jupiter beyond 130 deg phase (Mallama & Hilton 2018)");
+        return none("no magnitude: Jupiter beyond 130 deg (Mallama & Hilton 2018)");
     }
     case 6:
     case 699: {
@@ -169,7 +174,7 @@ Magnitude body_magnitude(long naif, const MagnitudeInputs& in) {
         if (a > 6.0 && a < 150.0)
             return {rd + poly(a, {-8.94, 2.446E-4, 2.672E-4, -1.505E-6, 4.767E-9}),
                     "Mallama & Hilton 2018 eq. 12 (globe only)"};
-        return none("no magnitude: Saturn beyond 150 deg phase (Mallama & Hilton 2018)");
+        return none("no magnitude: Saturn beyond 150 deg (Mallama & Hilton 2018)");
     }
     case 7:
     case 799: {
@@ -186,7 +191,7 @@ Magnitude body_magnitude(long naif, const MagnitudeInputs& in) {
         if (a <= 154.0)
             return {rd - 7.110 - 8.4E-04 * phi + 6.587E-3 * a + 1.045E-4 * a * a,
                     "Mallama & Hilton 2018 eq. 15"};
-        return none("no magnitude: Uranus beyond 154 deg phase (Mallama & Hilton 2018)");
+        return none("no magnitude: Uranus beyond 154 deg (Mallama & Hilton 2018)");
     }
     case 8:
     case 899: {
@@ -199,7 +204,7 @@ Magnitude body_magnitude(long naif, const MagnitudeInputs& in) {
         }
         if (year > 2000.0 && a <= 133.0)
             return {rd - 7.00 + 7.944E-3 * a + 9.617E-5 * a * a, "Mallama & Hilton 2018 eq. 17"};
-        return none("no magnitude: Neptune beyond Mallama & Hilton 2018's ranges");
+        return none("no magnitude: Neptune outside Mallama & Hilton 2018");
     }
     default:
         return none("no magnitude model for this body");

@@ -859,6 +859,13 @@ PROMETHEIA_API prometheia_status prometheia_tt_to_utc(double jd_tt, prometheia_u
 /* The default Delta T model (observed USNO values), seconds. */
 PROMETHEIA_API double prometheia_delta_t(double jd_tt);
 
+/* An engine's own Delta T, seconds: its model, or the one installed with
+ * prometheia_engine_set_delta_t. UT1 = TT - Delta T / 86400, so a caller
+ * holding a TT result (a solar eclipse's contacts) can give its UT1 as the
+ * engine would. NaN for a NULL engine. Added after library 0.7.3; the ABI
+ * version is unchanged. */
+PROMETHEIA_API double prometheia_engine_delta_t(const prometheia_engine* engine, double jd_tt);
+
 /* TDB - TT in seconds at the geocentre: the full Fairhead & Bretagnon
    series, 787 terms (docs/TIME.md). */
 PROMETHEIA_API double prometheia_tdb_minus_tt(double jd_tt);
@@ -1044,12 +1051,15 @@ typedef struct prometheia_lunar_eclipse_local {
 
 /*
  * The first lunar eclipse of the kinds in the bitmask (PROMETHEIA_LUNAR_
- * ECLIPSE_*; 0 or bits above 7 are PROMETHEIA_ERROR_ARGUMENT) whose greatest
- * eclipse is after jd_start_tt, a TT Julian date; with backward nonzero, the
+ * ECLIPSE_*; 0 for any; bits above 7 are PROMETHEIA_ERROR_ARGUMENT) whose
+ * greatest eclipse is strictly after jd_start_tt, a TT Julian date; with backward nonzero, the
  * last one before it. Computed in TT from the engine's geocentric apparent
  * Sun and Moon; UT1 fields use the engine's Delta T. PROMETHEIA_ERROR_NOT_FOUND
  * when none of those kinds occurs within about 160 years; the engine's
- * coverage errors (PROMETHEIA_ERROR_COVERAGE) pass through. On error *out is
+ * coverage errors (PROMETHEIA_ERROR_COVERAGE) pass through. A contact that
+ * does not occur (a partial eclipse's U2 and U3, a penumbral one's U1-U4) is
+ * NaN in contact_tt and contact_ut1, and in a local result's altitudes,
+ * which are indexed by the contact constants, the maximum at 6. On error *out is
  * zeroed.
  */
 PROMETHEIA_API prometheia_status prometheia_lunar_eclipse_next(prometheia_engine* engine,
@@ -1125,12 +1135,12 @@ typedef struct prometheia_solar_eclipse {
  * none turns up within ~240 years. The _ex form takes the lunar radius options
  * (NULL: the defaults). */
 PROMETHEIA_API prometheia_status prometheia_solar_eclipse_next(prometheia_engine* engine,
-                                                               double jd_start, int kinds,
+                                                               double jd_start_tt, unsigned kinds,
                                                                int backward,
                                                                prometheia_solar_eclipse* out,
                                                                prometheia_error* err);
 PROMETHEIA_API prometheia_status
-prometheia_solar_eclipse_next_ex(prometheia_engine* engine, double jd_start, int kinds,
+prometheia_solar_eclipse_next_ex(prometheia_engine* engine, double jd_start_tt, unsigned kinds,
                                  int backward, const prometheia_solar_eclipse_options* options,
                                  prometheia_solar_eclipse* out, prometheia_error* err);
 
@@ -1183,10 +1193,10 @@ typedef struct prometheia_solar_local {
 /* The next eclipse (the last, with backward) after jd_start (TT) that is seen
  * from the site in some phase with the Sun above the horizon. */
 PROMETHEIA_API prometheia_status prometheia_solar_eclipse_local_next(
-    prometheia_engine* engine, double jd_start, const prometheia_site* site, int backward,
+    prometheia_engine* engine, double jd_start_tt, const prometheia_site* site, int backward,
     prometheia_solar_local* out, prometheia_error* err);
 PROMETHEIA_API prometheia_status prometheia_solar_eclipse_local_next_ex(
-    prometheia_engine* engine, double jd_start, const prometheia_site* site, int backward,
+    prometheia_engine* engine, double jd_start_tt, const prometheia_site* site, int backward,
     const prometheia_solar_eclipse_options* options, prometheia_solar_local* out,
     prometheia_error* err);
 

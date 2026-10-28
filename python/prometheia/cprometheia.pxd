@@ -565,6 +565,7 @@ cdef extern from "prometheia/prometheia.h" nogil:
     prometheia_status prometheia_tt_to_utc(double jd_tt, prometheia_utc* utc,
                                            prometheia_error* err) noexcept
     double prometheia_delta_t(double jd_tt) noexcept
+    double prometheia_engine_delta_t(const prometheia_engine* engine, double jd_tt) noexcept
     double prometheia_tdb_minus_tt(double jd_tt) noexcept
 
     # Lunar eclipses
@@ -701,12 +702,12 @@ cdef extern from "prometheia/prometheia.h" nogil:
         double gamma
         double global_max_tt
 
-    prometheia_status prometheia_solar_eclipse_next(prometheia_engine* engine, double jd_start,
-                                                    int kinds, int backward,
+    prometheia_status prometheia_solar_eclipse_next(prometheia_engine* engine, double jd_start_tt,
+                                                    unsigned kinds, int backward,
                                                     prometheia_solar_eclipse* out,
                                                     prometheia_error* err) noexcept
     prometheia_status prometheia_solar_eclipse_next_ex(
-        prometheia_engine* engine, double jd_start, int kinds, int backward,
+        prometheia_engine* engine, double jd_start_tt, unsigned kinds, int backward,
         const prometheia_solar_eclipse_options* options, prometheia_solar_eclipse* out,
         prometheia_error* err) noexcept
     prometheia_status prometheia_solar_eclipse_where(prometheia_engine* engine, double jd_tt,
@@ -716,9 +717,9 @@ cdef extern from "prometheia/prometheia.h" nogil:
         prometheia_engine* engine, double jd_tt, const prometheia_solar_eclipse_options* options,
         prometheia_solar_where* out, prometheia_error* err) noexcept
     prometheia_status prometheia_solar_eclipse_local_next(
-        prometheia_engine* engine, double jd_start, const prometheia_site* site,
+        prometheia_engine* engine, double jd_start_tt, const prometheia_site* site,
         int backward, prometheia_solar_local* out, prometheia_error* err) noexcept
     prometheia_status prometheia_solar_eclipse_local_next_ex(
-        prometheia_engine* engine, double jd_start, const prometheia_site* site,
+        prometheia_engine* engine, double jd_start_tt, const prometheia_site* site,
         int backward, const prometheia_solar_eclipse_options* options,
         prometheia_solar_local* out, prometheia_error* err) noexcept

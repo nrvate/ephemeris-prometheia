@@ -1250,6 +1250,12 @@ prometheia_status prometheia_tt_to_utc(double jd_tt, prometheia_utc* utc, promet
     });
 }
 
+double prometheia_engine_delta_t(const prometheia_engine* engine, double jd_tt) {
+    if (!engine)
+        return std::nan("");
+    return engine->engine.delta_t_seconds(jd_tt);
+}
+
 double prometheia_delta_t(double jd_tt) {
     return time::delta_t(jd_tt);
 }
@@ -1662,8 +1668,8 @@ void prometheia_solar_eclipse_options_init(prometheia_solar_eclipse_options* opt
     opts->sun_radius_km = d.sun_radius_km;
 }
 
-prometheia_status prometheia_solar_eclipse_next_ex(prometheia_engine* engine, double jd_start,
-                                                   int kinds, int backward,
+prometheia_status prometheia_solar_eclipse_next_ex(prometheia_engine* engine, double jd_start_tt,
+                                                   unsigned kinds, int backward,
                                                    const prometheia_solar_eclipse_options* options,
                                                    prometheia_solar_eclipse* out,
                                                    prometheia_error* err) {
@@ -1673,14 +1679,14 @@ prometheia_status prometheia_solar_eclipse_next_ex(prometheia_engine* engine, do
         return argument(err, "engine is NULL");
     if (!out)
         return argument(err, "output is NULL");
-    if (kinds < 0 || kinds > PROMETHEIA_SOLAR_ALL_KINDS)
+    if (kinds > unsigned(PROMETHEIA_SOLAR_ALL_KINDS))
         return argument(err, "kinds out of range");
     se::Options o;
     prometheia_status st = PROMETHEIA_OK;
     if (!solar_options(engine, options, o, err, st))
         return st;
     return guarded(err, [&] {
-        auto r = se::next_global(engine->engine, jd_start, unsigned(kinds), backward != 0, o);
+        auto r = se::next_global(engine->engine, jd_start_tt, unsigned(kinds), backward != 0, o);
         if (!r.ok())
             return report(err, r.error());
         const se::Global& g = r.value();
@@ -1710,11 +1716,12 @@ prometheia_status prometheia_solar_eclipse_next_ex(prometheia_engine* engine, do
     });
 }
 
-prometheia_status prometheia_solar_eclipse_next(prometheia_engine* engine, double jd_start,
-                                                int kinds, int backward,
+prometheia_status prometheia_solar_eclipse_next(prometheia_engine* engine, double jd_start_tt,
+                                                unsigned kinds, int backward,
                                                 prometheia_solar_eclipse* out,
                                                 prometheia_error* err) {
-    return prometheia_solar_eclipse_next_ex(engine, jd_start, kinds, backward, nullptr, out, err);
+    return prometheia_solar_eclipse_next_ex(engine, jd_start_tt, kinds, backward, nullptr, out,
+                                            err);
 }
 
 prometheia_status prometheia_solar_eclipse_where_ex(prometheia_engine* engine, double jd_tt,
@@ -1765,7 +1772,7 @@ prometheia_status prometheia_solar_eclipse_where(prometheia_engine* engine, doub
 }
 
 prometheia_status
-prometheia_solar_eclipse_local_next_ex(prometheia_engine* engine, double jd_start,
+prometheia_solar_eclipse_local_next_ex(prometheia_engine* engine, double jd_start_tt,
                                        const prometheia_site* site, int backward,
                                        const prometheia_solar_eclipse_options* options,
                                        prometheia_solar_local* out, prometheia_error* err) {
@@ -1777,7 +1784,7 @@ prometheia_solar_eclipse_local_next_ex(prometheia_engine* engine, double jd_star
         return argument(err, "site is NULL");
     if (!out)
         return argument(err, "output is NULL");
-    if (!std::isfinite(jd_start))
+    if (!std::isfinite(jd_start_tt))
         return argument(err, "jd is not finite");
     if (!(std::fabs(site->lat_deg) <= 90.0) || !std::isfinite(site->lon_deg) ||
         !std::isfinite(site->height_m))
@@ -1789,7 +1796,7 @@ prometheia_solar_eclipse_local_next_ex(prometheia_engine* engine, double jd_star
     return guarded(err, [&] {
         const frames::GeoSite gs{site->lon_deg * kDegToRad, site->lat_deg * kDegToRad,
                                  site->height_m};
-        auto r = se::local_next(engine->engine, jd_start, gs, backward != 0, o);
+        auto r = se::local_next(engine->engine, jd_start_tt, gs, backward != 0, o);
         if (!r.ok())
             return report(err, r.error());
         const se::Local& l = r.value();
@@ -1817,11 +1824,11 @@ prometheia_solar_eclipse_local_next_ex(prometheia_engine* engine, double jd_star
     });
 }
 
-prometheia_status prometheia_solar_eclipse_local_next(prometheia_engine* engine, double jd_start,
+prometheia_status prometheia_solar_eclipse_local_next(prometheia_engine* engine, double jd_start_tt,
                                                       const prometheia_site* site, int backward,
                                                       prometheia_solar_local* out,
                                                       prometheia_error* err) {
-    return prometheia_solar_eclipse_local_next_ex(engine, jd_start, site, backward, nullptr, out,
+    return prometheia_solar_eclipse_local_next_ex(engine, jd_start_tt, site, backward, nullptr, out,
                                                   err);
 }
 

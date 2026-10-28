@@ -746,6 +746,11 @@ cdef class Context:
             fail(st, &err)
         return houses_of(&h)
 
+    def delta_t(self, double jd_tt):
+        """This engine's Delta T at a TT Julian date, seconds: UT1 = TT -
+        delta_t / 86400, for the results given in TT (solar eclipses)."""
+        return c.prometheia_engine_delta_t(self.engine(), jd_tt)
+
     def sidereal_time(self, double jd_ut1, str kind="apparent", Options options=None):
         """Greenwich sidereal time as an angle, degrees: "mean" or
         "apparent"; add the east longitude for local sidereal time."""

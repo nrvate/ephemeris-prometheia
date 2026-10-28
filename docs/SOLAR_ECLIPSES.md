@@ -48,9 +48,15 @@ fitted polynomial:
   Sun's centre below the horizon is reported as **missing** (NaN, None); the
   maximum is always reported with `visible_max`. `local_next` skips
   eclipses of which no phase is seen with the Sun up;
-- **times** are TT and UT1 (Delta T from the engine's model: the observed
-  default, or the one installed with `prometheia_engine_set_delta_t`).
-  Inputs `jd_start` and `jd_tt` are TT.
+- **times** are TT. The maximum also has its UT1, from the engine's Delta T
+  (the observed default, or the one installed with
+  `prometheia_engine_set_delta_t`). For any other time, UT1 = TT − ΔT/86400
+  with that same ΔT: `prometheia_engine_delta_t(engine, jd_tt)`, or
+  `Context.delta_t(jd_tt)` in Python. Inputs `jd_start_tt` and `jd_tt` are
+  TT. `kinds` is unsigned, as for lunar eclipses, and 0 means any kind.
+- **contacts that do not occur** (C2 and C3 of an eclipse seen as partial,
+  any contact with the Sun below the horizon) are NaN in every contact
+  array: times, altitudes and azimuths.
 
 Search: each lunation is brought to conjunction in ecliptic longitude
 (Newton on the Moon's and Sun's rates), its latitude screened (1.9 deg), the
@@ -62,8 +68,15 @@ touching the limb, C1/C2 axis entering and leaving the ellipsoid (named
 
 ### The Moon's radius
 
-`Options::k_umbra = 0.272281` and `k_penumbra = 0.272488` are NASA's
-canon values (also Meeus'), the Sun's radius is 696000 km. Both are options
+`Options::k_umbra = 0.272281` and `k_penumbra = 0.272488` are the canon's
+(Espenak & Meeus 2006, *Five Millennium Canon of Solar Eclipses*,
+NASA/TP-2006-214141, §1.5: the Nautical Almanac Office's 1968–1980 pair,
+the smaller for umbral and antumbral contacts). The Sun's radius is 696,000
+km, not the IAU 2015 nominal 695,700. We found no published statement of
+NASA's value, but with 696,000 km our l1 and l2 reproduce NASA's Besselian
+elements to 6.3e-6 Earth radii (below). 300 km less would shift l1 and l2
+by about 1e-4 Earth radii (an estimate: 300 km seen from 1 au, carried the
+Moon's ~60 Earth radii), far outside that agreement. Both are options
 (C: `prometheia_solar_eclipse_options`, Python: `k_umbra=`, `k_penumbra=`,
 `sun_radius_km=`). swetest uses 0.2725076 throughout, which gives its
 magnitudes: with that value we reproduce them (below), with NASA's we are

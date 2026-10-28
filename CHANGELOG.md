@@ -13,13 +13,18 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **`prometheia_engine_delta_t(engine, jd_tt)`** gives an engine's own Delta T
+  (its model, or the installed callback), so that a result given in TT can be
+  turned into UT1 as the engine would (Python: `Context.delta_t`). The ABI is
+  unchanged.
 - **Phenomena and magnitudes** ([docs/PHENOMENA.md](docs/PHENOMENA.md)),
   A-4 of astromcp's port plan. For any object: the phase angle (at the body,
   at emission), the illuminated fraction, the elongation, the apparent
   diameter of the IAU mean radius, and V with its model named. The models:
   - the planets: Mallama & Hilton 2018, eqs. 2–17, Saturn's ring and
     Uranus's latitude terms from the IAU poles included;
-  - the Moon: Krisciunas & Schaefer 1991;
+  - the Moon: Krisciunas & Schaefer 1991, to 120° of phase, where the
+    observations behind it end (Lane & Irvine 1973); none beyond;
   - the Sun: Willmer 2018;
   - catalog bodies: H, G;
   - stars: the catalog's V.

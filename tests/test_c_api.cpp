@@ -460,13 +460,16 @@ TEST_CASE("c_api_delta_t_callback") {
     cpp.value().set_delta_t_model(&fixed);
     prometheia_result res;
     CHECK(prometheia_calc_ut(c.e, 5, kJ2000, &o, &res, nullptr) == PROMETHEIA_OK);
-    CHECK(calls > 0); // the user pointer reached the callback
+    CHECK(calls > 0);                                      // the user pointer reached the callback
+    CHECK(prometheia_engine_delta_t(c.e, kJ2000) == 64.0); // the engine's own model
+    CHECK(std::isnan(prometheia_engine_delta_t(nullptr, kJ2000)));
     auto r = cpp.value().calc_ut(5, kJ2000, co);
     CHECK(r.ok());
     CHECK(same(res, r.value()));
 
     // NULL restores the default model on both sides.
     prometheia_engine_set_delta_t(c.e, nullptr, &calls);
+    CHECK(prometheia_engine_delta_t(c.e, kJ2000) == prometheia_delta_t(kJ2000));
     cpp.value().set_delta_t_model(nullptr);
     const int before = calls;
     CHECK(prometheia_calc_ut(c.e, 5, kJ2000, &o, &res, nullptr) == PROMETHEIA_OK);

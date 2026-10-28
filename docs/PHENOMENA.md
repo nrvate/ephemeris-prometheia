@@ -70,7 +70,7 @@ magnitudes for The Astronomical Almanac*, Astronomy and Computing 25, 10–24
   the season are left out, as the port plan decided, which puts them at
   ±0.04 mag (an estimate).
 - **No magnitude, with the reason named:**
-  - a phase angle beyond a planet's formulas;
+  - a phase angle beyond a planet's formulas, or beyond 120° for the Moon;
   - Pluto, which the paper does not cover;
   - the Earth–Moon barycentre.
 
@@ -83,10 +83,15 @@ The paper takes it at the Moon's mean distance and leaves the distance out,
 which it says is worth up to ±0.12 mag. We scale by the inverse squares of
 the actual distances, from 384,400 km and 1 au.
 
-**Near new moon the quartic is unconstrained.** At α = 178° it gives −4.1,
-for a Moon nobody can see, and `swetest` prints +2.0 there. The paper gives
-the formula no range, and we do not invent one. Read a Moon magnitude beyond
-about 150° as a number from outside the formula's data.
+**Beyond 120° of phase the Moon has no magnitude.** The formula rests on
+whole-disc photometry, and Lane & Irvine (1973, AJ 78, 267) observed the
+disc over 6°–120°. Past that, nothing constrains the quartic, and it
+brightens toward new moon: it gives −4.8 at 170.8°, where `swetest` gives
+−2.80, and −4.1 at 178°. Others have shown the formula failing past 150°
+(Segura González 2022). So we give no number there, and `magnitude_model`
+says why, as for Pluto. Below 7° the opposition surge makes the full Moon
+up to 35% brighter than the formula (Krisciunas & Schaefer 1991), and that
+is not modelled.
 
 **The Sun:** Willmer (2018), ApJS 236, 47, Table 3: V = −26.76 (Vega) at
 1 au, plus 5 log₁₀ d.
@@ -127,7 +132,7 @@ The instants are TT, so that no ΔT enters. Measured 2026-10-27
 | V: Neptune | 0.0016 |
 | V: Saturn | 0.014 |
 | V: Uranus | 0.022 |
-| V: the Moon, α ≤ 120° | 0.011 (ours brighter, consistently) |
+| V: the Moon, α ≤ 120° | 0.011 (ours brighter, consistently); beyond 120°, none by design |
 | V: the Sun | 0.10, exactly: swetest's −26.86 at 1 au against Willmer's −26.76 |
 | elongation, planets | 0.0001″ |
 | elongation, the Moon | 0.001″ |

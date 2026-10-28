@@ -76,7 +76,9 @@ TEST_CASE("next: arguments") {
         return;
     auto e = Engine::open(kDe440Path);
     REQUIRE(e.ok());
-    CHECK(le::next(e.value(), 2461000.0, 0).error().code == ErrorCode::ArgumentError);
+    // 0 is any kind (as for solar eclipses); bits outside the three are refused.
+    CHECK(le::next(e.value(), 2461000.0, 0).value().jd_max_tt ==
+          le::next(e.value(), 2461000.0, le::kAllKinds).value().jd_max_tt);
     CHECK(le::next(e.value(), 2461000.0, 8).error().code == ErrorCode::ArgumentError);
     CHECK(le::next(e.value(), std::nan(""), le::kAllKinds).error().code ==
           ErrorCode::ArgumentError);
@@ -280,7 +282,12 @@ TEST_CASE("the C API agrees with the C++ one and refuses bad arguments") {
     CHECK(x.saros_series == 133);
     CHECK(x.saros_member == 27);
     CHECK(std::isfinite(x.contact_tt[PROMETHEIA_LUNAR_CONTACT_U2]));
-    CHECK(prometheia_lunar_eclipse_next(eng, 2461042.5, 0, 0, &x, &err) ==
+    // 0 is any kind, as for the solar calls; bits above 7 are refused.
+    prometheia_lunar_eclipse any;
+    REQUIRE(prometheia_lunar_eclipse_next(eng, 2461042.5, 0, 0, &any, &err) == PROMETHEIA_OK);
+    REQUIRE(prometheia_lunar_eclipse_next(eng, 2461042.5, 7, 0, &x, &err) == PROMETHEIA_OK);
+    CHECK(any.jd_max_tt == x.jd_max_tt);
+    CHECK(prometheia_lunar_eclipse_next(eng, 2461042.5, 8, 0, &x, &err) ==
           PROMETHEIA_ERROR_ARGUMENT);
     CHECK(x.kind == 0);
     CHECK(prometheia_lunar_eclipse_next(nullptr, 2461042.5, 7, 0, &x, &err) ==

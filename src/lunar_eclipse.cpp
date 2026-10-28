@@ -287,9 +287,11 @@ Saros saros_of(double jd_tt) {
 Result<Eclipse> next(Engine& engine, double jd_start_tt, unsigned kinds, bool backward) {
     if (!std::isfinite(jd_start_tt))
         return make_error(ErrorCode::ArgumentError, "the start is not finite");
-    if (kinds == 0 || (kinds & ~kAllKinds) != 0)
+    if ((kinds & ~kAllKinds) != 0)
         return make_error(ErrorCode::ArgumentError,
-                          "kinds is a nonzero mask of total, partial and penumbral");
+                          "kinds is a mask of total, partial and penumbral (0: any)");
+    if (kinds == 0) // as the solar eclipse calls read it
+        kinds = kAllKinds;
     long ell = lunation_of(jd_start_tt) + (backward ? 1 : -1);
     for (int n = 0; n < 2000; ++n, ell += backward ? -1 : 1) {
         auto r = eclipse_of(engine, ell);

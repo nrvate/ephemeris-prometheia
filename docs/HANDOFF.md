@@ -1,4 +1,4 @@
-# Handoff — where the work stands (2026-10-25)
+# Handoff — where the work stands (2026-10-27)
 
 A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
@@ -6,7 +6,56 @@ working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
 
-## Resume here (state at 2026-10-25)
+## Resume here (state at 2026-10-27)
+
+**astromcp is porting from Swiss to Prometheia.** Its plan's Part A
+(A-0..A-17) is our work. The peers are the astromcp session, which
+coordinates, and the Astrolog session, which gets every C ABI and wire
+change *before* it lands (maintainer's rule). Astrolog absorbs each landing
+by moving its pin; so far all 1246 of its group tests pass, and its charts
+are byte-identical.
+
+**Landed on 2026-10-27, in order:**
+- A-0: `prometheia.swe` removed (`7cf6e12`).
+- A-11: perturber tables on one fixed grid (`41c95e1`).
+- A-1: houses, sidereal time, obliquity and rotations in C. R, C and T
+  cusps out of zodiacal order are refused (`365fd3c`).
+- A-17: the native Python binding (`1cf8bd7`).
+- A-2: the horizon and refraction (`19c3fa2`).
+- A-3: rise, set and transit (`85a8b97`).
+- Chiron and Nessus against Horizons (`56d9dbd`).
+- EPM1 1.2: orbit class and old designations (`a5abc8e`, `3f79d03`).
+- A-5: the Raman zodiac (`3a29e24`).
+- The full SBDB pull, `sbdb-20261027.epm`, released as `catalog-20261027`
+  (`3ed2b9c`, `06ade08`).
+- The Sun's orbit points (`015edb6`); on v4 under §3.5a as amended
+  (Astrolog `4607f86`), with mean models named in source strings
+  (`00d6ec6`).
+- A-9: the object registry (`5e17363`).
+- A-4: phenomena and magnitudes (`006956a`).
+
+- A-6 and A-7: lunar and solar eclipses (ECLIPSES.md, SOLAR_ECLIPSES.md),
+  built by agents in worktrees and merged here. Both APIs read `kinds` the
+  same way (unsigned, 0 for any) and take TT starts. Their `prometheia_site`
+  is one struct. `prometheia_engine_delta_t` gives UT1 for TT results.
+- The Moon's magnitude stops at 120° of phase, the limit of the
+  observations behind it (PHENOMENA.md).
+
+**Next:**
+- A-8, heliacal events after Schaefer. The sources are found: Schaefer
+  1993, Vistas in Astronomy 36:311, with his VISLIMIT.BAS as the oracle.
+- Then A-12..A-16, and A-17 coverage.
+
+**Waiting on the maintainer:**
+- `tools/fetch/stars_fetch.py --only simbad-ngc`, for NGC 869/884
+  (Capulus). The sandbox cannot reach SIMBAD, and the edit declaring the
+  source is uncommitted until the file is pinned.
+- Whether `catalog-20261027` keeps GitHub's "Latest" badge over v0.7.3.
+
+**Limits** (maintainer): at most 3 sub-agents and 2 CPU-bound jobs at
+once. The machine is shared with the astromcp and Astrolog sessions.
+
+## State at 2026-10-25
 
 **Astrolog is adopting Prometheia** (their maintainer's direction,
 2026-10-25). Prometheia becomes their default ephemeris source, Swiss stays
