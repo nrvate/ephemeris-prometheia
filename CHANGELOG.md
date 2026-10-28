@@ -13,6 +13,19 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Corpus and engines** ([docs/ENGINE.md](docs/ENGINE.md), "Threads"),
+  A-14 of astromcp's port plan. What an engine reads is a `Corpus`
+  (`Corpus::open`, `add_*`, `freeze`). A frozen corpus is read-only and
+  shared by any number of engines, one per thread
+  (`Engine::open_context`). Each engine keeps its own caches and integrated
+  trajectories; `Engine::open` builds a private corpus as before.
+  Measured per engine: 8.0 KB when opened, 241 KB after the planets,
+  417 KB after a catalog body. The nutation interpolator's 229 KB node
+  cache is now allocated on first use. A six-thread test asks 1200 mixed
+  questions of six engines on one corpus, and every answer matches a single
+  engine's bit for bit. `tools/tsan.sh` runs that test and the readers'
+  under ThreadSanitizer, clean; it is outside the gate. C++ only: the C API
+  is unchanged (its dataset calls are A-15).
 - **Read cursors**, A-13 of astromcp's port plan. The DE, SPK and catalog
   readers hold no mutable state. The record or chunk a read decodes goes
   into the caller's cursor (`de::DeCursor`, `spk::SpkCursor`,

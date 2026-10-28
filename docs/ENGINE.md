@@ -46,9 +46,10 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
   for small bodies whose records carry a full covariance (below).
   `ayanamsa_deg` carries the longitude shift applied for a sidereal
   request (absent for a tropical one).
-- **Threading:** an `Engine` caches ephemeris records and the frame
-  matrices of the last three epochs; it is not safe for concurrent use.
-  One engine per thread; there is no global state.
+- **Threading:** what an engine reads is a `Corpus`, which a frozen corpus
+  shares among engines, one per thread (below, "Threads"). An `Engine`
+  caches records, frames and trajectories of its own and is used by one
+  thread at a time. There is no global state.
 
 ## Options
 
@@ -621,6 +622,65 @@ not indexed (address those by their NAIF IDs).
 - A query epoch outside the planetary ephemeris's coverage (or the
   perturber kernel's) is an error, `ErrorCode::CoverageError`, and a body
   absent everywhere is `NotFound` — never extrapolations.
+
+## Threads
+
+The loaded files are a `Corpus`: the planetary ephemerides, the catalogs
+with their name indexes, the asteroid perturber kernel, the hypothetical
+bodies, the star maps and the provenance strings. `Corpus::open` and its
+`add_*` calls build one. `freeze()` then makes it read-only, and
+`Engine::open_context(corpus)` opens any number of engines on it, one per
+thread:
+
+```cpp
+auto corpus = Corpus::open("de440.bin").value();
+corpus->add_catalog("sbdb.epm");
+corpus->freeze();                              // add_* refused from here on
+Engine e = Engine::open_context(corpus).value(); // one per thread
+```
+
+- **Shared, read-only:** the files, which the readers read at explicit
+  offsets into the engine's own cursors (A-12, A-13), and everything else
+  the Corpus holds. A catalog's name index and the count of distinct bodies
+  are built on first use, under the Corpus's lock.
+- **Per engine:** the read cursors, the frame, observer and Sun memos, the
+  nutation and TDB interpolators, the integrated small-body trajectories
+  and their sigma tracks, the asteroid perturber tables, and the natural
+  apsides' passages. Each engine integrates a catalog body for itself
+  (sharing those tables is A-15).
+- **`Engine::open`** builds a private Corpus as before. Its `add_*` calls
+  add to that Corpus and drop the engine's caches. An engine from
+  `open_context` refuses `add_*` (ArgumentError), as does the frozen Corpus;
+  `open_context` refuses a Corpus not frozen.
+
+**Memory per engine** (measured 2026-10-28, 200 engines on one frozen DE440
+corpus with sample-100.epm, RSS growth divided by 200):
+
+| | per engine |
+|---|---:|
+| just opened | 8.0 KB |
+| after the planets at one instant | 241 KB |
+| after a catalog body too | 417 KB |
+
+Most of the 241 KB is the nutation interpolator's node cache (4096 x 56
+bytes), which is now allocated on first use: until 2026-10-28 every engine
+paid it at open. The catalog body's 176 KB is its trajectory and the
+perturber tables.
+
+**Checked:** `test_engine_threads` opens six engines on one frozen corpus and
+asks 1200 seeded questions at once across six threads: planets, catalog
+bodies, sigma, orbit points with the natural apsides, stars, houses and name
+lookups. Every answer must be bit for bit the one a single engine gives to
+the same questions asked in reverse order. With one read scratch shared
+between the engines (fault-injected), the test fails on every run. It runs
+in 0.8 s, and in the gate. `tools/tsan.sh` builds `build-tsan/` and runs the
+file readers' tests and this one under ThreadSanitizer; it was clean on
+2026-10-28. It is outside the gate.
+
+**Single-thread cost:** `prometheia-engine-bench`, planets apparent, five
+alternating runs on one pinned core, median 3.83 us per call before the
+split and 4.05 after (+6 %), inside the bench's run-to-run spread of about
+20 %.
 
 ## Performance
 

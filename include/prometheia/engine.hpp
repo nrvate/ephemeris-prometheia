@@ -29,9 +29,12 @@
 // does not know are looked up in the catalogs added with add_catalog()
 // — small bodies by SPK-ID, integrated on demand.
 //
-// Threading: an Engine caches ephemeris records and frame matrices and
-// is not safe for concurrent use. Give each thread its own Engine;
-// there is no process-wide state.
+// Threading: what an Engine loads (ephemerides, catalogs, perturbers,
+// hypotheticals) is a Corpus. A frozen Corpus is read-only and is shared by
+// any number of Engines, one per thread (Engine::open_context). An Engine
+// itself caches records, frames and integrated trajectories, and is used by
+// one thread at a time. Engine::open builds a private Corpus, as before.
+// There is no process-wide state.
 #ifndef PROMETHEIA_ENGINE_HPP
 #define PROMETHEIA_ENGINE_HPP
 
@@ -306,6 +309,33 @@ namespace hypotheticals {
 struct Body;
 }
 
+// The data engines read, loaded once: the planetary ephemerides, the
+// small-body catalogs, an asteroid perturber kernel and the hypothetical
+// bodies. Built with open and the add_* calls (each as Engine's), then
+// frozen; a frozen Corpus refuses add_* and is safe to read from any number
+// of threads, through one Engine each (Engine::open_context).
+class Corpus {
+public:
+    static Result<std::shared_ptr<Corpus>> open(const std::string& ephemeris_path);
+    ~Corpus();
+
+    Result<void> add_ephemeris(const std::string& ephemeris_path);
+    Result<void> add_catalog(const std::string& catalog_path);
+    Result<void> add_perturbers(const std::string& spk_path);
+    Result<void> add_hypotheticals(const std::string& element_file_path);
+
+    // No more add_* after this; engines may now share the Corpus.
+    void freeze();
+    bool frozen() const;
+
+    struct Data; // the contents (src/engine.cpp)
+
+private:
+    Corpus();
+    friend class Engine;
+    std::unique_ptr<Data> d_;
+};
+
 class Engine {
 public:
     Engine();
@@ -316,6 +346,14 @@ public:
     // Opens a planetary ephemeris: a JPL DE binary or a DAF/SPK kernel
     // (detected by content, not extension).
     static Result<Engine> open(const std::string& ephemeris_path);
+
+    // An engine reading a frozen Corpus that other engines may share: its
+    // own caches, the Corpus's data. ArgumentError for a Corpus not frozen.
+    // Its add_* calls are refused (ArgumentError); add to the Corpus before
+    // freezing it instead.
+    static Result<Engine> open_context(std::shared_ptr<const Corpus> corpus);
+    // The Corpus this engine reads (Engine::open's private one included).
+    std::shared_ptr<const Corpus> corpus() const;
 
     // Adds a further planetary ephemeris behind the ones already open, for
     // the instants they do not cover: each ephemeris read goes to the first

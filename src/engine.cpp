@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +19,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1215,29 +1217,40 @@ private:
 
 } // namespace
 
-// Where a body's state came from, for provenance and uncertainty.
-enum Origin { kFromEphemeris = 0, kFromCatalog = 1 };
+namespace {
 
-// One integrated catalog body: its own force model (which leaves the body
-// itself out when it is one of the perturbing masses) and trajectory memo.
-struct SmallBody {
-    std::unique_ptr<BarycentricForce> force;
-    std::unique_ptr<WindowMemo<BarycentricForce>> memo;
-};
+// The free helpers the name indexes and lookup() share.
+std::string fold_lower(std::string_view s) {
+    std::string key(s);
+    for (char& c : key)
+        if (c >= 'A' && c <= 'Z')
+            c += 'a' - 'A';
+    return key;
+}
 
-struct Engine::Impl {
+uint64_t fnv1a(std::string_view lower) {
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : lower) {
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+} // namespace
+
+// What a Corpus holds. Written only by Corpus::open and add_*, before the
+// Corpus is frozen; afterwards every member is read-only but the name indexes
+// and the distinct-body count, which are built on first use under `lazy`.
+struct Corpus::Data {
     std::unique_ptr<Source> source; // always a ChainSource (chain, below)
     ChainSource* chain = nullptr;
-    // Every file read goes through this one scratch (and the perturber
-    // tables through a pointer to it), so the sources and catalogs
-    // themselves hold no mutable state.
-    ReadScratch scratch;
-    size_t next_slot = 0; // Source::slot of the next file opened
-
-    std::unique_ptr<Source> number(std::unique_ptr<Source> s) {
-        s->slot = next_slot++;
-        return s;
-    }
+    size_t next_slot = 0;                      // Source::slot of the next file opened
+    std::unique_ptr<AsteroidSource> asteroids; // optional asteroid perturber kernel
+    std::vector<int> asteroid_masses;          // its bodies with a known mass
+    std::string perturber_note;                // appended when asteroid perturbers are loaded
+    double bias[9] = {};
+    double eps_j2000 = 0.0;
 
     // Named hypothetical bodies: every definition ever added (a deque, so the
     // set names answers point at stay put), the current one per token, and
@@ -1245,6 +1258,45 @@ struct Engine::Impl {
     std::deque<hypotheticals::Body> hypothetical_bodies;
     std::unordered_map<std::string, const hypotheticals::Body*> hypothetical_by_token;
     std::vector<std::string> hypothetical_order;
+
+    // Catalog stars by HR number (zodiac anchors) and by HIP number (a
+    // binary's partner): the first star carrying each, built once.
+    std::unordered_map<int, size_t> star_by_hr, star_by_hip;
+
+    // EPM1 catalogs, newest wins, with the paths add_catalog() was given.
+    std::vector<std::unique_ptr<catalog::Reader>> catalogs;
+    std::vector<std::string> catalog_paths;
+    std::string overlay_source; // provenance for catalog bodies
+
+    std::atomic<bool> frozen{false};
+
+    // Per catalog (parallel to `catalogs`), built on the first lookup():
+    // sorted (FNV-1a hash of the lowercased designation or name, SPK-ID)
+    // pairs. A hash hit is confirmed against the record's own names, so
+    // collisions cannot answer a wrong body. ~16 bytes per name instead of a
+    // string map (1.57M bodies: ~50 MB and ~0.5 s, was ~250 MB and ~1.4 s).
+    // A deque: an index stays put while a later catalog's is appended.
+    struct NameIndex {
+        std::atomic<bool> built{false};
+        std::vector<std::pair<uint64_t, uint64_t>> entries;
+    };
+    std::deque<NameIndex> name_indexes;
+    std::optional<uint64_t> distinct_bodies; // catalog_bodies(), until add_catalog()
+    std::mutex lazy;                         // guards building either
+
+    Data() {
+        frames::frame_bias_matrix(bias);
+        eps_j2000 = frames::mean_obliquity(kJ2000);
+        for (size_t i = 0; i < stars::count(); ++i) {
+            star_by_hr.try_emplace(stars::at(i).hr, i);
+            star_by_hip.try_emplace(stars::at(i).hip, i);
+        }
+    }
+
+    std::unique_ptr<Source> number(std::unique_ptr<Source> s) {
+        s->slot = next_slot++;
+        return s;
+    }
 
     void define_hypotheticals(std::vector<hypotheticals::Body> bodies) {
         for (hypotheticals::Body& b : bodies) {
@@ -1257,30 +1309,111 @@ struct Engine::Impl {
         }
     }
 
+    // Provenance of catalog answers: the ephemeris, the catalog stack (newest
+    // first) and, when loaded, the asteroid perturbers.
+    void refresh_overlay_source() {
+        if (catalogs.empty()) {
+            overlay_source.clear();
+            return;
+        }
+        std::string counts;
+        for (size_t i = catalogs.size(); i-- > 0;) {
+            if (!counts.empty())
+                counts += ", ";
+            counts += std::to_string(catalogs[i]->record_count());
+        }
+        overlay_source =
+            source->description + " + EPM1 catalog(s) [" + counts + " bodies]" + perturber_note;
+    }
+
+    // Catalog i's name index, built on first use: any thread may ask.
+    Result<const std::vector<std::pair<uint64_t, uint64_t>>*> name_index(size_t i) {
+        NameIndex& idx = name_indexes[i];
+        if (!idx.built.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> hold(lazy);
+            if (!idx.built.load(std::memory_order_relaxed)) {
+                std::vector<std::pair<uint64_t, uint64_t>> entries;
+                entries.reserve(size_t(catalogs[i]->record_count()) + 1024);
+                auto fe = catalogs[i]->for_each_name([&](uint64_t spkid, const catalog::Names& n) {
+                    if (!n.pdes.empty())
+                        entries.emplace_back(fnv1a(fold_lower(n.pdes)), spkid);
+                    if (!n.name.empty())
+                        entries.emplace_back(fnv1a(fold_lower(n.name)), spkid);
+                    if (!n.prov_des.empty()) // a numbered body's old designation (1.2)
+                        entries.emplace_back(fnv1a(fold_lower(n.prov_des)), spkid);
+                });
+                if (!fe)
+                    return fe.error();
+                std::sort(entries.begin(), entries.end());
+                idx.entries = std::move(entries);
+                idx.built.store(true, std::memory_order_release);
+            }
+        }
+        return &idx.entries;
+    }
+};
+
+// Where a body's state came from, for provenance and uncertainty.
+enum Origin { kFromEphemeris = 0, kFromCatalog = 1 };
+
+// One integrated catalog body: its own force model (which leaves the body
+// itself out when it is one of the perturbing masses) and trajectory memo.
+struct SmallBody {
+    std::unique_ptr<BarycentricForce> force;
+    std::unique_ptr<WindowMemo<BarycentricForce>> memo;
+};
+
+struct Engine::Impl {
+    // The loaded data, which other engines may share (a frozen Corpus); the
+    // references name its parts as the engine always has, read-only.
+    std::shared_ptr<Corpus> corpus_owner;
+    Corpus::Data& corpus;
+    const std::unique_ptr<Source>& source; // always a ChainSource (chain, below)
+    ChainSource* const& chain;
+    const std::unique_ptr<AsteroidSource>& asteroids; // optional asteroid perturber kernel
+    const double (&bias)[9];
+    const double& eps_j2000;
+    const std::vector<std::unique_ptr<catalog::Reader>>& catalogs;
+    const std::string& overlay_source_; // provenance for catalog bodies
+    const std::unordered_map<std::string, const hypotheticals::Body*>& hypothetical_by_token;
+    const std::vector<std::string>& hypothetical_order;
+    // Every file read goes through this one scratch (and the perturber
+    // tables through a pointer to it), so the sources and catalogs
+    // themselves hold no mutable state.
+    ReadScratch scratch;
+
+    Impl(std::shared_ptr<Corpus> owner, Corpus::Data& d)
+        : corpus_owner(std::move(owner)), corpus(d), source(d.source), chain(d.chain),
+          asteroids(d.asteroids), bias(d.bias), eps_j2000(d.eps_j2000), catalogs(d.catalogs),
+          overlay_source_(d.overlay_source), hypothetical_by_token(d.hypothetical_by_token),
+          hypothetical_order(d.hypothetical_order) {
+        attach_perturbers();
+    }
+
+    // The perturber tables read the corpus's planetary ephemeris and, when it
+    // has one, its asteroid kernel; again after an add_* changes either.
+    void attach_perturbers() {
+        perturbers.attach(source.get(), &scratch);
+        if (asteroids)
+            perturbers.attach_asteroids(asteroids.get(), corpus.asteroid_masses);
+        else
+            perturbers.reset();
+    }
+
     // The element frame's rotation for the fixed equinoxes, kept apart from
     // the three-slot date cache, which a light-time solve and its rate
     // stencil already fill.
     double element_frame_jd = NAN;
     Precession element_frame_model = Precession::IAU2006;
     double element_frame[9] = {};
-    std::unique_ptr<AsteroidSource> asteroids; // optional asteroid perturber kernel
     const time::DeltaTModel* delta_t = nullptr;
     time::ObservedDeltaT default_delta_t;
-    double bias[9];
-    double eps_j2000 = 0.0;
     EpochFrames cache[3];
-    // Catalog stars that anchor a zodiac, by HR number (star_by_hr).
-    std::unordered_map<int, size_t> star_by_hr_;
-    // A binary's partner component, by HIP number (star_by_hip).
-    std::unordered_map<int, size_t> star_by_hip_;
     int cache_next = 0;
 
-    // Small-body overlay: EPM1 catalogs, newest wins. Positions are
+    // Small-body overlay: the corpus's catalogs, newest wins. Positions are
     // integrated on demand from the catalog's osculating elements with
-    // the barycentric force model and memoized per body.
-    std::vector<std::unique_ptr<catalog::Reader>> catalogs;
-    std::vector<std::string> catalog_paths;          // as add_catalog() was given them
-    mutable std::optional<uint64_t> distinct_bodies; // catalog_bodies(), until add_catalog()
+    // the barycentric force model and memoized per body, per engine.
     PerturberSet perturbers;
     std::unordered_map<uint64_t, SmallBody> small_bodies;
     // Decoding a catalog record walks its chunk from the start, so a body
@@ -1293,75 +1426,9 @@ struct Engine::Impl {
     std::unordered_map<uint64_t, std::pair<catalog::Record, size_t>> record_cache;
     static constexpr size_t kRecordCacheMax = 4096;
     std::unordered_map<uint64_t, std::unique_ptr<SigmaTracks>> sigma_tracks;
-    std::string overlay_source_; // provenance for catalog bodies
-    std::string perturber_note_; // appended when asteroid perturbers are loaded
 
-    // Per catalog (parallel to `catalogs`), built on the first lookup():
-    // sorted (FNV-1a hash of the lowercased designation or name, SPK-ID)
-    // pairs. A hash hit is confirmed against the record's own names, so
-    // collisions cannot answer a wrong body. ~16 bytes per name instead of a
-    // string map (1.57M bodies: ~50 MB and ~0.5 s, was ~250 MB and ~1.4 s).
-    struct NameIndex {
-        bool built = false;
-        std::vector<std::pair<uint64_t, uint64_t>> entries;
-    };
-    std::vector<NameIndex> name_indexes;
-
-    static std::string lowercase(std::string_view s) {
-        std::string key(s);
-        for (char& c : key)
-            if (c >= 'A' && c <= 'Z')
-                c += 'a' - 'A';
-        return key;
-    }
-
-    static uint64_t name_hash(std::string_view lower) {
-        uint64_t h = 1469598103934665603ull;
-        for (unsigned char c : lower) {
-            h ^= c;
-            h *= 1099511628211ull;
-        }
-        return h;
-    }
-
-    Result<void> ensure_name_index(size_t i) {
-        NameIndex& idx = name_indexes[i];
-        if (idx.built)
-            return {};
-        std::vector<std::pair<uint64_t, uint64_t>> entries;
-        entries.reserve(size_t(catalogs[i]->record_count()) + 1024);
-        auto fe = catalogs[i]->for_each_name([&](uint64_t spkid, const catalog::Names& n) {
-            if (!n.pdes.empty())
-                entries.emplace_back(name_hash(lowercase(n.pdes)), spkid);
-            if (!n.name.empty())
-                entries.emplace_back(name_hash(lowercase(n.name)), spkid);
-            if (!n.prov_des.empty()) // a numbered body's old designation (1.2)
-                entries.emplace_back(name_hash(lowercase(n.prov_des)), spkid);
-        });
-        if (!fe)
-            return fe.error();
-        std::sort(entries.begin(), entries.end());
-        idx.entries = std::move(entries);
-        idx.built = true;
-        return {};
-    }
-
-    // Provenance of catalog answers: the ephemeris, the catalog stack (newest
-    // first) and, when loaded, the asteroid perturbers.
-    void refresh_overlay_source() {
-        if (catalogs.empty()) {
-            overlay_source_.clear();
-            return;
-        }
-        std::string counts;
-        for (size_t i = catalogs.size(); i-- > 0;) {
-            if (!counts.empty())
-                counts += ", ";
-            counts += std::to_string(catalogs[i]->record_count());
-        }
-        overlay_source_ =
-            source->description + " + EPM1 catalog(s) [" + counts + " bodies]" + perturber_note_;
-    }
+    static std::string lowercase(std::string_view s) { return fold_lower(s); }
+    static uint64_t name_hash(std::string_view lower) { return fnv1a(lower); }
 
     double delta_t_seconds(double jd_tt) const {
         return (delta_t ? delta_t : &default_delta_t)->delta_t_seconds(jd_tt);
@@ -1940,29 +2007,17 @@ struct Engine::Impl {
         return make_error(ErrorCode::ArgumentError, "unknown frame");
     }
 
-    // A catalog star's index by HIP number, remembered after the first search.
-    Result<size_t> star_by_hip(int hip) {
-        if (auto it = star_by_hip_.find(hip); it != star_by_hip_.end())
+    // A catalog star's index by HIP number (the first star carrying it).
+    Result<size_t> star_by_hip(int hip) const {
+        if (auto it = corpus.star_by_hip.find(hip); it != corpus.star_by_hip.end())
             return it->second;
-        for (size_t i = 0; i < stars::count(); ++i) {
-            if (stars::at(i).hip == hip) {
-                star_by_hip_.emplace(hip, i);
-                return i;
-            }
-        }
         return make_error(ErrorCode::NotFound, "no catalog star HIP " + std::to_string(hip));
     }
 
-    // A catalog star's index by HR number, remembered after the first search.
-    Result<size_t> star_by_hr(int hr) {
-        if (auto it = star_by_hr_.find(hr); it != star_by_hr_.end())
+    // A catalog star's index by HR number (the first star carrying it).
+    Result<size_t> star_by_hr(int hr) const {
+        if (auto it = corpus.star_by_hr.find(hr); it != corpus.star_by_hr.end())
             return it->second;
-        for (size_t i = 0; i < stars::count(); ++i) {
-            if (stars::at(i).hr == hr) {
-                star_by_hr_.emplace(hr, i);
-                return i;
-            }
-        }
         return make_error(ErrorCode::NotFound, "no catalog star HR " + std::to_string(hr));
     }
 
@@ -3255,11 +3310,8 @@ Result<std::unique_ptr<Source>> open_ephemeris_source(const std::string& path) {
 Result<void> Engine::add_ephemeris(const std::string& path) {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");
-    auto src = open_ephemeris_source(path);
-    if (!src)
-        return src.error();
-    impl_->chain->add(impl_->number(std::move(src).value()));
-    impl_->refresh_overlay_source();
+    if (auto r = impl_->corpus_owner->add_ephemeris(path); !r)
+        return r;
     // Anything computed from the ephemeris may have stopped at the old span's
     // edge: small-body tracks, and the natural apsides' passage blocks, which
     // are kept even when a scan ran off the file (and would keep refusing an
@@ -3274,24 +3326,140 @@ Result<void> Engine::add_ephemeris(const std::string& path) {
     return {};
 }
 
-Result<Engine> Engine::open(const std::string& path) {
+Corpus::Corpus() : d_(std::make_unique<Data>()) {}
+Corpus::~Corpus() = default;
+
+void Corpus::freeze() {
+    d_->frozen.store(true, std::memory_order_release);
+}
+
+bool Corpus::frozen() const {
+    return d_->frozen.load(std::memory_order_acquire);
+}
+
+namespace {
+Error frozen_error() {
+    return make_error(ErrorCode::ArgumentError,
+                      "the corpus is frozen: add files to it before freezing it");
+}
+} // namespace
+
+Result<std::shared_ptr<Corpus>> Corpus::open(const std::string& path) {
     auto src = open_ephemeris_source(path);
     if (!src)
         return src.error();
-    Engine e;
-    e.impl_ = std::make_unique<Impl>();
+    std::shared_ptr<Corpus> c(new Corpus);
+    Data& d = *c->d_;
     auto chain = std::make_unique<ChainSource>();
-    chain->add(e.impl_->number(std::move(src).value()));
-    e.impl_->chain = chain.get();
-    e.impl_->source = std::move(chain);
-    e.impl_->perturbers.attach(e.impl_->source.get(), &e.impl_->scratch);
-    frames::frame_bias_matrix(e.impl_->bias);
-    e.impl_->eps_j2000 = frames::mean_obliquity(kJ2000);
+    chain->add(d.number(std::move(src).value()));
+    d.chain = chain.get();
+    d.source = std::move(chain);
     auto shipped = hypotheticals::parse(hypotheticals::shipped(), "data/hypotheticals.jsonl");
     if (!shipped)
         return shipped.error(); // a build defect: the file is checked by the tests
-    e.impl_->define_hypotheticals(std::move(shipped).value());
+    d.define_hypotheticals(std::move(shipped).value());
+    return c;
+}
+
+Result<void> Corpus::add_ephemeris(const std::string& path) {
+    if (frozen())
+        return frozen_error();
+    auto src = open_ephemeris_source(path);
+    if (!src)
+        return src.error();
+    d_->chain->add(d_->number(std::move(src).value()));
+    d_->refresh_overlay_source();
+    return {};
+}
+
+Result<void> Corpus::add_catalog(const std::string& path) {
+    if (frozen())
+        return frozen_error();
+    auto r = catalog::Reader::open(path);
+    if (!r)
+        return r.error();
+    // CRC-verify the whole container before the corpus owns it, so a
+    // corrupt file fails add_catalog cleanly. The CRC covers each chunk's
+    // raw bytes, so decoding the records adds nothing to the check (it was
+    // 40% of loading, 2026-09-19). The name index is built on the first
+    // lookup().
+    auto fe = r.value().verify();
+    if (!fe)
+        return fe.error();
+    d_->catalogs.push_back(std::make_unique<catalog::Reader>(std::move(r).value()));
+    d_->catalog_paths.push_back(path);
+    d_->distinct_bodies.reset();
+    d_->name_indexes.emplace_back();
+    d_->refresh_overlay_source();
+    return {};
+}
+
+Result<void> Corpus::add_perturbers(const std::string& path) {
+    if (frozen())
+        return frozen_error();
+    auto f = spk::SpkFile::open(path);
+    if (!f)
+        return f.error();
+    auto src = std::make_unique<AsteroidSource>(std::move(f).value(), d_->source.get());
+    src->slot = d_->next_slot++;
+    if (src->bodies().empty())
+        return make_error(ErrorCode::FormatError,
+                          path + " carries no heliocentric numbered-asteroid segments");
+    std::vector<int> massive;
+    for (int id : src->bodies())
+        if (gm_or_builtin(src.get(), id) > 0.0)
+            massive.push_back(id);
+    if (massive.empty())
+        return make_error(ErrorCode::FormatError,
+                          path + ": no body with a known mass (DE MAnnnn constant or built-in)");
+    d_->perturber_note = " + " + std::to_string(massive.size()) + " " + src->description;
+    d_->asteroids = std::move(src);
+    d_->asteroid_masses = std::move(massive);
+    d_->refresh_overlay_source();
+    return {};
+}
+
+Result<void> Corpus::add_hypotheticals(const std::string& path) {
+    if (frozen())
+        return frozen_error();
+    std::ifstream f(path, std::ios::binary);
+    if (!f)
+        return make_error(ErrorCode::IoError, "cannot open " + path);
+    const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    auto bodies = hypotheticals::parse(text, path);
+    if (!bodies)
+        return bodies.error();
+    d_->define_hypotheticals(std::move(bodies).value());
+    return {};
+}
+
+Result<Engine> Engine::open(const std::string& path) {
+    auto c = Corpus::open(path);
+    if (!c)
+        return c.error();
+    std::shared_ptr<Corpus> corpus = std::move(c).value();
+    Corpus::Data& d = *corpus->d_;
+    Engine e;
+    e.impl_ = std::make_unique<Impl>(std::move(corpus), d);
     return e;
+}
+
+Result<Engine> Engine::open_context(std::shared_ptr<const Corpus> corpus) {
+    if (!corpus)
+        return make_error(ErrorCode::ArgumentError, "no corpus");
+    if (!corpus->frozen())
+        return make_error(ErrorCode::ArgumentError,
+                          "the corpus is not frozen: freeze it before engines share it");
+    // Frozen, it refuses every add_*: the engine only reads it.
+    std::shared_ptr<Corpus> owner = std::const_pointer_cast<Corpus>(std::move(corpus));
+    Corpus::Data& d = *owner->d_;
+    Engine e;
+    e.impl_ = std::make_unique<Impl>(std::move(owner), d);
+    return e;
+}
+
+std::shared_ptr<const Corpus> Engine::corpus() const {
+    return impl_ ? impl_->corpus_owner : nullptr;
 }
 
 Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
@@ -3345,23 +3513,8 @@ Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
 Result<void> Engine::add_catalog(const std::string& path) {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");
-    auto r = catalog::Reader::open(path);
-    if (!r)
-        return r.error();
-
-    // CRC-verify the whole container before the engine owns it, so a
-    // corrupt file fails add_catalog cleanly. The CRC covers each chunk's
-    // raw bytes, so decoding the records adds nothing to the check (it was
-    // 40% of loading, 2026-09-19). The name index is built on the first
-    // lookup().
-    auto fe = r.value().verify();
-    if (!fe)
-        return fe.error();
-
-    impl_->catalogs.push_back(std::make_unique<catalog::Reader>(std::move(r).value()));
-    impl_->catalog_paths.push_back(path);
-    impl_->distinct_bodies.reset();
-    impl_->name_indexes.emplace_back();
+    if (auto r = impl_->corpus_owner->add_catalog(path); !r)
+        return r;
     // A newer catalog may carry revised elements for bodies already
     // integrated: drop the memoized trajectories and uncertainty tracks,
     // they rebuild lazily.
@@ -3369,34 +3522,15 @@ Result<void> Engine::add_catalog(const std::string& path) {
     impl_->record_cache.clear();
     impl_->sigma_tracks.clear();
     impl_->forget_observers(); // an observer may be one of those bodies
-    impl_->refresh_overlay_source();
     return {};
 }
 
 Result<void> Engine::add_perturbers(const std::string& path) {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");
-    auto f = spk::SpkFile::open(path);
-    if (!f)
-        return f.error();
-    auto src = std::make_unique<AsteroidSource>(std::move(f).value(), impl_->source.get());
-    src->slot = impl_->next_slot++;
-    if (src->bodies().empty())
-        return make_error(ErrorCode::FormatError,
-                          path + " carries no heliocentric numbered-asteroid segments");
-    std::vector<int> massive;
-    for (int id : src->bodies())
-        if (gm_or_builtin(src.get(), id) > 0.0)
-            massive.push_back(id);
-    if (massive.empty())
-        return make_error(ErrorCode::FormatError,
-                          path + ": no body with a known mass (DE MAnnnn constant or built-in)");
-    const size_t n_massive = massive.size();
-    impl_->asteroids = std::move(src);
-    impl_->perturbers.attach_asteroids(impl_->asteroids.get(), std::move(massive));
-    impl_->perturber_note_ =
-        " + " + std::to_string(n_massive) + " " + impl_->asteroids->description;
-    impl_->refresh_overlay_source();
+    if (auto r = impl_->corpus_owner->add_perturbers(path); !r)
+        return r;
+    impl_->attach_perturbers();
     // Every trajectory integrated so far lacked these masses, and so did
     // any observer placed on one.
     impl_->small_bodies.clear();
@@ -3422,9 +3556,10 @@ Result<int> Engine::lookup(std::string_view name) const {
     // Newest catalog first; within one catalog the highest SPK-ID carrying
     // the name wins (as a later record would have overwritten it).
     for (size_t i = impl_->catalogs.size(); i-- > 0;) {
-        if (auto r = impl_->ensure_name_index(i); !r)
-            return r.error();
-        const auto& entries = impl_->name_indexes[i].entries;
+        auto index = impl_->corpus.name_index(i);
+        if (!index)
+            return index.error();
+        const auto& entries = *index.value();
         auto lo = std::lower_bound(entries.begin(), entries.end(), std::make_pair(h, uint64_t(0)));
         uint64_t best = 0;
         for (auto it = lo; it != entries.end() && it->first == h; ++it) {
@@ -3559,15 +3694,7 @@ Result<CalcResult> Engine::calc_elements_ut(const PolynomialElements& el, double
 Result<void> Engine::add_hypotheticals(const std::string& path) {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");
-    std::ifstream f(path, std::ios::binary);
-    if (!f)
-        return make_error(ErrorCode::IoError, "cannot open " + path);
-    const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    auto bodies = hypotheticals::parse(text, path);
-    if (!bodies)
-        return bodies.error();
-    impl_->define_hypotheticals(std::move(bodies).value());
-    return {};
+    return impl_->corpus_owner->add_hypotheticals(path);
 }
 
 std::vector<std::string> Engine::hypothetical_tokens() const {
@@ -4105,7 +4232,7 @@ std::vector<Engine::CatalogInfo> Engine::catalogs() const {
     if (!impl_)
         return out;
     for (size_t i = 0; i < impl_->catalogs.size(); ++i)
-        out.push_back({impl_->catalog_paths[i], impl_->catalogs[i]->record_count()});
+        out.push_back({impl_->corpus.catalog_paths[i], impl_->catalogs[i]->record_count()});
     return out;
 }
 
@@ -4114,8 +4241,11 @@ Result<uint64_t> Engine::catalog_bodies() const {
         return uint64_t{0};
     if (impl_->catalogs.size() == 1)
         return impl_->catalogs.front()->record_count(); // the writer keeps SPK-IDs unique
-    if (impl_->distinct_bodies)
-        return *impl_->distinct_bodies;
+    // Counted once, under the corpus's lock: any engine reading it may ask.
+    Corpus::Data& d = impl_->corpus;
+    std::lock_guard<std::mutex> hold(d.lazy);
+    if (d.distinct_bodies)
+        return *d.distinct_bodies;
     std::vector<uint64_t> ids;
     for (const auto& c : impl_->catalogs) {
         ids.reserve(ids.size() + size_t(c->record_count()));
@@ -4125,8 +4255,8 @@ Result<uint64_t> Engine::catalog_bodies() const {
             return each.error();
     }
     std::sort(ids.begin(), ids.end());
-    impl_->distinct_bodies = uint64_t(std::unique(ids.begin(), ids.end()) - ids.begin());
-    return *impl_->distinct_bodies;
+    d.distinct_bodies = uint64_t(std::unique(ids.begin(), ids.end()) - ids.begin());
+    return *d.distinct_bodies;
 }
 
 Result<Engine::CatalogBody> Engine::catalog_body(int spkid) const {

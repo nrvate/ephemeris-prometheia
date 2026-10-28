@@ -56,9 +56,10 @@ void nutation_printed_form(double jd_tt, double& dpsi, double& deps);
 // Hermite polynomial matching all six. Measured against the full series
 // over 1800-2100: 0.004 uas (docs/FRAMES.md). The value depends only on the
 // epoch, never on query history. Nodes are kept in a direct-mapped cache
-// (4096 nodes, ~200 KB, about 5.6 years), so a sweep of many bodies over
-// one time window sums the series once per half day in total. Not
-// thread-safe; one per thread (the Engine keeps its own).
+// (4096 nodes, 229 KB, about 5.6 years, allocated on the first evaluation),
+// so a sweep of many bodies over one time window sums the series once per
+// half day in total. Not thread-safe; one per thread (the Engine keeps its
+// own).
 class NutationInterpolator {
 public:
     NutationInterpolator();

@@ -77,6 +77,7 @@ prometheia_test(spk tests/test_spk.cpp)
 prometheia_test(io tests/test_io.cpp)
 prometheia_test(engine tests/test_engine.cpp)
 prometheia_test(engine_catalog tests/test_engine_catalog.cpp)
+prometheia_test(engine_threads tests/test_engine_threads.cpp)
 
 # The C interface: C++ checks against the engine, plus a translation unit
 # compiled as strict C99 to prove the header and calling pattern are C.

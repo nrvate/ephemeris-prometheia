@@ -934,13 +934,17 @@ struct NutationInterpolator::Node {
     double n[6] = {0, 0, 0, 0, 0, 0};
 };
 
-NutationInterpolator::NutationInterpolator() : nodes_(new Node[kNutationCacheSize]) {}
+// The node cache (4096 x 56 bytes) is allocated on first use: an engine
+// that never asks for nutation, or not yet, does not carry it.
+NutationInterpolator::NutationInterpolator() : nodes_(nullptr) {}
 
 NutationInterpolator::~NutationInterpolator() {
     delete[] nodes_;
 }
 
 const NutationInterpolator::Node& NutationInterpolator::node(long long index) {
+    if (!nodes_)
+        nodes_ = new Node[kNutationCacheSize];
     Node& slot = nodes_[size_t(index) & (kNutationCacheSize - 1)];
     if (slot.index != index) {
         slot.index = index;
@@ -955,6 +959,8 @@ void NutationInterpolator::at(double jd_tt, double& dpsi, double& deps) {
     const double k = std::floor(jd_tt / kNodeSpacingDays);
     const auto index = static_cast<long long>(k);
     const double u = (jd_tt - k * kNodeSpacingDays) / kNodeSpacingDays;
+    if (!nodes_)
+        nodes_ = new Node[kNutationCacheSize];
     // A fresh instant needs both nodes: they are computed together, a lane
     // each, for about the cost of one (the same values; 2026-09-19).
     Node& na = nodes_[size_t(index) & (kNutationCacheSize - 1)];
