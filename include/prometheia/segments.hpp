@@ -40,6 +40,10 @@ struct Segment {
     void velocity(double jd_tt, double out_au_per_day[3]) const;
 };
 
+// The Chebyshev coefficients of d/du of a series in u, one fewer ({0} for a
+// constant). Segment::velocity evaluates them and divides by half_span_days.
+std::vector<double> derivative(const std::vector<double>& c);
+
 // What the fitter samples: the rectangular position (AU) and velocity
 // (AU/day) of the thing being fitted, at a TT instant, in whatever frame the
 // caller wants the segments in. An error stops the fit.

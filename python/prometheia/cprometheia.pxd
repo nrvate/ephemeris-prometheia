@@ -7,8 +7,10 @@
 # and call it with or without the GIL. Every function is plain C: it takes no
 # Python object, calls back into nothing but a prometheia_delta_t_fn the
 # caller installs, never raises, and allocates only inside engine_open,
-# add_* and the first lookup that builds an index (docs/C_API.md). So the
-# whole block is nogil and noexcept. One engine per thread; engines share
+# add_*, segments_fit and the first lookup that builds an index
+# (docs/C_API.md). So the whole block is nogil and noexcept. A segments
+# handle is immutable: any thread may evaluate it, and a kernel may read its
+# layout directly (index with layout.stride). One engine per thread; engines share
 # nothing. Layouts are those of PROMETHEIA_ABI_VERSION, which a binding
 # compares with prometheia_abi_version() at load (docs/C_API.md, "ABI
 # stability"); this file is kept in step with the header by
@@ -840,3 +842,47 @@ cdef extern from "prometheia/prometheia.h" nogil:
         prometheia_visibility* out, prometheia_error* err) noexcept
     double prometheia_limiting_magnitude(double sky_brightness_nl,
                                          const prometheia_observer* observer) noexcept
+
+    # Segments (docs/C_API.md, "Segments")
+    ctypedef struct prometheia_segments:
+        pass
+
+    int PROMETHEIA_SEGMENTS_MAX_DEGREE
+
+    ctypedef struct prometheia_segments_layout:
+        int count
+        int stride
+        double jd_tt_start
+        double jd_tt_end
+        const double* bounds_jd_tt
+        const double* mid_jd_tt
+        const double* half_span_days
+        const int* degree
+        const double* coef
+        const double* dcoef
+        double tolerance_arcsec
+        double err_arcsec
+        double err_rel_dist
+        double err_rate_arcsec_per_day
+        int coords
+
+    ctypedef struct prometheia_segments_point:
+        double lon_deg
+        double lat_deg
+        double dist_au
+        double lon_speed
+        double lat_speed
+        double dist_speed
+        double xyz_au[3]
+        double vel_au_day[3]
+
+    prometheia_status prometheia_segments_fit(
+        prometheia_engine* engine, const prometheia_object* object, double jd_tt_start,
+        double jd_tt_end, const prometheia_options* opts, double tolerance_arcsec,
+        prometheia_segments** out, prometheia_error* err) noexcept
+    prometheia_status prometheia_segments_eval(const prometheia_segments* segments,
+                                               double jd_tt, prometheia_segments_point* out,
+                                               prometheia_error* err) noexcept
+    const prometheia_segments_layout* prometheia_segments_get_layout(
+        const prometheia_segments* segments) noexcept
+    void prometheia_segments_close(prometheia_segments* segments) noexcept

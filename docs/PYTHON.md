@@ -147,6 +147,15 @@ the C++ engine's, bit for bit.
     epoch; `equinox` is a name in `EQUINOXES` or a TT Julian date. A token's
     `hypothetical(token).elements` computes exactly what the token does;
   - `calc_orbit_point(body, point, method, …)`;
+  - `fit_segments(object, jd_tt_start, jd_tt_end, options,
+    tolerance_arcsec=0.001)` returns `Segments`: Chebyshev fits of any
+    object `calc` takes over a TT span ([C_API.md](C_API.md), "Segments").
+    `segments.eval(jd_tt)` gives a `SegmentPoint` (Position's fields, from
+    the fit), `segments.layout()` the arrays as lists, and `err_arcsec` the
+    worst residual measured while fitting. A `Segments` is immutable: any
+    thread may evaluate it, and it outlives its context. Cython code
+    `cimport`s the layout from `cprometheia.pxd` and evaluates it without
+    the GIL;
   - `houses(system, jd, lon, lat, options)`;
   - `sidereal_time(jd_ut1, "mean"|"apparent")` and
     `obliquity(jd_tt, "mean"|"true")`;
@@ -295,6 +304,12 @@ validation: [HELIACAL.md](HELIACAL.md).
     the `.pxd` against the header and the words against the v4 registries,
     and runs six threads each with its own context. Fault-injected: a
     binding that ignores the aberration switch fails it.
+  - segments (`test_segments_native.py`): `Segments.eval` against a Python
+    loop over `layout()` in the order C_API.md documents, equal to the last
+    bit, in the three coordinate and zodiac cases. Then the fit against
+    `calc` for five objects at two tolerances, the refusals, and one handle
+    evaluated by four threads after its context closed. Fault-injected: the
+    conversion constant one ulp off fails the bit-for-bit case.
   - The live tests skip when the binaries or DE440 are absent.
 
 ## Phases

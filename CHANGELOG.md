@@ -18,6 +18,29 @@ documented, not that it is frozen.
   (Sinnott 1988, NASA HEASARC; positions to 0.1 min and 1′), because SIMBAD
   could not be reached. `PROMETHEIA_ASTROMETRY_NGC2000` (3) is appended in
   C; no struct changed (docs/STARS.md).
+- **Segments through the C API** (A-16; docs/C_API.md, "Segments";
+  docs/SEGMENTS.md). `prometheia_segments_fit` fits any object, with the
+  options of a position call, to a tolerance in arcseconds. `_eval`
+  answers an instant without the engine, `_get_layout` hands a kernel the
+  coefficients as a documented struct of arrays, and `_close` frees them.
+  The ABI version is unchanged; the signatures were reviewed by the
+  Astrolog side first.
+  - A handle is immutable: any thread may evaluate it, and it outlives the
+    engine that fitted it.
+  - The fit aims at 0.8 × the tolerance, and refuses a tolerance it cannot
+    reach rather than returning a handle that misses it. One refused
+    instant fails the whole fit.
+  - Where a second planetary file takes over (0.34″ for the Moon from
+    DE441 to DE440 at 1550), the span is cut and each side fitted on its
+    own.
+  - Measured at 0.001″ over a year, 10,000 random instants per case: the
+    planets, the Moon, four catalog bodies, the mean and osculating nodes,
+    Lahiri and topocentric cases all within the tolerance (worst 0.000766″,
+    the Sun). Fits cost 11–43 ms a year geocentric and 130–180 ms
+    topocentric (257 segments, for the diurnal term). Evaluation costs
+    150–230 ns.
+  - Python: `Context.fit_segments` returns `Segments` (`eval`, `layout`),
+    and `cprometheia.pxd` declares the layout for nogil kernels.
 - **Python: the last C calls** (A-17). `Context.calc_elements` with
   `Elements`, `Context.hypothetical` (a token's definition),
   `Context.catalog_bodies` and `Context.set_delta_t`. Every function in

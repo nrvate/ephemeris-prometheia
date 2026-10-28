@@ -29,24 +29,6 @@ double clenshaw(const std::vector<double>& c, double t) {
     return t * b1 - b2 + c[0];
 }
 
-// The derivative of that series, d/dt, by the standard recurrence on the
-// coefficients (c'_{k-1} = c'_{k+1} + 2k c_k, c'_0 halved).
-std::vector<double> derivative(const std::vector<double>& c) {
-    const size_t n = c.size();
-    if (n <= 1) {
-        return {0.0};
-    }
-    std::vector<double> d(n - 1, 0.0);
-    if (n >= 2) {
-        d[n - 2] = 2.0 * double(n - 1) * c[n - 1];
-    }
-    for (size_t k = n - 2; k >= 1; --k) {
-        d[k - 1] = (k + 1 < d.size() ? d[k + 1] : 0.0) + 2.0 * double(k) * c[k];
-    }
-    d[0] *= 0.5;
-    return d;
-}
-
 // Interpolation at the Chebyshev nodes of the first kind: near-minimax, and
 // it costs exactly degree + 1 samples.
 void interpolate(const std::vector<double>& values_at_nodes, std::vector<double>& out) {
@@ -68,6 +50,24 @@ double norm(const double v[3]) {
 }
 
 } // namespace
+
+// The standard recurrence on the coefficients (c'_{k-1} = c'_{k+1} + 2k c_k,
+// c'_0 halved).
+std::vector<double> derivative(const std::vector<double>& c) {
+    const size_t n = c.size();
+    if (n <= 1) {
+        return {0.0};
+    }
+    std::vector<double> d(n - 1, 0.0);
+    if (n >= 2) {
+        d[n - 2] = 2.0 * double(n - 1) * c[n - 1];
+    }
+    for (size_t k = n - 2; k >= 1; --k) {
+        d[k - 1] = (k + 1 < d.size() ? d[k + 1] : 0.0) + 2.0 * double(k) * c[k];
+    }
+    d[0] *= 0.5;
+    return d;
+}
 
 void Segment::position(double jd_tt, double out_au[3]) const {
     const double t = (jd_tt - mid_jd_tt) / half_span_days;

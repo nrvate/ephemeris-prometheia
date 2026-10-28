@@ -352,6 +352,140 @@ temperature, for refraction) already exists.
 - `prometheia_limiting_magnitude(sky_brightness_nl, observer)`: Schaefer's
   naked-eye limiting V for a point source on a uniform sky; NaN for bad input.
 
+## Segments
+
+Additive: no existing struct or function changes, so the ABI version stays
+6. The signatures were reviewed by the Astrolog side before they landed.
+[SEGMENTS.md](SEGMENTS.md) has the fitter, its residuals and its costs.
+
+A segment set is a Chebyshev fit of one object's position over a TT span,
+placed by the options exactly as `prometheia_calc_object` places it. Once
+fitted, it answers any instant in the span without the engine. This is the
+bulk interface for scanning: a caller fits each object once per window,
+then evaluates the polynomials itself, inline and without the GIL.
+
+```c
+typedef struct prometheia_segments prometheia_segments;
+#define PROMETHEIA_SEGMENTS_MAX_DEGREE 16   /* today's; index with layout->stride */
+
+typedef struct prometheia_segments_layout {
+    int count, stride;
+    double jd_tt_start, jd_tt_end;
+    const double *bounds_jd_tt;   /* count + 1 */
+    const double *mid_jd_tt, *half_span_days; /* count */
+    const int *degree;            /* count */
+    const double *coef, *dcoef;   /* 3 * stride * count each */
+    double tolerance_arcsec, err_arcsec, err_rel_dist, err_rate_arcsec_per_day;
+    int coords;
+} prometheia_segments_layout;
+
+typedef struct prometheia_segments_point {
+    double lon_deg, lat_deg, dist_au, lon_speed, lat_speed, dist_speed;
+    double xyz_au[3], vel_au_day[3];
+} prometheia_segments_point;
+
+prometheia_status prometheia_segments_fit(prometheia_engine *engine,
+    const prometheia_object *object, double jd_tt_start, double jd_tt_end,
+    const prometheia_options *opts, double tolerance_arcsec,
+    prometheia_segments **out, prometheia_error *err);
+prometheia_status prometheia_segments_eval(const prometheia_segments *segments,
+    double jd_tt, prometheia_segments_point *out, prometheia_error *err);
+const prometheia_segments_layout *prometheia_segments_get_layout(
+    const prometheia_segments *segments);
+void prometheia_segments_close(prometheia_segments *segments);
+```
+
+- **What is fitted.** The rectangular vector `xyz_au` that
+  `prometheia_calc_object` returns for the same object and options. The
+  observer, frame, coordinates, corrections and zodiac are all inside it. A
+  sidereal zodiac is a rotation already applied to that vector, so no
+  separate ayanamsa series is needed. Every object kind is accepted:
+  bodies, catalog bodies, stars, hypotheticals, orbit points (the mean and
+  osculating nodes and apsides) and registry ids. `speed` and `sigma` in
+  the options are not read.
+- **Tolerance and residuals.** `tolerance_arcsec` is the largest direction
+  error the caller accepts; the astromcp scan kernel asks for 0.001″. The
+  fit aims at 0.8 × the tolerance, because a fit can land slightly worse
+  between its check points than on them (Venus by 1% at 0.01″).
+  - The layout reports the worst residuals measured against
+    `prometheia_calc_object` on each segment's check set. The check set is
+    both ends of the segment plus 4 × (degree + 1) + 1 interior points
+    offset from the nodes the fit interpolated.
+  - `err_arcsec` is the angular separation of the fitted and computed
+    directions, not a longitude difference. It is at most 0.8 × the
+    tolerance on those points: a measured bound there, not a guarantee
+    everywhere. 10,000 random instants per case measured the error
+    between the check points (SEGMENTS.md).
+  - `err_rel_dist` is the relative error in |r|. `err_rate_arcsec_per_day`
+    is the derivative's disagreement with the engine's rates, seen from the
+    observer: the velocity is the derivative of the fitted position, not a
+    separate fit.
+- **Steps in the source.** Where the engine's answer jumps, a segment
+  bound is placed, so no polynomial is fitted across a step:
+  - **A second planetary file taking over** (DE440 then DE441,
+    `prometheia_engine_add_ephemeris`). The observer's reads hand over at
+    each edge of a file's span, and the body's reads one light time later,
+    so both instants become bounds. The edges are TDB and converted to TT.
+  - **No other step is known.** A catalog body is integrated from the one
+    element record the newest catalog holds for it (FORMAT.md), and the
+    perturber kernel ends in a coverage refusal, not a step. Stars,
+    hypotheticals and mean elements are analytic. The Moon's interpolated
+    apsides are a cubic Hermite between passages, continuous in value and
+    slope.
+- **Refusals.** `*out` is `NULL` on any failure.
+  - `PROMETHEIA_ERROR_ARGUMENT`:
+    - a span that is not finite or does not increase;
+    - a tolerance that is not positive and finite;
+    - an object within 1e-9 AU of the observer, which has no direction (the
+      heliocentric Sun, say);
+    - a tolerance out of reach. That is a segment of 0.1 day at degree 16
+      still missing 0.8 × the tolerance, or a span needing more than 4096
+      segments. A handle is therefore at most 4096 × 844 bytes, 3.46 MB.
+  - **The engine's own errors** come back unchanged. Every instant the fit
+    samples must be answered, so one refusal anywhere in the span (coverage,
+    an unknown body) fails the whole fit with the engine's status. A fit
+    never stops short.
+- **Handles.** A handle is immutable once `_fit` returns. Any number of
+  threads may call `_eval` and `_get_layout` on one handle at once. It
+  holds no reference to the engine and may outlive it. `_close(NULL)` is a
+  no-op.
+- **The layout.** `layout->stride` is authoritative; index with it.
+  `PROMETHEIA_SEGMENTS_MAX_DEGREE` (16, so a stride of 17) describes today's
+  value only.
+  - Segment `i` covers `[bounds_jd_tt[i], bounds_jd_tt[i + 1])`. A bound
+    belongs to the segment after it, and the last segment includes the end.
+  - **Position is not continuous across a bound.** Each side is within the
+    tolerance of the engine, so the two may differ by up to twice it, plus
+    the engine's own step at a file handover.
+- **Evaluation.** `_eval` takes an instant in `[jd_tt_start, jd_tt_end]`;
+  outside it, the status is `PROMETHEIA_ERROR_COVERAGE` and `*out` is
+  zeroed. It does not allocate or lock. It finds the segment `i` that owns
+  the instant, then computes, for each component `c` (0 x, 1 y, 2 z):
+  - `u = (jd_tt - mid_jd_tt[i]) / half_span_days[i]`;
+  - the position, the Chebyshev sum of `coef[(3*i + c)*stride + k]` at
+    `u`, by Clenshaw's recurrence, in AU;
+  - the velocity, the same sum over `dcoef`, divided by
+    `half_span_days[i]`, in AU per day.
+
+  Coefficients past `degree[i]` are zero, so a loop over all `stride`
+  terms gives the same sums. From the vector `(x, y, z)` and velocity
+  `(vx, vy, vz)`, with `R = 180/π`:
+  - `rho2 = x*x + y*y`, `r = sqrt(rho2 + z*z)`;
+  - `lon_deg = atan2(y, x) * R`, plus 360 when negative;
+  - `lat_deg = atan2(z, sqrt(rho2)) * R`, and `dist_au = r`;
+  - `lon_speed = (x*vy - y*vx) / rho2 * R`;
+  - `lat_speed = (vz*rho2 - z*(x*vx + y*vy)) / (r*r*sqrt(rho2)) * R`;
+  - `dist_speed = (x*vx + y*vy + z*vz) / r`.
+
+  With equatorial coordinates, `lon_deg` is the right ascension and
+  `lat_deg` the declination. The angles are in degrees and the rates per
+  day, with `dist_speed` in AU per day. A caller's own loop that does the
+  same arithmetic in the same order gets the same doubles, unless its
+  compiler contracts multiply-adds differently
+  (`c_segments_layout_is_eval` holds such a loop to `_eval` with `==`).
+- **Against `calc`.** The direction differs from `prometheia_calc_object`
+  by up to the tolerance; segments are never bit-identical to direct calls.
+
 ## Datasets and threads
 
 One dataset holds the files, loaded once, and any number of engines,
@@ -571,6 +705,16 @@ and the in-tree `tests/data/sample-100.epm`:
   included. `prometheia_houses_from_armc` reproduces each answer from its
   ARMC and obliquity. Sidereal time and obliquity are checked against ERFA,
   and the rotations against fixed points and round trips.
+- **Segments** (`tests/test_c_segments.cpp`). A caller's own loop over the
+  layout equals `_eval` with `==` at every bound and 300 random instants,
+  ecliptic and equatorial. 19 cases (planets, the Moon, catalog bodies,
+  nodes, Lahiri, topocentric) are fitted over 12 days at 0.001″ and 0.1″
+  and held to the tolerance against `calc_object`. Six contexts fitting
+  on six threads give identical coefficients, and six threads evaluating
+  one handle give identical answers. The DE441-to-DE440 handover is cut
+  and holds 0.001″ on both sides, and the refusals are checked.
+  Fault-injected twice: with the cuts disabled the handover fit is
+  refused, and aiming at 3 × the tolerance fails three cases.
 - **Real C.** `tests/c_api_smoke.c` is compiled as C99 with
   `-Wall -Wextra -pedantic -Werror`. It opens, calcs, handles errors,
   installs a ΔT function pointer and converts leap-second UTC, all without

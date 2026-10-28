@@ -25,6 +25,7 @@
 #include "prometheia/lunar_eclipse.hpp"
 #include "prometheia/prometheia.hpp"
 #include "prometheia/registry.hpp"
+#include "prometheia/segments.hpp"
 #include "prometheia/time.hpp"
 
 using namespace prometheia;
@@ -2165,6 +2166,285 @@ double prometheia_limiting_magnitude(double sky_brightness_nl,
     if (!(o.age_years > 0.0) || !(o.snellen_ratio > 0.0))
         return std::nan("");
     return heliacal::limiting_magnitude(sky_brightness_nl, o);
+}
+
+} // extern "C"
+
+// ---- Segments ---------------------------------------------------------------
+
+// The layout's arrays live here; layout points into them and never changes
+// after prometheia_segments_fit returns.
+struct prometheia_segments {
+    prometheia_segments_layout layout{};
+    std::vector<double> bounds, mid, half, coef, dcoef;
+    std::vector<int> degree;
+};
+
+namespace {
+
+constexpr int kSegmentStride = PROMETHEIA_SEGMENTS_MAX_DEGREE + 1;
+// The fit aims below the tolerance asked: between its check points a fit can
+// land slightly worse than it measured (Venus 1% over at 0.01", docs/C_API.md).
+constexpr double kSegmentTargetFraction = 0.8;
+// Closer than this to the observer, a direction is noise (docs/C_API.md).
+constexpr double kSegmentMinDistanceAu = 1e-9;
+// How far inside a cut a piece's fit stops (docs/C_API.md, "Steps").
+constexpr double kSegmentCutGap = 1e-8;
+
+// Clenshaw's recurrence over n coefficients, as segments::Segment::position.
+double clenshaw(const double* c, int n, double u) {
+    double b1 = 0.0, b2 = 0.0;
+    for (int k = n - 1; k >= 1; --k) {
+        const double b = 2.0 * u * b1 - b2 + c[k];
+        b2 = b1;
+        b1 = b;
+    }
+    return u * b1 - b2 + c[0];
+}
+
+// Where the engine's answer steps inside (from, to): where a second planetary
+// file takes over. The observer's reads hand over at the instant the engine
+// names another file as the source, found to adjacent doubles by bisection
+// from each span edge (the edges are TDB; the engine's own TT -> TDB decides
+// the instant). The body's reads hand over one light time later. Files with
+// the same description are cuts of one DE and give the same numbers, so a
+// handover between them is no step.
+std::vector<double> segment_cuts(Engine& e, const Engine::ObjectRef& ref, const CalcOptions& o,
+                                 double from, double to) {
+    std::vector<double> cuts;
+    const std::vector<Engine::EphemerisSpan> spans = e.ephemeris_spans();
+    if (spans.size() < 2)
+        return cuts;
+    CalcOptions geometric;
+    geometric.center = Center::Barycentric;
+    geometric.light_time = geometric.deflection = geometric.aberration = false;
+    geometric.speed = geometric.sigma = false;
+    const auto source = [&](double jd, std::string& out) {
+        auto c = e.calc(PROMETHEIA_EARTH, jd, geometric);
+        if (!c)
+            return false;
+        out = std::string(c.value().provenance.source);
+        return true;
+    };
+    for (const Engine::EphemerisSpan& sp : spans) {
+        for (double edge_tdb : {sp.first_jd_tdb, sp.last_jd_tdb}) {
+            const double edge = time::tt_from_tdb(edge_tdb);
+            double lo = edge - 1e-6, hi = edge + 1e-6;
+            if (!(hi > from && lo < to))
+                continue;
+            std::string s_lo, s_hi, s_mid;
+            if (!source(lo, s_lo) || !source(hi, s_hi) || s_lo == s_hi)
+                continue;
+            while (std::nextafter(lo, hi) < hi) {
+                const double mid = lo + (hi - lo) / 2;
+                if (!source(mid, s_mid))
+                    break;
+                (s_mid == s_lo ? lo : hi) = mid;
+            }
+            cuts.push_back(hi); // the first instant the new file answers
+            auto c = e.calc_object(ref, hi, o);
+            if (c && c.value().provenance.light_time_days > 0.0)
+                cuts.push_back(hi + c.value().provenance.light_time_days);
+        }
+    }
+    cuts.erase(
+        std::remove_if(cuts.begin(), cuts.end(), [&](double t) { return !(t > from && t < to); }),
+        cuts.end());
+    std::sort(cuts.begin(), cuts.end());
+    cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+    return cuts;
+}
+
+} // namespace
+
+extern "C" {
+
+prometheia_status prometheia_segments_fit(prometheia_engine* engine,
+                                          const prometheia_object* object, double jd_tt_start,
+                                          double jd_tt_end, const prometheia_options* opts,
+                                          double tolerance_arcsec, prometheia_segments** out,
+                                          prometheia_error* err) {
+    if (out)
+        *out = nullptr;
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!object)
+        return argument(err, "object is NULL");
+    if (!out)
+        return argument(err, "out is NULL");
+    if (!(tolerance_arcsec > 0.0) || !std::isfinite(tolerance_arcsec))
+        return argument(err, "segments: the tolerance must be positive and finite");
+    if (!std::isfinite(jd_tt_start) || !std::isfinite(jd_tt_end) || !(jd_tt_end > jd_tt_start))
+        return argument(err, "segments: the span must be finite and end after it starts");
+    return guarded(err, [&] {
+        Engine::ObjectRef ref;
+        if (prometheia_status st = to_ref(engine, *object, ref, err); st != PROMETHEIA_OK)
+            return st;
+        CalcOptions o;
+        if (opts) {
+            if (prometheia_status st = translate(*opts, o, err); st != PROMETHEIA_OK)
+                return st;
+        }
+        o.speed = true; // the fit's rate residual is measured against the engine's rates
+        o.sigma = false;
+        Engine& e = engine->engine;
+        const segments::Sampler sampler = [&](double jd, double p[3], double v[3]) -> Result<void> {
+            auto c = e.calc_object(ref, jd, o);
+            if (!c)
+                return c.error();
+            if (!(c.value().pos.dist_au >= kSegmentMinDistanceAu)) {
+                return make_error(
+                    ErrorCode::ArgumentError,
+                    "segments: the object is at the observer, so it has no direction");
+            }
+            std::copy_n(c.value().pos.xyz_au, 3, p);
+            std::copy_n(c.value().pos.vel_au_day, 3, v);
+            return {};
+        };
+        segments::FitOptions fo;
+        fo.target_err_arcsec = kSegmentTargetFraction * tolerance_arcsec;
+        fo.max_degree = PROMETHEIA_SEGMENTS_MAX_DEGREE;
+        const size_t budget = fo.max_segments;
+
+        // Each piece between two cuts is fitted on its own, so no segment
+        // straddles a step; the cuts become bounds exactly.
+        std::vector<double> edges = {jd_tt_start};
+        for (double c : segment_cuts(e, ref, o, jd_tt_start, jd_tt_end))
+            edges.push_back(c);
+        edges.push_back(jd_tt_end);
+        auto h = std::make_unique<prometheia_segments>();
+        std::vector<segments::Segment> all;
+        double worst = 0.0;
+        bool met = true;
+        for (size_t k = 0; k + 1 < edges.size(); ++k) {
+            fo.max_segments = budget - all.size();
+            if (fo.max_segments == 0)
+                return argument(err, ("segments: the span needs more than " +
+                                      std::to_string(budget) + " segments")
+                                         .c_str());
+            // A piece is fitted kSegmentCutGap inside each cut, so no sample
+            // lands across a step whose instant is known only to a few ulps
+            // (the body's, one light time after the observer's). Its segments
+            // still own the instants up to the cut, a gap's width of
+            // extrapolation.
+            const double a = k == 0 ? edges[k] : edges[k] + kSegmentCutGap;
+            const double b = k + 2 == edges.size() ? edges[k + 1] : edges[k + 1] - kSegmentCutGap;
+            auto fit = b > a ? segments::fit(sampler, a, b, fo)
+                             : segments::fit(sampler, edges[k], edges[k + 1], fo);
+            if (!fit)
+                return report(err, fit.error());
+            h->bounds.push_back(edges[k]);
+            for (size_t i = 1; i < fit.value().segments.size(); ++i) {
+                const segments::Segment& sg = fit.value().segments[i];
+                h->bounds.push_back(sg.mid_jd_tt - sg.half_span_days);
+            }
+            worst = std::max(worst, fit.value().worst_err_arcsec);
+            met = met && fit.value().met_target;
+            for (segments::Segment& sg : fit.value().segments)
+                all.push_back(std::move(sg));
+        }
+        h->bounds.push_back(jd_tt_end);
+        if (!met) {
+            const std::string m = "segments: no fit within " + std::to_string(tolerance_arcsec) +
+                                  "\" (aiming at " + std::to_string(fo.target_err_arcsec) +
+                                  "\"): the worst segment measured " + std::to_string(worst) +
+                                  "\" at the shortest span and highest degree";
+            return argument(err, m.c_str());
+        }
+
+        const size_t n = all.size();
+        h->mid.resize(n);
+        h->half.resize(n);
+        h->degree.resize(n);
+        h->coef.assign(3 * kSegmentStride * n, 0.0);
+        h->dcoef.assign(3 * kSegmentStride * n, 0.0);
+        double err_rel_dist = 0.0, err_rate = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            const segments::Segment& sg = all[i];
+            h->mid[i] = sg.mid_jd_tt;
+            h->half[i] = sg.half_span_days;
+            h->degree[i] = sg.degree;
+            const std::vector<double>* comp[3] = {&sg.x, &sg.y, &sg.z};
+            for (size_t c = 0; c < 3; ++c) {
+                std::copy(comp[c]->begin(), comp[c]->end(), &h->coef[(3 * i + c) * kSegmentStride]);
+                const std::vector<double> d = segments::derivative(*comp[c]);
+                std::copy(d.begin(), d.end(), &h->dcoef[(3 * i + c) * kSegmentStride]);
+            }
+            err_rel_dist = std::max(err_rel_dist, sg.err_rel_dist);
+            err_rate = std::max(err_rate, sg.err_rate_arcsec_per_day);
+        }
+        prometheia_segments_layout& l = h->layout;
+        l.count = int(n);
+        l.stride = kSegmentStride;
+        l.jd_tt_start = jd_tt_start;
+        l.jd_tt_end = jd_tt_end;
+        l.bounds_jd_tt = h->bounds.data();
+        l.mid_jd_tt = h->mid.data();
+        l.half_span_days = h->half.data();
+        l.degree = h->degree.data();
+        l.coef = h->coef.data();
+        l.dcoef = h->dcoef.data();
+        l.tolerance_arcsec = tolerance_arcsec;
+        l.err_arcsec = worst;
+        l.err_rel_dist = err_rel_dist;
+        l.err_rate_arcsec_per_day = err_rate;
+        l.coords = opts ? opts->coords : PROMETHEIA_COORDS_ECLIPTIC;
+        *out = h.release();
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_segments_eval(const prometheia_segments* segments, double jd_tt,
+                                           prometheia_segments_point* out, prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!segments)
+        return argument(err, "segments is NULL");
+    if (!out)
+        return argument(err, "out is NULL");
+    const prometheia_segments_layout& l = segments->layout;
+    if (!(jd_tt >= l.jd_tt_start && jd_tt <= l.jd_tt_end))
+        return report(err, PROMETHEIA_ERROR_COVERAGE, "segments: the instant is outside the span");
+    // The segment i with bounds[i] <= jd_tt < bounds[i + 1]; the last owns the end.
+    const double* first = l.bounds_jd_tt + 1;
+    const double* last = l.bounds_jd_tt + l.count;
+    const int i = int(std::upper_bound(first, last, jd_tt) - first);
+    const double u = (jd_tt - l.mid_jd_tt[i]) / l.half_span_days[i];
+    const int n = l.degree[i] + 1;
+    double p[3], v[3];
+    for (int c = 0; c < 3; ++c) {
+        const size_t at = size_t(3 * i + c) * size_t(l.stride);
+        p[c] = clenshaw(l.coef + at, n, u);
+        v[c] = clenshaw(l.dcoef + at, n, u) / l.half_span_days[i];
+    }
+    constexpr double kR = 180.0 / 3.14159265358979323846;
+    const double x = p[0], y = p[1], z = p[2], vx = v[0], vy = v[1], vz = v[2];
+    const double rho2 = x * x + y * y;
+    const double r = std::sqrt(rho2 + z * z);
+    const double rho = std::sqrt(rho2);
+    double lon = std::atan2(y, x) * kR;
+    if (lon < 0.0)
+        lon += 360.0;
+    out->lon_deg = lon;
+    out->lat_deg = std::atan2(z, rho) * kR;
+    out->dist_au = r;
+    out->lon_speed = (x * vy - y * vx) / rho2 * kR;
+    out->lat_speed = (vz * rho2 - z * (x * vx + y * vy)) / (r * r * rho) * kR;
+    out->dist_speed = (x * vx + y * vy + z * vz) / r;
+    for (int c = 0; c < 3; ++c) {
+        out->xyz_au[c] = p[c];
+        out->vel_au_day[c] = v[c];
+    }
+    return succeed(err);
+}
+
+const prometheia_segments_layout*
+prometheia_segments_get_layout(const prometheia_segments* segments) {
+    return segments ? &segments->layout : nullptr;
+}
+
+void prometheia_segments_close(prometheia_segments* segments) {
+    delete segments;
 }
 
 } // extern "C"

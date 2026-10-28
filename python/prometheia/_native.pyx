@@ -847,6 +847,127 @@ def limiting_magnitude(double sky_brightness_nl, *, age_years=None, snellen_rati
     return v
 
 
+_COORDS_NAMES = {v: k for k, v in COORDINATES.items()}
+
+
+cdef class SegmentPoint:
+    """One instant from Segments.eval: Position's fields of the same names,
+    from the fitted vector (docs/C_API.md, "Segments")."""
+    cdef readonly double lon_deg, lat_deg, dist_au, lon_speed, lat_speed, dist_speed
+    cdef readonly tuple xyz_au, vel_au_day
+
+    def __repr__(self):
+        return ("SegmentPoint(lon_deg=%r, lat_deg=%r, dist_au=%r)"
+                % (self.lon_deg, self.lat_deg, self.dist_au))
+
+
+cdef class Segments:
+    """Chebyshev segments of one object over a TT span, from
+    Context.fit_segments (docs/C_API.md, "Segments"). Immutable: any thread
+    may evaluate them, and they outlive the context that fitted them."""
+    cdef c.prometheia_segments* s
+
+    def __cinit__(self):
+        self.s = NULL
+
+    def __dealloc__(self):
+        if self.s != NULL:
+            c.prometheia_segments_close(self.s)
+            self.s = NULL
+
+    def close(self):
+        """Frees the coefficients now; the handle then refuses every call."""
+        if self.s != NULL:
+            c.prometheia_segments_close(self.s)
+            self.s = NULL
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    cdef const c.prometheia_segments_layout* lay(self) except NULL:
+        if self.s == NULL:
+            raise Error("these segments are closed", code="argument")
+        return c.prometheia_segments_get_layout(self.s)
+
+    @property
+    def start(self):
+        return self.lay().jd_tt_start
+
+    @property
+    def end(self):
+        return self.lay().jd_tt_end
+
+    @property
+    def count(self):
+        return self.lay().count
+
+    @property
+    def tolerance_arcsec(self):
+        return self.lay().tolerance_arcsec
+
+    @property
+    def err_arcsec(self):
+        """The worst direction residual measured while fitting."""
+        return self.lay().err_arcsec
+
+    @property
+    def err_rel_dist(self):
+        return self.lay().err_rel_dist
+
+    @property
+    def err_rate_arcsec_per_day(self):
+        return self.lay().err_rate_arcsec_per_day
+
+    @property
+    def coordinates(self):
+        return _COORDS_NAMES[self.lay().coords]
+
+    def eval(self, double jd_tt):
+        """The position at a TT instant inside the span."""
+        cdef const c.prometheia_segments_layout* l = self.lay()
+        cdef c.prometheia_segments_point r
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_segments_eval(self.s, jd_tt, &r, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        cdef SegmentPoint p = SegmentPoint.__new__(SegmentPoint)
+        p.lon_deg, p.lat_deg, p.dist_au = r.lon_deg, r.lat_deg, r.dist_au
+        p.lon_speed, p.lat_speed, p.dist_speed = r.lon_speed, r.lat_speed, r.dist_speed
+        p.xyz_au = (r.xyz_au[0], r.xyz_au[1], r.xyz_au[2])
+        p.vel_au_day = (r.vel_au_day[0], r.vel_au_day[1], r.vel_au_day[2])
+        return p
+
+    def layout(self):
+        """The arrays a kernel evaluates, as lists: bounds_jd_tt (count + 1),
+        mid_jd_tt, half_span_days and degree (count), and coef and dcoef
+        (3 * stride * count, segment-major, then x, y, z)."""
+        cdef const c.prometheia_segments_layout* l = self.lay()
+        cdef int n = l.count, m = 3 * l.stride * l.count
+        return {"count": n, "stride": l.stride,
+                "jd_tt_start": l.jd_tt_start, "jd_tt_end": l.jd_tt_end,
+                "bounds_jd_tt": [l.bounds_jd_tt[i] for i in range(n + 1)],
+                "mid_jd_tt": [l.mid_jd_tt[i] for i in range(n)],
+                "half_span_days": [l.half_span_days[i] for i in range(n)],
+                "degree": [l.degree[i] for i in range(n)],
+                "coef": [l.coef[i] for i in range(m)],
+                "dcoef": [l.dcoef[i] for i in range(m)],
+                "tolerance_arcsec": l.tolerance_arcsec, "err_arcsec": l.err_arcsec,
+                "err_rel_dist": l.err_rel_dist,
+                "err_rate_arcsec_per_day": l.err_rate_arcsec_per_day,
+                "coordinates": _COORDS_NAMES[l.coords]}
+
+    def __repr__(self):
+        if self.s == NULL:
+            return "Segments(closed)"
+        return ("Segments(start=%r, end=%r, count=%r, err_arcsec=%r)"
+                % (self.start, self.end, self.count, self.err_arcsec))
+
+
 cdef class Context:
     """One engine over a Dataset's files, for the thread that made it."""
     cdef c.prometheia_engine* e
@@ -909,6 +1030,28 @@ cdef class Context:
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
         return position(&r)
+
+    def fit_segments(self, object body, double jd_tt_start, double jd_tt_end,
+                     Options options=None, double tolerance_arcsec=0.001):
+        """Chebyshev segments of any object calc() takes, over a TT span, as
+        the options place it, within tolerance_arcsec (docs/C_API.md,
+        "Segments"). The fit aims at 0.8 x the tolerance."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef const c.prometheia_options* o = opts_of(options)
+        cdef c.prometheia_object obj
+        cdef list keep = []
+        cdef c.prometheia_segments* out = NULL
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        object_of(body, &obj, keep)
+        with nogil:
+            st = c.prometheia_segments_fit(e, &obj, jd_tt_start, jd_tt_end, o, tolerance_arcsec,
+                                           &out, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        cdef Segments seg = Segments.__new__(Segments)
+        seg.s = out
+        return seg
 
     def calc_star(self, star, double jd, Options options=None, str scale="tt"):
         """A fixed star or Messier object by catalog index or name."""

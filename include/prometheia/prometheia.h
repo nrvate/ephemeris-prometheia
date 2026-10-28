@@ -1400,6 +1400,112 @@ PROMETHEIA_API prometheia_status prometheia_visibility_at(
 PROMETHEIA_API double prometheia_limiting_magnitude(double sky_brightness_nl,
                                                     const prometheia_observer* observer);
 
+/* ---- Segments (docs/C_API.md, "Segments") ------------------------------------
+ *
+ * Chebyshev fits of an object's position over a TT span, as the options
+ * place it (docs/SEGMENTS.md). Fitted once on an engine, a handle answers any
+ * instant in its span without the engine: through prometheia_segments_eval,
+ * or by a caller's own loop over the documented layout. A handle is
+ * immutable once returned: any number of threads may evaluate it and read
+ * its layout at once. It holds no reference to the engine, so it may
+ * outlive it. Added after library 0.7.3; the ABI version is unchanged, as
+ * no existing layout changed.
+ */
+typedef struct prometheia_segments prometheia_segments;
+
+/* Today's highest degree; layout->stride is what a reader indexes with. */
+#define PROMETHEIA_SEGMENTS_MAX_DEGREE 16
+
+/*
+ * The coefficients, as arrays a caller can evaluate inline. Index with
+ * layout->stride, never a constant. Segment i covers [bounds_jd_tt[i],
+ * bounds_jd_tt[i + 1]): a bound belongs to the segment after it, and the
+ * last segment includes jd_tt_end. Component c (0 x, 1 y, 2 z, in the
+ * options' output frame and zodiac) of segment i:
+ *   u        = (jd_tt - mid_jd_tt[i]) / half_span_days[i]
+ *   position = sum over k of coef [(3 i + c) stride + k] T_k(u)     AU
+ *   velocity = sum over k of dcoef[(3 i + c) stride + k] T_k(u)
+ *              / half_span_days[i]                                   AU/day
+ * dcoef is the derivative of the position series, not a separate fit.
+ * Coefficients past degree[i] are zero, so a fixed loop over stride terms
+ * gives the same sums. prometheia_segments_eval uses exactly this, by
+ * Clenshaw's recurrence, then the spherical conversion in C_API.md.
+ * Position is not continuous across a bound: each side is within the
+ * tolerance of the engine, so the two may differ by up to twice it.
+ */
+typedef struct prometheia_segments_layout {
+    int count;          /* segments, at least 1 */
+    int stride;         /* doubles per component and segment */
+    double jd_tt_start; /* the span fitted, as asked */
+    double jd_tt_end;
+    const double* bounds_jd_tt;   /* count + 1, ascending; [0] and [count] are the span */
+    const double* mid_jd_tt;      /* count */
+    const double* half_span_days; /* count */
+    const int* degree;            /* count */
+    const double* coef;           /* 3 * stride * count */
+    const double* dcoef;          /* 3 * stride * count: d/du of coef */
+    double tolerance_arcsec;      /* as asked */
+    /* The worst residuals measured against prometheia_calc_object while
+     * fitting, on each segment's check set: both ends and 4 x (degree + 1) + 1
+     * interior points offset from the fit's nodes. err_arcsec is the angular
+     * separation of the two directions, and is at most 0.8 x
+     * tolerance_arcsec on those points; elsewhere it is not a guarantee.
+     * err_rel_dist is |r| relative; err_rate_arcsec_per_day is the
+     * derivative's disagreement with the engine's rates, seen from the
+     * observer. */
+    double err_arcsec;
+    double err_rel_dist;
+    double err_rate_arcsec_per_day;
+    int coords; /* the options' PROMETHEIA_COORDS_*: what lon and lat are */
+} prometheia_segments_layout;
+
+/* One instant from a handle, from the fitted vector. Ecliptic coords: lon
+ * and lat; equatorial: lon_deg is the right ascension and lat_deg the
+ * declination. Degrees, AU; the rates per day (dist_speed in AU per day),
+ * from the derivative of the fitted position. */
+typedef struct prometheia_segments_point {
+    double lon_deg; /* [0, 360) */
+    double lat_deg;
+    double dist_au;
+    double lon_speed;
+    double lat_speed;
+    double dist_speed;
+    double xyz_au[3];
+    double vel_au_day[3];
+} prometheia_segments_point;
+
+/*
+ * Fits the object over [jd_tt_start, jd_tt_end] with the options of a
+ * position call (NULL: the defaults; speed and sigma are not read), aiming
+ * at 0.8 x tolerance_arcsec. Where the engine's answer steps (a second
+ * planetary file taking over), a bound is put at the step. Every instant the
+ * fit samples must be answered: one refusal fails the whole fit with the
+ * engine's status (coverage, an unknown body), never a shorter span. On
+ * failure *out is NULL. PROMETHEIA_ERROR_ARGUMENT for a span not finite or
+ * not increasing, a tolerance not positive and finite, an object within
+ * 1e-9 AU of the observer (no direction), and a tolerance out of reach: a
+ * segment of 0.1 day at degree 16 missing it, or a span needing more than
+ * 4096 segments (a handle is at most 3.5 MB).
+ */
+PROMETHEIA_API prometheia_status
+prometheia_segments_fit(prometheia_engine* engine, const prometheia_object* object,
+                        double jd_tt_start, double jd_tt_end, const prometheia_options* opts,
+                        double tolerance_arcsec, prometheia_segments** out, prometheia_error* err);
+
+/* An instant in the span; outside it, PROMETHEIA_ERROR_COVERAGE. No
+ * allocation and no lock. On failure *out is zeroed. */
+PROMETHEIA_API prometheia_status prometheia_segments_eval(const prometheia_segments* segments,
+                                                          double jd_tt,
+                                                          prometheia_segments_point* out,
+                                                          prometheia_error* err);
+
+/* The handle's arrays, valid until prometheia_segments_close. NULL for NULL. */
+PROMETHEIA_API const prometheia_segments_layout*
+prometheia_segments_get_layout(const prometheia_segments* segments);
+
+/* NULL is a no-op. */
+PROMETHEIA_API void prometheia_segments_close(prometheia_segments* segments);
+
 #ifdef __cplusplus
 }
 #endif
