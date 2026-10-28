@@ -1257,6 +1257,70 @@ double prometheia_tdb_minus_tt(double jd_tt) {
     return time::tdb_minus_tt(jd_tt);
 }
 
+// ---- phenomena -------------------------------------------------------------
+
+extern "C++" {
+namespace {
+
+template <typename Call>
+prometheia_status phenomena_common(prometheia_engine* engine, const prometheia_object* object,
+                                   double jd, const prometheia_options* opts,
+                                   prometheia_phenomena* out, prometheia_error* err, Call call) {
+    if (out) {
+        std::memset(out, 0, sizeof *out);
+        out->phase_angle_deg = out->illuminated_fraction = out->elongation_deg =
+            out->diameter_arcsec = out->magnitude = std::nan("");
+    }
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!object)
+        return argument(err, "object is NULL");
+    if (!out)
+        return argument(err, "phenomena output is NULL");
+    return guarded(err, [&] {
+        Engine::ObjectRef ref;
+        if (prometheia_status st = to_ref(engine, *object, ref, err); st != PROMETHEIA_OK)
+            return st;
+        CalcOptions o;
+        if (opts) {
+            if (prometheia_status s = translate(*opts, o, err); s != PROMETHEIA_OK)
+                return s;
+        }
+        auto r = call(engine->engine, ref, jd, o);
+        if (!r)
+            return report(err, r.error());
+        const Engine::Phenomena& p = r.value();
+        out->phase_angle_deg = p.phase_angle_deg;
+        out->illuminated_fraction = p.illuminated_fraction;
+        out->elongation_deg = p.elongation_deg;
+        out->diameter_arcsec = p.diameter_arcsec;
+        out->magnitude = p.magnitude;
+        copy_string(out->magnitude_model, sizeof out->magnitude_model, p.magnitude_model);
+        return succeed(err);
+    });
+}
+
+} // namespace
+} // extern "C++"
+
+prometheia_status prometheia_calc_phenomena(prometheia_engine* engine,
+                                            const prometheia_object* object, double jd_tt,
+                                            const prometheia_options* opts,
+                                            prometheia_phenomena* out, prometheia_error* err) {
+    return phenomena_common(engine, object, jd_tt, opts, out, err,
+                            [](Engine& e, const Engine::ObjectRef& ref, double jd,
+                               const CalcOptions& o) { return e.phenomena(ref, jd, o); });
+}
+
+prometheia_status prometheia_calc_phenomena_ut(prometheia_engine* engine,
+                                               const prometheia_object* object, double jd_ut1,
+                                               const prometheia_options* opts,
+                                               prometheia_phenomena* out, prometheia_error* err) {
+    return phenomena_common(engine, object, jd_ut1, opts, out, err,
+                            [](Engine& e, const Engine::ObjectRef& ref, double jd,
+                               const CalcOptions& o) { return e.phenomena_ut(ref, jd, o); });
+}
+
 // ---- the object registry ---------------------------------------------------
 
 static_assert(PROMETHEIA_KIND_COMET == int(registry::Kind::Comet));

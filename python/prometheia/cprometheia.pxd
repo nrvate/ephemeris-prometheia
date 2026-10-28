@@ -457,6 +457,23 @@ cdef extern from "prometheia/prometheia.h" nogil:
                                              prometheia_event* out,
                                              prometheia_error* err) noexcept
 
+    # Phenomena and magnitudes
+    ctypedef struct prometheia_phenomena:
+        double phase_angle_deg, illuminated_fraction, elongation_deg, diameter_arcsec, magnitude
+        char magnitude_model[64]
+
+    prometheia_status prometheia_calc_phenomena(prometheia_engine* engine,
+                                                const prometheia_object* object, double jd_tt,
+                                                const prometheia_options* opts,
+                                                prometheia_phenomena* out,
+                                                prometheia_error* err) noexcept
+    prometheia_status prometheia_calc_phenomena_ut(prometheia_engine* engine,
+                                                   const prometheia_object* object,
+                                                   double jd_ut1,
+                                                   const prometheia_options* opts,
+                                                   prometheia_phenomena* out,
+                                                   prometheia_error* err) noexcept
+
     # The object registry
     int PROMETHEIA_KIND_PLANET
     int PROMETHEIA_KIND_MOON

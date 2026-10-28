@@ -89,6 +89,7 @@ prometheia_test(frames tests/test_frames.cpp)
 prometheia_test(houses tests/test_houses.cpp)
 prometheia_test(stars tests/test_stars.cpp)
 prometheia_test(registry tests/test_registry.cpp)
+prometheia_test(phenomena tests/test_phenomena.cpp)
 prometheia_test(segments tests/test_segments.cpp)
 
 # JPL Horizons referee corpus (M5); needs the DE440 binary, SKIPs without it.

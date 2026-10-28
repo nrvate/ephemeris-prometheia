@@ -121,6 +121,10 @@ the C++ engine's, bit for bit.
     `("star", index or name)`, `("hypothetical", token)`,
     `("orbit-point", body, point, method)`, or a registry id string
     (`"sb:136199"`). An int takes the plain `prometheia_calc` path;
+  - `phenomena(object, jd, options, scale)` gives a `Phenomena`: the phase
+    angle, illuminated fraction, elongation, diameter and V magnitude with
+    its model ([PHENOMENA.md](PHENOMENA.md)). A quantity that does not apply
+    is `None`;
   - the object registry ([REGISTRY.md](REGISTRY.md)):
     - `object_lookup(query, *, prefix=False, limit=20)` gives `Match`es
       (`id`, `kind`, `quality`, `name`, `matched`, `ambiguous`) across every

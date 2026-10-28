@@ -34,6 +34,7 @@
 #include "prometheia/hypotheticals.hpp"
 #include "prometheia/kepler.hpp"
 #include "prometheia/memo.hpp"
+#include "prometheia/phenomena.hpp"
 #include "prometheia/spk.hpp"
 
 namespace prometheia {
@@ -3761,46 +3762,12 @@ Engine::equatorial_from_horizontal_ut(double jd_ut1, const frames::GeoSite& site
     return q;
 }
 
-namespace {
-
-// Mean radii (km), for the limbs: the Sun's IAU 2015 Resolution B3 nominal
-// radius, the others the mean radii of Archinal et al. 2018 (Celest. Mech.
-// Dyn. Astron. 130:22). Mars to Pluto are answered as system barycentres;
-// the disc is the planet's.
-double body_radius_km(long id) {
-    switch (id) {
-    case 10:
-        return 695700.0;
-    case 199:
-        return 2439.4;
-    case 299:
-        return 6051.8;
-    case 301:
-        return 1737.4;
-    case 4:
-    case 499:
-        return 3389.5;
-    case 5:
-    case 599:
-        return 69911.0;
-    case 6:
-    case 699:
-        return 58232.0;
-    case 7:
-    case 799:
-        return 25362.0;
-    case 8:
-    case 899:
-        return 24622.0;
-    case 9:
-    case 999:
-        return 1188.3;
-    default:
-        return 0.0;
-    }
+Result<Engine::Phenomena> Engine::phenomena_ut(const ObjectRef& object, double jd_ut1,
+                                               const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return phenomena(object, impl_->ut1_to_tt(jd_ut1), o);
 }
-
-} // namespace
 
 Result<CalcResult> Engine::calc_object(const ObjectRef& object, double jd_tt,
                                        const CalcOptions& o) {
@@ -3861,7 +3828,8 @@ Result<Engine::EventResult> Engine::rise_set_ut(const ObjectRef& object, Event e
     o.speed = false;
     o.sigma = false;
     auto position = [&](double jd) { return calc_object_ut(object, jd, o); };
-    const double radius = object.kind == ObjectRef::Kind::Body ? body_radius_km(object.id) : 0.0;
+    const double radius =
+        object.kind == ObjectRef::Kind::Body ? phenomena::mean_radius_km(object.id) : 0.0;
     const double dip = frames::horizon_dip_deg(ro.dip_height_m);
     const double h0 =
         -dip -

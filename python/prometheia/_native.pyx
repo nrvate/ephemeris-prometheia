@@ -330,6 +330,19 @@ cdef int object_of(object obj, c.prometheia_object* out, list keep) except -1:
                 '("orbit-point", body, point, method) or a registry id', code="argument")
 
 
+cdef class Phenomena:
+    """What an object looks like from the observer (Context.phenomena;
+    docs/PHENOMENA.md). None where a quantity does not apply;
+    magnitude_model names the published formula, or why there is none."""
+    cdef readonly object phase_angle_deg, illuminated_fraction, elongation_deg
+    cdef readonly object diameter_arcsec, magnitude
+    cdef readonly str magnitude_model
+
+    def __repr__(self):
+        return "Phenomena(phase %r, elongation %r, V %r)" % (
+            self.phase_angle_deg, self.elongation_deg, self.magnitude)
+
+
 _RANK = {"exact": 0, "old-designation": 0, "alias": 1, "prefix": 2}
 
 
@@ -665,6 +678,31 @@ cdef class Context:
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
         return body
+
+    def phenomena(self, object body, double jd, Options options=None, str scale="tt"):
+        """Phase angle, illuminated fraction, elongation, apparent diameter
+        and V magnitude of any object calc() takes (docs/PHENOMENA.md)."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef const c.prometheia_options* o = opts_of(options)
+        cdef c.prometheia_object obj
+        cdef list keep = []
+        object_of(body, &obj, keep)
+        cdef bint ut = is_ut(scale)
+        cdef c.prometheia_phenomena r
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = (c.prometheia_calc_phenomena_ut(e, &obj, jd, o, &r, &err) if ut
+                  else c.prometheia_calc_phenomena(e, &obj, jd, o, &r, &err))
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        cdef Phenomena out = Phenomena.__new__(Phenomena)
+        out.phase_angle_deg, out.illuminated_fraction = (nan_none(r.phase_angle_deg),
+                                                         nan_none(r.illuminated_fraction))
+        out.elongation_deg, out.diameter_arcsec = (nan_none(r.elongation_deg),
+                                                   nan_none(r.diameter_arcsec))
+        out.magnitude, out.magnitude_model = nan_none(r.magnitude), text(r.magnitude_model)
+        return out
 
     def object_lookup(self, str query, *, bint prefix=False, int limit=20):
         """Every object answering to query in every namespace, best first

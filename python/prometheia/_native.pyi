@@ -35,6 +35,17 @@ class Match:
     matched: str
     ambiguous: bool
 
+class Phenomena:
+    """What an object looks like from the observer (Context.phenomena;
+    docs/PHENOMENA.md). None where a quantity does not apply;
+    magnitude_model names the published formula, or why there is none."""
+    phase_angle_deg: Optional[float]
+    illuminated_fraction: Optional[float]
+    elongation_deg: Optional[float]
+    diameter_arcsec: Optional[float]
+    magnitude: Optional[float]
+    magnitude_model: str
+
 class ObjectInfo:
     """What an object is (Context.object_info; docs/REGISTRY.md). Absent
     values are None. object is the form calc() and rise_set() take."""
@@ -139,6 +150,8 @@ class Context:
                  dip_height_m: float = 0.0, window_days: float = 2.0, backward: bool = False,
                  options: Optional[Options] = None) -> Event: ...
     def lookup(self, name: str) -> int: ...
+    def phenomena(self, body: Object, jd: float, options: Optional[Options] = None,
+                  scale: Scale = "tt") -> Phenomena: ...
     def object_lookup(self, query: str, *, prefix: bool = False, limit: int = 20) -> list[Match]: ...
     def object_info(self, id: str) -> ObjectInfo: ...
     def object_list(self, *, kind: Union[None, str, Sequence[str]] = None,

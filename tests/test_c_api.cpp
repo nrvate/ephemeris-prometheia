@@ -1285,3 +1285,33 @@ TEST_CASE("c_api_object_registry") {
     cursor = 0;
     CHECK(prometheia_object_list(c.e, &f, &cursor, m, 2, &n, &err) == PROMETHEIA_ERROR_ARGUMENT);
 }
+
+TEST_CASE("c_api_phenomena_match_engine") {
+    TempFile tf("capi-phen");
+    synth::write_linear_spk(tf.path);
+    CHandle c;
+    prometheia_error err;
+    REQUIRE(prometheia_engine_open(tf.path.c_str(), &c.e, &err) == PROMETHEIA_OK);
+    auto cpp = Engine::open(tf.path);
+    REQUIRE(cpp.ok());
+    const prometheia_object jupiter{PROMETHEIA_OBJECT_BODY, 5, nullptr}; // the kernel has no Mars
+    prometheia_phenomena p;
+    REQUIRE_MESSAGE(prometheia_calc_phenomena(c.e, &jupiter, kJ2000, nullptr, &p, &err) ==
+                        PROMETHEIA_OK,
+                    err.message);
+    Engine::ObjectRef ref;
+    ref.id = 5;
+    auto want = cpp.value().phenomena(ref, kJ2000);
+    REQUIRE(want.ok());
+    CHECK(p.phase_angle_deg == want.value().phase_angle_deg);
+    CHECK(p.elongation_deg == want.value().elongation_deg);
+    CHECK(p.magnitude == want.value().magnitude);
+    CHECK(std::string(p.magnitude_model) == want.value().magnitude_model);
+    const prometheia_object star{PROMETHEIA_OBJECT_ID, 0, "star:HR 3982"};
+    REQUIRE(prometheia_calc_phenomena_ut(c.e, &star, kJ2000, nullptr, &p, &err) == PROMETHEIA_OK);
+    CHECK(std::isnan(p.phase_angle_deg));
+    CHECK(p.magnitude == doctest::Approx(1.35));
+    CHECK(prometheia_calc_phenomena(c.e, nullptr, kJ2000, nullptr, &p, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(std::isnan(p.magnitude));
+}

@@ -411,6 +411,13 @@ or designation). Space motion, parallax, the Sun's deflection and aberration
 lead into the same output frames and zodiacs as bodies. The details and the
 validation against ERFA (0.34 mas) are in [STARS.md](STARS.md).
 
+## Phenomena and magnitudes
+
+`phenomena(object, jd_tt, opts)` (and `_ut`) gives an object's phase
+angle, illuminated fraction, elongation, apparent diameter and V magnitude,
+as the options' observer sees it. [PHENOMENA.md](PHENOMENA.md) has the
+definitions, the published formulas and the validation.
+
 ## Rise, set and transit
 
 `Engine::rise_set_ut(object, event, jd_ut1_start, site, options)`, the C

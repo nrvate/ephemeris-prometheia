@@ -314,6 +314,28 @@ class Engine(unittest.TestCase):
         with self.assertRaises(prometheia.Error):
             ctx.rise_set("Sun", "rise", start, lon, lat)
 
+    def test_phenomena(self):
+        ctx = self.ds.local()
+        jd = 2461042.0
+        venus = ctx.phenomena(n.BODIES["venus"], jd)
+        self.assertEqual(venus.magnitude_model, "Mallama & Hilton 2018 eq. 3")
+        self.assertTrue(-5.0 < venus.magnitude < -3.0)
+        self.assertAlmostEqual(venus.illuminated_fraction,
+                               (1.0 + __import__("math").cos(venus.phase_angle_deg * 0.017453292519943295)) / 2,
+                               places=12)
+        # Every object form calc() takes; a star has no phase, a point no V.
+        regulus = ctx.phenomena(("star", "Regulus"), jd)
+        self.assertIsNone(regulus.phase_angle_deg)
+        self.assertAlmostEqual(regulus.magnitude, 1.35, places=2)
+        node = ctx.phenomena("orbit:naif:301:ascending-node:mean", jd)
+        self.assertIsNone(node.magnitude)
+        self.assertTrue(node.magnitude_model.startswith("no magnitude"))
+        ceres = ctx.phenomena("sb:1", jd)
+        self.assertEqual(ceres.magnitude_model, "H, G (Bowell et al. 1989)")
+        helio = ctx.phenomena(n.BODIES["mars"], jd, n.Options(observer="heliocentric"))
+        self.assertIsNone(helio.elongation_deg)  # seen from the Sun
+        self.assertLess(helio.phase_angle_deg, 1e-4)  # the Sun moves in the light time
+
     def test_object_registry(self):
         ctx = self.ds.local()
         # One namespace-wide lookup; ambiguity is reported, not resolved.

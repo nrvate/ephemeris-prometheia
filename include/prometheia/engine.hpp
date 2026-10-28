@@ -37,6 +37,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -521,6 +522,27 @@ public:
         OrbitElements method = OrbitElements::Mean;   // OrbitPoint
     };
     Result<CalcResult> calc_object(const ObjectRef& object, double jd_tt,
+                                   const CalcOptions& opts = {});
+
+    // What an object looks like from the options' observer
+    // (docs/PHENOMENA.md): the phase angle at the object between the Sun and
+    // the observer, the illuminated fraction (1 + cos phase) / 2, the
+    // elongation from the Sun, the apparent diameter of the IAU mean radius,
+    // and the V magnitude with the published model that gave it. NaN where a
+    // quantity does not apply: a star's or a point's phase, a point's
+    // diameter, a magnitude outside its model's range (the model then says
+    // why), the elongation seen from the Sun.
+    struct Phenomena {
+        double phase_angle_deg = std::numeric_limits<double>::quiet_NaN();
+        double illuminated_fraction = std::numeric_limits<double>::quiet_NaN();
+        double elongation_deg = std::numeric_limits<double>::quiet_NaN();
+        double diameter_arcsec = std::numeric_limits<double>::quiet_NaN();
+        double magnitude = std::numeric_limits<double>::quiet_NaN();
+        std::string_view magnitude_model; // a static string
+    };
+    Result<Phenomena> phenomena(const ObjectRef& object, double jd_tt,
+                                const CalcOptions& opts = {});
+    Result<Phenomena> phenomena_ut(const ObjectRef& object, double jd_ut1,
                                    const CalcOptions& opts = {});
     Result<CalcResult> calc_object_ut(const ObjectRef& object, double jd_ut1,
                                       const CalcOptions& opts = {});

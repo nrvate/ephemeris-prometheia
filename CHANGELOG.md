@@ -13,6 +13,23 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Phenomena and magnitudes** ([docs/PHENOMENA.md](docs/PHENOMENA.md)),
+  A-4 of astromcp's port plan. For any object: the phase angle (at the body,
+  at emission), the illuminated fraction, the elongation, the apparent
+  diameter of the IAU mean radius, and V with its model named. The models:
+  - the planets: Mallama & Hilton 2018, eqs. 2–17, Saturn's ring and
+    Uranus's latitude terms from the IAU poles included;
+  - the Moon: Krisciunas & Schaefer 1991;
+  - the Sun: Willmer 2018;
+  - catalog bodies: H, G;
+  - stars: the catalog's V.
+
+  Against `swetest` on DE440, V agrees to 0.0006 for Mercury, Venus, Mars
+  and Jupiter, to 0.0016 for Neptune, and to 0.014 and 0.022 for Saturn and
+  Uranus. The elongations agree to 0.0001″. The engine gains
+  `Engine::phenomena(_ut)`, the C API `prometheia_calc_phenomena(_ut)` (ABI
+  unchanged), and Python `Context.phenomena`. The radius table moves to
+  `prometheia::phenomena`, and gains the Earth.
 - **The object registry** ([docs/REGISTRY.md](docs/REGISTRY.md)), A-9 of
   astromcp's port plan. One id scheme covers every object: `naif:`, `sb:`,
   `orbit:`, `hyp:` and `star:`. Numbered bodies keep their id across

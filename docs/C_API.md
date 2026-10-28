@@ -226,6 +226,14 @@ printf("%s\n", r.source);    /* the element set's name */
   malformed element file gives `PROMETHEIA_ERROR_FORMAT`, with the file and
   line in the message.
 
+**Phenomena and magnitudes (after 0.7.3; ABI version unchanged).**
+`prometheia_calc_phenomena(_ut)(engine, object, jd, opts, out, err)` takes
+any `prometheia_object`. It fills a `prometheia_phenomena` with the phase
+angle, illuminated fraction, elongation, apparent diameter and V magnitude,
+and names the published model that gave the magnitude. Quantities that do
+not apply are NaN. [PHENOMENA.md](PHENOMENA.md) has the formulas and the
+measured agreement with `swetest`.
+
 **The object registry (after 0.7.3; ABI version unchanged).** One id scheme
 for every object, and lookup, description and listing across all of them
 ([REGISTRY.md](REGISTRY.md)):

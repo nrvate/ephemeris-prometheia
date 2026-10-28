@@ -863,6 +863,28 @@ PROMETHEIA_API double prometheia_delta_t(double jd_tt);
    series, 787 terms (docs/TIME.md). */
 PROMETHEIA_API double prometheia_tdb_minus_tt(double jd_tt);
 
+/* ---- Phenomena and magnitudes (after 0.7.3) ---------------------------------
+ *
+ * docs/PHENOMENA.md: the phase angle at the object between the Sun and the
+ * observer, the illuminated fraction, the elongation from the Sun, the
+ * apparent diameter of the IAU mean radius, and the V magnitude with the
+ * published model that gave it (Mallama & Hilton 2018 for the planets,
+ * Krisciunas & Schaefer 1991 for the Moon, Willmer 2018 for the Sun, H, G for
+ * catalog bodies, the catalog's V for stars). NaN where a quantity does not
+ * apply. The options' observer and corrections stand. Added after library
+ * 0.7.3; the ABI version is unchanged, as no existing layout changed.
+ */
+typedef struct prometheia_phenomena {
+    double phase_angle_deg, illuminated_fraction, elongation_deg, diameter_arcsec, magnitude;
+    char magnitude_model[64]; /* "Mallama & Hilton 2018 eq. 2", or why there is none */
+} prometheia_phenomena;
+PROMETHEIA_API prometheia_status prometheia_calc_phenomena(
+    prometheia_engine* engine, const prometheia_object* object, double jd_tt,
+    const prometheia_options* opts, prometheia_phenomena* out, prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_calc_phenomena_ut(
+    prometheia_engine* engine, const prometheia_object* object, double jd_ut1,
+    const prometheia_options* opts, prometheia_phenomena* out, prometheia_error* err);
+
 /* ---- The object registry (after 0.7.3) --------------------------------------
  *
  * docs/REGISTRY.md: one id scheme for every object (naif:, sb:, orbit:, hyp:,
