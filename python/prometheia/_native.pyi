@@ -2,7 +2,7 @@
 # Types for prometheia._native (_native.pyx), the engine in process. The
 # package re-exports every name here at prometheia.*; docs/PYTHON.md,
 # "Native". python/tests/test_native.py holds this file to the module.
-from typing import Any, Literal, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Literal, Mapping, Optional, Sequence, Tuple, Union
 
 Scale = Literal["tt", "ut1"]
 Site = Union[Tuple[float, float], Tuple[float, float, float], Mapping[str, float]]
@@ -26,6 +26,8 @@ KINDS: dict[str, int]
 SOLAR_KINDS: dict[str, int]
 HELIACAL_EVENTS: dict[str, int]
 VISIBILITY_MODELS: dict[str, int]
+EQUINOXES: dict[str, int]
+ORIGINS: dict[str, int]
 Object = Union[int, str, Tuple[Literal["star"], Union[int, str]],
                Tuple[Literal["hypothetical"], str], Tuple[Literal["orbit-point"], int, str, str]]
 
@@ -217,6 +219,33 @@ class LunarEclipseLocal:
     altitude_deg: Tuple[Optional[float], ...]
     apparent_altitude_deg: Tuple[Optional[float], ...]
 
+Coefficients = Union[float, Sequence[float]]
+
+class Elements:
+    """Two-body orbital elements (Context.calc_elements); each a polynomial in T."""
+    epoch_jd_tt: float
+    equinox: Union[str, float]
+    origin: Literal["sun", "earth"]
+    mean_anomaly: Tuple[float, ...]
+    semi_major_axis: Tuple[float, ...]
+    eccentricity: Tuple[float, ...]
+    arg_perihelion: Tuple[float, ...]
+    ascending_node: Tuple[float, ...]
+    inclination: Tuple[float, ...]
+    def __init__(self, epoch_jd_tt: float, *, mean_anomaly: Coefficients,
+                 semi_major_axis: Coefficients, eccentricity: Coefficients,
+                 arg_perihelion: Coefficients, ascending_node: Coefficients,
+                 inclination: Coefficients, equinox: Union[str, float] = "j2000",
+                 origin: Literal["sun", "earth"] = "sun") -> None: ...
+
+class Hypothetical:
+    """A hypothetical body's definition (Context.hypothetical)."""
+    token: str
+    name: str
+    set: str
+    citation: str
+    elements: Elements
+
 class Heliacal:
     """A heliacal event (Context.heliacal_next); jd_* is the start of the visibility window."""
     event: Literal["rising", "setting", "evening-first", "morning-last"]
@@ -278,6 +307,10 @@ class Context:
                   scale: Scale = "tt") -> Position: ...
     def calc_hypothetical(self, token: str, jd: float, options: Optional[Options] = None,
                           scale: Scale = "tt") -> Position: ...
+    def calc_elements(self, elements: Elements, jd: float, options: Optional[Options] = None,
+                      scale: Scale = "tt") -> Position: ...
+    def hypothetical(self, token: str) -> Hypothetical: ...
+    def set_delta_t(self, fn: Optional[Callable[[float], float]]) -> None: ...
     def calc_orbit_point(self, body: int, point: str, method: str, jd: float,
                          options: Optional[Options] = None, scale: Scale = "tt") -> Position: ...
     def houses(self, system: str, jd: float, lon_deg: float, lat_deg: float,
@@ -351,6 +384,7 @@ class Context:
                     limit: int = 500) -> Tuple[list[str], Optional[int]]: ...
     def hypotheticals(self) -> list[str]: ...
     def ephemeris_spans(self) -> list[Tuple[str, float, float]]: ...
+    def catalog_bodies(self) -> int: ...
     def catalogs(self) -> list[Tuple[str, int]]: ...
 
 class Dataset:

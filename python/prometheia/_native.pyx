@@ -10,7 +10,9 @@ the GIL while the engine works.
 import threading
 
 from cpython.pythread cimport PyThread_get_thread_ident
+from cpython.exc cimport PyErr_SetObject, PyErr_WriteUnraisable
 from cpython.mem cimport PyMem_Free, PyMem_Malloc
+from libc.math cimport NAN
 from libc.string cimport memcpy, memset
 
 from prometheia cimport cprometheia as c
@@ -653,6 +655,108 @@ class Visibility:
         return "Visibility(visible=%r, margin=%r)" % (self.visible, self.margin)
 
 
+EQUINOXES = {"j2000": c.PROMETHEIA_EQUINOX_J2000, "b1950": c.PROMETHEIA_EQUINOX_B1950,
+             "j1900": c.PROMETHEIA_EQUINOX_J1900, "of-date": c.PROMETHEIA_EQUINOX_OF_DATE}
+ORIGINS = {"sun": c.PROMETHEIA_ELEMENTS_ORIGIN_SUN, "earth": c.PROMETHEIA_ELEMENTS_ORIGIN_EARTH}
+_EQUINOX_NAMES = {v: k for k, v in EQUINOXES.items()}
+_ORIGIN_NAMES = {v: k for k, v in ORIGINS.items()}
+_ELEMENT_FIELDS = ("mean_anomaly", "semi_major_axis", "eccentricity", "arg_perihelion",
+                   "ascending_node", "inclination")
+
+
+class Elements:
+    """Two-body orbital elements (docs/HYPOTHETICALS.md; Context.calc_elements).
+    Each element is a number or the coefficients of a polynomial in
+    T = (t_TT - epoch_jd_tt) / 36525, at most five: the mean anomaly,
+    argument of perihelion, ascending node and inclination in degrees, the
+    semi-major axis in AU. equinox is a name in EQUINOXES or the TT Julian
+    date of an explicit one; origin "sun" or "earth"."""
+
+    def __init__(self, double epoch_jd_tt, *, mean_anomaly, semi_major_axis, eccentricity,
+                 arg_perihelion, ascending_node, inclination, equinox="j2000", origin="sun"):
+        self.epoch_jd_tt = epoch_jd_tt
+        self.equinox = equinox
+        self.origin = origin
+        values = (mean_anomaly, semi_major_axis, eccentricity, arg_perihelion, ascending_node,
+                  inclination)
+        for name, v in zip(_ELEMENT_FIELDS, values):
+            terms = (float(v),) if isinstance(v, (int, float)) else tuple(float(x) for x in v)
+            if not 1 <= len(terms) <= 5:
+                raise Error("%s takes 1 to 5 coefficients" % name, code="argument")
+            setattr(self, name, terms)
+
+    def __eq__(self, other):
+        return isinstance(other, Elements) and vars(self) == vars(other)
+
+    def __repr__(self):
+        return "Elements(%r, a=%r, e=%r)" % (self.epoch_jd_tt, self.semi_major_axis[0],
+                                            self.eccentricity[0])
+
+
+class Hypothetical:
+    """A hypothetical body's definition (Context.hypothetical): its token,
+    display name, element set (results carry it as source), citation and
+    Elements."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __repr__(self):
+        return "Hypothetical(%r, %r)" % (self.token, self.set)
+
+
+cdef int elements_in(object el, c.prometheia_elements* out) except -1:
+    if not isinstance(el, Elements):
+        raise Error("elements are an Elements", code="argument")
+    memset(out, 0, sizeof(c.prometheia_elements))
+    out.epoch_jd_tt = el.epoch_jd_tt
+    if isinstance(el.equinox, str):
+        out.equinox = word(EQUINOXES, el.equinox, "equinox")
+    else:
+        out.equinox = c.PROMETHEIA_EQUINOX_EXPLICIT
+        out.equinox_jd_tt = float(el.equinox)
+    out.origin = word(ORIGINS, el.origin, "origin")
+    cdef int n = max(len(getattr(el, f)) for f in _ELEMENT_FIELDS)
+    out.n_terms = n
+    cdef double* rows[6]
+    rows[0] = out.mean_anomaly
+    rows[1] = out.semi_major_axis
+    rows[2] = out.eccentricity
+    rows[3] = out.arg_perihelion
+    rows[4] = out.ascending_node
+    rows[5] = out.inclination
+    for i, f in enumerate(_ELEMENT_FIELDS):
+        for k, v in enumerate(getattr(el, f)):
+            rows[i][k] = v
+    return 0
+
+
+cdef object elements_out(const c.prometheia_elements* e):
+    cdef int n = e.n_terms
+    equinox = (e.equinox_jd_tt if e.equinox == c.PROMETHEIA_EQUINOX_EXPLICIT
+               else _EQUINOX_NAMES[e.equinox])
+    return Elements(e.epoch_jd_tt, mean_anomaly=[e.mean_anomaly[k] for k in range(n)],
+                    semi_major_axis=[e.semi_major_axis[k] for k in range(n)],
+                    eccentricity=[e.eccentricity[k] for k in range(n)],
+                    arg_perihelion=[e.arg_perihelion[k] for k in range(n)],
+                    ascending_node=[e.ascending_node[k] for k in range(n)],
+                    inclination=[e.inclination[k] for k in range(n)],
+                    equinox=equinox, origin=_ORIGIN_NAMES[e.origin])
+
+
+# The Delta T function a context was given (Context.set_delta_t), called by
+# the engine with the GIL released. What it raises goes to
+# sys.unraisablehook, and the engine is handed NaN, which fails the call.
+cdef double delta_t_call(void* user, double jd_tt) noexcept nogil:
+    cdef double v = NAN
+    with gil:
+        try:
+            v = float((<object>user)(jd_tt))
+        except BaseException as exc:
+            PyErr_SetObject(type(exc), exc)
+            PyErr_WriteUnraisable(<object>user)
+    return v
+
+
 cdef int air_of(c.prometheia_air* a, c.prometheia_observer* o, c.prometheia_visibility_model* m,
                 pressure_hpa, temperature_c, humidity_pct, extinction_coefficient, visual_range_km,
                 age_years, snellen_ratio, binocular, model, arc_deg, object_altitude_deg,
@@ -748,6 +852,7 @@ cdef class Context:
     cdef c.prometheia_engine* e
     cdef unsigned long owner
     cdef readonly object dataset
+    cdef object delta_t_fn  # held while the engine may call it
 
     def __cinit__(self):
         self.e = NULL
@@ -837,6 +942,49 @@ cdef class Context:
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
         return position(&r)
+
+    def calc_elements(self, elements, double jd, Options options=None, str scale="tt"):
+        """The body two-body Elements define, at a TT or UT1 Julian date."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef const c.prometheia_options* o = opts_of(options)
+        cdef c.prometheia_elements el
+        elements_in(elements, &el)
+        cdef c.prometheia_result r
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        cdef bint ut = is_ut(scale)
+        with nogil:
+            st = (c.prometheia_calc_elements_ut(e, &el, jd, o, &r, &err) if ut
+                  else c.prometheia_calc_elements(e, &el, jd, o, &r, &err))
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return position(&r)
+
+    def hypothetical(self, str token):
+        """A hypothetical token's current definition, a Hypothetical."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef bytes t = token.encode("utf-8")
+        cdef c.prometheia_hypothetical h
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st = c.prometheia_hypothetical_get(e, t, &h, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return Hypothetical(token=text(h.token), name=text(h.name), set=text(h.set_),
+                            citation=text(h.citation), elements=elements_out(&h.elements))
+
+    def set_delta_t(self, fn):
+        """Delta T (TT - UT1, seconds) for this context's UT calls and Earth
+        rotation: fn(jd_tt) -> seconds, or None for the observed model. fn
+        runs on the context's thread, with the GIL; if it raises, the
+        exception goes to sys.unraisablehook and the call fails."""
+        cdef c.prometheia_engine* e = self.engine()
+        if fn is None:
+            c.prometheia_engine_set_delta_t(e, NULL, NULL)
+        elif callable(fn):
+            c.prometheia_engine_set_delta_t(e, delta_t_call, <void*>fn)
+        else:
+            raise Error("set_delta_t takes a function of jd_tt, or None", code="argument")
+        self.delta_t_fn = fn
 
     def calc_orbit_point(self, int body, str point, str method, double jd,
                          Options options=None, str scale="tt"):
@@ -1344,6 +1492,18 @@ cdef class Context:
                 fail(st, &err)
             out.append((text(s), a, b))
         return out
+
+    def catalog_bodies(self):
+        """The distinct bodies the catalogs answer between them."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef int n = 0
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_engine_catalog_bodies(e, &n, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return n
 
     def catalogs(self):
         """[(path, records)], in the order added; a later one wins."""

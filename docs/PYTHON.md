@@ -137,6 +137,15 @@ the C++ engine's, bit for bit.
       and `next_cursor` is `None` after the last page. `KINDS` names the
       kinds;
   - `calc_star(index or name, …)` and `calc_hypothetical(token, …)`;
+    `hypothetical(token)` gives a token's definition, a `Hypothetical`
+    (`token`, `name`, `set`, `citation`, `elements`);
+  - `calc_elements(Elements(epoch_jd_tt, mean_anomaly=, semi_major_axis=,
+    eccentricity=, arg_perihelion=, ascending_node=, inclination=,
+    equinox="j2000", origin="sun"), jd, options)`: a body from two-body
+    elements ([HYPOTHETICALS.md](HYPOTHETICALS.md)). Each element is a number
+    or up to five polynomial coefficients in Julian centuries from the
+    epoch; `equinox` is a name in `EQUINOXES` or a TT Julian date. A token's
+    `hypothetical(token).elements` computes exactly what the token does;
   - `calc_orbit_point(body, point, method, …)`;
   - `houses(system, jd, lon, lat, options)`;
   - `sidereal_time(jd_ut1, "mean"|"apparent")` and
@@ -158,7 +167,13 @@ the C++ engine's, bit for bit.
     and `equatorial_from_horizontal(…)`. The azimuth runs from north
     through east. An atmosphere is `"standard"`, `(hPa, °C)` or a dict, and
     `None` means none;
-  - `ephemeris_spans()`, `catalogs()`, `hypotheticals()` and `source`.
+  - `ephemeris_spans()`, `catalogs()`, `catalog_bodies()` (the distinct
+    bodies between them), `hypotheticals()` and `source`;
+  - `set_delta_t(fn)` gives the context a Delta T of its own,
+    `fn(jd_tt) -> seconds`, for its UT1 calls and the Earth's rotation;
+    `None` restores the observed model. The engine calls `fn` with the GIL
+    released and takes the GIL back for it. What `fn` raises goes to
+    `sys.unraisablehook`, and the call that needed Delta T fails.
 - `Options(observer=, site=, center=, frame=, coordinates=, corrections=,
   zodiac=, sidereal_plane=, precession=, rates=, sigma=)` takes the JSON
   tools' words ([JSON_API.md](JSON_API.md), "Words"). It is built once and

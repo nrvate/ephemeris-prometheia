@@ -187,6 +187,74 @@ class Engine(unittest.TestCase):
                     self.json_row({"point": "ascending-node", "of": "Moon", "method": "mean"},
                                   jd, **args))
 
+    def test_elements_and_hypothetical_definitions(self):
+        # A token's definition, given back as Elements, computes exactly what
+        # the token does: both are the C library's two-body path.
+        ctx = self.ds.local()
+        for token in ("cupido", "vulcanus", "transpluto" if "transpluto" in ctx.hypotheticals()
+                      else "hades"):
+            h = ctx.hypothetical(token)
+            self.assertEqual(h.token, token)
+            self.assertTrue(h.set and h.citation)
+            for native in ({}, {"zodiac": "lahiri"}, {"observer": "heliocentric"}):
+                o = n.Options(**native)
+                for scale in ("tt", "ut1"):
+                    a = ctx.calc_elements(h.elements, 2461000.5, o, scale=scale)
+                    b = ctx.calc_hypothetical(token, 2461000.5, o, scale=scale)
+                    self.assertEqual((a.lon_deg, a.lat_deg, a.dist_au, a.lon_speed),
+                                     (b.lon_deg, b.lat_deg, b.dist_au, b.lon_speed))
+        with self.assertRaises(prometheia.Error) as e:
+            ctx.hypothetical("no-such-token")
+        self.assertEqual(e.exception.code, "not-found")
+        # Numbers or up to five coefficients; an explicit equinox by its date.
+        el = n.Elements(2451545.0, mean_anomaly=[10.0, 35999.0], semi_major_axis=1.5,
+                        eccentricity=0.1, arg_perihelion=20.0, ascending_node=30.0,
+                        inclination=2.0, equinox=2433282.5)
+        self.assertEqual(el.mean_anomaly, (10.0, 35999.0))
+        self.assertEqual(el.semi_major_axis, (1.5,))
+        p = ctx.calc_elements(el, 2461000.5)
+        self.assertTrue(0.0 <= p.lon_deg < 360.0)
+        with self.assertRaises(prometheia.Error):
+            n.Elements(2451545.0, mean_anomaly=[0.0] * 6, semi_major_axis=1.0,
+                       eccentricity=0.0, arg_perihelion=0.0, ascending_node=0.0, inclination=0.0)
+        with self.assertRaises(prometheia.Error):
+            ctx.calc_elements(n.Elements(2451545.0, mean_anomaly=0.0, semi_major_axis=1.0,
+                                         eccentricity=1.5, arg_perihelion=0.0,
+                                         ascending_node=0.0, inclination=0.0), 2461000.5)
+
+    def test_catalog_bodies(self):
+        ctx = self.ds.local()
+        self.assertEqual(ctx.catalog_bodies(), ctx.catalogs()[0][1])
+
+    def test_set_delta_t(self):
+        import sys
+        ctx = self.ds.context()
+        jd = 2461000.5
+        default = ctx.delta_t(jd)
+        self.assertEqual(default, n.delta_t(jd))
+        before = ctx.calc(n.BODIES["moon"], jd, scale="ut1").lon_deg
+        ctx.set_delta_t(lambda t: 42.0)
+        self.assertEqual(ctx.delta_t(jd), 42.0)
+        self.assertNotEqual(ctx.calc(n.BODIES["moon"], jd, scale="ut1").lon_deg, before)
+        # What the function raises reaches sys.unraisablehook, and the call
+        # fails rather than answering with a made-up Delta T.
+        seen = []
+        hook, sys.unraisablehook = sys.unraisablehook, seen.append
+        try:
+            def broken(t):
+                raise ValueError("no Delta T here")
+            ctx.set_delta_t(broken)
+            with self.assertRaises(prometheia.Error):
+                ctx.calc(n.BODIES["moon"], jd, scale="ut1")
+        finally:
+            sys.unraisablehook = hook
+        self.assertTrue(seen and isinstance(seen[0].exc_value, ValueError))
+        ctx.set_delta_t(None)
+        self.assertEqual(ctx.delta_t(jd), default)
+        self.assertEqual(ctx.calc(n.BODIES["moon"], jd, scale="ut1").lon_deg, before)
+        with self.assertRaises(prometheia.Error):
+            ctx.set_delta_t(42.0)
+
     def test_houses_equal_the_json_tools_bit_for_bit(self):
         ctx = self.ds.local()
         for system in n.HOUSE_SYSTEMS:

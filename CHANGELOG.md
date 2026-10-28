@@ -13,6 +13,11 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Python: the last C calls** (A-17). `Context.calc_elements` with
+  `Elements`, `Context.hypothetical` (a token's definition),
+  `Context.catalog_bodies` and `Context.set_delta_t`. Every function in
+  `prometheia.h` is now reached from Python, except the engine open and
+  `_add_*` calls, which `Dataset` replaces (docs/PYTHON.md, "Native").
 - **Fixed: orbit points rise without parallax.** `rise_set_ut` (and C's
   `prometheia_rise_set_ut`, Python's `Context.rise_set`) now takes an orbit
   point as a direction from the Earth's centre. It applied the site
