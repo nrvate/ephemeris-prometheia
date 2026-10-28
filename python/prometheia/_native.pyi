@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Types for prometheia._native (_native.pyx), the engine in process. The
+# package re-exports every name here at prometheia.*; docs/PYTHON.md,
+# "Native". python/tests/test_native.py holds this file to the module.
+from typing import Any, Literal, Mapping, Optional, Sequence, Tuple, Union
+
+Scale = Literal["tt", "ut1"]
+Site = Union[Tuple[float, float], Tuple[float, float, float], Mapping[str, float]]
+Atmosphere = Union[None, Literal["standard"], Tuple[float, float], Mapping[str, float]]
+
+OBSERVERS: dict[str, int]
+FRAMES: dict[str, int]
+COORDINATES: dict[str, int]
+ZODIACS: dict[str, int]
+SIDEREAL_PLANES: dict[str, int]
+PRECESSION: dict[str, int]
+CORRECTIONS: Tuple[str, ...]
+POINTS: dict[str, int]
+METHODS: dict[str, int]
+HOUSE_SYSTEMS: dict[str, int]
+BODIES: dict[str, int]
+
+class Options:
+    """What a position call means, in the JSON tools' words; built once."""
+    def __init__(self, *, observer: str = "geocentric", site: Optional[Site] = None,
+                 center: Optional[int] = None, frame: str = "true-of-date",
+                 coordinates: str = "ecliptic",
+                 corrections: Union[str, Sequence[str]] = "apparent",
+                 zodiac: Union[str, Mapping[str, Mapping[str, float]]] = "tropical",
+                 sidereal_plane: str = "date", precession: str = "vondrak2011",
+                 rates: bool = True, sigma: bool = True) -> None: ...
+
+class Position:
+    lon_deg: float
+    lat_deg: float
+    dist_au: float
+    lon_speed: float
+    lat_speed: float
+    dist_speed: float
+    light_time_days: float
+    xyz_au: Tuple[float, float, float]
+    vel_au_day: Tuple[float, float, float]
+    sigma_arcsec: Optional[float]
+    ayanamsa_deg: Optional[float]
+    denum: int
+    source: str
+
+class Houses:
+    cusps: Tuple[float, ...]
+    asc_deg: float
+    mc_deg: float
+    armc_deg: float
+    vertex_deg: float
+    equatorial_asc_deg: float
+    obliquity_deg: float
+    ayanamsa_deg: Optional[float]
+
+class Horizontal:
+    azimuth_deg: float
+    altitude_deg: float
+    apparent_altitude_deg: float
+    hour_angle_deg: float
+
+class Context:
+    """One engine over a Dataset's files, for the thread that made it."""
+    dataset: "Dataset"
+    @property
+    def source(self) -> str: ...
+    def close(self) -> None: ...
+    def __enter__(self) -> "Context": ...
+    def __exit__(self, *exc: Any) -> None: ...
+    def calc(self, body: int, jd: float, options: Optional[Options] = None,
+             scale: Scale = "tt") -> Position: ...
+    def calc_star(self, star: Union[int, str], jd: float, options: Optional[Options] = None,
+                  scale: Scale = "tt") -> Position: ...
+    def calc_hypothetical(self, token: str, jd: float, options: Optional[Options] = None,
+                          scale: Scale = "tt") -> Position: ...
+    def calc_orbit_point(self, body: int, point: str, method: str, jd: float,
+                         options: Optional[Options] = None, scale: Scale = "tt") -> Position: ...
+    def houses(self, system: str, jd: float, lon_deg: float, lat_deg: float,
+               options: Optional[Options] = None, scale: Scale = "tt") -> Houses: ...
+    def sidereal_time(self, jd_ut1: float, kind: Literal["mean", "apparent"] = "apparent",
+                      options: Optional[Options] = None) -> float: ...
+    def obliquity(self, jd_tt: float, kind: Literal["mean", "true"] = "true",
+                  options: Optional[Options] = None) -> float: ...
+    def horizontal(self, jd_ut1: float, lon_deg: float, lat_deg: float, ra_deg: float,
+                   dec_deg: float, atmosphere: Atmosphere = None, height_m: float = 0.0,
+                   options: Optional[Options] = None) -> Horizontal: ...
+    def equatorial_from_horizontal(self, jd_ut1: float, lon_deg: float, lat_deg: float,
+                                   azimuth_deg: float, altitude_deg: float,
+                                   apparent: bool = True, atmosphere: Atmosphere = None,
+                                   height_m: float = 0.0,
+                                   options: Optional[Options] = None) -> Tuple[float, float]: ...
+    def lookup(self, name: str) -> int: ...
+    def hypotheticals(self) -> list[str]: ...
+    def ephemeris_spans(self) -> list[Tuple[str, float, float]]: ...
+    def catalogs(self) -> list[Tuple[str, int]]: ...
+
+class Dataset:
+    """The files a context answers from, in the order they are added."""
+    ephemeris: str
+    ephemerides: Tuple[str, ...]
+    catalogs: Tuple[str, ...]
+    perturbers: Tuple[str, ...]
+    hypotheticals: Tuple[str, ...]
+    def __init__(self, ephemeris: str, *, ephemerides: Sequence[str] = (),
+                 catalogs: Sequence[str] = (), perturbers: Sequence[str] = (),
+                 hypotheticals: Sequence[str] = ()) -> None: ...
+    def context(self) -> Context: ...
+    def local(self) -> Context: ...
+
+def version() -> str: ...
+def abi_version() -> int: ...
+def houses_from_armc(system: str, armc_deg: float, obliquity_deg: float,
+                     lat_deg: float) -> Houses: ...
+def ecliptic_to_equatorial(lon_deg: float, lat_deg: float,
+                           obliquity_deg: float) -> Tuple[float, float]: ...
+def equatorial_to_ecliptic(ra_deg: float, dec_deg: float,
+                           obliquity_deg: float) -> Tuple[float, float]: ...
+def refraction(altitude_deg: float, from_: Literal["true", "apparent"] = "true",
+               atmosphere: Atmosphere = "standard", height_m: float = 0.0) -> float: ...
+def utc_to_tt(year: int, month: int, day: int, hour: int = 0, minute: int = 0,
+              second: float = 0.0) -> float: ...
+def tt_to_utc(jd_tt: float) -> Tuple[int, int, int, int, int, float, float]: ...
+def delta_t(jd_tt: float) -> float: ...
+def tdb_minus_tt(jd_tt: float) -> float: ...
+def jd_from_ymdhms(year: int, month: int, day: int, hour: int = 0, minute: int = 0,
+                   second: float = 0.0) -> float: ...
+def civil_from_jd(jd: float) -> Tuple[int, int, float]: ...
+def star_find(query: str) -> int: ...
+def star_lookup(query: str, prefix: bool = False,
+                limit: int = 20) -> list[Tuple[int, str, str]]: ...
+def star_count() -> int: ...
+def star_info(index: int) -> dict[str, Any]: ...
+def constellation_at(ra_deg: float, dec_deg: float) -> str: ...

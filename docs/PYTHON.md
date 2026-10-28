@@ -54,23 +54,23 @@ with prometheia.Client(ephemeris="ephe") as c:     # the JSON tools, no compiler
 
 ## Where the answers come from
 
-The first match wins:
+`Client(server=…)` or `Client(ephemeris=…)` choose directly. A `Client()`
+with neither follows the environment, and the first match wins. There is no
+module-level state. The `set_server`, `set_ephe_path`, `default_client` and
+`close` functions, which configured one process-wide client for
+`prometheia.swe`, were removed on 2026-10-27.
 
-`Client(server=…)` or `Client(ephemeris=…)` choose directly. The module-level
-default client (`prometheia.default_client()`) follows this order:
-
-1. **`set_server(url)`** or `$PROMETHEIA_SERVER`, with `$PROMETHEIA_TOKEN`
-   for a token:
+1. **`$PROMETHEIA_SERVER`**, with `$PROMETHEIA_TOKEN` for a token:
    - a `ws://` or `wss://` address of a `prometheiad` (protocol v4, binary);
    - or the `http(s)://` address of a running `prometheia-json --http`.
-2. **`set_ephe_path(path)`** or `$PROMETHEIA_EPHEMERIS`: a JPL DE file, or a
+2. **`$PROMETHEIA_EPHEMERIS`**, or `Client(ephemeris=…)`: a JPL DE file, or a
    directory. In a directory it takes DE440, DE441 (behind DE440), every
    `*.epm` small-body catalog, and the SB441 perturber kernel. Several paths
    join with `os.pathsep`, so a catalog kept elsewhere can be named beside
    the directory.
    - A local `prometheia-json` is started over stdio, found through
      `$PROMETHEIA_JSON`, then `PATH`, then this repository's `build/`.
-   - `Client.close()` (or `prometheia.close()` for the default client) stops it.
+   - `Client.close()` stops it.
 
 **The binary transport** (`_binary.py`, `_v4.py`, `_ws.py`):
 - It speaks protocol v4 over a minimal RFC 6455 client, written here with
@@ -123,6 +123,10 @@ the C++ engine's, bit for bit.
   - `houses(system, jd, lon, lat, options)`;
   - `sidereal_time(jd_ut1, "mean"|"apparent")` and
     `obliquity(jd_tt, "mean"|"true")`;
+  - `horizontal(jd_ut1, lon, lat, ra, dec, atmosphere=None, height_m=0)`
+    and `equatorial_from_horizontal(…)`. The azimuth runs from north
+    through east. An atmosphere is `"standard"`, `(hPa, °C)` or a dict, and
+    `None` means none;
   - `ephemeris_spans()`, `catalogs()`, `hypotheticals()` and `source`.
 - `Options(observer=, site=, center=, frame=, coordinates=, corrections=,
   zodiac=, sidereal_plane=, precession=, rates=, sigma=)` takes the JSON
@@ -134,12 +138,18 @@ the C++ engine's, bit for bit.
 - Refusals raise `prometheia.Error` with the engine's sentence. Its `code`
   is the C status: `argument`, `coverage`, `not-found`, `io`, `format`,
   `corruption` or `internal`.
-- Engine-free functions: `houses_from_armc`, `ecliptic_to_equatorial` and
-  `equatorial_to_ecliptic`, the time scales (`utc_to_tt`, `tt_to_utc`,
+- Engine-free functions: `houses_from_armc`, `refraction`,
+  `ecliptic_to_equatorial` and `equatorial_to_ecliptic`, the time scales (`utc_to_tt`, `tt_to_utc`,
   `delta_t`, `tdb_minus_tt`, `jd_from_ymdhms`, `civil_from_jd`), and the
   star catalog (`star_find`, `star_lookup`, `star_info`,
   `constellation_at`).
 - Every engine call releases the GIL while the engine works.
+- **Every public name is at the top of the package:** `prometheia.Dataset`,
+  `prometheia.refraction`, `prometheia.ZODIACS`, and the rest. The
+  extension module `prometheia._native` is an implementation detail.
+- **Typed.** `_native.pyi` and `py.typed` ship with the package. A test
+  holds the stub to the module: every public name and method is in it, and
+  nothing else.
 
 **Threads and memory** (measured 2026-10-27, this machine). Each context is
 an engine of its own until the shared dataset lands (A-14/A-15 of the

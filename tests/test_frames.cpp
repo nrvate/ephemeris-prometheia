@@ -499,3 +499,135 @@ TEST_CASE("nutation_fast_form_matches_printed") {
     CHECK(worst_eps < 1e-18);
     CHECK(worst_rates < 1e-18);
 }
+
+// ---- The horizon -----------------------------------------------------------
+
+namespace {
+
+constexpr double kDegH = 3.14159265358979323846 / 180.0;
+
+double ang_arcsec(double a_deg, double b_deg) {
+    return std::fabs(std::remainder(a_deg - b_deg, 360.0)) * 3600.0;
+}
+
+} // namespace
+
+TEST_CASE("horizon_geometry_matches_erfa") {
+    // ERFA 2.0.1 hd2ae (pyerfa), as an output oracle: hour angle,
+    // declination and latitude to azimuth (north through east) and
+    // elevation, degrees.
+    struct Row {
+        double ha, dec, lat, az, el;
+    };
+    const Row rows[] = {
+        {0.0, 20.0, 47.0, 180.0, 63.0},
+        {30.0, -10.0, 47.0, 213.56265944233036, 27.042848048621817},
+        {-75.5, 45.0, -33.9, 44.95526858660017, -14.325809591930941},
+        {170.0, 80.0, 69.6, 356.5731694931562, 59.704280313523476},
+        {-120.0, -60.0, -80.0, 132.48580109582795, 54.04286272277319},
+        {5.0, 89.0, 10.0, 359.9112186114818, 10.996182587068775},
+        {200.0, 0.0, 0.0, 90.0, -70.00000000000001},
+        {-3.0, -23.4, 78.2, 177.18933428923185, -11.615044441649088},
+    };
+    double worst = 0.0, worst_back = 0.0;
+    for (const Row& r : rows) {
+        double az, el;
+        equatorial_to_horizontal(r.ha * kDegH, r.dec * kDegH, r.lat * kDegH, az, el);
+        CHECK(az >= 0.0);
+        CHECK(az < 2.0 * 3.14159265358979323846);
+        worst = std::max({worst, ang_arcsec(az / kDegH, r.az), ang_arcsec(el / kDegH, r.el)});
+        double ha, dec;
+        horizontal_to_equatorial(az, el, r.lat * kDegH, ha, dec);
+        // On the sky: an hour angle near the pole counts by cos(dec).
+        worst_back = std::max({worst_back, ang_arcsec(ha / kDegH, r.ha) * std::cos(r.dec * kDegH),
+                               ang_arcsec(dec / kDegH, r.dec)});
+    }
+    std::printf("  horizon vs ERFA hd2ae: worst %.2e\", round trip %.2e\"\n", worst, worst_back);
+    CHECK(worst < 1e-9);
+    CHECK(worst_back < 1e-9);
+}
+
+TEST_CASE("refraction_bennett") {
+    const Atmosphere air;
+    // Bennett's formula at standard air: 34' at the horizon, falling to
+    // under a minute at 45 deg; his correction leaves -0.88" at the zenith,
+    // within his stated 0.015'.
+    CHECK(std::fabs(refraction_from_apparent_deg(0.0, air) * 60.0 - 33.9676) < 1e-4);
+    CHECK(std::fabs(refraction_from_apparent_deg(10.0, air) * 60.0 - 5.2558) < 1e-4);
+    CHECK(std::fabs(refraction_from_apparent_deg(45.0, air) * 60.0 - 0.9533) < 1e-4);
+    CHECK(std::fabs(refraction_from_apparent_deg(90.0, air) * 3600.0) < 0.9);
+    // ERFA 2.0.1 refco(1013.25 hPa, 15 C, rh 0, 0.574 um) as an independent
+    // model where it holds, above 15 deg: A tan z + B tan^3 z of the observed
+    // zenith distance.
+    const double A = 0.0002770929978069813, B = -3.170665511804554e-07;
+    double worst = 0.0;
+    for (int q = 60; q <= 360; ++q) {
+        const double h = q / 4.0, t = std::tan((90.0 - h) * kDegH);
+        const double erfa = (A * t + B * t * t * t) / kDegH * 3600.0;
+        worst = std::max(worst, std::fabs(refraction_from_apparent_deg(h, air) * 3600.0 - erfa));
+    }
+    std::printf("  Bennett vs ERFA refco, 15-90 deg: worst %.3f\"\n", worst);
+    CHECK(worst < 2.0);
+    // Scaled by pressure and temperature; nothing in a vacuum.
+    const Atmosphere thin{506.625, 15.0}, cold{1013.25, -20.0}, none{0.0, 15.0};
+    CHECK(
+        std::fabs(refraction_from_apparent_deg(5.0, thin) / refraction_from_apparent_deg(5.0, air) -
+                  0.5) < 1e-12);
+    CHECK(refraction_from_apparent_deg(5.0, cold) > refraction_from_apparent_deg(5.0, air));
+    CHECK(refraction_from_apparent_deg(5.0, none) == 0.0);
+}
+
+TEST_CASE("refraction_round_trips_and_stops_at_the_dip") {
+    const Atmosphere air;
+    double worst = 0.0;
+    for (int q = -200; q <= 9000; ++q) {
+        const double t = q / 100.0;
+        const double r = refraction_from_true_deg(t, air);
+        if (r == 0.0)
+            continue;
+        const double apparent = t + r;
+        worst =
+            std::max(worst, std::fabs(apparent - refraction_from_apparent_deg(apparent, air) - t));
+    }
+    CHECK(worst * 3600.0 < 1e-9);
+    // No dip: refraction stops at the astronomical horizon, so a true
+    // altitude whose apparent one would be below 0 is not refracted.
+    CHECK(refraction_from_apparent_deg(-0.01, air) == 0.0);
+    CHECK(refraction_from_true_deg(-0.5, air) > 0.0); // 34' lifts it above 0
+    CHECK(refraction_from_true_deg(-0.6, air) == 0.0);
+    // From 100 m the sea horizon is 17.6' down, and refraction reaches it;
+    // below -1 deg nothing is refracted, whatever the height.
+    const double dip = horizon_dip_deg(100.0);
+    CHECK(std::fabs(dip * 60.0 - 17.6) < 1e-12);
+    CHECK(refraction_from_apparent_deg(-0.25, air, dip) > 0.0);
+    CHECK(refraction_from_apparent_deg(-0.3, air, dip) == 0.0);
+    CHECK(refraction_from_apparent_deg(-0.9, air, horizon_dip_deg(5000.0)) > 0.0);
+    CHECK(refraction_from_apparent_deg(-1.01, air, horizon_dip_deg(5000.0)) == 0.0);
+    CHECK(horizon_dip_deg(-3.0) == 0.0);
+}
+
+TEST_CASE("refraction_at_the_cutoff") {
+    // At the cutoff c (here the astronomical horizon, no dip) R is 34'. True
+    // altitudes from t* = c - R(c) up are refracted to c or above; those
+    // below t* are not refracted; apparent altitudes in [t*, c) are never
+    // produced. Pinned at c and t* +- 1e-6 deg.
+    const Atmosphere air;
+    const double c = 0.0, eps = 1e-6;
+    const double t_star = c - refraction_from_apparent_deg(c, air);
+    CHECK(t_star < -0.5);
+    CHECK(refraction_from_apparent_deg(c + eps, air) > 0.5);
+    CHECK(refraction_from_apparent_deg(c - eps, air) == 0.0);
+    const double above = t_star + eps, below = t_star - eps;
+    const double app_above = above + refraction_from_true_deg(above, air);
+    CHECK(app_above >= c);
+    CHECK(app_above < c + 1e-5);
+    CHECK(refraction_from_true_deg(below, air) == 0.0);
+    // Back from each: exact from the refracted side and from below t*.
+    CHECK(std::fabs(app_above - refraction_from_apparent_deg(app_above, air) - above) < 1e-12);
+    CHECK(below - refraction_from_apparent_deg(below, air) == below);
+    // An apparent altitude in the gap is read as unrefracted, R = 0, and
+    // does not come back to itself: no true altitude gives it.
+    const double gap = 0.5 * (t_star + c);
+    CHECK(refraction_from_apparent_deg(gap, air) == 0.0);
+    CHECK(gap + refraction_from_true_deg(gap, air) > c);
+}

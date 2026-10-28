@@ -130,6 +130,31 @@ if (prometheia_calc_houses_ut(eph, PROMETHEIA_HOUSES_PLACIDUS, jd_ut1,
 - **Cusp speeds** are not served. If they come, they come as a separate
   call with its own struct, so `prometheia_houses` keeps its layout.
 
+**The horizon and refraction** (added after 0.7.3; ABI version unchanged;
+announced to the Astrolog side first, 2026-10-27). [FRAMES.md](FRAMES.md),
+"The horizon", has the definitions and the measurements.
+- `prometheia_horizontal_ut(engine, jd_ut1, lon, lat, height_m, ra, dec,
+  &atmosphere, opts, &out, &err)` puts a direction on the true equator and
+  equinox of date in the site's horizon. For a body that is its topocentric
+  apparent equatorial position from the same site. It returns the azimuth,
+  the true and apparent altitudes, and the local hour angle.
+  - **Azimuth runs from north through east.** pyswisseph's `azalt` counts
+    from the south, westward, so a call ported one for one comes out 180°
+    off and still looks plausible.
+  - The hour angle is positive westward.
+  - `height_m` sets only the dip. No parallax is applied here.
+- `prometheia_equatorial_from_horizontal_ut` goes back, removing the
+  refraction from an apparent altitude first.
+- `prometheia_refraction(alt, PROMETHEIA_REFRACTION_FROM_TRUE |
+  _FROM_APPARENT, &atmosphere, height_m, &deg, &err)` is Bennett 1982,
+  applied down to the dip or −1°.
+- `prometheia_atmosphere_init` gives 1013.25 hPa and 15 °C. A `NULL`
+  atmosphere means none on the horizon calls, and the standard one on
+  `prometheia_refraction`.
+- `c_api_horizon_matches_engine` holds every field to `Engine` with `==`,
+  with and without an atmosphere, at three latitudes. It round-trips through
+  refraction to 2e-10″.
+
 To build the library inside another project (a git submodule, plain make,
 no CMake), see [EMBEDDING.md](EMBEDDING.md).
 

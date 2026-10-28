@@ -8,6 +8,7 @@
 #include "prometheia/stars.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <exception>
 #include <new>
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "prometheia/engine.hpp"
+#include "prometheia/frames.hpp"
 #include "prometheia/hypotheticals.hpp"
 #include "prometheia/prometheia.hpp"
 #include "prometheia/time.hpp"
@@ -962,6 +964,100 @@ void prometheia_equatorial_to_ecliptic(double ra_deg, double dec_deg, double obl
         *lon_deg = lon / kDegToRad;
     if (lat_deg)
         *lat_deg = lat / kDegToRad;
+}
+
+void prometheia_atmosphere_init(prometheia_atmosphere* atmosphere) {
+    if (!atmosphere)
+        return;
+    const frames::Atmosphere d;
+    atmosphere->pressure_hpa = d.pressure_hpa;
+    atmosphere->temperature_c = d.temperature_c;
+}
+
+prometheia_status prometheia_horizontal_ut(prometheia_engine* engine, double jd_ut1, double lon_deg,
+                                           double lat_deg, double height_m, double ra_deg,
+                                           double dec_deg, const prometheia_atmosphere* atmosphere,
+                                           const prometheia_options* opts,
+                                           prometheia_horizontal* out, prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!out)
+        return argument(err, "horizontal output is NULL");
+    Precession p{};
+    if (prometheia_status st; !precession_of(opts, p, err, st))
+        return st;
+    return guarded(err, [&] {
+        const frames::GeoSite site{lon_deg * kDegToRad, lat_deg * kDegToRad, height_m};
+        frames::Atmosphere air;
+        if (atmosphere)
+            air = {atmosphere->pressure_hpa, atmosphere->temperature_c};
+        auto r = engine->engine.horizontal_ut(jd_ut1, site, ra_deg, dec_deg,
+                                              atmosphere ? &air : nullptr, p);
+        if (!r)
+            return report(err, r.error());
+        out->azimuth_deg = r.value().azimuth_deg;
+        out->altitude_deg = r.value().altitude_deg;
+        out->apparent_altitude_deg = r.value().apparent_altitude_deg;
+        out->hour_angle_deg = r.value().hour_angle_deg;
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_equatorial_from_horizontal_ut(
+    prometheia_engine* engine, double jd_ut1, double lon_deg, double lat_deg, double height_m,
+    double azimuth_deg, double altitude_deg, int apparent, const prometheia_atmosphere* atmosphere,
+    const prometheia_options* opts, double* ra_deg, double* dec_deg, prometheia_error* err) {
+    if (ra_deg)
+        *ra_deg = 0.0;
+    if (dec_deg)
+        *dec_deg = 0.0;
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!ra_deg || !dec_deg)
+        return argument(err, "equatorial outputs are NULL");
+    Precession p{};
+    if (prometheia_status st; !precession_of(opts, p, err, st))
+        return st;
+    return guarded(err, [&] {
+        const frames::GeoSite site{lon_deg * kDegToRad, lat_deg * kDegToRad, height_m};
+        frames::Atmosphere air;
+        if (atmosphere)
+            air = {atmosphere->pressure_hpa, atmosphere->temperature_c};
+        auto r = engine->engine.equatorial_from_horizontal_ut(
+            jd_ut1, site, azimuth_deg, altitude_deg, apparent != 0, atmosphere ? &air : nullptr, p);
+        if (!r)
+            return report(err, r.error());
+        *ra_deg = r.value().ra_deg;
+        *dec_deg = r.value().dec_deg;
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_refraction(double altitude_deg, int from,
+                                        const prometheia_atmosphere* atmosphere, double height_m,
+                                        double* out_deg, prometheia_error* err) {
+    if (out_deg)
+        *out_deg = 0.0;
+    if (!out_deg)
+        return argument(err, "refraction output is NULL");
+    if (from != PROMETHEIA_REFRACTION_FROM_TRUE && from != PROMETHEIA_REFRACTION_FROM_APPARENT)
+        return argument(err, "refraction direction out of range");
+    if (!std::isfinite(altitude_deg) || std::fabs(altitude_deg) > 90.0 || !std::isfinite(height_m))
+        return argument(err, "refraction needs a finite altitude within -90..90 and height");
+    frames::Atmosphere air;
+    if (atmosphere)
+        air = {atmosphere->pressure_hpa, atmosphere->temperature_c};
+    if (!std::isfinite(air.pressure_hpa) || !std::isfinite(air.temperature_c) ||
+        air.pressure_hpa < 0.0 || air.temperature_c <= -273.0)
+        return argument(err, "refraction needs a pressure of 0 hPa or more and a temperature "
+                             "above -273 C");
+    const double dip = frames::horizon_dip_deg(height_m);
+    *out_deg = from == PROMETHEIA_REFRACTION_FROM_TRUE
+                   ? frames::refraction_from_true_deg(altitude_deg, air, dip)
+                   : frames::refraction_from_apparent_deg(altitude_deg, air, dip);
+    return succeed(err);
 }
 
 const char* prometheia_constellation_at(double ra_deg, double dec_deg) {

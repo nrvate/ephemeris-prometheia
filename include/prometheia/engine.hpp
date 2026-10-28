@@ -468,6 +468,35 @@ public:
     Result<double> obliquity(double jd_tt, bool true_obliquity,
                              Precession precession = Precession::Vondrak2011);
 
+    // A direction on the true equator and equinox of date (a body's
+    // topocentric apparent position, for one seen from the site) at a UT1
+    // instant, in the site's horizon (docs/FRAMES.md, "The horizon"): the
+    // hour angle from the local apparent sidereal time, sidereal_time_ut's
+    // GAST plus the east longitude. Geodetic latitude; polar motion is
+    // neglected. With an atmosphere the apparent altitude carries Bennett's
+    // refraction, down to the dip of the site's height (or -1 deg); without
+    // one it equals the true altitude.
+    struct Horizontal {
+        double azimuth_deg = 0.0;           // from north through east, [0, 360)
+        double altitude_deg = 0.0;          // true: no refraction
+        double apparent_altitude_deg = 0.0; // refracted
+        double hour_angle_deg = 0.0;        // local apparent, [0, 360)
+    };
+    Result<Horizontal> horizontal_ut(double jd_ut1, const frames::GeoSite& site, double ra_deg,
+                                     double dec_deg, const frames::Atmosphere* atmosphere,
+                                     Precession precession = Precession::Vondrak2011);
+    // And back: an azimuth and an altitude (apparent, refraction removed,
+    // when `apparent`) to right ascension and declination of date.
+    struct Equatorial {
+        double ra_deg = 0.0; // [0, 360)
+        double dec_deg = 0.0;
+    };
+    Result<Equatorial>
+    equatorial_from_horizontal_ut(double jd_ut1, const frames::GeoSite& site, double azimuth_deg,
+                                  double altitude_deg, bool apparent,
+                                  const frames::Atmosphere* atmosphere,
+                                  Precession precession = Precession::Vondrak2011);
+
     // Delta T model for UT inputs and topocentric Earth rotation. Not
     // owned; nullptr restores the default (time::ObservedDeltaT).
     void set_delta_t_model(const time::DeltaTModel* model);

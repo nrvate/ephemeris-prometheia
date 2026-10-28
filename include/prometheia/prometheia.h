@@ -658,6 +658,91 @@ PROMETHEIA_API void prometheia_equatorial_to_ecliptic(double ra_deg, double dec_
                                                       double obliquity_deg, double* lon_deg,
                                                       double* lat_deg);
 
+/* ---- The horizon and refraction (after 0.7.3) -------------------------------
+ *
+ * docs/FRAMES.md, "The horizon". Added after library 0.7.3; the ABI version
+ * is unchanged, as no existing layout changed. Degrees throughout.
+ */
+
+/* The air refraction is scaled by. prometheia_atmosphere_init gives the
+ * standard 1013.25 hPa and 15 C. The dip of the sea horizon is the almanac
+ * value for standard conditions, 1.76' sqrt(height_m); no lapse rate
+ * enters. A dip from a lapse rate, if it comes, is a call of its own, so
+ * this struct keeps its layout. */
+typedef struct prometheia_atmosphere {
+    double pressure_hpa;
+    double temperature_c;
+} prometheia_atmosphere;
+
+PROMETHEIA_API void prometheia_atmosphere_init(prometheia_atmosphere* atmosphere);
+
+typedef struct prometheia_horizontal {
+    /* From NORTH through east, [0, 360): 90 is east. (pyswisseph's azalt
+     * counts from the south, westward: 180 deg apart.) */
+    double azimuth_deg;
+    double altitude_deg;          /* true: no refraction */
+    double apparent_altitude_deg; /* refracted; the true altitude without an atmosphere */
+    /* Local apparent hour angle, positive westward, [0, 360): 350 is 10 deg
+     * east of the meridian. */
+    double hour_angle_deg;
+} prometheia_horizontal;
+
+/*
+ * A direction on the true equator and equinox of date, ra_deg/dec_deg, in
+ * the horizon of a site at a UT1 Julian date. For a body, that is its
+ * topocentric apparent position from the same site: prometheia_calc_ut
+ * with PROMETHEIA_CENTER_TOPOCENTRIC, PROMETHEIA_FRAME_TRUE_OF_DATE and
+ * PROMETHEIA_COORDS_EQUATORIAL. No parallax is applied here; the direction
+ * is taken as given, and height_m sets only the dip.
+ *
+ * The hour angle is from the local apparent sidereal time: GAST, as
+ * prometheia_sidereal_time_ut gives it (TT from the engine's Delta T, the
+ * same one calc_ut uses, including a function installed with
+ * prometheia_engine_set_delta_t), plus lon_deg, east positive. The latitude
+ * is geodetic; polar motion is neglected. Only opts->precession enters
+ * (NULL: the default).
+ *
+ * With an atmosphere, the apparent altitude carries Bennett's refraction
+ * (prometheia_refraction). NULL means no atmosphere: apparent = true.
+ */
+PROMETHEIA_API prometheia_status prometheia_horizontal_ut(
+    prometheia_engine* engine, double jd_ut1, double lon_deg, double lat_deg, double height_m,
+    double ra_deg, double dec_deg, const prometheia_atmosphere* atmosphere,
+    const prometheia_options* opts, prometheia_horizontal* out, prometheia_error* err);
+
+/* And back: an azimuth and altitude to right ascension [0, 360) and
+ * declination of date. With apparent nonzero and an atmosphere, the
+ * altitude is apparent and its refraction is removed first, as
+ * prometheia_refraction(..., PROMETHEIA_REFRACTION_FROM_APPARENT, ...) does. */
+PROMETHEIA_API prometheia_status prometheia_equatorial_from_horizontal_ut(
+    prometheia_engine* engine, double jd_ut1, double lon_deg, double lat_deg, double height_m,
+    double azimuth_deg, double altitude_deg, int apparent, const prometheia_atmosphere* atmosphere,
+    const prometheia_options* opts, double* ra_deg, double* dec_deg, prometheia_error* err);
+
+/*
+ * Refraction R, degrees: Bennett 1982, cot(h + 7.31/(h + 4.4)) arcminutes
+ * with his correction -0.06 sin(14.7 R + 13 deg), scaled by
+ * (P/1010)(283/(273 + T)) (atmosphere NULL: the standard one).
+ *
+ * The cutoff c is the dip for height_m, below the astronomical horizon, or
+ * -1 deg, whichever is higher. An apparent altitude at or above c is
+ * refracted; below it, apparent = true and R = 0.
+ *   - FROM_APPARENT, altitude h: R(h) when h >= c, else 0; true = h - R.
+ *   - FROM_TRUE, altitude t: apparent = t + R, the formula inverted; R = 0
+ *     when that apparent altitude would fall below c.
+ * So true altitudes at or above t* = c - R(c) (about half a degree below c)
+ * become apparent ones at or above c, and those below t* stay below t*: the
+ * apparent altitudes in [t*, c) are never produced. From a true altitude
+ * and back is exact to 1e-10 arcsec everywhere; from an apparent altitude
+ * and back, everywhere outside [t*, c).
+ */
+#define PROMETHEIA_REFRACTION_FROM_TRUE 0
+#define PROMETHEIA_REFRACTION_FROM_APPARENT 1
+PROMETHEIA_API prometheia_status prometheia_refraction(double altitude_deg, int from,
+                                                       const prometheia_atmosphere* atmosphere,
+                                                       double height_m, double* out_deg,
+                                                       prometheia_error* err);
+
 /* ---- Time scales (docs/TIME.md) -------------------------------------------- */
 
 /* JD of a proleptic Gregorian date and wall-clock time, in whatever

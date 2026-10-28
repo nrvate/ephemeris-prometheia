@@ -2257,9 +2257,10 @@ TEST_CASE("server_houses_match_the_reference_rows") {
             (placidus ? worst_placidus : worst) = std::max(placidus ? worst_placidus : worst, d);
         }
     }
-    // Their 513437f, nine decimals (docs/HOUSES.md).
+    // Their 428d095: nine decimals (513437f), out-of-order cusps refused
+    // (the 3.5b amendment of 2026-10-27; docs/HOUSES.md).
     CHECK_MESSAGE(rows_sha.hex() ==
-                      "855a73426353f23a542c0601a317f9a704100806dd651d3fafa7360000a73b29",
+                      "e9b87707dce260e45667a2ca726a36166753dab94a72fd98a4d6ce4c3a9e3373",
                   "Astrolog's houses-rows.tsv changed: review it and re-pin");
     CHECK(rows == 2244);
     std::printf("  houses-rows.tsv: %d rows, %d cells, worst %.6f\" (Placidus %.6f\"); %d rows "

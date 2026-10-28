@@ -13,6 +13,22 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **The horizon and refraction** ([docs/FRAMES.md](docs/FRAMES.md), "The
+  horizon"):
+  - azimuth (from north through east) and altitude from a direction of date,
+    and back;
+  - Bennett 1982 refraction, scaled by pressure and temperature and applied
+    down to the dip of the eye's height or −1°.
+  - In the engine, the C API (`prometheia_horizontal_ut`,
+    `_equatorial_from_horizontal_ut`, `prometheia_refraction`; ABI
+    unchanged, announced to Astrolog first) and the Python binding.
+  - Checked against ERFA: the geometry to 3e-11″, and refraction within 1.9″
+    above 15°.
+- **Python: no module-level client state.** `set_server`, `set_ephe_path`,
+  `default_client` and `close` existed for `prometheia.swe` and are removed.
+  `Client()` with no arguments follows `$PROMETHEIA_SERVER` and
+  `$PROMETHEIA_EPHEMERIS`. The native names are re-exported at
+  `prometheia.*`, and a type stub (`_native.pyi`, `py.typed`) ships.
 - **Python: a native binding** ([docs/PYTHON.md](docs/PYTHON.md), "Native").
   `prometheia.Dataset`, a `Context` per thread, and `Options` in the JSON
   tools' words run the engine in process through the C interface, bit for

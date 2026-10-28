@@ -3648,6 +3648,77 @@ Result<double> Engine::obliquity(double jd_tt, bool true_obliquity, Precession p
     return (true_obliquity ? f.eps_mean + f.deps : f.eps_mean) * kRad2Deg;
 }
 
+namespace {
+
+double wrap360(double d) {
+    d = std::fmod(d, 360.0);
+    if (d < 0.0)
+        d += 360.0;
+    return d >= 360.0 ? 0.0 : d;
+}
+
+std::optional<Error> horizon_site(const frames::GeoSite& site) {
+    if (!std::isfinite(site.lon_rad) || !std::isfinite(site.lat_rad) ||
+        !std::isfinite(site.height_m) || std::fabs(site.lat_rad * kRad2Deg) > 90.0)
+        return Error{ErrorCode::ArgumentError,
+                     "a horizon needs a finite site, its latitude within -90..90 degrees"};
+    return std::nullopt;
+}
+
+} // namespace
+
+Result<Engine::Horizontal> Engine::horizontal_ut(double jd_ut1, const frames::GeoSite& site,
+                                                 double ra_deg, double dec_deg,
+                                                 const frames::Atmosphere* atm,
+                                                 Precession precession) {
+    if (auto e = horizon_site(site))
+        return *e;
+    if (!std::isfinite(ra_deg) || !std::isfinite(dec_deg) || std::fabs(dec_deg) > 90.0)
+        return make_error(ErrorCode::ArgumentError,
+                          "a horizon needs a finite direction, its declination within -90..90");
+    auto gast = sidereal_time_ut(jd_ut1, true, precession);
+    if (!gast)
+        return gast.error();
+    Horizontal h;
+    h.hour_angle_deg = wrap360(gast.value() + site.lon_rad * kRad2Deg - ra_deg);
+    double az = 0.0, alt = 0.0;
+    frames::equatorial_to_horizontal(h.hour_angle_deg / kRad2Deg, dec_deg / kRad2Deg, site.lat_rad,
+                                     az, alt);
+    h.azimuth_deg = az * kRad2Deg;
+    h.altitude_deg = alt * kRad2Deg;
+    h.apparent_altitude_deg =
+        atm ? h.altitude_deg + frames::refraction_from_true_deg(
+                                   h.altitude_deg, *atm, frames::horizon_dip_deg(site.height_m))
+            : h.altitude_deg;
+    return h;
+}
+
+Result<Engine::Equatorial>
+Engine::equatorial_from_horizontal_ut(double jd_ut1, const frames::GeoSite& site,
+                                      double azimuth_deg, double altitude_deg, bool apparent,
+                                      const frames::Atmosphere* atm, Precession precession) {
+    if (auto e = horizon_site(site))
+        return *e;
+    if (!std::isfinite(azimuth_deg) || !std::isfinite(altitude_deg) ||
+        std::fabs(altitude_deg) > 90.0)
+        return make_error(ErrorCode::ArgumentError,
+                          "a horizon direction needs a finite azimuth and an altitude within "
+                          "-90..90");
+    auto gast = sidereal_time_ut(jd_ut1, true, precession);
+    if (!gast)
+        return gast.error();
+    const double alt = apparent && atm ? altitude_deg - frames::refraction_from_apparent_deg(
+                                                            altitude_deg, *atm,
+                                                            frames::horizon_dip_deg(site.height_m))
+                                       : altitude_deg;
+    double ha = 0.0, dec = 0.0;
+    frames::horizontal_to_equatorial(azimuth_deg / kRad2Deg, alt / kRad2Deg, site.lat_rad, ha, dec);
+    Equatorial q;
+    q.ra_deg = wrap360(gast.value() + site.lon_rad * kRad2Deg - ha * kRad2Deg);
+    q.dec_deg = dec * kRad2Deg;
+    return q;
+}
+
 Result<CalcResult> Engine::calc_orbit_point_ut(int id, OrbitPoint point, OrbitElements elements,
                                                double jd_ut1, const CalcOptions& o) {
     if (!impl_)

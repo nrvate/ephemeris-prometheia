@@ -38,7 +38,7 @@ class StdioTransport:
 
     def __init__(self, ephemeris, executable=None, catalogs=(), perturbers=()):
         if not ephemeris:
-            raise Error("no ephemeris file: call set_ephe_path() with a JPL DE file or a "
+            raise Error("no ephemeris file: give Client(ephemeris=...) a JPL DE file or a "
                         "directory holding one, or set PROMETHEIA_EPHEMERIS")
         self.ephemeris = list(ephemeris)
         self.executable = executable or find_executable()
@@ -204,7 +204,7 @@ PERTURBER_NAMES = ("sb441-n16.bsp", "sb441-n16-de440span.bsp")
 
 
 def discover(path):
-    """What a set_ephe_path() argument holds: (ephemerides, catalogs, perturbers).
+    """What a Client(ephemeris=...) argument holds: (ephemerides, catalogs, perturbers).
 
     A file, several (os.pathsep), or a directory: in a directory DE440 and
     DE441, every *.epm small-body catalog, and the SB441 perturber kernel."""

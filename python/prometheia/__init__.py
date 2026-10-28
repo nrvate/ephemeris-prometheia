@@ -10,33 +10,49 @@ process through the C interface, when the native extension is built
 whole chart or a series in one call, every answer with its provenance, over
 a server or a local prometheia-json; it needs no compiler.
 
-Where the answers come from, first match wins:
+A Client made with no arguments answers from, first match wins:
 
-1. ``set_server(url)`` or ``$PROMETHEIA_SERVER``: a ``ws(s)://`` address of a
-   prometheiad (protocol v4, binary), or an ``http(s)://`` URL of a running
-   ``prometheia-json --http``.
-2. ``set_ephe_path(path)`` or ``$PROMETHEIA_EPHEMERIS``: a JPL DE file, or a
-   directory holding DE440 (and DE441, used behind it), any ``*.epm``
-   small-body catalogs and the SB441 perturber kernel; a local
-   ``prometheia-json`` is started over stdio ($PROMETHEIA_JSON, PATH, or this
-   repository's build/). Several paths join with os.pathsep, so a catalog
-   kept elsewhere can be named beside the directory.
+1. ``$PROMETHEIA_SERVER`` (with ``$PROMETHEIA_TOKEN``): a ``ws(s)://``
+   address of a prometheiad (protocol v4, binary), or an ``http(s)://`` URL
+   of a running ``prometheia-json --http``.
+2. ``$PROMETHEIA_EPHEMERIS``: a JPL DE file, or a directory holding DE440
+   (and DE441, used behind it), any ``*.epm`` small-body catalogs and the
+   SB441 perturber kernel; a local ``prometheia-json`` is started over stdio
+   ($PROMETHEIA_JSON, PATH, or this repository's build/). Several paths join
+   with os.pathsep, so a catalog kept elsewhere can be named beside the
+   directory.
+
+There is no module-level state: every client is made, and closed, by its
+caller.
 """
 import os
 
 from ._errors import Error
 from ._transport import HttpTransport, StdioTransport, ToolError, discover
 
-__all__ = ["Client", "Error", "ToolError", "default_client", "set_server", "set_ephe_path",
-           "close", "native"]
+__all__ = ["Client", "Error", "ToolError", "native"]
 
+# The native binding's public names, at the top of the package (the
+# extension module itself is an implementation detail); _native.pyi types them.
 try:
-    from ._native import Context, Dataset, Houses, Options, Position
+    from ._native import (BODIES, COORDINATES, CORRECTIONS, FRAMES, HOUSE_SYSTEMS, METHODS,
+                          OBSERVERS, POINTS, PRECESSION, SIDEREAL_PLANES, ZODIACS, Context,
+                          Dataset, Horizontal, Houses, Options, Position, abi_version,
+                          civil_from_jd, constellation_at, delta_t, ecliptic_to_equatorial,
+                          equatorial_to_ecliptic, houses_from_armc, jd_from_ymdhms, refraction,
+                          star_count, star_find, star_info, star_lookup, tdb_minus_tt, tt_to_utc,
+                          utc_to_tt, version)
 except ImportError:  # the extension is not built: the client alone
     native = False
 else:
     native = True
-    __all__ += ["Context", "Dataset", "Houses", "Options", "Position"]
+    __all__ += ["BODIES", "COORDINATES", "CORRECTIONS", "FRAMES", "HOUSE_SYSTEMS", "METHODS",
+                "OBSERVERS", "POINTS", "PRECESSION", "SIDEREAL_PLANES", "ZODIACS", "Context",
+                "Dataset", "Horizontal", "Houses", "Options", "Position", "abi_version",
+                "civil_from_jd", "constellation_at", "delta_t", "ecliptic_to_equatorial",
+                "equatorial_to_ecliptic", "houses_from_armc", "jd_from_ymdhms", "refraction",
+                "star_count", "star_find", "star_info", "star_lookup", "tdb_minus_tt",
+                "tt_to_utc", "utc_to_tt", "version"]
 __version__ = "0.7.3"
 
 
@@ -45,6 +61,10 @@ class Client:
 
     def __init__(self, server=None, ephemeris=None, executable=None, token=None, catalogs=(),
                  perturbers=()):
+        if server is None and ephemeris is None:
+            server = os.environ.get("PROMETHEIA_SERVER") or None
+            token = token or os.environ.get("PROMETHEIA_TOKEN")
+            ephemeris = None if server else os.environ.get("PROMETHEIA_EPHEMERIS")
         if server:
             if server.startswith(("ws://", "wss://")):
                 from ._binary import BinaryTransport
@@ -83,45 +103,3 @@ class Client:
 
     def __exit__(self, *exc):
         self.close()
-
-
-_default = None
-_server = None
-_ephemeris = None
-
-
-def set_server(url, token=None):
-    """Answer from a running prometheia-json --http at ``url``."""
-    global _server, _default
-    close()
-    _server = (url, token)
-
-
-def set_ephe_path(path):
-    """Answer from a local prometheia-json on this ephemeris file or directory."""
-    global _ephemeris, _server
-    close()
-    _server = None
-    _ephemeris = path
-
-
-def default_client():
-    """The client made on first need from the settings above."""
-    global _default
-    if _default is None:
-        if _server:
-            _default = Client(server=_server[0], token=_server[1])
-        elif os.environ.get("PROMETHEIA_SERVER") and _ephemeris is None:
-            _default = Client(server=os.environ["PROMETHEIA_SERVER"],
-                              token=os.environ.get("PROMETHEIA_TOKEN"))
-        else:
-            _default = Client(ephemeris=_ephemeris or os.environ.get("PROMETHEIA_EPHEMERIS"))
-    return _default
-
-
-def close():
-    """Stop the default client's connection or child process."""
-    global _default
-    if _default is not None:
-        _default.close()
-        _default = None

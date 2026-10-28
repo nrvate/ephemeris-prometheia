@@ -363,6 +363,50 @@ that with the Galactic Centre in mid-Mula, Revati is "almost exactly" at
   exactly as a user zodiac anchored at that instant with that instant's
   mean ayanamsha.
 
+## The horizon
+
+`frames::equatorial_to_horizontal` and its inverse, `Engine::horizontal_ut`
+and `equatorial_from_horizontal_ut`, the C API's `prometheia_horizontal_ut`,
+`_equatorial_from_horizontal_ut` and `prometheia_refraction` (added
+2026-10-27).
+
+- **Geometry.** The hour angle is the local apparent sidereal time less the
+  right ascension of date. That sidereal time is GAST
+  (`sidereal_time_ut`, with TT from the engine's ΔT) plus the east
+  longitude. Azimuth runs from **north through east**, [0°, 360°), and the
+  hour angle is positive westward. The latitude is geodetic, and polar
+  motion (≤ 0.3″) is neglected, as for houses and topocentric sites.
+  Altitude comes from atan2, never asin.
+  - The direction is taken as given, with no parallax applied. For a body
+    it is the topocentric apparent position from the same site. The site's
+    height enters only the dip.
+  - Against ERFA 2.0.1's `hd2ae`, eight cases over both hemispheres and
+    every quadrant agree to 3e-11″, and to 1e-10″ back
+    (`horizon_geometry_matches_erfa`).
+- **Refraction** (Bennett 1982): R = cot(h + 7.31/(h + 4.4)) arcminutes for
+  an apparent altitude h. It carries his correction
+  −0.06′ sin(14.7R + 13°) and is scaled by (P/1010)(283/(273 + T)).
+  - Standard air (1013.25 hPa, 15 °C) gives 33.97′ at the horizon, 5.26′ at
+    10° and 0.95′ at 45°. At the zenith it gives −0.88″, within the 0.015′
+    Bennett states for the corrected formula.
+  - Above 15°, ERFA's `refco` model (A tan z + B tan³ z, which holds there)
+    agrees to within **1.9″**, measured at every 0.25° of altitude.
+  - The true → apparent direction is the same formula inverted by
+    fixed-point iteration, so the two round-trip to 1e-10″.
+- **The cutoff.** Refraction is applied while the apparent altitude is at
+  least the cutoff c. That is the dip of the sea horizon for the eye's
+  height, 1.76′√h (the almanac value for standard conditions; no lapse rate
+  enters), or −1°, whichever is higher. With no height, c is the
+  astronomical horizon. Below c the apparent altitude is the true one.
+  - So true altitudes from t* = c − R(c), about half a degree below c, are
+    refracted to c or above, and those below t* are not refracted. The
+    apparent altitudes in [t*, c) are never produced: an apparent altitude
+    read there is taken as unrefracted.
+  - The −1° floor is ours. Bennett's curve was fitted from the horizon up,
+    and a degree below it is as far as we take it.
+  - `refraction_at_the_cutoff` pins both sides at ±1e-6°.
+- **Oracle.** ERFA throughout, not `swetest`.
+
 ## Accuracy notes
 
 - ICRF vs the J2000 mean equator/ecliptic differ by the ~0.02″ frame

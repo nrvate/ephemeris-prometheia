@@ -375,6 +375,39 @@ cdef extern from "prometheia/prometheia.h" nogil:
                                            double obliquity_deg, double* lon_deg,
                                            double* lat_deg) noexcept
 
+    # The horizon and refraction
+    ctypedef struct prometheia_atmosphere:
+        double pressure_hpa
+        double temperature_c
+
+    void prometheia_atmosphere_init(prometheia_atmosphere* atmosphere) noexcept
+
+    ctypedef struct prometheia_horizontal:
+        double azimuth_deg
+        double altitude_deg
+        double apparent_altitude_deg
+        double hour_angle_deg
+
+    prometheia_status prometheia_horizontal_ut(prometheia_engine* engine, double jd_ut1,
+                                               double lon_deg, double lat_deg, double height_m,
+                                               double ra_deg, double dec_deg,
+                                               const prometheia_atmosphere* atmosphere,
+                                               const prometheia_options* opts,
+                                               prometheia_horizontal* out,
+                                               prometheia_error* err) noexcept
+    prometheia_status prometheia_equatorial_from_horizontal_ut(
+        prometheia_engine* engine, double jd_ut1, double lon_deg, double lat_deg,
+        double height_m, double azimuth_deg, double altitude_deg, int apparent,
+        const prometheia_atmosphere* atmosphere, const prometheia_options* opts,
+        double* ra_deg, double* dec_deg, prometheia_error* err) noexcept
+
+    int PROMETHEIA_REFRACTION_FROM_TRUE
+    int PROMETHEIA_REFRACTION_FROM_APPARENT
+    prometheia_status prometheia_refraction(double altitude_deg, int from_,
+                                            const prometheia_atmosphere* atmosphere,
+                                            double height_m, double* out_deg,
+                                            prometheia_error* err) noexcept
+
     # Time scales
     double prometheia_jd_from_ymdhms(int year, int month, int day, int hour, int minute,
                                      double second) noexcept

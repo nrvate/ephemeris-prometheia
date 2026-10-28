@@ -232,6 +232,36 @@ cdef Houses houses_of(const c.prometheia_houses* h):
     return out
 
 
+cdef class Horizontal:
+    """A direction in a site's horizon: azimuth from north through east and
+    the true and apparent (refracted) altitudes, degrees, with the local
+    apparent hour angle (docs/FRAMES.md, "The horizon")."""
+    cdef readonly double azimuth_deg, altitude_deg, apparent_altitude_deg, hour_angle_deg
+
+    def __repr__(self):
+        return ("Horizontal(azimuth_deg=%r, altitude_deg=%r, apparent_altitude_deg=%r)"
+                % (self.azimuth_deg, self.altitude_deg, self.apparent_altitude_deg))
+
+
+cdef int atmosphere_of(object atmosphere, c.prometheia_atmosphere* out) except -1:
+    """None: no atmosphere (returns 0). "standard", (pressure_hpa,
+    temperature_c) or {"pressure_hpa", "temperature_c"}: fills out (1)."""
+    if atmosphere is None:
+        return 0
+    c.prometheia_atmosphere_init(out)
+    if atmosphere == "standard":
+        return 1
+    if isinstance(atmosphere, dict):
+        out.pressure_hpa = atmosphere.get("pressure_hpa", out.pressure_hpa)
+        out.temperature_c = atmosphere.get("temperature_c", out.temperature_c)
+    elif isinstance(atmosphere, (tuple, list)) and len(atmosphere) == 2:
+        out.pressure_hpa, out.temperature_c = atmosphere
+    else:
+        raise Error('an atmosphere is None, "standard", (pressure_hpa, temperature_c) or '
+                    '{"pressure_hpa", "temperature_c"}', code="argument")
+    return 1
+
+
 cdef bint is_ut(str scale) except -1:
     if scale == "tt":
         return False
@@ -392,6 +422,50 @@ cdef class Context:
             fail(st, &err)
         return out
 
+    def horizontal(self, double jd_ut1, double lon_deg, double lat_deg, double ra_deg,
+                   double dec_deg, atmosphere=None, double height_m=0.0, Options options=None):
+        """A direction on the true equator and equinox of date (for a body,
+        its topocentric apparent position from this site) in the site's
+        horizon. atmosphere None: no refraction; "standard" or (hPa, C):
+        Bennett's, down to the dip for height_m. Of the options only the
+        precession model enters."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef const c.prometheia_options* o = opts_of(options)
+        cdef c.prometheia_atmosphere air
+        cdef const c.prometheia_atmosphere* a = &air if atmosphere_of(atmosphere, &air) else NULL
+        cdef c.prometheia_horizontal h
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_horizontal_ut(e, jd_ut1, lon_deg, lat_deg, height_m, ra_deg,
+                                            dec_deg, a, o, &h, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        cdef Horizontal out = Horizontal.__new__(Horizontal)
+        out.azimuth_deg, out.altitude_deg = h.azimuth_deg, h.altitude_deg
+        out.apparent_altitude_deg, out.hour_angle_deg = h.apparent_altitude_deg, h.hour_angle_deg
+        return out
+
+    def equatorial_from_horizontal(self, double jd_ut1, double lon_deg, double lat_deg,
+                                   double azimuth_deg, double altitude_deg, bint apparent=True,
+                                   atmosphere=None, double height_m=0.0, Options options=None):
+        """(ra_deg, dec_deg) of date for an azimuth and altitude; with
+        apparent and an atmosphere, the refraction is removed first."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef const c.prometheia_options* o = opts_of(options)
+        cdef c.prometheia_atmosphere air
+        cdef const c.prometheia_atmosphere* a = &air if atmosphere_of(atmosphere, &air) else NULL
+        cdef double ra = 0.0, dec = 0.0
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_equatorial_from_horizontal_ut(e, jd_ut1, lon_deg, lat_deg, height_m,
+                                                            azimuth_deg, altitude_deg, apparent,
+                                                            a, o, &ra, &dec, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return ra, dec
+
     def lookup(self, str name):
         """A catalog body's SPK-ID from its designation or name ("1",
         "Ceres"); Error code "not-found" when no loaded catalog has it."""
@@ -546,6 +620,24 @@ def equatorial_to_ecliptic(double ra_deg, double dec_deg, double obliquity_deg):
     cdef double a = 0.0, b = 0.0
     c.prometheia_equatorial_to_ecliptic(ra_deg, dec_deg, obliquity_deg, &a, &b)
     return a, b
+
+
+def refraction(double altitude_deg, str from_="true", atmosphere="standard",
+               double height_m=0.0):
+    """Refraction R, degrees (Bennett 1982): from a "true" altitude,
+    apparent = true + R; from an "apparent" one, true = apparent - R. Zero
+    below the dip for height_m, or below -1 deg."""
+    cdef int d = word({"true": c.PROMETHEIA_REFRACTION_FROM_TRUE,
+                       "apparent": c.PROMETHEIA_REFRACTION_FROM_APPARENT}, from_, "from_")
+    cdef c.prometheia_atmosphere air
+    cdef const c.prometheia_atmosphere* a = &air if atmosphere_of(atmosphere, &air) else NULL
+    cdef double out = 0.0
+    cdef c.prometheia_error err
+    cdef c.prometheia_status st = c.prometheia_refraction(altitude_deg, d, a, height_m, &out,
+                                                          &err)
+    if st != c.PROMETHEIA_OK:
+        fail(st, &err)
+    return out
 
 
 def utc_to_tt(int year, int month, int day, int hour=0, int minute=0, double second=0.0):

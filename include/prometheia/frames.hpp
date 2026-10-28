@@ -248,6 +248,38 @@ struct GeoSite {
 // motion (<= 0.3") is neglected.
 void observer_geocentric(const GeoSite& site, double gast, double out[3]);
 
+// --- The horizon (docs/FRAMES.md, "The horizon") --------------------
+
+// The air refraction is scaled by: pressure and temperature at the site.
+struct Atmosphere {
+    double pressure_hpa = 1013.25;
+    double temperature_c = 15.0;
+};
+
+// The dip of the sea horizon below the astronomical one for an eye at
+// height_m, degrees: 1.76' sqrt(h) (almanac practice); 0 at or below 0 m.
+double horizon_dip_deg(double height_m);
+
+// Refraction R (degrees) for an apparent altitude, so that true = apparent -
+// R: Bennett 1982, cot(h + 7.31/(h + 4.4)) arcminutes with his correction
+// -0.06 sin(14.7 R + 13 deg), scaled by (P/1010)(283/(273 + T)). R is 0
+// where the apparent altitude lies below -dip, or below -1 deg, where the
+// formula leaves the range it was fitted over.
+double refraction_from_apparent_deg(double apparent_alt_deg, const Atmosphere& atm,
+                                    double dip_deg = 0.0);
+// The R for a true altitude, apparent = true + R: the same formula inverted
+// (to 1e-12 deg), so the two round-trip; 0 where the apparent altitude it
+// would give lies below -dip or -1 deg.
+double refraction_from_true_deg(double true_alt_deg, const Atmosphere& atm, double dip_deg = 0.0);
+
+// Hour angle and declination to azimuth (from north through east, [0,
+// 2pi)) and altitude, at a geodetic latitude; radians. And back. A pure
+// rotation, by atan2 throughout.
+void equatorial_to_horizontal(double hour_angle, double dec, double lat, double& azimuth,
+                              double& altitude);
+void horizontal_to_equatorial(double azimuth, double altitude, double lat, double& hour_angle,
+                              double& dec);
+
 } // namespace prometheia::frames
 
 #endif // PROMETHEIA_FRAMES_HPP

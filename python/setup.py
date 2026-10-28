@@ -45,4 +45,4 @@ def ext_modules():
 
 
 setup(ext_modules=ext_modules(),
-      package_data={"prometheia": ["cprometheia.pxd", "_native.pyx"]})
+      package_data={"prometheia": ["cprometheia.pxd", "_native.pyx", "_native.pyi", "py.typed"]})

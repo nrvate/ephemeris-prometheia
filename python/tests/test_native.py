@@ -57,6 +57,33 @@ class Surface(unittest.TestCase):
         self.assertEqual(missing, [])
         self.assertEqual(n.abi_version(), 6)
 
+    def test_stub_matches_the_module(self):
+        import ast
+        with open(os.path.join(REPO, "python", "prometheia", "_native.pyi")) as f:
+            tree = ast.parse(f.read())
+        stub = {}
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                stub[node.name] = {m.name for m in node.body
+                                   if isinstance(m, ast.FunctionDef) and not m.name.startswith("_")}
+            elif isinstance(node, ast.FunctionDef):
+                stub[node.name] = None
+            elif isinstance(node, ast.AnnAssign) and node.target.id.isupper():
+                stub[node.target.id] = None
+        public = {k for k in dir(n) if not k.startswith("_") and k not in (
+            "Error", "threading", "Atmosphere")}
+        self.assertEqual(public - set(stub), set())  # nothing untyped
+        self.assertEqual(set(stub) - public - {"Scale", "Site", "Atmosphere"}, set())
+        for cls, methods in stub.items():
+            if methods:
+                real = {m for m in dir(getattr(n, cls)) if not m.startswith("_")}
+                self.assertEqual(methods - real, set(), cls)
+                attrs = {m for m in real if not callable(getattr(getattr(n, cls), m, None))}
+                self.assertEqual(real - methods - attrs, set(), cls)
+        # And the package re-exports every one.
+        for name in public:
+            self.assertIs(getattr(prometheia, name), getattr(n, name))
+
     def test_words_are_the_registry_names(self):
         a11 = {e["index"]: e["token"] for e in registry("A.11")}
         for token, value in n.ZODIACS.items():
@@ -221,6 +248,41 @@ class Engine(unittest.TestCase):
         closed.close()
         with self.assertRaises(prometheia.Error):
             closed.calc(4, 2451545.0)
+
+    def test_horizon(self):
+        import math
+        ctx = self.ds.local()
+        jd_ut1, lon, lat = 2461000.25, 8.55, 47.37
+        o = n.Options(observer="topocentric", site=(lon, lat, 400.0), frame="true-of-date",
+                      coordinates="equatorial")
+        sun = ctx.calc(n.BODIES["sun"], jd_ut1, o, scale="ut1")
+        h = ctx.horizontal(jd_ut1, lon, lat, sun.lon_deg, sun.lat_deg)
+        # Independently: the hour angle from GAST, then the spherical triangle.
+        ha = math.radians((ctx.sidereal_time(jd_ut1) + lon - sun.lon_deg) % 360.0)
+        d, p = math.radians(sun.lat_deg), math.radians(lat)
+        alt = math.degrees(math.asin(math.sin(p) * math.sin(d) +
+                                     math.cos(p) * math.cos(d) * math.cos(ha)))
+        az = math.degrees(math.atan2(-math.cos(d) * math.sin(ha), math.sin(d) * math.cos(p) -
+                                     math.cos(d) * math.sin(p) * math.cos(ha))) % 360.0
+        self.assertAlmostEqual(h.altitude_deg, alt, places=9)
+        self.assertAlmostEqual(h.azimuth_deg, az, places=9)
+        self.assertEqual(h.apparent_altitude_deg, h.altitude_deg)  # no atmosphere
+        refr = ctx.horizontal(jd_ut1, lon, lat, sun.lon_deg, sun.lat_deg, "standard", 400.0)
+        self.assertAlmostEqual(refr.apparent_altitude_deg - refr.altitude_deg,
+                               n.refraction(refr.altitude_deg, "true", "standard", 400.0),
+                               places=12)
+        ra, dec = ctx.equatorial_from_horizontal(jd_ut1, lon, lat, refr.azimuth_deg,
+                                                 refr.apparent_altitude_deg, True, "standard",
+                                                 400.0)
+        self.assertAlmostEqual(ra, sun.lon_deg, places=9)
+        self.assertAlmostEqual(dec, sun.lat_deg, places=9)
+        self.assertAlmostEqual(n.refraction(0.0, "apparent") * 60.0, 33.9676, places=4)
+        self.assertEqual(n.refraction(-0.5, "apparent"), 0.0)
+        self.assertGreater(n.refraction(-0.5, "apparent", height_m=1000.0), 0.0)
+        with self.assertRaises(prometheia.Error):
+            ctx.horizontal(jd_ut1, lon, lat, 0.0, 0.0, atmosphere="thin")
+        with self.assertRaises(prometheia.Error):
+            n.refraction(5.0, "upward")
 
     def test_sidereal_time_is_the_houses_armc(self):
         ctx = self.ds.local()

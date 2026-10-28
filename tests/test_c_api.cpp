@@ -1017,4 +1017,84 @@ TEST_CASE("c_api_rotations") {
     prometheia_ecliptic_to_equatorial(10.0, 10.0, eps, nullptr, nullptr); // NULL is fine
 }
 
+TEST_CASE("c_api_horizon_matches_engine") {
+    TempFile tf("capi-horizon");
+    synth::write_linear_spk(tf.path);
+    auto cpp = Engine::open(tf.path.string());
+    CHandle c;
+    CHECK(prometheia_engine_open(tf.path.c_str(), &c.e, nullptr) == PROMETHEIA_OK);
+    if (!cpp.ok() || !c.e)
+        return;
+    prometheia_atmosphere air;
+    prometheia_atmosphere_init(&air);
+    CHECK(air.pressure_hpa == 1013.25);
+    CHECK(air.temperature_c == 15.0);
+    const frames::Atmosphere cair;
+    double worst_back = 0.0;
+    for (double jd : {kJ2000 + 0.25, 2461000.71}) {
+        for (double lat : {47.37, -33.9, 78.2}) {
+            for (double ra = 0.0; ra < 360.0; ra += 40.0) {
+                for (double dec : {-60.0, -5.0, 0.0, 23.0, 75.0}) {
+                    for (const prometheia_atmosphere* atm :
+                         {&air, (prometheia_atmosphere*)nullptr}) {
+                        const frames::GeoSite site{8.55 * kDegToRad, lat * kDegToRad, 120.0};
+                        prometheia_horizontal h;
+                        REQUIRE(prometheia_horizontal_ut(c.e, jd, 8.55, lat, 120.0, ra, dec, atm,
+                                                         nullptr, &h, nullptr) == PROMETHEIA_OK);
+                        auto r =
+                            cpp.value().horizontal_ut(jd, site, ra, dec, atm ? &cair : nullptr);
+                        REQUIRE(r.ok());
+                        CHECK(h.azimuth_deg == r.value().azimuth_deg);
+                        CHECK(h.altitude_deg == r.value().altitude_deg);
+                        CHECK(h.apparent_altitude_deg == r.value().apparent_altitude_deg);
+                        CHECK(h.hour_angle_deg == r.value().hour_angle_deg);
+                        if (!atm)
+                            CHECK(h.apparent_altitude_deg == h.altitude_deg);
+                        // And back, from the apparent altitude.
+                        double ra2, dec2;
+                        REQUIRE(prometheia_equatorial_from_horizontal_ut(
+                                    c.e, jd, 8.55, lat, 120.0, h.azimuth_deg,
+                                    h.apparent_altitude_deg, 1, atm, nullptr, &ra2, &dec2,
+                                    nullptr) == PROMETHEIA_OK);
+                        worst_back =
+                            std::max({worst_back, arcsec(ra2, ra) * std::cos(dec * kDegToRad),
+                                      std::fabs(dec2 - dec) * 3600.0});
+                    }
+                }
+            }
+        }
+    }
+    CHECK(worst_back < 1e-8);
+    std::printf("  C horizon: round trip through refraction %.2e\"\n", worst_back);
+
+    // The refraction function is the frames' one.
+    double r = 0.0;
+    REQUIRE(prometheia_refraction(5.0, PROMETHEIA_REFRACTION_FROM_APPARENT, nullptr, 0.0, &r,
+                                  nullptr) == PROMETHEIA_OK);
+    CHECK(r == frames::refraction_from_apparent_deg(5.0, cair));
+    REQUIRE(prometheia_refraction(-0.25, PROMETHEIA_REFRACTION_FROM_APPARENT, &air, 100.0, &r,
+                                  nullptr) == PROMETHEIA_OK);
+    CHECK(r == frames::refraction_from_apparent_deg(-0.25, cair, frames::horizon_dip_deg(100.0)));
+    REQUIRE(prometheia_refraction(3.0, PROMETHEIA_REFRACTION_FROM_TRUE, &air, 0.0, &r, nullptr) ==
+            PROMETHEIA_OK);
+    CHECK(r == frames::refraction_from_true_deg(3.0, cair));
+
+    prometheia_error err;
+    CHECK(prometheia_refraction(5.0, 2, nullptr, 0.0, &r, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_refraction(NAN, 0, nullptr, 0.0, &r, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    prometheia_atmosphere bad{-1.0, 15.0};
+    CHECK(prometheia_refraction(5.0, 0, &bad, 0.0, &r, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    prometheia_horizontal h;
+    CHECK(prometheia_horizontal_ut(c.e, kJ2000, 0.0, 91.0, 0.0, 0.0, 0.0, nullptr, nullptr, &h,
+                                   &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_horizontal_ut(c.e, kJ2000, 0.0, 0.0, 0.0, 0.0, 95.0, nullptr, nullptr, &h,
+                                   &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_horizontal_ut(nullptr, kJ2000, 0.0, 0.0, 0.0, 0.0, 0.0, nullptr, nullptr, &h,
+                                   &err) == PROMETHEIA_ERROR_ARGUMENT);
+    double a, b;
+    CHECK(prometheia_equatorial_from_horizontal_ut(c.e, kJ2000, 0.0, 0.0, 0.0, 0.0, 91.0, 0,
+                                                   nullptr, nullptr, &a, &b,
+                                                   &err) == PROMETHEIA_ERROR_ARGUMENT);
+}
+
 } // namespace

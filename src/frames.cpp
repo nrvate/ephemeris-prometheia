@@ -971,4 +971,79 @@ void NutationInterpolator::at(double jd_tt, double& dpsi, double& deps) {
     deps = interp(1);
 }
 
+double horizon_dip_deg(double height_m) {
+    return height_m > 0.0 ? 1.76 * std::sqrt(height_m) / 60.0 : 0.0;
+}
+
+namespace {
+
+// Below this apparent altitude no refraction is applied: Bennett's formula
+// was fitted from the horizon up, and a degree below it is as far as the
+// curve is taken.
+constexpr double kLowestRefractedDeg = -1.0;
+
+double bennett_arcmin(double h_deg) {
+    constexpr double kDeg = 3.14159265358979323846 / 180.0;
+    const double r = 1.0 / std::tan((h_deg + 7.31 / (h_deg + 4.4)) * kDeg);
+    return r - 0.06 * std::sin((14.7 * r + 13.0) * kDeg);
+}
+
+double air_scale(const Atmosphere& a) {
+    return (a.pressure_hpa / 1010.0) * (283.0 / (273.0 + a.temperature_c));
+}
+
+double floor_deg(double dip_deg) {
+    return std::max(-dip_deg, kLowestRefractedDeg);
+}
+
+} // namespace
+
+double refraction_from_apparent_deg(double h, const Atmosphere& atm, double dip_deg) {
+    if (!std::isfinite(h) || h < floor_deg(dip_deg))
+        return 0.0;
+    return bennett_arcmin(std::min(h, 90.0)) / 60.0 * air_scale(atm);
+}
+
+double refraction_from_true_deg(double t, const Atmosphere& atm, double dip_deg) {
+    if (!std::isfinite(t))
+        return 0.0;
+    // apparent = t + R(apparent), by fixed-point iteration: |dR/dh| < 0.3
+    // for h >= -1 deg, so it contracts.
+    const double lowest = floor_deg(dip_deg);
+    double h = std::max(t, lowest);
+    for (int k = 0; k < 200; ++k) {
+        const double next = t + refraction_from_apparent_deg(std::max(h, lowest), atm, dip_deg);
+        const bool done = std::fabs(next - h) < 1e-14;
+        h = next;
+        if (done)
+            break;
+    }
+    return h < lowest ? 0.0 : h - t;
+}
+
+void equatorial_to_horizontal(double ha, double dec, double lat, double& az, double& alt) {
+    const double cd = std::cos(dec), sd = std::sin(dec), cl = std::cos(lat), sl = std::sin(lat);
+    const double north = sd * cl - cd * sl * std::cos(ha);
+    const double east = -cd * std::sin(ha);
+    const double up = sd * sl + cd * cl * std::cos(ha);
+    double a = (north == 0.0 && east == 0.0) ? 0.0 : std::atan2(east, north);
+    if (a < 0.0)
+        a += kTwoPi;
+    az = a >= kTwoPi ? 0.0 : a;
+    alt = std::atan2(up, std::hypot(north, east));
+}
+
+void horizontal_to_equatorial(double az, double alt, double lat, double& ha, double& dec) {
+    // The same rotation: it is its own inverse, with hour angle for azimuth.
+    const double ca = std::cos(alt), sa = std::sin(alt), cl = std::cos(lat), sl = std::sin(lat);
+    const double x = sa * cl - ca * sl * std::cos(az);
+    const double y = -ca * std::sin(az);
+    const double z = sa * sl + ca * cl * std::cos(az);
+    double h = (x == 0.0 && y == 0.0) ? 0.0 : std::atan2(y, x);
+    if (h < 0.0)
+        h += kTwoPi;
+    ha = h >= kTwoPi ? 0.0 : h;
+    dec = std::atan2(z, std::hypot(x, y));
+}
+
 } // namespace prometheia::frames
