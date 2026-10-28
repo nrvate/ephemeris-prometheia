@@ -380,7 +380,9 @@ the sum less the overlap, so the server applies both. Freshness is still
      skipped, the same as the September base. 895,910 numbered bodies carry
      their old provisional designation, and every record its orbit class.
      The 2026-10-25 file was removed and can be rebuilt from its raw
-     directories.
+     directories. It is published as the release `catalog-20261027`
+     (tagged at `3ed2b9c`), and `tools/fetch/catalog_fetch.py --dir .`
+     fetches it and verifies it against its pin.
 
    - `--numbered-after` is the base's highest asteroid number (895910 for
      `sbdb-full-20260916`). Numbered asteroids are SPK-ID 20000000 + number,
@@ -417,10 +419,12 @@ someone actually wants the cadence.
 SBDB orbit solutions change continuously, so catalogs are **published as
 tagged GitHub release assets, not repo-tree files**:
 
-- One asset per catalog build: `sbdb-full-YYYYMMDD.epm` plus a `.sha256`
-  sidecar (the swisseph-fork release pattern: SHA256SUMS, nothing binary in
-  the tree). Release assets allow 2 GB each; the full catalog is 137 MB
-  (`sbdb-full-20260916.epm`: 136,692,088 bytes, 1,566,773 records, 87.2
+- One asset per catalog build plus a `.sha256` sidecar (the swisseph-fork
+  release pattern: SHA256SUMS, nothing binary in the tree), each pinned in
+  `tools/fetch/catalog_fetch.py`: `sbdb-full-20260916.epm` on `v0.1.0`, and
+  since 2026-10-27 `sbdb-YYYYMMDD.epm` on a data-only tag
+  `catalog-YYYYMMDD`. Release assets allow 2 GB each; the full catalog
+  is 137 MB (`sbdb-full-20260916.epm`: 136,692,088 bytes, 1,566,773 records, 87.2
   bytes each including the index, metadata and string pool; sha256
   `35ae8b889a5646ad2481a8357ca09d818eff426a30cedee6f366dc2128d23ba4`).
 - Each release is immutable and pinned — downstreams can reproduce any

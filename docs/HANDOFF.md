@@ -201,6 +201,12 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
 
 ## Released
 
+- **catalog-20261027**, published 2026-10-27
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/catalog-20261027).
+  A data-only release tagged at `3ed2b9c`. Its asset is `sbdb-20261027.epm`
+  (EPM1 1.2, 1,580,028 records, sha256 `1dd348aa…59919`), fetched by
+  `tools/fetch/catalog_fetch.py`. GitHub marked it "Latest" in place of
+  v0.7.3, and that is left for the maintainer to decide.
 - **v0.7.3**, published 2026-09-29
   (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v0.7.3).
   - The library and tools are 0.7.3 (C ABI 6, unchanged); `prometheiad` is
