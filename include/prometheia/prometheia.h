@@ -984,6 +984,90 @@ PROMETHEIA_API prometheia_status prometheia_calc_object_ut(
     prometheia_engine* engine, const prometheia_object* object, double jd_ut1,
     const prometheia_options* opts, prometheia_result* result, prometheia_error* err);
 
+/* ---- Lunar eclipses (docs/ECLIPSES.md, "Lunar eclipses") ------------------ */
+
+/* A bitmask of kinds for prometheia_lunar_eclipse_next, and the value of
+ * prometheia_lunar_eclipse.kind (exactly one of the three). */
+#define PROMETHEIA_LUNAR_ECLIPSE_TOTAL 1
+#define PROMETHEIA_LUNAR_ECLIPSE_PARTIAL 2
+#define PROMETHEIA_LUNAR_ECLIPSE_PENUMBRAL 4
+
+/* Indexes of the contact arrays. MAXIMUM is the greatest eclipse and is only
+ * in prometheia_lunar_eclipse_local's arrays (the eclipse struct has it as
+ * jd_max_*). */
+#define PROMETHEIA_LUNAR_CONTACT_P1 0 /* the penumbra's first contact */
+#define PROMETHEIA_LUNAR_CONTACT_U1 1 /* the umbra's */
+#define PROMETHEIA_LUNAR_CONTACT_U2 2 /* totality begins */
+#define PROMETHEIA_LUNAR_CONTACT_U3 3 /* totality ends */
+#define PROMETHEIA_LUNAR_CONTACT_U4 4
+#define PROMETHEIA_LUNAR_CONTACT_P4 5
+#define PROMETHEIA_LUNAR_CONTACT_MAXIMUM 6
+
+typedef struct prometheia_lunar_eclipse {
+    int kind; /* PROMETHEIA_LUNAR_ECLIPSE_TOTAL, _PARTIAL or _PENUMBRAL */
+    /* van den Bergh's saros series; the member counts from 1, 0 when the
+     * series' first eclipse is not tabulated (before -1999 or after 3000). */
+    int saros_series, saros_member;
+    int reserved;                 /* 0 */
+    double jd_max_tt, jd_max_ut1; /* the greatest eclipse */
+    /* Earth equatorial radii, positive when the Moon is north of the shadow
+     * axis. */
+    double gamma;
+    /* Fractions of the Moon's diameter in the umbra and in the penumbra;
+     * the umbral one is negative when the Moon misses the umbra. */
+    double umbral_magnitude, penumbral_magnitude;
+    /* Danjon's angular radii of the shadow at the greatest eclipse, and the
+     * Moon's semi-diameter, degrees. */
+    double umbra_radius_deg, penumbra_radius_deg, moon_semidiameter_deg;
+    /* P1 U1 U2 U3 U4 P4 (PROMETHEIA_LUNAR_CONTACT_*); NaN where the contact
+     * does not occur (no U1/U4 in a penumbral eclipse, no U2/U3 unless
+     * total). */
+    double contact_tt[6], contact_ut1[6];
+} prometheia_lunar_eclipse;
+
+/* A place on the WGS84 ellipsoid: geodetic longitude (east positive) and
+ * latitude in degrees, height in metres. */
+typedef struct prometheia_site {
+    double lon_deg, lat_deg, height_m;
+} prometheia_site;
+
+typedef struct prometheia_lunar_eclipse_local {
+    prometheia_lunar_eclipse eclipse;
+    /* The Moon's centre seen from the site at each PROMETHEIA_LUNAR_CONTACT_*
+     * (MAXIMUM last): topocentric altitude in degrees, true and with the
+     * standard atmosphere's refraction (as prometheia_horizontal_ut); NaN
+     * where the contact does not occur. */
+    double altitude_deg[7], apparent_altitude_deg[7];
+} prometheia_lunar_eclipse_local;
+
+/*
+ * The first lunar eclipse of the kinds in the bitmask (PROMETHEIA_LUNAR_
+ * ECLIPSE_*; 0 or bits above 7 are PROMETHEIA_ERROR_ARGUMENT) whose greatest
+ * eclipse is after jd_start_tt, a TT Julian date; with backward nonzero, the
+ * last one before it. Computed in TT from the engine's geocentric apparent
+ * Sun and Moon; UT1 fields use the engine's Delta T. PROMETHEIA_ERROR_NOT_FOUND
+ * when none of those kinds occurs within about 160 years; the engine's
+ * coverage errors (PROMETHEIA_ERROR_COVERAGE) pass through. On error *out is
+ * zeroed.
+ */
+PROMETHEIA_API prometheia_status prometheia_lunar_eclipse_next(prometheia_engine* engine,
+                                                               double jd_start_tt, unsigned kinds,
+                                                               int backward,
+                                                               prometheia_lunar_eclipse* out,
+                                                               prometheia_error* err);
+
+/*
+ * The eclipse whose greatest eclipse is within two days of jd_max_tt (the
+ * value prometheia_lunar_eclipse_next returned will do), with the Moon's
+ * altitude at the site at each contact. A NULL site gives the eclipse alone,
+ * with the altitudes NaN. PROMETHEIA_ERROR_NOT_FOUND if there is none.
+ */
+PROMETHEIA_API prometheia_status prometheia_lunar_eclipse_at(prometheia_engine* engine,
+                                                             double jd_max_tt,
+                                                             const prometheia_site* site,
+                                                             prometheia_lunar_eclipse_local* out,
+                                                             prometheia_error* err);
+
 #ifdef __cplusplus
 }
 #endif

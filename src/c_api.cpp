@@ -21,6 +21,7 @@
 #include "prometheia/engine.hpp"
 #include "prometheia/frames.hpp"
 #include "prometheia/hypotheticals.hpp"
+#include "prometheia/lunar_eclipse.hpp"
 #include "prometheia/prometheia.hpp"
 #include "prometheia/registry.hpp"
 #include "prometheia/time.hpp"
@@ -1526,6 +1527,87 @@ prometheia_status prometheia_calc_object_ut(prometheia_engine* engine,
                        [&ref](Engine& e, int, double jd, const CalcOptions& o) {
                            return e.calc_object_ut(ref, jd, o);
                        });
+}
+
+// ---- Lunar eclipses ------------------------------------------------------
+
+static_assert(PROMETHEIA_LUNAR_ECLIPSE_TOTAL == int(lunar_eclipse::kTotal));
+static_assert(PROMETHEIA_LUNAR_ECLIPSE_PARTIAL == int(lunar_eclipse::kPartial));
+static_assert(PROMETHEIA_LUNAR_ECLIPSE_PENUMBRAL == int(lunar_eclipse::kPenumbral));
+static_assert(PROMETHEIA_LUNAR_CONTACT_MAXIMUM == lunar_eclipse::kMaximum);
+
+static void fill_lunar_eclipse(prometheia_lunar_eclipse& o, const lunar_eclipse::Eclipse& e) {
+    std::memset(&o, 0, sizeof o);
+    o.kind = e.kind == lunar_eclipse::Kind::Total     ? PROMETHEIA_LUNAR_ECLIPSE_TOTAL
+             : e.kind == lunar_eclipse::Kind::Partial ? PROMETHEIA_LUNAR_ECLIPSE_PARTIAL
+                                                      : PROMETHEIA_LUNAR_ECLIPSE_PENUMBRAL;
+    o.saros_series = e.saros_series;
+    o.saros_member = e.saros_member;
+    o.jd_max_tt = e.jd_max_tt;
+    o.jd_max_ut1 = e.jd_max_ut1;
+    o.gamma = e.gamma;
+    o.umbral_magnitude = e.umbral_magnitude;
+    o.penumbral_magnitude = e.penumbral_magnitude;
+    o.umbra_radius_deg = e.umbra_radius_deg;
+    o.penumbra_radius_deg = e.penumbra_radius_deg;
+    o.moon_semidiameter_deg = e.moon_semidiameter_deg;
+    for (int i = 0; i < 6; ++i) {
+        o.contact_tt[i] = e.contact_tt[i];
+        o.contact_ut1[i] = e.contact_ut1[i];
+    }
+}
+
+prometheia_status prometheia_lunar_eclipse_next(prometheia_engine* engine, double jd_start_tt,
+                                                unsigned kinds, int backward,
+                                                prometheia_lunar_eclipse* out,
+                                                prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!out)
+        return argument(err, "output is NULL");
+    return guarded(err, [&] {
+        auto r = lunar_eclipse::next(engine->engine, jd_start_tt, kinds, backward != 0);
+        if (!r)
+            return report(err, r.error());
+        fill_lunar_eclipse(*out, r.value());
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_lunar_eclipse_at(prometheia_engine* engine, double jd_max_tt,
+                                              const prometheia_site* site,
+                                              prometheia_lunar_eclipse_local* out,
+                                              prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!out)
+        return argument(err, "output is NULL");
+    return guarded(err, [&] {
+        if (!site) {
+            auto r = lunar_eclipse::at(engine->engine, jd_max_tt);
+            if (!r)
+                return report(err, r.error());
+            fill_lunar_eclipse(out->eclipse, r.value());
+            for (int i = 0; i < 7; ++i)
+                out->altitude_deg[i] = out->apparent_altitude_deg[i] = std::nan("");
+            return succeed(err);
+        }
+        const frames::GeoSite gs{site->lon_deg * kDegToRad, site->lat_deg * kDegToRad,
+                                 site->height_m};
+        auto r = lunar_eclipse::local(engine->engine, jd_max_tt, gs);
+        if (!r)
+            return report(err, r.error());
+        fill_lunar_eclipse(out->eclipse, r.value().eclipse);
+        for (int i = 0; i < 7; ++i) {
+            out->altitude_deg[i] = r.value().altitude_deg[i];
+            out->apparent_altitude_deg[i] = r.value().apparent_altitude_deg[i];
+        }
+        return succeed(err);
+    });
 }
 
 } // extern "C"

@@ -176,6 +176,23 @@ announced to the Astrolog side first, 2026-10-27). [ENGINE.md](ENGINE.md),
   with `==`: a body, a star and a hypothetical, all four events, both
   limbs, both directions.
 
+**Lunar eclipses** (added after 0.7.3; ABI version unchanged; to be announced
+to the Astrolog side before it lands). [ECLIPSES.md](ECLIPSES.md) has the
+method and the measurements.
+- `prometheia_lunar_eclipse_next(engine, jd_start_tt, kinds, backward, &out,
+  &err)`: the first eclipse after (before, with `backward`) a TT Julian
+  date, of the kinds in the bitmask `PROMETHEIA_LUNAR_ECLIPSE_TOTAL |
+  _PARTIAL | _PENUMBRAL` (0 or other bits: `PROMETHEIA_ERROR_ARGUMENT`).
+  None within about 160 years is `PROMETHEIA_ERROR_NOT_FOUND`.
+- `prometheia_lunar_eclipse_at(engine, jd_max_tt, &site, &out, &err)`: the
+  eclipse whose greatest is within two days, with the Moon's true and
+  refracted altitude at the site (`prometheia_site`: lon, lat, height_m) at
+  each contact and the maximum; a NULL site gives NaN altitudes.
+- `prometheia_lunar_eclipse` and `prometheia_lunar_eclipse_local` hold
+  fixed-size members only: ints, doubles, and arrays of 6 or 7 doubles
+  indexed by `PROMETHEIA_LUNAR_CONTACT_*`. An absent contact is NaN. On an
+  error `*out` is zeroed.
+
 To build the library inside another project (a git submodule, plain make,
 no CMake), see [EMBEDDING.md](EMBEDDING.md).
 

@@ -285,6 +285,26 @@ class Engine(unittest.TestCase):
         with self.assertRaises(prometheia.Error):
             n.refraction(5.0, "upward")
 
+    def test_lunar_eclipse(self):
+        ctx = self.ds.local()
+        e = ctx.lunar_eclipse_next(2461042.5, kinds="total")  # 2026-01-01
+        self.assertIsInstance(e, n.LunarEclipse)
+        self.assertEqual((e.kind, e.saros_series, e.saros_member), ("total", 133, 27))
+        self.assertLess(abs(e.umbral_magnitude - 1.1507), 0.002)
+        self.assertEqual(len(e.contacts_tt), 6)
+        self.assertTrue(all(x is not None for x in e.contacts_tt))
+        p = ctx.lunar_eclipse_next(2461042.5, kinds=["penumbral"])
+        self.assertEqual(p.kind, "penumbral")
+        self.assertIsNone(p.contacts_tt[1])
+        b = ctx.lunar_eclipse_next(e.jd_max_tt, backward=True)
+        self.assertLess(b.jd_max_tt, e.jd_max_tt)
+        loc = ctx.lunar_eclipse_at(e.jd_max_tt, (-157.86, 21.31))
+        self.assertGreater(loc.altitude_deg[6], 30.0)
+        self.assertEqual(loc.eclipse.jd_max_tt, e.jd_max_tt)
+        self.assertIsNone(ctx.lunar_eclipse_at(e.jd_max_tt).altitude_deg[0])
+        with self.assertRaises(prometheia.Error):
+            ctx.lunar_eclipse_next(2461042.5, kinds="annular")
+
     def test_rise_set(self):
         import math
         ctx = self.ds.local()

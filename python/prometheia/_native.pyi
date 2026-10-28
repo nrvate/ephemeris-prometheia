@@ -114,6 +114,26 @@ class Event:
     jd_ut1: float
     outcome: Literal["found", "always-above", "always-below", "not-in-window"]
 
+class LunarEclipse:
+    kind: Literal["total", "partial", "penumbral"]
+    saros_series: int
+    saros_member: int
+    jd_max_tt: float
+    jd_max_ut1: float
+    gamma: float
+    umbral_magnitude: float
+    penumbral_magnitude: float
+    umbra_radius_deg: float
+    penumbra_radius_deg: float
+    moon_semidiameter_deg: float
+    contacts_tt: Tuple[Optional[float], ...]
+    contacts_ut1: Tuple[Optional[float], ...]
+
+class LunarEclipseLocal:
+    eclipse: LunarEclipse
+    altitude_deg: Tuple[Optional[float], ...]
+    apparent_altitude_deg: Tuple[Optional[float], ...]
+
 class Context:
     """One engine over a Dataset's files, for the thread that made it."""
     dataset: "Dataset"
@@ -149,6 +169,10 @@ class Context:
                  refraction: bool = True, atmosphere: Atmosphere = "standard",
                  dip_height_m: float = 0.0, window_days: float = 2.0, backward: bool = False,
                  options: Optional[Options] = None) -> Event: ...
+    def lunar_eclipse_next(self, jd: float, *, kinds: Union[None, str, Sequence[str]] = None,
+                           backward: bool = False) -> LunarEclipse: ...
+    def lunar_eclipse_at(self, jd_max: float,
+                         site: Optional[Sequence[float]] = None) -> LunarEclipseLocal: ...
     def lookup(self, name: str) -> int: ...
     def phenomena(self, body: Object, jd: float, options: Optional[Options] = None,
                   scale: Scale = "tt") -> Phenomena: ...

@@ -424,6 +424,58 @@ cdef bint is_ut(str scale) except -1:
 
 # ---- Context -------------------------------------------------------------
 
+_LUNAR_KINDS = {"total": c.PROMETHEIA_LUNAR_ECLIPSE_TOTAL,
+                "partial": c.PROMETHEIA_LUNAR_ECLIPSE_PARTIAL,
+                "penumbral": c.PROMETHEIA_LUNAR_ECLIPSE_PENUMBRAL}
+_LUNAR_KIND_NAMES = {v: k for k, v in _LUNAR_KINDS.items()}
+
+
+cdef class LunarEclipse:
+    """A lunar eclipse (docs/ECLIPSES.md): kind ("total", "partial" or
+    "penumbral"), saros_series and saros_member (0 when the series' start is
+    not tabulated), the greatest eclipse jd_max_tt / jd_max_ut1, gamma (Earth
+    radii, north positive), the umbral and penumbral magnitudes (the umbral
+    one is negative when the Moon misses the umbra), the shadow's radii and
+    the Moon's semi-diameter in degrees, and the contacts P1 U1 U2 U3 U4 P4 as
+    tuples contacts_tt / contacts_ut1 (None where a contact does not occur)."""
+    cdef readonly str kind
+    cdef readonly int saros_series, saros_member
+    cdef readonly double jd_max_tt, jd_max_ut1, gamma, umbral_magnitude, penumbral_magnitude
+    cdef readonly double umbra_radius_deg, penumbra_radius_deg, moon_semidiameter_deg
+    cdef readonly tuple contacts_tt, contacts_ut1
+
+    def __repr__(self):
+        return ("LunarEclipse(kind=%r, jd_max_tt=%r, saros=%d/%d, umbral_magnitude=%r)"
+                % (self.kind, self.jd_max_tt, self.saros_series, self.saros_member,
+                   self.umbral_magnitude))
+
+
+cdef class LunarEclipseLocal:
+    """An eclipse seen from a site: eclipse (LunarEclipse) and the Moon's
+    topocentric altitude in degrees at P1 U1 U2 U3 U4 P4 and the greatest
+    eclipse (seven values, None where the contact does not occur), true
+    (altitude_deg) and with standard refraction (apparent_altitude_deg)."""
+    cdef readonly LunarEclipse eclipse
+    cdef readonly tuple altitude_deg, apparent_altitude_deg
+
+    def __repr__(self):
+        return "LunarEclipseLocal(eclipse=%r, altitude_deg=%r)" % (self.eclipse, self.altitude_deg)
+
+
+cdef LunarEclipse lunar_eclipse_of(const c.prometheia_lunar_eclipse* x):
+    cdef LunarEclipse r = LunarEclipse.__new__(LunarEclipse)
+    cdef int k
+    r.kind = _LUNAR_KIND_NAMES[x.kind]
+    r.saros_series, r.saros_member = x.saros_series, x.saros_member
+    r.jd_max_tt, r.jd_max_ut1, r.gamma = x.jd_max_tt, x.jd_max_ut1, x.gamma
+    r.umbral_magnitude, r.penumbral_magnitude = x.umbral_magnitude, x.penumbral_magnitude
+    r.umbra_radius_deg, r.penumbra_radius_deg = x.umbra_radius_deg, x.penumbra_radius_deg
+    r.moon_semidiameter_deg = x.moon_semidiameter_deg
+    r.contacts_tt = tuple([nan_none(x.contact_tt[k]) for k in range(6)])
+    r.contacts_ut1 = tuple([nan_none(x.contact_ut1[k]) for k in range(6)])
+    return r
+
+
 cdef class Context:
     """One engine over a Dataset's files, for the thread that made it."""
     cdef c.prometheia_engine* e
@@ -666,6 +718,58 @@ cdef class Context:
         cdef Event result = Event.__new__(Event)
         result.jd_ut1, result.outcome = out.jd_ut1, OUTCOMES[out.outcome]
         return result
+
+    def lunar_eclipse_next(self, double jd, *, kinds=None, bint backward=False):
+        """The first lunar eclipse after jd (a TT Julian date; before, with
+        backward) of the kinds ("total", "partial", "penumbral": a name or a
+        sequence of them; None: all), as a LunarEclipse. Error code
+        "not-found" when none occurs within about 160 years."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef unsigned mask = 0
+        if kinds is None:
+            mask = 7
+        elif isinstance(kinds, str):
+            mask = word(_LUNAR_KINDS, kinds, "kind")
+        else:
+            for k in kinds:
+                mask |= word(_LUNAR_KINDS, k, "kind")
+        cdef c.prometheia_lunar_eclipse out
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_lunar_eclipse_next(e, jd, mask, backward, &out, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return lunar_eclipse_of(&out)
+
+    def lunar_eclipse_at(self, double jd_max, site=None):
+        """The eclipse whose greatest is within two days of jd_max (TT) as
+        a LunarEclipseLocal: its altitudes are seen from site, a (lon_deg,
+        lat_deg) or (lon_deg, lat_deg, height_m) tuple, and None without
+        one."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef c.prometheia_site s
+        cdef const c.prometheia_site* sp = NULL
+        if site is not None:
+            if len(site) not in (2, 3):
+                raise Error("site is (lon_deg, lat_deg[, height_m])", code="argument")
+            s.lon_deg, s.lat_deg = site[0], site[1]
+            s.height_m = site[2] if len(site) == 3 else 0.0
+            sp = &s
+        cdef c.prometheia_lunar_eclipse_local out
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        cdef int k
+        with nogil:
+            st = c.prometheia_lunar_eclipse_at(e, jd_max, sp, &out, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        cdef LunarEclipseLocal r = LunarEclipseLocal.__new__(LunarEclipseLocal)
+        r.eclipse = lunar_eclipse_of(&out.eclipse)
+        r.altitude_deg = tuple([nan_none(out.altitude_deg[k]) for k in range(7)])
+        r.apparent_altitude_deg = tuple([nan_none(out.apparent_altitude_deg[k])
+                                         for k in range(7)])
+        return r
 
     def lookup(self, str name):
         """A catalog body's SPK-ID from its designation or name ("1",

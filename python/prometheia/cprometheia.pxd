@@ -566,3 +566,50 @@ cdef extern from "prometheia/prometheia.h" nogil:
                                            prometheia_error* err) noexcept
     double prometheia_delta_t(double jd_tt) noexcept
     double prometheia_tdb_minus_tt(double jd_tt) noexcept
+
+    # Lunar eclipses
+    int PROMETHEIA_LUNAR_ECLIPSE_TOTAL
+    int PROMETHEIA_LUNAR_ECLIPSE_PARTIAL
+    int PROMETHEIA_LUNAR_ECLIPSE_PENUMBRAL
+    int PROMETHEIA_LUNAR_CONTACT_P1
+    int PROMETHEIA_LUNAR_CONTACT_U1
+    int PROMETHEIA_LUNAR_CONTACT_U2
+    int PROMETHEIA_LUNAR_CONTACT_U3
+    int PROMETHEIA_LUNAR_CONTACT_U4
+    int PROMETHEIA_LUNAR_CONTACT_P4
+    int PROMETHEIA_LUNAR_CONTACT_MAXIMUM
+
+    ctypedef struct prometheia_lunar_eclipse:
+        int kind
+        int saros_series
+        int saros_member
+        int reserved
+        double jd_max_tt
+        double jd_max_ut1
+        double gamma
+        double umbral_magnitude
+        double penumbral_magnitude
+        double umbra_radius_deg
+        double penumbra_radius_deg
+        double moon_semidiameter_deg
+        double contact_tt[6]
+        double contact_ut1[6]
+
+    ctypedef struct prometheia_site:
+        double lon_deg
+        double lat_deg
+        double height_m
+
+    ctypedef struct prometheia_lunar_eclipse_local:
+        prometheia_lunar_eclipse eclipse
+        double altitude_deg[7]
+        double apparent_altitude_deg[7]
+
+    prometheia_status prometheia_lunar_eclipse_next(prometheia_engine* engine,
+                                                    double jd_start_tt, unsigned kinds,
+                                                    int backward, prometheia_lunar_eclipse* out,
+                                                    prometheia_error* err) noexcept
+    prometheia_status prometheia_lunar_eclipse_at(prometheia_engine* engine, double jd_max_tt,
+                                                  const prometheia_site* site,
+                                                  prometheia_lunar_eclipse_local* out,
+                                                  prometheia_error* err) noexcept

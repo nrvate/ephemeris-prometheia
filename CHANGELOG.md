@@ -30,6 +30,17 @@ documented, not that it is frozen.
   `Engine::phenomena(_ut)`, the C API `prometheia_calc_phenomena(_ut)` (ABI
   unchanged), and Python `Context.phenomena`. The radius table moves to
   `prometheia::phenomena`, and gains the Earth.
+- **Lunar eclipses** ([docs/ECLIPSES.md](docs/ECLIPSES.md)), A-6 of
+  astromcp's port plan. The next or previous total, partial or penumbral
+  eclipse: contacts P1 U1 U2 U3 U4 P4, umbral and penumbral magnitudes,
+  gamma, and van den Bergh saros series and member; Danjon's shadow radii,
+  computed in TT, with UT1 alongside; the Moon's altitude at a site at each
+  contact. Over 1900-2100 all 459 eclipses of NASA's canon are found, with
+  class and saros identical, greatest eclipse within 2.73 s (in TD) and
+  magnitudes within 0.0007. The C API gains `prometheia_lunar_eclipse_next`
+  and `_at` (ABI unchanged), Python `Context.lunar_eclipse_next` and
+  `lunar_eclipse_at`, and the engine `Engine::delta_t_seconds`.
+  `tools/fetch/eclipse_fetch.py` fetches the canon for the comparison.
 - **The object registry** ([docs/REGISTRY.md](docs/REGISTRY.md)), A-9 of
   astromcp's port plan. One id scheme covers every object: `naif:`, `sb:`,
   `orbit:`, `hyp:` and `star:`. Numbered bodies keep their id across

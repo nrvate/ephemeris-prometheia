@@ -578,6 +578,9 @@ public:
     // Delta T model for UT inputs and topocentric Earth rotation. Not
     // owned; nullptr restores the default (time::ObservedDeltaT).
     void set_delta_t_model(const time::DeltaTModel* model);
+    // Delta T, TT - UT1 in seconds, at a TT instant, by the model calc_ut
+    // and the topocentric rotation use (0 for an engine that is not open).
+    double delta_t_seconds(double jd_tt) const;
 
     // Human-readable description of the loaded ephemeris (every file, in
     // order). The view is valid until add_ephemeris() or add_catalog().

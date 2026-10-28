@@ -145,6 +145,15 @@ the C++ engine's, bit for bit.
     limb=, refraction=, atmosphere=, dip_height_m=, window_days=,
     backward=)` returns an `Event` (`jd_ut1`, NaN unless `outcome` is
     `"found"`). The object takes any form `calc` takes;
+  - `lunar_eclipse_next(jd_tt, *, kinds=None, backward=False)` returns a
+    `LunarEclipse` (kind, saros series and member, greatest eclipse in TT
+    and UT1, gamma, magnitudes, contacts P1 U1 U2 U3 U4 P4 as tuples with
+    `None` for a contact that does not occur); `kinds` is a name or a
+    sequence of `"total"`, `"partial"`, `"penumbral"`.
+    `lunar_eclipse_at(jd_max_tt, site=None)` returns a `LunarEclipseLocal`
+    (the eclipse and the Moon's altitude, true and refracted, at each
+    contact and the maximum from `site=(lon, lat[, height_m])`). See
+    [ECLIPSES.md](ECLIPSES.md);
   - `horizontal(jd_ut1, lon, lat, ra, dec, atmosphere=None, height_m=0)`
     and `equatorial_from_horizontal(…)`. The azimuth runs from north
     through east. An atmosphere is `"standard"`, `(hPa, °C)` or a dict, and

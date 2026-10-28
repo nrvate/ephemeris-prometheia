@@ -87,6 +87,7 @@ set_source_files_properties(tests/c_api_smoke.c PROPERTIES
 prometheia_test(time tests/test_time.cpp)
 prometheia_test(frames tests/test_frames.cpp)
 prometheia_test(houses tests/test_houses.cpp)
+prometheia_test(lunar_eclipse tests/test_lunar_eclipse.cpp)
 prometheia_test(stars tests/test_stars.cpp)
 prometheia_test(registry tests/test_registry.cpp)
 prometheia_test(phenomena tests/test_phenomena.cpp)

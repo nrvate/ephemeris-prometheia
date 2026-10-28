@@ -4033,6 +4033,10 @@ void Engine::set_delta_t_model(const time::DeltaTModel* model) {
     }
 }
 
+double Engine::delta_t_seconds(double jd_tt) const {
+    return impl_ ? impl_->delta_t_seconds(jd_tt) : 0.0;
+}
+
 std::string_view Engine::source() const {
     return impl_ ? std::string_view(impl_->source->description) : std::string_view();
 }
