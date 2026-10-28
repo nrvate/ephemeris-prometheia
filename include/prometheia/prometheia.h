@@ -1239,10 +1239,9 @@ PROMETHEIA_API void prometheia_observer_init(prometheia_observer* observer);
  * geometric horizon (no default: NaN is PROMETHEIA_ERROR_ARGUMENT) with the
  * object at least object_altitude_deg above the apparent horizon.
  * SCHAEFER: detection_margin_mag is how far above the 50 % threshold the
- * object must stand (the default is a constant fitted to swetest, 0 is the
- * paper's threshold); moonlight nonzero adds the Moon's light to the sky;
- * dark_sky_nl is eq. 15a's B_o in nanoLamberts. search_days is how far the
- * finder looks. */
+ * object must stand (the default, 0, is the paper's threshold); moonlight nonzero adds the Moon's
+ * light to the sky; dark_sky_nl is eq. 15a's B_o in nanoLamberts. search_days is how far the finder
+ * looks. */
 typedef struct prometheia_visibility_model {
     int kind;
     double arcus_visionis_deg, object_altitude_deg;
@@ -1251,7 +1250,7 @@ typedef struct prometheia_visibility_model {
     double dark_sky_nl;
     double search_days;
 } prometheia_visibility_model;
-/* SCHAEFER, arc NaN, altitude 0, margin 1.2, no moonlight, 180 nL, 800 days. */
+/* SCHAEFER, arc NaN, altitude 0, margin 0, no moonlight, 180 nL, 800 days. */
 PROMETHEIA_API void prometheia_visibility_model_init(prometheia_visibility_model* model);
 
 /* A heliacal event. Times are Julian dates, TT and UT1. The event is the
@@ -1262,6 +1261,12 @@ PROMETHEIA_API void prometheia_visibility_model_init(prometheia_visibility_model
  * (SCHAEFER: the limit at the eye less the object's dimmed magnitude, less
  * the detection margin) or degrees (ARCUS_VISIONIS: the lesser of the Sun's
  * depression beyond the arc and the object's altitude beyond the one asked).
+ * spread_before_days and spread_after_days (SCHAEFER; 0 under
+ * ARCUS_VISIONIS) say how firmly the model fixes the day: the event moves
+ * that many days earlier, or later, with the threshold 0.2 magnitude easier
+ * or harder (at most 90 each way). A sensitivity, not an observed
+ * uncertainty: where it is weeks (Mars, Venus far from the Sun), so is the
+ * date's.
  * atmosphere, observer and model echo the inputs used. */
 typedef struct prometheia_heliacal {
     int event, model;
@@ -1278,6 +1283,7 @@ typedef struct prometheia_heliacal {
     double extinction_mag;     /* the object's dimming, eq. 8b */
     double limiting_magnitude; /* at the eye, extinction included */
     double margin;
+    double spread_before_days, spread_after_days;
     prometheia_air atmosphere;
     prometheia_observer observer;
     prometheia_visibility_model options;

@@ -772,6 +772,8 @@ cdef extern from "prometheia/prometheia.h" nogil:
         double extinction_mag
         double limiting_magnitude
         double margin
+        double spread_before_days
+        double spread_after_days
         prometheia_air atmosphere
         prometheia_observer observer
         prometheia_visibility_model options

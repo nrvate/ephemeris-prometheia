@@ -45,11 +45,22 @@ documented, not that it is frozen.
   `prometheia_air`, `prometheia_observer` and `prometheia_visibility_model`
   and their `_init` functions (additive; the ABI version is unchanged);
   Python: `Context.heliacal_next`, `Context.visibility_at`,
-  `limiting_magnitude`. Measured against swetest's `-hev` on DE440: of 29
-  star cases 20 are within a day and 26 within three, with one detection
-  margin (1.2 mag) fitted to swetest, not from the paper; the paper's own
-  threshold is 3 to 9 days early. Reproduces the paper's Table 3 to 0.9 %
-  and its 5.80 limiting magnitude at 220 nL to 0.006.
+  `limiting_magnitude`. Eq. 15c's twilight term is misprinted in the 1993
+  paper: as printed, the sky beside the Sun is no brighter than the sky far
+  from it. The term used is Schaefer's 1998 one (Sky & Telescope, May 1998).
+  The default detection margin is the paper's threshold, 0. Each event
+  carries a spread: how many days it moves with the threshold 0.2 magnitude
+  easier or harder. Against swetest's `-hev` on DE440 (43 cases), our
+  risings come early and our settings late in every case:
+  - stars by 1 to 6 days, Sirius at Cairo -1 and +2, with spreads of 0 to 2
+    days;
+  - Mercury, Jupiter, Saturn and Venus's rising and setting by 1 to 5;
+  - Venus's evening first and morning last by 7 and 10;
+  - Mars by 11 and 21 (spreads 3 and 5);
+  - the Moon by 0 and 1.
+  The 139 CE Sirius rising at Alexandria comes out 1.1 days after Censorinus's
+  date. The paper's Table 3 is reproduced to 0.9 %, and its 5.80 limiting
+  magnitude at 220 nL to 0.006.
 - **`prometheia_engine_delta_t(engine, jd_tt)`** gives an engine's own Delta T
   (its model, or the installed callback), so that a result given in TT can be
   turned into UT1 as the engine would (Python: `Context.delta_t`). The ABI is

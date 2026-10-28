@@ -344,7 +344,7 @@ class Engine(unittest.TestCase):
         self.assertLessEqual(h.optimum_ut1, h.end_ut1)
         self.assertGreater(h.margin, 0.0)
         self.assertAlmostEqual(h.magnitude, -1.46, places=2)
-        self.assertEqual(h.options["detection_margin_mag"], 1.2)
+        self.assertEqual(h.options["detection_margin_mag"], 0.0)
         self.assertEqual(h.atmosphere["relative_humidity_pct"], 40.0)
         self.assertIsNone(h.atmosphere["visual_range_km"])
         # The same through the registry id, and bit for bit the same.

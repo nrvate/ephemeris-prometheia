@@ -1988,6 +1988,8 @@ prometheia_status prometheia_heliacal_next(prometheia_engine* engine,
         out->optimum_ut1 = f.optimum_ut1;
         out->end_tt = f.end_tt;
         out->end_ut1 = f.end_ut1;
+        out->spread_before_days = f.spread_before_days;
+        out->spread_after_days = f.spread_after_days;
         const heliacal::Sight& s = f.at_optimum;
         out->magnitude = s.scene.object_v;
         out->object_alt_deg = s.scene.object_alt_deg;

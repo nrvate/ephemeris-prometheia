@@ -237,6 +237,8 @@ class Heliacal:
     extinction_mag: Optional[float]
     limiting_magnitude: Optional[float]
     margin: float
+    spread_before_days: float
+    spread_after_days: float
     atmosphere: dict[str, Optional[float]]
     observer: dict[str, Any]
     options: dict[str, Any]

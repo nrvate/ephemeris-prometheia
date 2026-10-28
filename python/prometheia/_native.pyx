@@ -630,8 +630,11 @@ class Heliacal:
     moment and end_* the window's end. magnitude, object_alt_deg,
     object_az_deg, sun_depression_deg, sun_separation_deg, sky_brightness_nl,
     extinction_k, extinction_mag, limiting_magnitude and margin are the
-    circumstances at the optimum (None where the model has none). atmosphere,
-    observer and options echo the inputs used."""
+    circumstances at the optimum (None where the model has none).
+    spread_before_days and spread_after_days say how firmly the model fixes
+    the day: how far it moves with the threshold 0.2 magnitude easier or
+    harder (a sensitivity, at most 90 days each way). atmosphere, observer and
+    options echo the inputs used."""
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
@@ -1147,6 +1150,7 @@ cdef class Context:
             sky_brightness_nl=nan_none(out.sky_brightness_nl),
             extinction_k=nan_none(out.extinction_k), extinction_mag=nan_none(out.extinction_mag),
             limiting_magnitude=nan_none(out.limiting_magnitude), margin=out.margin,
+            spread_before_days=out.spread_before_days, spread_after_days=out.spread_after_days,
             atmosphere=air_dict(&out.atmosphere), observer=observer_dict(&out.observer),
             options=model_dict(&out.options))
 

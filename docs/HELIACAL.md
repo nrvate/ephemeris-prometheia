@@ -67,7 +67,8 @@ than the limiting magnitude of the sky behind it, less a margin:
 - **Brightness.** eq. 10, V = -16.57 - 2.5 log I (I in foot-candles).
 - **Sky.** eq. 14 (the scattering function) and eqs. 15a-e: night
   (B_o = 180 nL, "a typical value for a dark site"), moonlight, twilight, day
-  and their sum. The Moon's V is the engine's to 120 deg of phase and the paper's
+  and their sum, with the twilight term as Schaefer revised it in 1998 (item 3
+  below). The Moon's V is the engine's to 120 deg of phase and the paper's
   eq. 12 beyond it (-12.73 + 0.026|a| + 4e-9 a^4, at the mean distance; Table 5's
   crescent at a = 135 deg, -7.89, is reproduced), because the young and old
   crescents a heliacal event needs lie past 120 deg.
@@ -89,19 +90,32 @@ Each of these is a decision the code makes, in the order they matter:
    papers, without a number. The paper's own threshold (50 % detection,
    "highly-experienced young observers") finds events 3 to 9 days early
    against swetest (below). `detection_margin_mag` is the margin by which the
-   object must stand above the threshold; **its default 1.2 magnitudes is not
-   from the paper**: it is the one constant fitted to swetest's printed
-   events (of 1.0, 1.2, 1.4 and 1.6 the one that agreed best over the star
-   cases; the fit is coarse). `0` is the paper.
+   object must stand above the threshold. **Its default is 0, the paper's
+   threshold** (the maintainer's decision, 2026-10-28). A caller who wants
+   an experience correction supplies it; 1.2 brings the stars closest to
+   swetest (below), a number fitted to swetest, not from any source.
 2. **B_day below the horizon.** Eqs. 2b and 3a are not defined for a zenith
    distance past 90 deg, and with the horizon's air mass (40) eq. 15d is a
    hundred times fainter than the paper's own sunset sky (Table 6). With the
    Sun on or below the horizon the twilight term (15c) stands alone; above it
    the paper's min(B_twi, B_day) applies.
-3. **Eq. 15c's separation term**, `max{1, dex[(rho_sun/90 deg) - 1.1]}`, is
-   implemented as printed. It is 1 for the Sun's neighbourhood and rises
-   beyond 99 deg, which is opposite to the sky's actual glow near the Sun;
-   it was not changed.
+3. **Eq. 15c is misprinted, and Schaefer's 1998 form is used.** The page
+   image reads `max{1, dex[(rho_sun/90 deg) - 1.1]} 10^(8.45 + 0.4 h_sun)`.
+   The separation factor is 1 everywhere within 99 deg of the Sun and grows
+   beyond it, so the twilight sky beside the Sun would be no brighter than
+   the sky across from it. Schaefer's later model ("To the Visual Limits",
+   Sky & Telescope 95(5), 57-60, May 1998: the twilight brightness of its
+   published listing, V band) has the sky brighter toward the Sun as
+   100/rho_sun and toward the horizon:
+   B_twi = dex(8.2307 + 0.4 h_sun + Z/(900 k)) (100/rho_sun) (1 - dex(-0.4 k X))
+   nL. Here 8.2307 = -0.4(M_sun - M_0 + 32.5) - log 1.11e-15, with that
+   article's V-band M_sun = -26.74 and M_0 = -11.05, and its 1.11e-15 to
+   nanoLamberts. This is the term used; rho_sun is held at 1 deg or more.
+   Against the 1993 printing, both at margin 1.2, it moved Venus's evening
+   first and morning last from -13 and +11 days to +1 and -1, and Mars's
+   setting from -33 to -72. Mars's margin falls slowly while it sets, so its
+   date answers the margin more than any other case here: +21 at margin 0,
+   -72 at 1.2. At the default margin 0 the numbers are in (b).
 4. **Naked eye.** The telescope factors are 1; the aperture D of eqs. 31e,
    31i, 31l is the observer's pupil (eq. 32); F_p is 1. Eq. 31d as printed
    (`P_st / M P`) is a telescope's exit-pupil factor and has no meaning for
@@ -157,97 +171,91 @@ All measured (2026-10-28, DE440, Release).
 | Aldebaran: X at 0.2 deg (2b) | 36 | 36.3 |
 | Aldebaran: k_R, k_oz at 2940 m, night vision | 0.101, 0.010 | 0.1005, 0.0111 |
 | Aldebaran: A_m at 0.6 deg (eq. 51 with the paper's k_a) | 4.95 | 4.976 |
-| zenith sky, Sun at 0, -6, -12 deg (Table 6) | 3e7, 1e5, 300 nL | 5.6e7, 2.2e5, 1121 nL |
+| zenith sky, Sun at 0, -6, -12 deg (Table 6) | 3e7, 1e5, 300 nL | 3.7e7, 1.5e5, 798 nL |
 
-The sky brightness is within a factor 1.9 at sunset, 2.2 at civil and 3.7 at
-nautical twilight (a factor, not a percentage: the table says "zenith" and
+The sky brightness is within a factor 1.25 at sunset, 1.5 at civil and 2.7
+at nautical twilight (a factor, not a percentage: the table says "zenith" and
 the formula has a haze factor that depends on k); the rest agree to the
 table's precision. Schaefer 1987 (JHA Suppl. 18, S19) was not read: not
 attempted, so none of its tabulated values is reproduced.
 
 **(b) swetest `-hev`** (43 cases, DE440, tools/gen/gen_heliacal_fixtures.py,
 atmosphere printed beside each in `tests/heliacal_fixtures.inc`). Differences
-are ours less swetest's, in days of the event's UT1; the default margin 1.2
-and, in brackets, the paper's 0:
+are ours less swetest's, in days of the event's UT1, with the default margin
+0; in brackets, the spread (below), days before/after:
 
-- all 43 cases: 22 within 1 day (1), 35 within 3 days (11);
-- the 29 star cases (12 stars, six sites, and Sirius at Cairo in five
-  atmospheres): 20 within 1 day (1), 26 within 3 (9);
-- the 24 star cases in the default atmosphere: 23 within 3 days, the worst
-  Fomalhaut's rising at +4.0; the optimum moment agrees to within 8 minutes
-  except Fomalhaut (34, 21);
-- the recorded dates: Sirius at Cairo rises on 2026-08-06 (ours -1.0 day;
-  -3.0 with margin 0), Venus at Berlin rises on 2026-11-02 (-2.0) and sets on
-  2028-05-23 (+3.0);
-- Sirius at Cairo, which moves with the atmosphere in swetest by +4 days at
-  80 % humidity and +20 at a 10 km visual range: ours moves +1 and +10, and
-  is 3.99 and 2.00 days off at 80 % and at 60 km, 11.0 days off at 10 km;
-  a total coefficient of 0.35 gives +1.0 here against no change in swetest;
-- planets (ours less swetest's, days): Mercury -1.0 and +1.0, Saturn +2.0
-  and 0, Jupiter -3.0 and +4.0, Mars +5.0 (rising) and -33.0 (setting), Venus
-  -2.0 and +3.0 (rising, setting) and -13.0 and +11.0 (evening first, morning
-  last); the Moon -1.0 (evening first) and +1.0 (morning last).
+- all 43 cases: 5 within 1 day, 25 within 3 (margin 1.2: 17 and 35);
+- the 24 star cases in the default atmosphere: risings 1 to 6 days early,
+  settings 1 to 6 days late, Sirius at Cairo -1.0 and +2.0, the worst
+  Fomalhaut's and Capella's risings (-6.0) and Regulus's setting (+6.0); each
+  spread 0 to 2 days;
+- Sirius at Cairo's rising in other atmospheres: -5.0 at 80 % humidity,
+  -14.0 at a 10 km visual range, -2.0 at 60 km, 0.0 with a total
+  coefficient of 0.35, -1.0 at 900 hPa and 20 %;
+- planets: Mercury -3.0 and +1.0, Jupiter -2.0 and +3.0, Saturn -5.0 and
+  +3.0, Venus -1.0 and +1.0 (rising, setting) and -7.0 and +10.0 (evening
+  first, morning last; spread 2/1 and 2/2), Mars -11.0 and +21.0 (spread 3/3
+  and 5/4); the Moon 0.0 (evening first) and +1.0 (morning last).
+
+Every difference has one sign: our risings come early and our settings late,
+so this implementation sees an object at a fainter margin than swetest does.
+Dividing each difference by its spread gives the size of that offset in
+magnitudes. It is about 0.3 mag for the stars, about 0.8 for Saturn and for
+Venus's evening first and morning last, and about 1 for Mars. swetest is a
+black box here, and its algorithm is unknown to me, so the offset does not
+say which is nearer the sky. The one observation checked (d) fits margin 0.
+
+### How firm the date is
+
+`Found::spread_before_days` and `spread_after_days` (C:
+`prometheia_heliacal`, Python: `Heliacal`) give the number of days the event
+moves with the threshold `kSpreadMag` = 0.2 magnitude easier or harder, at
+most 90 each way:
+- for a first sighting, the run of days within 0.2 mag below the threshold
+  before it, and the days to the first margin 0.2 mag above it;
+- mirrored for a last sighting.
+This is a sensitivity of the model, not an observed uncertainty. 0.2 mag is a
+round figure: Schaefer gives his sky brightnesses and extinctions as
+typically 20 % accurate (1998), and that much in either moves a threshold by
+a tenth of a magnitude or more. Sirius's rising at Cairo is firm to a day;
+Mars's setting at Athens to five.
 
 ### The planet and Moon misses, investigated
 
-Each test varied one thing and held the rest (the 43-case table, margin 1.2):
-
-- **A 1-day step instead of 4** (a short run skipped): every planet and Moon
-  result identical. Ruled out.
-- **The window, 3.5 h or 6 h** around sunrise or sunset: identical for all
-  but Mercury's setting (+0.01 d) and the Moon's (-0.04 d). Ruled out.
-- **Magnitude and phase passed in**: ours against swetest's printed V at its
+Under the printed eq. 15c with margin 1.2, Mars's setting was -33 days and
+Venus's evening first and morning last -13 and +11. Each check below varied
+one thing and held the rest:
+- **A 1-day step instead of 4** (a short run skipped): identical. Ruled out.
+- **The window, 3.5 h or 6 h** around sunrise or sunset: identical but for
+  Mercury's setting (+0.01 d) and the Moon's (-0.04 d). Ruled out.
+- **Magnitude and phase passed in**, ours against swetest's printed V at its
   event: Venus -3.89 and -3.96 (swetest -3.893, -3.960), Mars 1.25 (1.249),
   Jupiter -1.80 (-1.805). Ruled out.
-- **The branch of the last-type events**: checked by the margin on each day
-  around swetest's (it falls through zero on the day found for Venus's
-  setting, Mars's and Jupiter's); the code takes the last visible day. Ruled
-  out.
+- **The branch of the last-type events**: the margin falls through zero on
+  the day found. Ruled out.
 - **The Moon: a defect, fixed.** The engine's Moon V is NaN past 120 deg of
   phase, so the young and old crescents were declared unseen: +4.0 and -3.1
-  days. With the paper's eq. 12 beyond 120 deg they are -1.0 and +1.0.
-- **Mars's setting: not a defect.** Mars (V 1.25) stands 6 deg up in the
-  evening at 24 deg elongation; its margin is -0.06 to -0.33 over the 24 days
-  around swetest's date and changes by 0.01 mag a day. Any model that differs
-  by 0.3 mag moves that event by weeks; the same holds for Mars's rising
-  (-0.36 to +0.26 over 24 days). The date there is not determined to better
-  than the detection margin's uncertainty.
-- **Venus's evening first and morning last, Jupiter, Mercury: elongation.**
-  Venus at Berlin stays 2.7-3.5 deg up for weeks, its margin moving 0.1 mag a
-  day, so a 1.4 mag disagreement is 12 days. The disagreement grows as the
-  object's elongation falls (Sirius at 48 deg is 1 day, Venus at 24 deg 13,
-  Jupiter at 13-19 deg 3-4). The one place the elongation enters is eq. 15c's
-  `max{1, dex[(rho_sun/90 deg) - 1.1]}`, which I implemented as printed and
-  which is 1 at every elongation below 99 deg (so the Sun's neighbourhood has
-  no extra glow). As a diagnostic, not a fix, the reversed reading
-  `max{1, dex[1.1 - rho/90 deg]}` (a brighter sky near the Sun) with the
-  margin held at 1.2 brings Venus to 0, 0, +1, -2 days, Jupiter to +1 and -1
-  and Mercury to +2 and -1, but spreads the stars (10 of 29 within a day, 23
-  within 3) and sends Mars's setting to -74; so it is a reading that explains
-  the direction and not a corrected model, and it was not adopted. A constant
-  fitted to close the gap was not tried.
-- **Not tested**: the point-source threshold for a bright planet (eqs. 35-36
-  are not implemented), and swetest's handling of Venus, which I cannot see.
-
-So: the stars and the Moon are fitted to a day or two; Mercury, Saturn and
-Jupiter to a few days; Mars and Venus's evening first and morning last are
-not determined by this model to better than weeks, and the numbers stand as
-measured.
-
-swetest here is a black box; its algorithm is unknown to me, so "disagrees"
-does not say which is right. Where it sits among observation is not
-measured.
+  days. With the paper's eq. 12 beyond 120 deg they are 0.0 and +1.0 now.
+- **The twilight term: the cause.** The page image confirms the printing of
+  eq. 15c (item 3 of the list above). Under it the sky near the Sun carried no
+  extra glow, and the margin of a planet low in bright twilight sat near zero
+  for weeks: Mars's changed 0.01 mag a day. With Schaefer's 1998 term the
+  margins move a few tenths of a magnitude a day, the spreads are days, and
+  what is left is the one-signed offset of (b). Mars stays the most
+  sensitive case (item 3 of the list above).
+- **The colour factor** (eq. 31m) applies only to night vision (B below
+  1500 nL); heliacal events are seen in brighter twilight, where the paper
+  sets it to 1. Not a cause.
 
 **(c) Limiting-magnitude spot checks**: the rows of (a) above.
 
 **(d) The historical Sirius rising** (Censorinus, 139 CE at Alexandria,
 Julian 20 July): the finder run on DE440 with the DE441 cut
-`linux_m3000p1550.441` behind it (docs/DE.md) gives JD 1772027.606, +0.1 days
-from 20 July, with margin 0, and +2.1 days with the default 1.2
+`linux_m3000p1550.441` behind it (docs/DE.md) gives JD 1772028.603, +1.1 days
+from 20 July, with the default margin 0, and +3.1 days with 1.2
 (`heliacal_censorinus_sirius_139_ce`, skipped by default because the cut is
 423 MB and not in every checkout; run with `--no-skip`). The date is a
-historical claim and not a calibration: the 1.2 was fitted on swetest's
-2026 output alone.
+historical claim, one observation, and not a calibration.
 
 **Cost.** The default test set (selected events including the Moon, arcus visionis, the C API,
 the checks of (a)) runs in 0.8 s in Release.

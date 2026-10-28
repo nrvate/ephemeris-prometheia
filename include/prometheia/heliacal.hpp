@@ -74,12 +74,10 @@ struct Options {
     double arcus_visionis_deg = std::nan("");
     double object_altitude_deg = 0.0;
     // Schaefer only: how far above the threshold the object must be, in
-    // magnitudes. 0 is the paper's 50 % detection threshold, which finds
-    // heliacal events 3 to 9 days early against swetest's; the default 1.2
-    // is a constant fitted to swetest's printed events (docs/HELIACAL.md,
-    // "Validation"), not a number from the paper, which refers to an
-    // experience correction without giving one.
-    double detection_margin_mag = 1.2;
+    // magnitudes. The default is the paper's own 50 % detection threshold;
+    // the paper mentions an experience correction without giving one, and a
+    // caller may supply it here (docs/HELIACAL.md, "Validation").
+    double detection_margin_mag = 0.0;
     // Schaefer only: add the Moon's light to the sky (eq. 15b). Off, the finder
     // looks for the object's own heliacal event, not for a night the Moon spares.
     bool moonlight = false;
@@ -169,12 +167,22 @@ struct Found {
     double jd_tt = 0.0, jd_ut1 = 0.0;           // the event: the start of the visibility window
     double optimum_tt = 0.0, optimum_ut1 = 0.0; // the best moment (largest margin)
     double end_tt = 0.0, end_ut1 = 0.0;         // the end of the window
+    // How firmly the model fixes the date: the event moves this many days
+    // earlier, or later, with the threshold kSpreadMag easier or harder (at
+    // most kSpreadMaxDays each way). Where the margin changes slowly from day
+    // to day (Mars, Venus far from the Sun) a small error in the sky or the
+    // extinction moves the date by weeks, and this says so. A sensitivity of
+    // the model, not an observed uncertainty.
+    double spread_before_days = 0.0, spread_after_days = 0.0;
     Sight at_optimum;
     // The inputs as used.
     Atmosphere atmosphere;
     Observer observer;
     Options options;
 };
+
+inline constexpr double kSpreadMag = 0.2;
+inline constexpr int kSpreadMaxDays = 90;
 
 // The first event strictly after jd_start_tt. ArgumentError for a bad input
 // (a star with an evening-first or morning-last event, an object with no

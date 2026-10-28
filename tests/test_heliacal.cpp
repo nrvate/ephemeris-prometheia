@@ -152,6 +152,26 @@ TEST_CASE("heliacal_sky_brightness_against_schaefer_table_6") {
     CHECK(dark < 180.0);
 }
 
+TEST_CASE("heliacal_twilight_sky_is_brighter_toward_the_sun") {
+    // Eq. 15c as printed has no glow beside the Sun; Schaefer's 1998 term
+    // falls off as 100/rho (docs/HELIACAL.md, item 3). The same patch of sky,
+    // 5 deg up with the Sun 8 deg down, at 15, 30, 60 and 120 deg from it.
+    auto sky = [](double sep) {
+        Scene s;
+        s.object_alt_deg = 5.0;
+        s.sun_alt_deg = -8.0;
+        s.sun_sep_deg = sep;
+        return visibility(s, Atmosphere{}, Observer{}).sky_brightness_nl;
+    };
+    const double b15 = sky(15.0), b30 = sky(30.0), b60 = sky(60.0), b120 = sky(120.0);
+    MESSAGE("twilight sky at 15, 30, 60, 120 deg: " << b15 << ", " << b30 << ", " << b60 << ", "
+                                                    << b120 << " nL");
+    CHECK(b15 > b30);
+    CHECK(b30 > b60);
+    CHECK(b60 > b120);
+    CHECK(b15 / b120 > 5.0); // 100/rho: a factor 8 less the night sky's share
+}
+
 TEST_CASE("heliacal_extinction_inputs") {
     Atmosphere atm;
     const Extinction humid = extinction(0.0, 30.0, 0.0, atm, false);
@@ -207,7 +227,7 @@ namespace {
 // One fixture through the finder; the difference in days (ours less swetest's).
 struct Run {
     bool ok = false;
-    double days = 0.0, optimum_min = 0.0;
+    double days = 0.0, optimum_min = 0.0, before = 0.0, after = 0.0;
     std::string message;
 };
 
@@ -232,6 +252,8 @@ Run run_fixture(Engine& e, registry::Registry& reg, const HeliacalFixture& f, do
     }
     out.ok = true;
     out.days = r.value().jd_ut1 - f.event_ut;
+    out.before = r.value().spread_before_days;
+    out.after = r.value().spread_after_days;
     // The optimum is compared as a time of day, mod one day.
     double m = (r.value().optimum_ut1 - f.optimum_ut) * 1440.0;
     out.optimum_min = m - 1440.0 * std::floor(m / 1440.0 + 0.5);
@@ -273,12 +295,35 @@ TEST_CASE("heliacal_selected_events_against_swetest") {
                                       fixture("Moon", "Rome", 3),    fixture("Moon", "Rome", 4)};
     for (const HeliacalFixture* f : picks) {
         REQUIRE(f != nullptr);
-        const Run r = run_fixture(e, reg, *f, 1.2);
+        const Run r = run_fixture(e, reg, *f, 0.0);
         REQUIRE_MESSAGE(r.ok, std::string(f->object) << ": " << r.message);
         MESSAGE(std::string(f->object)
                 << " " << std::string(f->site) << " event " << f->event << ": " << r.days << " d");
         CHECK(std::fabs(r.days) <= 3.5);
     }
+}
+
+TEST_CASE("heliacal_spread_says_how_firm_the_date_is") {
+    // Sirius's margin climbs fast through its rising: a day either way.
+    // Mars's falls slowly while it sets: days, not weeks, with Schaefer's
+    // 1998 twilight term (docs/HELIACAL.md, "How firm the date is").
+    if (access(de440().c_str(), R_OK) != 0) {
+        MESSAGE("SKIP: no DE440 at " << de440());
+        return;
+    }
+    auto opened = Engine::open(de440());
+    REQUIRE(opened.ok());
+    Engine e = std::move(opened).value();
+    registry::Registry reg(e);
+    const Run sirius = run_fixture(e, reg, *fixture("Sirius", "Cairo", 1), 0.0);
+    const Run mars = run_fixture(e, reg, *fixture("Mars", "Athens", 2), 0.0);
+    REQUIRE(sirius.ok);
+    REQUIRE(mars.ok);
+    MESSAGE("Sirius -" << sirius.before << "/+" << sirius.after << " d, Mars setting -"
+                       << mars.before << "/+" << mars.after << " d");
+    CHECK(sirius.before + sirius.after <= 2.0);
+    CHECK(mars.before + mars.after >= 6.0);
+    CHECK(mars.before + mars.after <= 15.0);
 }
 
 TEST_CASE("heliacal_moon_crescent_magnitude_is_paper_eq_12") {
@@ -296,7 +341,7 @@ TEST_CASE("heliacal_moon_crescent_magnitude_is_paper_eq_12") {
     for (int ev : {3, 4}) {
         const HeliacalFixture* f = fixture("Moon", "Rome", ev);
         REQUIRE(f != nullptr);
-        const Run r = run_fixture(e, reg, *f, 1.2);
+        const Run r = run_fixture(e, reg, *f, 0.0);
         REQUIRE(r.ok);
         CHECK(std::fabs(r.days) <= 2.0);
     }
@@ -309,7 +354,7 @@ TEST_CASE("heliacal_all_events_against_swetest" * doctest::skip()) {
     REQUIRE(opened.ok());
     Engine e = std::move(opened).value();
     registry::Registry reg(e);
-    for (double margin : {1.2, 0.0}) {
+    for (double margin : {0.0, 1.2}) {
         int n = 0, w1 = 0, w3 = 0, stars = 0, stars3 = 0, stars1 = 0;
         for (const HeliacalFixture& f : kHeliacalFixtures) {
             const Run r = run_fixture(e, reg, f, margin);
@@ -325,10 +370,10 @@ TEST_CASE("heliacal_all_events_against_swetest" * doctest::skip()) {
             w3 += std::fabs(r.days) <= 3.0;
             stars1 += star && std::fabs(r.days) <= 1.0;
             stars3 += star && std::fabs(r.days) <= 3.0;
-            std::printf(
-                "margin %.1f %-9s %-8s ev%d P%.0f RH%.0f VR%.2f: %+6.2f d, optimum %+5.1f min\n",
-                margin, f.object, f.site, f.event, f.pressure, f.humidity, f.visr, r.days,
-                r.optimum_min);
+            std::printf("margin %.1f %-9s %-8s ev%d P%.0f RH%.0f VR%.2f: %+6.2f d (-%2.0f/+%2.0f), "
+                        "optimum %+5.1f min\n",
+                        margin, f.object, f.site, f.event, f.pressure, f.humidity, f.visr, r.days,
+                        r.before, r.after, r.optimum_min);
         }
         std::printf("margin %.1f: %d cases, %d within 1 day, %d within 3; stars %d: %d within 1, "
                     "%d within 3\n",
@@ -416,7 +461,7 @@ TEST_CASE("heliacal_c_api") {
     CHECK(observer.age_years == 36.0);
     CHECK(observer.binocular == 1);
     CHECK(model.kind == PROMETHEIA_VISIBILITY_SCHAEFER);
-    CHECK(model.detection_margin_mag == 1.2);
+    CHECK(model.detection_margin_mag == 0.0);
     prometheia_object sirius{PROMETHEIA_OBJECT_ID, 0, "star:Sirius"};
     prometheia_heliacal h;
     REQUIRE(prometheia_heliacal_next(eng, &sirius, 2461222.5, &site, &air, &observer, &model,
@@ -427,7 +472,7 @@ TEST_CASE("heliacal_c_api") {
     CHECK(h.end_ut1 >= h.optimum_ut1);
     CHECK(h.magnitude == doctest::Approx(-1.46).epsilon(0.01));
     CHECK(h.margin > 0.0);
-    CHECK(h.options.detection_margin_mag == 1.2);
+    CHECK(h.options.detection_margin_mag == 0.0);
     CHECK(h.atmosphere.relative_humidity_pct == 40.0);
     prometheia_visibility vis;
     REQUIRE(prometheia_visibility_at(eng, &sirius, h.optimum_tt, &site, &air, &observer, &model,

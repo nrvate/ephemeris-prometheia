@@ -156,8 +156,14 @@ double sky_brightness(const Scene& s, double k, double b0) {
     // fainter than Table 6's sunset sky, so with the Sun on or below the
     // horizon the twilight term stands alone (docs/HELIACAL.md); above it the
     // paper's min applies.
-    double b_sun =
-        std::max(1.0, dex(s.sun_sep_deg / 90.0 - 1.1)) * dex(8.45 + 0.4 * s.sun_alt_deg) * haze;
+    // The twilight term is Schaefer's revision (S&T 95(5):57, 1998, the
+    // listing's twilight brightness, V band: M_sun - M_0 = -26.74 + 11.05,
+    // 1.11e-15 to nL): brighter toward the Sun as 100/rho and toward the
+    // horizon as dex(Z/(900 k)). The 1993 printing's max{1, dex[rho/90 - 1.1]}
+    // is 1 at every separation under 99 deg, so the sky beside the Sun was no
+    // brighter than the sky across from it (docs/HELIACAL.md).
+    const double rho = std::max(s.sun_sep_deg, 1.0);
+    double b_sun = dex(8.2307 + 0.4 * s.sun_alt_deg + z / (900.0 * k)) * (100.0 / rho) * haze;
     if (s.sun_alt_deg > 0.0) {
         const double zs = 90.0 - s.sun_alt_deg;
         const double b_day = 11700.0 * scatter(s.sun_sep_deg) * dex(-0.4 * k * air_mass(zs)) * haze;
@@ -353,8 +359,8 @@ double margin_at(Ctx& c, double jd_tt, const Magnitudes& m) {
 
 struct Day {
     bool vis = false;
-    double opt_tt = 0.0, margin = 0.0;
-    double w0 = 0.0, w1 = 0.0; // the visibility window, TT
+    double opt_tt = 0.0, margin = -kInf; // the day's best; -inf: no sunrise or no magnitude
+    double w0 = 0.0, w1 = 0.0;           // the visibility window, TT
     Magnitudes mags;
 };
 
@@ -566,6 +572,28 @@ Result<Found> next(Engine& engine, const Engine::ObjectRef& object, double jd_st
         f.optimum_ut1 = d.opt_tt - c.dt_days(d.opt_tt);
         f.end_tt = d.w1;
         f.end_ut1 = d.w1 - c.dt_days(d.w1);
+        // The spread: with the threshold kSpreadMag easier the event is the
+        // far end of the run of days within kSpreadMag below it (earlier for a
+        // first sighting, later for a last); with it harder, the nearest day
+        // kSpreadMag above it on the other side.
+        const auto easier_run = [&](int dir) {
+            int k = j;
+            while (std::abs(k + dir - j) <= kSpreadMaxDays && S(k + dir).margin > -kSpreadMag)
+                k += dir;
+            return std::abs(k - j);
+        };
+        const auto harder_day = [&](int dir) {
+            int k = j;
+            while (std::abs(k - j) < kSpreadMaxDays && !(S(k).margin > kSpreadMag))
+                k += dir;
+            return std::abs(k - j);
+        };
+        if (options.model == Model::Schaefer) {
+            f.spread_before_days = first ? easier_run(-1) : harder_day(-1);
+            f.spread_after_days = first ? harder_day(+1) : easier_run(+1);
+        }
+        if (c.error.code != ErrorCode::Ok)
+            return c.error;
         auto s = sight(c, d.opt_tt, d.mags);
         if (!s.ok())
             return s.error();
