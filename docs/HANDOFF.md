@@ -8,8 +8,8 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Resume here (state at 2026-10-28)
 
-**astromcp's port plan, Part A, has landed through A-15 and A-17; A-16 is
-in progress.** The plan is
+**astromcp's port plan, Part A, is complete** (A-16 landed `a435099`,
+2026-10-28). What remains of the port is astromcp's Part B. The plan is
 `docs/prometheia_port_plan.md` on astromcp's `prometheia` branch. Its
 coordinator is the astromcp session. Astrolog's session hears about every
 change to the C ABI, the wire or `.epm` before it lands.
@@ -76,20 +76,30 @@ change to the C ABI, the wire or `.epm` before it lands.
   `_add_*` calls, which `Dataset` replaces (`fabc804`). The wheel against
   an installed library was checked on 2026-10-27, so A-17 is done.
 
+- A-16: segments through C and Python (`a435099`; C_API.md, "Segments";
+  SEGMENTS.md, "Through the C API"). It was built by the helper session.
+  - Astrolog reviewed the signatures first: `prometheia_segments_close`,
+    `layout->stride` authoritative, `err_arcsec` an angular separation on
+    stated points.
+  - The fit is cut at every DE-file handover, refuses a near-zero distance,
+    and fails as a whole on any refused instant.
+  - At 0.001″ over a year, 10,000 instants per case, the worst is 0.000766″.
+    Eval takes 150–230 ns.
+- NGC 869 and 884, the Double Cluster (astromcp's Capulus), from NASA
+  HEASARC's NGC 2000.0 table, since SIMBAD was down (`8913d9d`;
+  STARS.md). `PROMETHEIA_ASTROMETRY_NGC2000` is appended; Astrolog pinned it.
+
 **Next:**
-- **A-16, segments through C, is in progress** in a helper session
-  (`ephemeris-prometheia-b6`, branch `a16-segments-c` in its own worktree).
-  - Astrolog reviewed the signatures. The destructor is
-    `prometheia_segments_close`, and `layout->stride` is authoritative.
-  - `err_arcsec` is an angular separation, with its sampling stated.
-  - A segment bound goes at every step the engine knows of, such as the
-    DE440/DE441 handover.
-  - A near-zero distance is ARGUMENT, and a refused instant fails the
-    whole fit.
-  - The limits are documented, and position is not continuous across a
-    bound.
-  - It lands through this tree once its gate passes. With it, Part A is
-    complete.
+- Nothing queued in Part A. astromcp's Part B, as it reported on
+  2026-10-28:
+  - B-1 to B-8 are done.
+  - B-9 (the segment kernel) and B-10 (one dataset, a context per thread,
+    the bench) were waiting on A-16, which has now landed.
+  - B-11 to B-13 (tests off libswe, removing Swiss, docs) are in progress.
+  - Maintainer: astromcp's sidereal modes use its own identifiers, not the
+    Swiss integers. The libswe parity tests are deferred: they stay until
+    the maintainer decides.
+- If astromcp's B-9 re-timing falls short of libswe, it sends a profile.
 - **Helper session.** The maintainer started `ephemeris-prometheia-b6` to
   take self-contained work in its own worktree. Its commits are picked in
   here. Its gates and ours must not overlap: ask before each one.
@@ -97,9 +107,6 @@ change to the C ABI, the wire or `.epm` before it lands.
 **Open:**
 - Heliacal: only sighting records can settle the offset from swetest.
   Schaefer 1987 (JHA, 556 sightings) has not been read (HELIACAL.md).
-- `tools/fetch/stars_fetch.py --only simbad-ngc` still waits on SIMBAD.
-  The sandbox cannot reach it, and the edit that declares the source stays
-  uncommitted until the file is pinned.
 
 **Limits** (maintainer): at most 3 sub-agents and 2 CPU-bound jobs at
 once. The machine is shared with the astromcp and Astrolog sessions.
