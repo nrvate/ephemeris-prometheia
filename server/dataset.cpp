@@ -25,7 +25,10 @@ std::string base_name(const std::string& path) {
 // file's size and the SHA-256 of each kPiece-byte piece in order. The same
 // bytes give the same digest, as a single stream would; unlike one stream it
 // is not bound to one core (one stream was 97% of starting up, 2026-09-19).
+// A piece is read in kBlock reads: a whole-piece buffer per thread stayed
+// resident after startup, about 8 MiB a core (SERVER.md, "Event loops").
 constexpr size_t kPiece = size_t(8) << 20;
+constexpr size_t kBlock = size_t(64) << 10;
 
 bool file_digest(const std::string& path, std::array<uint8_t, 32>& out) {
     std::FILE* f = std::fopen(path.c_str(), "rb");
@@ -47,17 +50,24 @@ bool file_digest(const std::string& path, std::array<uint8_t, 32>& out) {
             failed = true;
             return;
         }
-        std::vector<uint8_t> buf(kPiece);
-        for (size_t i; (i = next++) < pieces;) {
+        std::vector<uint8_t> buf(kBlock);
+        for (size_t i; !failed && (i = next++) < pieces;) {
             const uint64_t at = uint64_t(i) * kPiece;
-            const size_t want = size_t(std::min<uint64_t>(kPiece, size - at));
-            if (std::fseek(g, long(at), SEEK_SET) != 0 ||
-                std::fread(buf.data(), 1, want, g) != want) {
+            size_t left = size_t(std::min<uint64_t>(kPiece, size - at));
+            if (std::fseek(g, long(at), SEEK_SET) != 0) {
                 failed = true;
                 break;
             }
             Sha256 h;
-            h.update(buf.data(), want);
+            while (left > 0) {
+                const size_t want = std::min(kBlock, left);
+                if (std::fread(buf.data(), 1, want, g) != want) {
+                    failed = true;
+                    break;
+                }
+                h.update(buf.data(), want);
+                left -= want;
+            }
             digests[i] = h.bytes();
         }
         std::fclose(g);

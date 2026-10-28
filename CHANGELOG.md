@@ -39,6 +39,17 @@ documented, not that it is frozen.
   - single-loop throughput: no lower (charts 13,819–13,967 → 14,262–14,366
     requests a second).
   No answer and nothing in the protocol changes.
+- **Fixed: about 95 MB held after startup by the dataset digest**
+  ([docs/SERVER.md](docs/SERVER.md), "Event loops"). Each digest thread,
+  one per core, read a whole 8 MiB piece into its own buffer, and glibc
+  kept those buffers resident; `malloc_trim(0)` did not return them. A
+  piece is now read in 64 KiB blocks. The dataset id is unchanged.
+  Measured for `prometheiad` at `--threads 8`, resident memory after
+  startup:
+  - DE440 with the perturbers and the SBDB catalog: 135 → 40 MB;
+  - DE440 with the perturbers and sample-100: 113 → 18 MB;
+  - startup is no slower.
+  `prometheia-json` uses the same digest.
 - **Fixed: non-ASCII paths on Windows, for every open.** The catalog
   writer, `de::trim`, `spk::write_spk`, the engine's sniff of an
   ephemeris's kind and `add_hypotheticals` opened their files in the ANSI

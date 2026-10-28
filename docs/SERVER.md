@@ -57,7 +57,8 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
   (`<engine>/<ephemeris>/<catalogs>#<8 hex>`). The id changes whenever any
   answer could change; clients key their caches on it and may pin it.
   Each file's digest is SHA-256 over its size and the SHA-256 of each 8 MiB
-  piece, computed on every core. `prometheia-json` with DE440 starts in
+  piece, computed on every core and read in 64 KiB blocks ("Event loops"
+  has what whole-piece buffers cost). `prometheia-json` with DE440 starts in
   0.10 s, where one SHA-256 stream made it 0.66 s (2026-09-19). The id changed with this
   once; it changes with every release anyway, since it carries the engine
   version. The
@@ -456,26 +457,34 @@ them once more.
 **Measured 2026-10-28** on this machine: an Intel i7-8700K (6 cores, 12
 threads), 46 GB, Linux 6.8, glibc 2.35 and GCC 11.4, in a Release build. The
 data was DE440 (`linux_p1550p2650.440`), `sb441-n16.bsp` and the SBDB
-catalog `sbdb-20261027.epm` (147 MB), with `--threads 8`. Memory was read a
-second after the "listening" line, and each figure is three runs.
+catalog `sbdb-20261027.epm` (147 MB), with `--threads 8`. Memory was read
+half a second after the "listening" line. Each figure is five runs, with
+the builds alternated, while other work loaded the machine (load average
+5–9).
 
-| | a corpus per loop | one corpus |
-|---|---:|---:|
-| resident memory | 247 MB | 139 MB |
-| live heap (`MALLOC_MMAP_THRESHOLD_=131072`) | 202 MB | 41 MB |
-| start to "listening" | 1.49–1.59 s | 1.02–1.06 s |
+| | a corpus per loop | one corpus | and 64 KiB digest reads |
+|---|---:|---:|---:|
+| resident memory | 241 MB | 135 MB | 40 MB |
+| start to "listening" | 1.69–1.83 s | 1.06–1.19 s | 1.03–1.09 s |
 
-- **Live heap:** with its default settings glibc keeps about 100 MB that
-  was freed during startup. That memory does not grow with `--threads`.
-  A fixed mmap threshold hands it back, and what remains is the live heap.
 - **Per loop:** each extra loop used to cost about 23 MB of live heap with
-  this catalog. Now it costs one engine context, 8 KB when opened
-  (ENGINE.md, "Threads").
-- **One loop:** the live heap is the same both ways (41 and 40 MB).
-  Resident memory is 6 MB higher now (139 against 133 MB), which is the
-  allocator's retention, not data.
-- **Small catalog:** with `tests/data/sample-100.epm` instead of SBDB,
-  resident memory is 116 MB and startup 0.6 s, both ways.
+  this catalog. That was measured with `MALLOC_MMAP_THRESHOLD_=131072`,
+  which stops glibc from keeping freed memory: 202 MB at `--threads 8`
+  before, 41 MB after. Now a loop costs one engine context, 8 KB when
+  opened (ENGINE.md, "Threads").
+- **The digest's buffers:** about 95 MB of the middle column was not data.
+  The dataset digest ("Dataset identity", above) gave each of its threads,
+  one per core, an 8 MiB buffer for a whole piece. glibc kept each
+  thread's arena resident after startup. `malloc_trim(0)` did not reach
+  them and returned only 8 MB.
+  - The digest now reads a piece in 64 KiB blocks, below glibc's 128 KiB
+    mmap threshold.
+  - The same files give the same dataset id, which was checked with SBDB
+    and with sample-100.
+  - A 256 KiB block left 2 MB more resident than 64 KiB.
+- **Smaller datasets:** DE440 alone takes 23, 17 and 18 MB across the
+  three columns. With `tests/data/sample-100.epm` and the perturbers it
+  takes 113 MB with one corpus and 18 MB with 64 KiB reads.
 - **Throughput:** single-loop throughput is unchanged ("Throughput",
   below).
 
