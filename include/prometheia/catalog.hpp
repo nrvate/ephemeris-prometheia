@@ -8,10 +8,9 @@
 // conditions on demand, so file size scales with the number of objects, not
 // with objects x time-span. See docs/FORMAT.md for the byte-level spec.
 //
-// Threading: a Writer is single-threaded. A Reader is safe for concurrent
-// const use only if every thread opens its own instance (the chunk cache is
-// mutable); the engine hands out per-context readers, mirroring the
-// no-shared-mutable-state rule of the library.
+// Threading: a Writer is single-threaded. A Reader holds no mutable state:
+// the chunk it decodes goes into the caller's ChunkCursor, so one open
+// Reader serves several threads at once, each with a cursor of its own.
 #ifndef PROMETHEIA_CATALOG_HPP
 #define PROMETHEIA_CATALOG_HPP
 
@@ -187,7 +186,12 @@ private:
     std::vector<ChunkEntry> entries_;
 };
 
-struct ReaderStats {
+// A reader's scratch: the last chunk decoded, for one thread. A Reader
+// holds no mutable state, so one file serves any number of cursors at once;
+// a cursor follows one Reader (reset it before using another).
+struct ChunkCursor {
+    uint64_t chunk = UINT64_MAX; // index of the chunk in `data`, or none
+    std::string data;            // its records, decompressed and CRC-checked
     uint64_t chunks_read = 0;
     uint64_t chunk_cache_hits = 0;
 };
@@ -201,8 +205,9 @@ public:
     const std::string& name_pool() const { return pool_; }
     uint32_t chunk_records() const { return chunk_records_; }
 
-    // Exact match on spkid. Uses a one-chunk cache: repeated lookups in the
-    // same chunk do not re-read from disk.
+    // Exact match on spkid. Repeated lookups in the cursor's chunk do not
+    // re-read from disk; the form without a cursor reads its chunk each call.
+    Result<Record> lookup(uint64_t spkid, ChunkCursor& cursor) const;
     Result<Record> lookup(uint64_t spkid) const;
 
     // Streams every record in file order (ascending spkid), verifying each
@@ -218,10 +223,8 @@ public:
     // container's integrity at the cost of decompression alone.
     Result<void> verify() const;
 
-    const ReaderStats& stats() const { return stats_; }
-
 private:
-    Result<const std::string*> load_chunk(uint64_t chunk_index) const;
+    Result<const std::string*> load_chunk(uint64_t chunk_index, ChunkCursor& cursor) const;
 
     struct ChunkEntry {
         uint64_t data_offset, stored_size, raw_size, first_spkid;
@@ -236,10 +239,6 @@ private:
     CborValue metadata_;
     std::string pool_;
     std::vector<ChunkEntry> entries_;
-    // Single-chunk cache.
-    mutable uint64_t cached_chunk_ = UINT64_MAX;
-    mutable std::string cached_data_;
-    mutable ReaderStats stats_;
 };
 
 } // namespace prometheia::catalog

@@ -208,8 +208,6 @@ Result<SpkFile> SpkFile::open(const std::string& path) {
         }
         record = int32_t(next);
     }
-    out.cached_index_.assign(out.segments_.size(), ~uint64_t{0});
-    out.cached_record_.assign(out.segments_.size(), {});
     return out;
 }
 
@@ -228,6 +226,12 @@ Result<void> SpkFile::read_words(uint64_t first_word, size_t count,
 }
 
 Result<void> SpkFile::segment_state_et(size_t index, double et, double out[6]) const {
+    SpkCursor cursor;
+    return segment_state_et(index, et, out, cursor);
+}
+
+Result<void> SpkFile::segment_state_et(size_t index, double et, double out[6],
+                                       SpkCursor& cursor) const {
     if (index >= segments_.size()) {
         return make_error(ErrorCode::ArgumentError,
                           "segment index out of range: " + std::to_string(index));
@@ -251,14 +255,18 @@ Result<void> SpkFile::segment_state_et(size_t index, double et, double out[6]) c
     if (pos > double(seg.record_count - 1))
         pos = double(seg.record_count - 1);
     const uint64_t rec = uint64_t(pos);
-    std::vector<double>& words = cached_record_[index];
-    if (cached_index_[index] != rec) {
-        cached_index_[index] = ~uint64_t{0};
+    if (cursor.index.size() != segments_.size()) {
+        cursor.index.assign(segments_.size(), ~uint64_t{0});
+        cursor.records.assign(segments_.size(), {});
+    }
+    std::vector<double>& words = cursor.records[index];
+    if (cursor.index[index] != rec) {
+        cursor.index[index] = ~uint64_t{0};
         Result<void> r = read_words(seg.begin_word + rec * uint64_t(seg.record_words),
                                     size_t(seg.record_words), words);
         if (!r.ok())
             return r;
-        cached_index_[index] = rec;
+        cursor.index[index] = rec;
     }
 
     // Record: MID, RADIUS, then ncoeff coefficients per component.
@@ -499,7 +507,7 @@ long SpkFile::find_segment(int body, double et) const {
 // chain[k] is the k-th ancestor of body (chain[0] = body); states holds,
 // for each, body's state relative to that ancestor (zeros for k = 0).
 Result<void> SpkFile::state_to_root(int body, double et, std::vector<int>& chain,
-                                    std::vector<double>& states) const {
+                                    std::vector<double>& states, SpkCursor& cursor) const {
     chain.assign(1, body);
     states.assign(6, 0.0);
     int current = body;
@@ -526,7 +534,7 @@ Result<void> SpkFile::state_to_root(int body, double et, std::vector<int>& chain
             return {};
         }
         double s[6];
-        Result<void> r = segment_state_et(size_t(seg), et, s);
+        Result<void> r = segment_state_et(size_t(seg), et, s, cursor);
         if (!r.ok())
             return r;
         const size_t prev = states.size() - 6;
@@ -544,15 +552,21 @@ Result<void> SpkFile::state_to_root(int body, double et, std::vector<int>& chain
 }
 
 Result<void> SpkFile::state_et(int target, int center, double et, double out[6]) const {
+    SpkCursor cursor;
+    return state_et(target, center, et, out, cursor);
+}
+
+Result<void> SpkFile::state_et(int target, int center, double et, double out[6],
+                               SpkCursor& cursor) const {
     if (!std::isfinite(et)) {
         return make_error(ErrorCode::ArgumentError, "epoch is not finite");
     }
     std::vector<int> tc, cc;
     std::vector<double> ts, cs;
-    Result<void> r = state_to_root(target, et, tc, ts);
+    Result<void> r = state_to_root(target, et, tc, ts, cursor);
     if (!r.ok())
         return r;
-    r = state_to_root(center, et, cc, cs);
+    r = state_to_root(center, et, cc, cs, cursor);
     if (!r.ok())
         return r;
     for (size_t i = 0; i < tc.size(); ++i) {

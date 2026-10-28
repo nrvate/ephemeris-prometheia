@@ -225,10 +225,35 @@ void unit_radec(double ra_deg, double dec_deg, double u[3]) {
 // ---------------------------------------------------------------------------
 // Ephemeris sources: barycentric ICRF states in km and km/day.
 
+// What reading the files costs a caller in memory: the record each file
+// last decoded, per source slot (Source::slot) and per catalog. The files
+// hold none of it, so sources and catalogs are read-only once loaded and
+// any number of scratches can read them at once, one per thread.
+struct ReadScratch {
+    struct SourceCursors {
+        de::DeCursor de;
+        spk::SpkCursor spk;
+    };
+    std::vector<SourceCursors> sources;       // by Source::slot
+    std::vector<catalog::ChunkCursor> chunks; // by catalog, parallel to Impl::catalogs
+
+    SourceCursors& source(size_t slot) {
+        if (slot >= sources.size())
+            sources.resize(slot + 1);
+        return sources[slot];
+    }
+    catalog::ChunkCursor& chunk(size_t catalog) {
+        if (catalog >= chunks.size())
+            chunks.resize(catalog + 1);
+        return chunks[catalog];
+    }
+};
+
 class Source {
 public:
     virtual ~Source() = default;
-    virtual Result<void> barycentric(int id, double jd_tdb, double out[6]) = 0;
+    virtual Result<void> barycentric(int id, double jd_tdb, double out[6],
+                                     ReadScratch& scratch) const = 0;
     // Best-known GM of a perturbing mass (AU^3/day^2): published by the
     // ephemeris when it carries the constant, absent otherwise (the
     // caller falls back to the DE440 values in forces.hpp).
@@ -242,6 +267,7 @@ public:
     }
     std::string description;
     int denum = 0;
+    size_t slot = 0; // this file's cursors in a ReadScratch; the engine numbers its files
 };
 
 double gm_or_builtin(const Source* s, int id) {
@@ -323,7 +349,8 @@ public:
         return {file_.header().start_jed, file_.header().end_jed};
     }
 
-    Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
+    Result<void> barycentric(int id, double jd_tdb, double out[6],
+                             ReadScratch& scratch) const override {
         using T = de::Target;
         T target;
         switch (id) {
@@ -363,7 +390,8 @@ public:
             return make_error(ErrorCode::NotFound,
                               "body " + std::to_string(id) + " is not in " + description);
         }
-        return file_.relative_state(target, T::SolarSystemBary, jd_tdb, out);
+        return file_.relative_state(target, T::SolarSystemBary, jd_tdb, out,
+                                    scratch.source(slot).de);
     }
 
     // DE headers publish GMs in AU^3/day^2 (GM1..GM9, GMB, GMS; older
@@ -443,13 +471,14 @@ public:
         return {2451545.0 + first_et_ / 86400.0, 2451545.0 + last_et_ / 86400.0};
     }
 
-    Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
+    Result<void> barycentric(int id, double jd_tdb, double out[6],
+                             ReadScratch& scratch) const override {
         if (id == 0) {
             for (int i = 0; i < 6; ++i)
                 out[i] = 0.0;
             return {};
         }
-        return file_.state(id, 0, jd_tdb, out);
+        return file_.state(id, 0, jd_tdb, out, scratch.source(slot).spk);
     }
 
 private:
@@ -473,18 +502,19 @@ public:
             description += ", then " + members_[i]->description + " outside it";
     }
 
-    Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
+    Result<void> barycentric(int id, double jd_tdb, double out[6],
+                             ReadScratch& scratch) const override {
         bool tried = false;
         Result<void> last;
         for (const auto& m : members_) {
             if (!m->covers(jd_tdb))
                 continue;
             tried = true;
-            last = m->barycentric(id, jd_tdb, out);
+            last = m->barycentric(id, jd_tdb, out, scratch);
             if (last || last.error().code != ErrorCode::CoverageError)
                 return last;
         }
-        return tried ? last : members_.front()->barycentric(id, jd_tdb, out);
+        return tried ? last : members_.front()->barycentric(id, jd_tdb, out, scratch);
     }
 
     std::optional<double> gm_au3(int id) const override { return members_.front()->gm_au3(id); }
@@ -535,7 +565,7 @@ private:
 // by adding the main ephemeris's Sun.
 class AsteroidSource final : public Source {
 public:
-    AsteroidSource(spk::SpkFile f, Source* main) : file_(std::move(f)), main_(main) {
+    AsteroidSource(spk::SpkFile f, const Source* main) : file_(std::move(f)), main_(main) {
         description = "asteroid perturbers";
         if (!file_.internal_name().empty())
             description += " (" + file_.internal_name() + ")";
@@ -561,12 +591,13 @@ public:
         return std::find(bodies_.begin(), bodies_.end(), id) != bodies_.end();
     }
 
-    Result<void> barycentric(int id, double jd_tdb, double out[6]) override {
+    Result<void> barycentric(int id, double jd_tdb, double out[6],
+                             ReadScratch& scratch) const override {
         if (!has(id))
             return make_error(ErrorCode::NotFound,
                               "body " + std::to_string(id) + " is not in " + description);
         const int kid = int(id - kSpkidNumberedBase + kOldSpkidNumberedBase);
-        if (auto r = file_.state(kid, body::kSun, jd_tdb, out); !r) {
+        if (auto r = file_.state(kid, body::kSun, jd_tdb, out, scratch.source(slot).spk); !r) {
             if (r.error().code != ErrorCode::CoverageError)
                 return r;
             // Say what the kernel covers, not which of its bodies ran out:
@@ -581,7 +612,7 @@ public:
             return make_error(ErrorCode::CoverageError, buf);
         }
         double sun[6];
-        if (auto r = main_->barycentric(body::kSun, jd_tdb, sun); !r)
+        if (auto r = main_->barycentric(body::kSun, jd_tdb, sun, scratch); !r)
             return r;
         for (int i = 0; i < 6; ++i)
             out[i] += sun[i];
@@ -592,7 +623,7 @@ public:
 
 private:
     spk::SpkFile file_;
-    Source* main_;
+    const Source* main_;
     std::vector<int> bodies_;
     double first_et_ = std::numeric_limits<double>::infinity();
     double last_et_ = -std::numeric_limits<double>::infinity();
@@ -669,11 +700,15 @@ constexpr int kPerturberIds[] = {10, 199, 299, 399, 301, 4, 5, 6, 7, 8, 9};
 // and Eros moved by up to 159 m with the order of requests.)
 class PerturberSet final : public PerturberStates {
 public:
-    void attach(Source* s) { source_ = s; }
+    // The planetary ephemeris, and the scratch every table is read through.
+    void attach(const Source* s, ReadScratch* scratch) {
+        source_ = s;
+        scratch_ = scratch;
+    }
 
     // Adds the asteroid masses of a perturber kernel (after the Sun and
     // planets) and drops every table built so far; they rebuild lazily.
-    void attach_asteroids(Source* s, std::vector<int> ids) {
+    void attach_asteroids(const Source* s, std::vector<int> ids) {
         asteroid_source_ = s;
         asteroid_ids_ = std::move(ids);
         reset();
@@ -830,7 +865,7 @@ private:
             span_lo < kGridEpoch && kGridEpoch < span_hi ? kGridEpoch : 0.5 * (span_lo + span_hi);
         for (int id : kPerturberIds) {
             double st[6];
-            if (source_->barycentric(id, probe, st).ok()) {
+            if (source_->barycentric(id, probe, st, *scratch_).ok()) {
                 if (id == body::kSun)
                     sun_index_ = long(ids_.size());
                 ids_.push_back(id);
@@ -842,7 +877,7 @@ private:
             for (int id : asteroid_ids_) {
                 double st[6];
                 const double mu = gm_or_builtin(asteroid_source_, id);
-                if (mu > 0.0 && asteroid_source_->barycentric(id, probe, st).ok()) {
+                if (mu > 0.0 && asteroid_source_->barycentric(id, probe, st, *scratch_).ok()) {
                     ids_.push_back(id);
                     sources_.push_back(asteroid_source_);
                     mus_.push_back(mu);
@@ -918,7 +953,7 @@ private:
         for (size_t i = 0; i < times.size(); ++i) {
             for (size_t k = 0; k < nb; ++k) {
                 double st[6];
-                auto r = sources_[k]->barycentric(ids_[k], times[i], st);
+                auto r = sources_[k]->barycentric(ids_[k], times[i], st, *scratch_);
                 if (!r) {
                     fail(r.error().code, r.error().message);
                     return false;
@@ -1039,17 +1074,18 @@ private:
         out[5] = p.vz;
     }
 
-    Source* source_ = nullptr;
+    const Source* source_ = nullptr;
+    ReadScratch* scratch_ = nullptr;
     bool ok_ = true;
     long sun_index_ = -1;
     bool built_ = false;
     std::string error_;
     ErrorCode error_code_ = ErrorCode::Ok;
-    double lo_ = 0.0, hi_ = 0.0;       // first and last row epochs
-    long lo_block_ = 0, hi_block_ = 0; // grid blocks held, inclusive
-    std::vector<int> ids_;             // NAIF ids of the masses, table order
-    std::vector<Source*> sources_;     // where each mass's states come from
-    Source* asteroid_source_ = nullptr;
+    double lo_ = 0.0, hi_ = 0.0;         // first and last row epochs
+    long lo_block_ = 0, hi_block_ = 0;   // grid blocks held, inclusive
+    std::vector<int> ids_;               // NAIF ids of the masses, table order
+    std::vector<const Source*> sources_; // where each mass's states come from
+    const Source* asteroid_source_ = nullptr;
     std::vector<int> asteroid_ids_;
     // Rows of ids_.size() samples, ascending epochs, from grid_[head_]; the
     // slots before head_ are headroom for backward blocks.
@@ -1192,6 +1228,16 @@ struct SmallBody {
 struct Engine::Impl {
     std::unique_ptr<Source> source; // always a ChainSource (chain, below)
     ChainSource* chain = nullptr;
+    // Every file read goes through this one scratch (and the perturber
+    // tables through a pointer to it), so the sources and catalogs
+    // themselves hold no mutable state.
+    ReadScratch scratch;
+    size_t next_slot = 0; // Source::slot of the next file opened
+
+    std::unique_ptr<Source> number(std::unique_ptr<Source> s) {
+        s->slot = next_slot++;
+        return s;
+    }
 
     // Named hypothetical bodies: every definition ever added (a deque, so the
     // set names answers point at stay put), the current one per token, and
@@ -1400,7 +1446,7 @@ struct Engine::Impl {
                 return {};
             }
         }
-        auto r = source->barycentric(body::kSun, jd_tdb, out);
+        auto r = source->barycentric(body::kSun, jd_tdb, out, scratch);
         if (!r)
             return r;
         SunMemo& m = sun_memo[sun_memo_next];
@@ -1452,7 +1498,7 @@ struct Engine::Impl {
         case Center::Heliocentric:
             return sun_at(jd_tdb, out);
         case Center::Geocentric:
-            return source->barycentric(body::kEarth, jd_tdb, out);
+            return source->barycentric(body::kEarth, jd_tdb, out, scratch);
         case Center::Body:
             return body_barycentric(o.center_body, jd_tdb, out, nullptr);
         case Center::Topocentric: {
@@ -1464,7 +1510,7 @@ struct Engine::Impl {
                 !std::isfinite(o.site.height_m) || o.site.height_m <= -6356752.0)
                 return make_error(ErrorCode::ArgumentError,
                                   "a topocentric site must be finite and above the Earth's centre");
-            auto r = source->barycentric(body::kEarth, jd_tdb, out);
+            auto r = source->barycentric(body::kEarth, jd_tdb, out, scratch);
             if (!r)
                 return r;
             const EpochFrames& f = frames_at(jd_tt, true, o.precession);
@@ -1493,7 +1539,7 @@ struct Engine::Impl {
     // not know is looked up in the catalog overlay (small bodies, by
     // SPK-ID). out is barycentric km, km/day either way.
     Result<void> body_barycentric(int id, double jd_tdb, double out[6], int* origin) {
-        auto r = source->barycentric(id, jd_tdb, out);
+        auto r = source->barycentric(id, jd_tdb, out, scratch);
         if (r.ok()) {
             if (origin)
                 *origin = kFromEphemeris;
@@ -1522,7 +1568,7 @@ struct Engine::Impl {
         if (auto hit = record_cache.find(uint64_t(id)); hit != record_cache.end())
             return std::optional<std::pair<catalog::Record, size_t>>(hit->second);
         for (size_t i = catalogs.size(); i-- > 0;) {
-            auto rr = catalogs[i]->lookup(uint64_t(id));
+            auto rr = catalogs[i]->lookup(uint64_t(id), scratch.chunk(i));
             if (rr.ok()) {
                 if (record_cache.size() >= kRecordCacheMax)
                     record_cache.clear();
@@ -1631,7 +1677,7 @@ struct Engine::Impl {
         apply_transpose(m, rv, v);
 
         double sun[6];
-        auto rs = source->barycentric(body::kSun, epoch_jtdb, sun);
+        auto rs = source->barycentric(body::kSun, epoch_jtdb, sun, scratch);
         if (!rs)
             return rs.error();
 
@@ -2201,7 +2247,8 @@ struct Engine::Impl {
         auto r = body_barycentric(id, jd_tdb, b, nullptr);
         if (!r)
             return r;
-        r = center == body::kSun ? sun_at(jd_tdb, c) : source->barycentric(center, jd_tdb, c);
+        r = center == body::kSun ? sun_at(jd_tdb, c)
+                                 : source->barycentric(center, jd_tdb, c, scratch);
         if (!r)
             return r;
         const double au3 = kAuKm * kAuKm * kAuKm;
@@ -2259,7 +2306,7 @@ struct Engine::Impl {
         r = sun_at(jd_tdb, sun);
         if (!r)
             return r;
-        r = source->barycentric(body::kEarth, jd_tdb, earth);
+        r = source->barycentric(body::kEarth, jd_tdb, earth, scratch);
         if (!r)
             return r;
         for (int i = 0; i < 3; ++i)
@@ -2353,7 +2400,7 @@ struct Engine::Impl {
             matmul(e1, f.pb, date);
             apply_transpose(date, normal, hi);
             apply_transpose(date, ev, ei);
-            auto r = source->barycentric(body::kEarth, jd_tdb, focus);
+            auto r = source->barycentric(body::kEarth, jd_tdb, focus, scratch);
             if (!r)
                 return r;
         } else {
@@ -2436,10 +2483,10 @@ struct Engine::Impl {
     // The Moon relative to the Earth, geometric: ICRF km, km/day.
     Result<void> moon_geocentric(double t, double s[6]) {
         double m[6], e[6];
-        auto r = source->barycentric(body::kMoon, t, m);
+        auto r = source->barycentric(body::kMoon, t, m, scratch);
         if (!r)
             return r;
-        r = source->barycentric(body::kEarth, t, e);
+        r = source->barycentric(body::kEarth, t, e, scratch);
         if (!r)
             return r;
         for (int i = 0; i < 6; ++i)
@@ -2526,7 +2573,7 @@ struct Engine::Impl {
         auto r = sun_at(t, sun);
         if (!r)
             return r;
-        r = source->barycentric(body::kEarth, t, earth);
+        r = source->barycentric(body::kEarth, t, earth, scratch);
         if (!r)
             return r;
         double g[3], m[9], e1[9], v[3];
@@ -2646,7 +2693,7 @@ struct Engine::Impl {
         rot1(eps_j2000, e1);
         matmul(e1, bias, m);
         apply_transpose(m, ecl, rel);
-        r = source->barycentric(body::kEarth, jd_tdb, earth);
+        r = source->barycentric(body::kEarth, jd_tdb, earth, scratch);
         if (!r)
             return r;
         for (int i = 0; i < 3; ++i)
@@ -2809,7 +2856,7 @@ struct Engine::Impl {
         const double jd_tdb = tdb.tdb_from_tt(jd_tt);
         double centre[6];
         auto r = el.origin == ElementOrigin::Earth
-                     ? source->barycentric(body::kEarth, jd_tdb, centre)
+                     ? source->barycentric(body::kEarth, jd_tdb, centre, scratch)
                      : sun_at(jd_tdb, centre);
         if (!r)
             return r;
@@ -3211,7 +3258,7 @@ Result<void> Engine::add_ephemeris(const std::string& path) {
     auto src = open_ephemeris_source(path);
     if (!src)
         return src.error();
-    impl_->chain->add(std::move(src).value());
+    impl_->chain->add(impl_->number(std::move(src).value()));
     impl_->refresh_overlay_source();
     // Anything computed from the ephemeris may have stopped at the old span's
     // edge: small-body tracks, and the natural apsides' passage blocks, which
@@ -3234,10 +3281,10 @@ Result<Engine> Engine::open(const std::string& path) {
     Engine e;
     e.impl_ = std::make_unique<Impl>();
     auto chain = std::make_unique<ChainSource>();
-    chain->add(std::move(src).value());
+    chain->add(e.impl_->number(std::move(src).value()));
     e.impl_->chain = chain.get();
     e.impl_->source = std::move(chain);
-    e.impl_->perturbers.attach(e.impl_->source.get());
+    e.impl_->perturbers.attach(e.impl_->source.get(), &e.impl_->scratch);
     frames::frame_bias_matrix(e.impl_->bias);
     e.impl_->eps_j2000 = frames::mean_obliquity(kJ2000);
     auto shipped = hypotheticals::parse(hypotheticals::shipped(), "data/hypotheticals.jsonl");
@@ -3333,6 +3380,7 @@ Result<void> Engine::add_perturbers(const std::string& path) {
     if (!f)
         return f.error();
     auto src = std::make_unique<AsteroidSource>(std::move(f).value(), impl_->source.get());
+    src->slot = impl_->next_slot++;
     if (src->bodies().empty())
         return make_error(ErrorCode::FormatError,
                           path + " carries no heliocentric numbered-asteroid segments");
@@ -3380,7 +3428,7 @@ Result<int> Engine::lookup(std::string_view name) const {
         auto lo = std::lower_bound(entries.begin(), entries.end(), std::make_pair(h, uint64_t(0)));
         uint64_t best = 0;
         for (auto it = lo; it != entries.end() && it->first == h; ++it) {
-            auto rec = impl_->catalogs[i]->lookup(it->second);
+            auto rec = impl_->catalogs[i]->lookup(it->second, impl_->scratch.chunk(i));
             if (!rec)
                 return rec.error();
             const catalog::Names n =

@@ -15,8 +15,9 @@
 // The planets and the Sun are barycentric, the Moon geocentric, and
 // body 3 is the Earth-Moon barycentre.
 //
-// A DeFile caches its last-read record and is not safe for concurrent use;
-// give each thread its own DeFile.
+// A DeFile holds no mutable state: the record it decodes goes into the
+// caller's DeCursor, so one open file serves several threads at once, each
+// with a cursor of its own.
 #ifndef PROMETHEIA_DE_HPP
 #define PROMETHEIA_DE_HPP
 
@@ -98,12 +99,20 @@ enum class Target : int {
     EarthMoonBary = 13,
 };
 
+// A reader's scratch: the last data record decoded, for one thread. A
+// DeFile holds no mutable state, so one file serves any number of cursors
+// at once; a cursor follows one file (reset it before using another).
+struct DeCursor {
+    uint64_t record = ~uint64_t{0}; // index of the record in `coeffs`, or none
+    std::vector<double> coeffs;
+};
+
 class DeFile {
 public:
     DeFile() = default;
 
     // Opens and validates a DE binary. The file stays open for lazy
-    // record reads; the last decoded record is cached.
+    // record reads, which decode into the caller's cursor.
     static Result<DeFile> open(const std::string& path);
 
     const Header& header() const { return header_; }
@@ -115,21 +124,23 @@ public:
     // Raw column evaluation at a TDB Julian Ephemeris Date:
     // out = {c0, c1, c2, c0', c1', c2'} with rates per day; unused
     // components (nutations: index 2; TT-TDB: 1 and 2) are zero.
+    // The forms without a cursor decode into one of their own each call.
+    Result<void> state(Body body, double jed, double out[6], DeCursor& cursor) const;
     Result<void> state(Body body, double jed, double out[6]) const;
 
     // State of target relative to center (km, km/day), composing
     // Earth = EMB - Moon/(1+EMRAT) and Moon = Earth + geocentric Moon.
+    Result<void> relative_state(Target target, Target center, double jed, double out[6],
+                                DeCursor& cursor) const;
     Result<void> relative_state(Target target, Target center, double jed, double out[6]) const;
 
 private:
-    Result<void> load_record(uint64_t index) const;
-    Result<void> barycentric(Target target, double jed, double out[6]) const;
+    Result<void> load_record(uint64_t index, DeCursor& cursor) const;
+    Result<void> barycentric(Target target, double jed, double out[6], DeCursor& cursor) const;
 
     Header header_;
     std::string path_;
     io::RandomAccessFile file_; // positional reads: no shared file position
-    mutable uint64_t cached_record_ = ~uint64_t{0};
-    mutable std::vector<double> cache_;
 };
 
 // A DE binary cut to the whole data records covering [jed0, jed1] TDB,

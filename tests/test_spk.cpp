@@ -17,6 +17,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -26,6 +27,7 @@
 #include <doctest/doctest.h>
 
 using namespace prometheia;
+using prometheia::spk::SpkCursor;
 using prometheia::spk::SpkFile;
 namespace naif = prometheia::spk::naif;
 
@@ -338,6 +340,42 @@ TEST_CASE("spk_synthetic_little_endian") {
 
 TEST_CASE("spk_synthetic_big_endian") {
     check_synthetic(true);
+}
+
+TEST_CASE("spk_one_file_two_cursors_two_threads") {
+    // The file holds no cache: two threads chain states through one SpkFile
+    // at once, each with its own cursor, crossing records and the overriding
+    // segment, and every state is the one a fresh cursor gives.
+    const fs::path dir = temp_dir();
+    const SpkFile f = open_ok(write_spk(dir / "threads.bsp", false));
+    constexpr int kN = 1500;
+    const int pairs[3][2] = {{naif::kMoon, naif::kEarth},
+                             {naif::kEarth, naif::kSolarSystemBary},
+                             {naif::kSolarSystemBary, naif::kMoon}};
+    const auto et_of = [](int i) {
+        return kInit + std::fmod(i * 0.377, double(kRecords)) * kInterval;
+    };
+    std::vector<double> expect(size_t(kN) * 6);
+    for (int i = 0; i < kN; ++i)
+        REQUIRE(
+            f.state_et(pairs[i % 3][0], pairs[i % 3][1], et_of(i), &expect[size_t(i) * 6]).ok());
+    int mismatches[2] = {0, 0};
+    const auto worker = [&](int t) {
+        SpkCursor cursor;
+        for (int pass = 0; pass < 5; ++pass)
+            for (int k = 0; k < kN; ++k) {
+                const int i = t == 0 ? k : kN - 1 - k;
+                double out[6];
+                if (!f.state_et(pairs[i % 3][0], pairs[i % 3][1], et_of(i), out, cursor).ok() ||
+                    std::memcmp(out, &expect[size_t(i) * 6], sizeof out) != 0)
+                    ++mismatches[t];
+            }
+    };
+    std::thread a(worker, 0), b(worker, 1);
+    a.join();
+    b.join();
+    CHECK(mismatches[0] == 0);
+    CHECK(mismatches[1] == 0);
 }
 
 TEST_CASE("spk_synthetic_errors") {

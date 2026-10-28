@@ -181,7 +181,14 @@ this machine, which is too long for the gate:
     reads at 64-bit offsets: `pread` on POSIX, `ReadFile` with an
     `OVERLAPPED` offset on Windows, where the UTF-8 path is widened for
     `CreateFileW`, so a path outside the ANSI code page opens. That Windows
-    branch has not been compiled yet.
+    branch has not been built with MSVC yet. Astrolog compiled it with
+    mingw-w64 (`-std=c++20 -Wall`, no warnings), against our `a11531e`, and
+    ran it under Wine. The harness read a 1,280,268-byte `.epm` in a
+    directory named `Ünïcödé-ε` at three offsets, plus a short read at the
+    end and a missing file. Its output was identical to the same harness
+    built natively on Linux. Plain `fopen` of that path fails under Wine.
+    Wine is not Windows, and that run covered no read over 1 GiB and no
+    second thread.
   - Headers reached only transitively. The first pass added `<cstdint>`
     where the audit named it and missed `src/frames.cpp`. GCC 13's
     libstdc++ no longer pulls `<cstdint>` in, so Astrolog's Ubuntu 24.04

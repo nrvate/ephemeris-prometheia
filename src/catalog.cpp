@@ -550,10 +550,10 @@ Result<Reader> Reader::open(const std::string& path) {
     return r;
 }
 
-Result<const std::string*> Reader::load_chunk(uint64_t chunk_index) const {
-    if (chunk_index == cached_chunk_) {
-        ++stats_.chunk_cache_hits;
-        return &cached_data_;
+Result<const std::string*> Reader::load_chunk(uint64_t chunk_index, ChunkCursor& cursor) const {
+    if (chunk_index == cursor.chunk) {
+        ++cursor.chunk_cache_hits;
+        return &cursor.data;
     }
     const ChunkEntry& e = entries_[size_t(chunk_index)];
     std::string stored;
@@ -574,13 +574,18 @@ Result<const std::string*> Reader::load_chunk(uint64_t chunk_index) const {
     if (crc32(raw.data(), raw.size()) != e.crc) {
         return make_error(ErrorCode::CorruptionError, "chunk CRC mismatch");
     }
-    cached_chunk_ = chunk_index;
-    cached_data_ = std::move(raw);
-    ++stats_.chunks_read;
-    return &cached_data_;
+    cursor.chunk = chunk_index;
+    cursor.data = std::move(raw);
+    ++cursor.chunks_read;
+    return &cursor.data;
 }
 
 Result<Record> Reader::lookup(uint64_t spkid) const {
+    ChunkCursor cursor;
+    return lookup(spkid, cursor);
+}
+
+Result<Record> Reader::lookup(uint64_t spkid, ChunkCursor& cursor) const {
     if (entries_.empty() || spkid < entries_.front().first_spkid) {
         return make_error(ErrorCode::NotFound, "spkid below first chunk");
     }
@@ -594,7 +599,7 @@ Result<Record> Reader::lookup(uint64_t spkid) const {
             hi = mid;
         }
     }
-    auto chunk = load_chunk(lo);
+    auto chunk = load_chunk(lo, cursor);
     if (!chunk.ok())
         return Result<Record>(chunk.error());
     const char* p = chunk.value()->data();
@@ -617,8 +622,9 @@ Result<Record> Reader::lookup(uint64_t spkid) const {
 Result<void>
 Reader::for_each_name(const std::function<void(uint64_t spkid, const Names&)>& fn) const {
     Record r; // only spkid, flags and name_offset are read into it
+    ChunkCursor cursor;
     for (uint64_t i = 0; i < entries_.size(); ++i) {
-        auto chunk = load_chunk(i);
+        auto chunk = load_chunk(i, cursor);
         if (!chunk.ok())
             return chunk.error();
         const char* p = chunk.value()->data();
@@ -654,17 +660,19 @@ Reader::for_each_name(const std::function<void(uint64_t spkid, const Names&)>& f
 }
 
 Result<void> Reader::verify() const {
+    ChunkCursor cursor;
     for (uint64_t i = 0; i < entries_.size(); ++i) {
-        auto c = load_chunk(i);
-        if (!c)
+        auto c = load_chunk(i, cursor);
+        if (!c.ok())
             return c.error();
     }
     return {};
 }
 
 Result<void> Reader::for_each(const std::function<void(const Record&, const Names&)>& fn) const {
+    ChunkCursor cursor;
     for (uint64_t i = 0; i < entries_.size(); ++i) {
-        auto chunk = load_chunk(i);
+        auto chunk = load_chunk(i, cursor);
         if (!chunk.ok())
             return chunk.error();
         const char* p = chunk.value()->data();

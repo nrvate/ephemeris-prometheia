@@ -15,8 +15,9 @@
 // barycentre, 3 = Earth-Moon barycentre, 10 = Sun, 301 = Moon, 399 = Earth,
 // 199/299 = Mercury/Venus, 1..9 = planetary-system barycentres).
 //
-// An SpkFile caches decoded records and is not safe for concurrent use;
-// give each thread its own SpkFile.
+// An SpkFile holds no mutable state: the records it decodes go into the
+// caller's SpkCursor, so one open file serves several threads at once, each
+// with a cursor of its own.
 #ifndef PROMETHEIA_SPK_HPP
 #define PROMETHEIA_SPK_HPP
 
@@ -68,6 +69,15 @@ struct Segment {
     int degree = 0; // Chebyshev degree per component
 };
 
+// A reader's scratch: the last record read of each segment, for one
+// thread. An SpkFile holds no mutable state, so one file serves any number
+// of cursors at once; a cursor follows one file (reset it before using
+// another). It sizes itself to the file on first use.
+struct SpkCursor {
+    std::vector<uint64_t> index;              // per segment: the record held, or none
+    std::vector<std::vector<double>> records; // per segment: its words
+};
+
 class SpkFile {
 public:
     SpkFile() = default;
@@ -84,9 +94,12 @@ public:
     static double et_from_jd(double jd_tdb) { return (jd_tdb - 2451545.0) * 86400.0; }
 
     // State of a segment's target relative to its center, km and km/day.
+    // The forms without a cursor read into one of their own each call.
     Result<void> segment_state(size_t segment, double jd_tdb, double out[6]) const {
         return segment_state_et(segment, et_from_jd(jd_tdb), out);
     }
+    Result<void> segment_state_et(size_t segment, double et, double out[6],
+                                  SpkCursor& cursor) const;
     Result<void> segment_state_et(size_t segment, double et, double out[6]) const;
 
     // State of target relative to center (km, km/day), chaining segments
@@ -95,9 +108,15 @@ public:
     // wins (the SPK precedence rule). The _et form takes TDB seconds past
     // J2000 directly: a JD double near the present only resolves ~40 us,
     // which matters at exact segment boundaries.
+    Result<void> state(int target, int center, double jd_tdb, double out[6],
+                       SpkCursor& cursor) const {
+        return state_et(target, center, et_from_jd(jd_tdb), out, cursor);
+    }
     Result<void> state(int target, int center, double jd_tdb, double out[6]) const {
         return state_et(target, center, et_from_jd(jd_tdb), out);
     }
+    Result<void> state_et(int target, int center, double et, double out[6],
+                          SpkCursor& cursor) const;
     Result<void> state_et(int target, int center, double et, double out[6]) const;
 
     // The raw words of `count` consecutive records of a type 2/3 segment,
@@ -113,7 +132,7 @@ private:
     // Segment giving `body` relative to its parent at et, or -1.
     long find_segment(int body, double et) const;
     Result<void> state_to_root(int body, double et, std::vector<int>& chain,
-                               std::vector<double>& states) const;
+                               std::vector<double>& states, SpkCursor& cursor) const;
     Result<void> read_words(uint64_t first_word, size_t count, std::vector<double>& out) const;
 
     std::vector<Segment> segments_;
@@ -122,9 +141,6 @@ private:
     bool swap_ = false;
     int32_t forward_ = 0;       // first summary record: comments fill records 2 .. forward_ - 1
     io::RandomAccessFile file_; // positional reads: no shared file position
-    // One cached record per segment: index into segments_ -> record.
-    mutable std::vector<uint64_t> cached_index_;
-    mutable std::vector<std::vector<double>> cached_record_;
 };
 
 // A type 2/3 segment to write: the summary and the raw records

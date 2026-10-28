@@ -272,38 +272,41 @@ Result<DeFile> DeFile::open(const std::string& path) {
             continue;
 
         out.header_ = std::move(h);
-        out.cache_.clear();
-        out.cached_record_ = ~uint64_t{0};
         return out;
     }
 
     return make_error(ErrorCode::FormatError, "not a recognised JPL DE binary: '" + path + "'");
 }
 
-Result<void> DeFile::load_record(uint64_t index) const {
-    if (cached_record_ == index)
+Result<void> DeFile::load_record(uint64_t index, DeCursor& cursor) const {
+    if (cursor.record == index)
         return {};
 
     const uint64_t rec_len = uint64_t(header_.record_doubles) * 8;
-    // Straight into the cache, then swapped in place only when the file's
+    // Straight into the cursor, then swapped in place only when the file's
     // byte order is not the machine's: the same doubles the byte-by-byte
     // reader assembles, without the copy (a fresh instant loads a record).
-    cache_.resize(size_t(header_.record_doubles));
-    if (!file_.read_exact((index + 2) * rec_len, cache_.data(), size_t(rec_len))) {
-        cached_record_ = ~uint64_t{0};
+    cursor.coeffs.resize(size_t(header_.record_doubles));
+    if (!file_.read_exact((index + 2) * rec_len, cursor.coeffs.data(), size_t(rec_len))) {
+        cursor.record = ~uint64_t{0};
         return make_error(ErrorCode::CorruptionError,
                           "truncated data record " + std::to_string(index) + " in '" + path_ + "'");
     }
     // The file is little-endian unless byte_swapped says it is big-endian.
     if ((std::endian::native == std::endian::little) == header_.byte_swapped) {
-        for (double& d : cache_)
+        for (double& d : cursor.coeffs)
             d = std::bit_cast<double>(bswap64(std::bit_cast<uint64_t>(d)));
     }
-    cached_record_ = index;
+    cursor.record = index;
     return {};
 }
 
 Result<void> DeFile::state(Body body, double jed, double out[6]) const {
+    DeCursor cursor;
+    return state(body, jed, out, cursor);
+}
+
+Result<void> DeFile::state(Body body, double jed, double out[6], DeCursor& cursor) const {
     if (header_.record_doubles == 0) {
         return make_error(ErrorCode::ArgumentError, "DeFile is not open");
     }
@@ -343,11 +346,12 @@ Result<void> DeFile::state(Body body, double jed, double out[6]) const {
     while (j + 1 < header_.record_count &&
            jed >= header_.start_jed + double(j + 1) * header_.interval_days)
         ++j;
-    Result<void> loaded = load_record(j);
+    Result<void> loaded = load_record(j, cursor);
     if (!loaded.ok())
         return loaded;
 
-    const double rec_start = cache_[0];
+    const std::vector<double>& coeffs = cursor.coeffs;
+    const double rec_start = coeffs[0];
     const double width = header_.interval_days / layout.nsubint;
     double s = std::floor((jed - rec_start) / width);
     if (s < 0.0)
@@ -368,7 +372,7 @@ Result<void> DeFile::state(Body body, double jed, double out[6]) const {
     if (ncomp == 3) {
         // A position: one set of recurrences for x, y, z.
         double value[3], deriv[3];
-        chebyshev_eval3(&cache_[base], n, tau, value, deriv);
+        chebyshev_eval3(&coeffs[base], n, tau, value, deriv);
         for (int c = 0; c < 3; ++c) {
             out[c] = value[c];
             out[3 + c] = deriv[c] * scale;
@@ -382,27 +386,27 @@ Result<void> DeFile::state(Body body, double jed, double out[6]) const {
             continue;
         }
         double value = 0.0, deriv = 0.0;
-        chebyshev_eval(&cache_[base + size_t(c) * size_t(n)], n, tau, value, deriv);
+        chebyshev_eval(&coeffs[base + size_t(c) * size_t(n)], n, tau, value, deriv);
         out[c] = value;
         out[3 + c] = deriv * scale;
     }
     return {};
 }
 
-Result<void> DeFile::barycentric(Target target, double jed, double out[6]) const {
+Result<void> DeFile::barycentric(Target target, double jed, double out[6], DeCursor& cursor) const {
     switch (target) {
     case Target::SolarSystemBary:
         std::fill(out, out + 6, 0.0);
         return {};
     case Target::EarthMoonBary:
-        return state(Body::EarthMoonBary, jed, out);
+        return state(Body::EarthMoonBary, jed, out, cursor);
     case Target::Earth:
     case Target::Moon: {
         double moon[6];
-        Result<void> r = state(Body::EarthMoonBary, jed, out);
+        Result<void> r = state(Body::EarthMoonBary, jed, out, cursor);
         if (!r.ok())
             return r;
-        r = state(Body::Moon, jed, moon);
+        r = state(Body::Moon, jed, moon, cursor);
         if (!r.ok())
             return r;
         const double k = 1.0 / (1.0 + header_.emrat);
@@ -419,15 +423,16 @@ Result<void> DeFile::barycentric(Target target, double jed, double out[6]) const
             return make_error(ErrorCode::ArgumentError,
                               "target out of range: " + std::to_string(t));
         }
-        return state(Body(t), jed, out);
+        return state(Body(t), jed, out, cursor);
     }
     }
 }
 
-Result<void> DeFile::relative_state(Target target, Target center, double jed, double out[6]) const {
+Result<void> DeFile::relative_state(Target target, Target center, double jed, double out[6],
+                                    DeCursor& cursor) const {
     if (target == center) {
         // Still validate the query (coverage, bodies present).
-        Result<void> r = barycentric(target, jed, out);
+        Result<void> r = barycentric(target, jed, out, cursor);
         if (!r.ok())
             return r;
         std::fill(out, out + 6, 0.0);
@@ -440,7 +445,7 @@ Result<void> DeFile::relative_state(Target target, Target center, double jed, do
         (center == Target::Moon || center == Target::Earth || center == Target::EarthMoonBary);
     if (em_pair) {
         double moon[6];
-        Result<void> r = state(Body::Moon, jed, moon);
+        Result<void> r = state(Body::Moon, jed, moon, cursor);
         if (!r.ok())
             return r;
         const double k = 1.0 / (1.0 + header_.emrat);
@@ -454,14 +459,19 @@ Result<void> DeFile::relative_state(Target target, Target center, double jed, do
         return {};
     }
     double c[6];
-    Result<void> r = barycentric(target, jed, out);
+    Result<void> r = barycentric(target, jed, out, cursor);
     if (!r.ok())
         return r;
-    r = barycentric(center, jed, c);
+    r = barycentric(center, jed, c, cursor);
     if (!r.ok())
         return r;
     subtract(out, c);
     return {};
+}
+
+Result<void> DeFile::relative_state(Target target, Target center, double jed, double out[6]) const {
+    DeCursor cursor;
+    return relative_state(target, center, jed, out, cursor);
 }
 
 Result<TrimResult> trim(const std::string& in_path, const std::string& out_path, double jed0,

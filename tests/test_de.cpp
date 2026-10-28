@@ -20,6 +20,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -30,6 +31,7 @@
 
 using namespace prometheia;
 using prometheia::de::Body;
+using prometheia::de::DeCursor;
 using prometheia::de::DeFile;
 using prometheia::de::Target;
 
@@ -399,6 +401,37 @@ TEST_CASE("de_synthetic_big_endian") {
     DeFile f = open_ok(write_modern(dir / "modern-be.eph", true));
     check_modern_header(f, true);
     CHECK(worst_synthetic_delta(f) < 1e-9);
+}
+
+TEST_CASE("de_one_file_two_cursors_two_threads") {
+    // The file holds no cache: two threads read one DeFile at once, each
+    // through its own cursor, alternating records so each cursor keeps
+    // reloading, and every state is the one a fresh cursor gives.
+    const fs::path dir = temp_dir();
+    const DeFile f = open_ok(write_modern(dir / "threads.eph", false));
+    constexpr int kN = 2000;
+    std::vector<double> expect(size_t(kN) * 6);
+    const auto jed_of = [](int i) { return kSynSS + std::fmod(i * 7.37, 96.0); };
+    const auto body_of = [](int i) { return Body(1 + i % 11); };
+    for (int i = 0; i < kN; ++i)
+        REQUIRE(f.state(body_of(i), jed_of(i), &expect[size_t(i) * 6]).ok());
+    int mismatches[2] = {0, 0};
+    const auto worker = [&](int t) {
+        DeCursor cursor;
+        for (int pass = 0; pass < 5; ++pass)
+            for (int k = 0; k < kN; ++k) {
+                const int i = t == 0 ? k : kN - 1 - k;
+                double out[6];
+                if (!f.state(body_of(i), jed_of(i), out, cursor).ok() ||
+                    std::memcmp(out, &expect[size_t(i) * 6], sizeof out) != 0)
+                    ++mismatches[t];
+            }
+    };
+    std::thread a(worker, 0), b(worker, 1);
+    a.join();
+    b.join();
+    CHECK(mismatches[0] == 0);
+    CHECK(mismatches[1] == 0);
 }
 
 TEST_CASE("de_synthetic_truncated_by_a_record") {

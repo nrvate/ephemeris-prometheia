@@ -189,9 +189,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     catalog::Writer& writer = w.value();
+    // One cursor per reader: ascending SPK-IDs walk each file's chunks in order.
+    std::vector<catalog::ChunkCursor> cursors(readers.size());
     for (uint64_t spkid : wanted) { // a std::set: ascending, as the writer requires
-        const catalog::Reader& reader = readers[newest.at(spkid).reader];
-        auto r = reader.lookup(spkid);
+        const size_t from = newest.at(spkid).reader;
+        const catalog::Reader& reader = readers[from];
+        auto r = reader.lookup(spkid, cursors[from]);
         if (!r.ok()) {
             std::fprintf(stderr, "spkid %llu: %s\n", (unsigned long long)spkid,
                          r.error().message.c_str());

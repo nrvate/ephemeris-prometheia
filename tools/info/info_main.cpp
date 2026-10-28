@@ -133,8 +133,5 @@ int main(int argc, char** argv) {
             (unsigned long long)with_cov);
         std::printf("epoch range (TDB):  %.1f .. %.1f\n", epoch_min, epoch_max);
     }
-    const auto& st = reader.stats();
-    std::printf("reader stats:       chunks_read=%llu cache_hits=%llu\n",
-                (unsigned long long)st.chunks_read, (unsigned long long)st.chunk_cache_hits);
     return 0;
 }

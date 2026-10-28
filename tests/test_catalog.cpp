@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <prometheia/catalog.hpp>
@@ -14,6 +15,7 @@
 
 using namespace prometheia;
 using catalog::BodyClass;
+using catalog::ChunkCursor;
 using CborValue = prometheia::CborValue;
 using catalog::Names;
 using catalog::orbit_class_code;
@@ -430,9 +432,13 @@ TEST_CASE("medium_scale_and_size") {
             g.flags = uint8_t(RecordFlags::kSigmas | RecordFlags::kHg);
             return g;
         };
-        // Scattered lookups; the repeated probe exercises the chunk cache path.
-        for (uint64_t probe : {20000001ull, 20012345ull, 20025000ull, 20049999ull, 20012345ull}) {
-            auto rec = reader.lookup(probe);
+        // Scattered lookups through one cursor, which holds one chunk: the
+        // repeat after another chunk reads again, the neighbour in the same
+        // chunk does not (4096 records a chunk).
+        ChunkCursor cursor;
+        for (uint64_t probe :
+             {20000001ull, 20012345ull, 20025000ull, 20049999ull, 20012345ull, 20012399ull}) {
+            auto rec = reader.lookup(probe, cursor);
             CHECK(rec.ok());
             if (rec.ok())
                 expect_records_equal(rec.value(), expected(probe));
@@ -441,7 +447,27 @@ TEST_CASE("medium_scale_and_size") {
         auto fe = reader.for_each([&](const Record& rec, const Names&) { ++scanned; });
         CHECK(fe.ok());
         CHECK(scanned == kCount);
-        CHECK(reader.stats().chunks_read > 0);
+        CHECK(cursor.chunks_read == 5);
+        CHECK(cursor.chunk_cache_hits == 1);
+
+        // The reader holds no cache: two threads look up through it at
+        // once, each with its own cursor, hopping between chunks.
+        int wrong[2] = {0, 0};
+        const auto worker = [&](int t) {
+            ChunkCursor own;
+            for (uint64_t k = 0; k < 3000; ++k) {
+                const uint64_t spkid = 20000001 + (k * 7919 + uint64_t(t) * 25000) % kCount;
+                auto rec = reader.lookup(spkid, own);
+                if (!rec.ok() || rec.value().spkid != spkid ||
+                    rec.value().a_au != expected(spkid).a_au)
+                    ++wrong[t];
+            }
+        };
+        std::thread a(worker, 0), b(worker, 1);
+        a.join();
+        b.join();
+        CHECK(wrong[0] == 0);
+        CHECK(wrong[1] == 0);
     }
     std::filesystem::remove(path);
 }
