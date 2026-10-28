@@ -36,7 +36,8 @@ prometheiad --ephemeris ephe/linux_p1550p2650.440 \
     answered with Vondrák 2011 (§3.5a, agreed 2026-09-29; IAU 2006 before),
     and the token `iau2006` selects IAU 2006.
   - `--threads N`: the number of event loops (default: one per hardware
-    thread). Each loop opens its own engine.
+    thread). The files are opened once and every loop shares them; each
+    loop has its own engine and caches ("Event loops", below).
   - `--bind ADDR`: the listen address.
   - `--max-cells N`: the per-request bound WELCOME advertises.
   - `--max-seg-span-days N`: the widest span one segments REQUEST may ask
@@ -395,8 +396,9 @@ does with them:
 
 - **Event loops.** One uWebSockets event loop per thread, each with its own
   engine and `LoopContext`, all listening on one port through `SO_REUSEPORT`.
-  The kernel balances the accepts. For `--port 0` a free port is chosen
-  first, because uSockets enables port sharing only on a nonzero port.
+  The engines share one corpus ("Event loops", below). The kernel balances
+  the accepts. For `--port 0` a free port is chosen first, because uSockets
+  enables port sharing only on a nonzero port.
 - **Messages.**
   - Each binary message goes to the connection's `Session`.
   - Replies are sent while less than 4 MiB is buffered; the rest follow from
@@ -430,6 +432,52 @@ kernel in-process and covers:
   refused at startup.
 
 The whole suite takes about 0.7 s.
+
+### Event loops
+
+`main` opens every data file once, into one `Corpus` ([ENGINE.md](ENGINE.md),
+"Threads"). The files go in the order the options give them: the
+ephemerides, then the catalogs, the perturber kernel and the hypotheticals.
+Then `main` freezes the corpus, and each loop's engine is an
+`Engine::open_context` on it. The probe engine that names the dataset at
+startup is one more context on the same corpus.
+- **Shared:** the files and everything read from them, and what is built
+  from them once: the catalogs' name indexes, the perturber tables catalog
+  bodies are integrated through, and the Moon's apsis passages.
+- **Per loop:** the engine's other caches (the small bodies' trajectories
+  among them), the result cache (`--cache-mb`) and the segment cache
+  (`--seg-cache-mb`).
+- **Failures:** a file that will not open stops the daemon before any loop
+  starts, with the same message as before.
+
+Until 2026-10-28 every loop opened the files itself, and the probe opened
+them once more.
+
+**Measured 2026-10-28** on this machine: an Intel i7-8700K (6 cores, 12
+threads), 46 GB, Linux 6.8, glibc 2.35 and GCC 11.4, in a Release build. The
+data was DE440 (`linux_p1550p2650.440`), `sb441-n16.bsp` and the SBDB
+catalog `sbdb-20261027.epm` (147 MB), with `--threads 8`. Memory was read a
+second after the "listening" line, and each figure is three runs.
+
+| | a corpus per loop | one corpus |
+|---|---:|---:|
+| resident memory | 247 MB | 139 MB |
+| live heap (`MALLOC_MMAP_THRESHOLD_=131072`) | 202 MB | 41 MB |
+| start to "listening" | 1.49–1.59 s | 1.02–1.06 s |
+
+- **Live heap:** with its default settings glibc keeps about 100 MB that
+  was freed during startup. That memory does not grow with `--threads`.
+  A fixed mmap threshold hands it back, and what remains is the live heap.
+- **Per loop:** each extra loop used to cost about 23 MB of live heap with
+  this catalog. Now it costs one engine context, 8 KB when opened
+  (ENGINE.md, "Threads").
+- **One loop:** the live heap is the same both ways (41 and 40 MB).
+  Resident memory is 6 MB higher now (139 against 133 MB), which is the
+  allocator's retention, not data.
+- **Small catalog:** with `tests/data/sample-100.epm` instead of SBDB,
+  resident memory is 116 MB and startup 0.6 s, both ways.
+- **Throughput:** single-loop throughput is unchanged ("Throughput",
+  below).
 
 ### The protocol core
 
@@ -527,6 +575,15 @@ same host:
   on its Swiss Ephemeris server, about 11 µs a cell.
 - **Caching:** a new connection may land on another loop, which has its own
   cache.
+- **One corpus for every loop** ("Event loops"), measured 2026-10-28 on the
+  same machine with `prometheia-load`. The server ran one loop with DE440,
+  `sb441-n16.bsp` and the SBDB catalog, `--cells-per-sec 0`. The client
+  used 8 connections, with old and new builds alternated, three runs each.
+  - Charts, 15 s a run: 13,819–13,967 requests a second before and
+    14,262–14,366 after.
+  - 365 daily rows a request, 10 s a run: 63–66 a second before and 61–66
+    after, which is within the run-to-run spread.
+  - Every canary matched in every run.
 
 ## Protocol version 4 (agreed with Astrolog; §3 locked; **served here**)
 

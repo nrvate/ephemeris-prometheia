@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -39,7 +40,8 @@ constexpr const char* kUsage =
     "                        repeatable, later definitions win)\n"
     "  --bind ADDR           listen address (default: every interface)\n"
     "  --port N              default 47190; 0 picks a free port\n"
-    "  --threads N           event loops, one engine each (default: hardware threads)\n"
+    "  --threads N           event loops, one engine each on files loaded once\n"
+    "                        (default: hardware threads)\n"
     "  --max-cells N         objects x rows per REQUEST (default 100000)\n"
     "  --max-seg-span-days N widest span one segments REQUEST may ask (WELCOME's\n"
     "                        segMaxSpanDays; default 1024)\n"
@@ -189,32 +191,37 @@ int main(int argc, char** argv) {
                    options.limits.require_token ? ", required" : "");
     }
 
-    const auto make_engine = [&]() -> Result<Engine> {
-        auto e = Engine::open(ephemeris);
-        if (!e) {
-            return e.error();
+    // Every file is opened once, into one Corpus that the loops share: each
+    // loop's engine is a context on it, with its own caches (ENGINE.md,
+    // "Threads"; SERVER.md, "Event loops").
+    const auto open_corpus = [&]() -> Result<std::shared_ptr<Corpus>> {
+        auto c = Corpus::open(ephemeris);
+        if (!c) {
+            return c.error();
         }
+        Corpus& corpus = *c.value();
         for (const std::string& x : extra_ephemerides) {
-            if (auto r = e.value().add_ephemeris(x); !r) {
+            if (auto r = corpus.add_ephemeris(x); !r) {
                 return make_error(r.error().code, x + ": " + r.error().message);
             }
         }
-        for (const std::string& c : catalogs) {
-            if (auto r = e.value().add_catalog(c); !r) {
-                return make_error(r.error().code, c + ": " + r.error().message);
+        for (const std::string& cat : catalogs) {
+            if (auto r = corpus.add_catalog(cat); !r) {
+                return make_error(r.error().code, cat + ": " + r.error().message);
             }
         }
         if (!perturbers.empty()) {
-            if (auto r = e.value().add_perturbers(perturbers); !r) {
+            if (auto r = corpus.add_perturbers(perturbers); !r) {
                 return make_error(r.error().code, perturbers + ": " + r.error().message);
             }
         }
         for (const std::string& h : hypothetical_files) {
-            if (auto r = e.value().add_hypotheticals(h); !r) {
+            if (auto r = corpus.add_hypotheticals(h); !r) {
                 return r.error(); // the parser's message already names the file and line
             }
         }
-        return e;
+        corpus.freeze();
+        return c;
     };
 
     // Signals are taken by one thread in sigwait(), never by a handler: the
@@ -230,8 +237,15 @@ int main(int argc, char** argv) {
 
     // The dataset identity: the engine string names what is read, and the
     // digest over the files' contents changes whenever an answer could
-    // (docs/SERVER.md, "datasetId"). A probe engine reads the same files the
+    // (docs/SERVER.md, "datasetId"). A probe engine reads the corpus the
     // loops will, so the description matches what is served.
+    auto opened = open_corpus();
+    if (!opened) {
+        log.always("%s", opened.error().message.c_str());
+        return 1;
+    }
+    const std::shared_ptr<const Corpus> corpus = std::move(opened).value();
+    const auto make_engine = [corpus] { return Engine::open_context(corpus); };
     {
         auto probe = make_engine();
         if (!probe) {

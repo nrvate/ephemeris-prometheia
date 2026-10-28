@@ -27,6 +27,18 @@ documented, not that it is frozen.
   wrong scratch. Python's `Dataset` now loads its files once, through the
   C dataset, and its contexts share them. A refused perturber kernel no
   longer uses up a read slot.
+- **prometheiad: one corpus for every event loop**
+  ([docs/SERVER.md](docs/SERVER.md), "Event loops"), prometheiad's part of
+  A-15 in astromcp's port plan. `main` opens the files once, into a frozen
+  `Corpus`, and each loop's engine is a context on it. Until now every
+  loop opened the files itself, and the startup probe opened them once
+  more. Measured with DE440, `sb441-n16.bsp` and the 147 MB SBDB catalog
+  at `--threads 8`:
+  - resident memory: 247 → 139 MB (live heap 202 → 41 MB);
+  - start to listening: 1.49–1.59 → 1.02–1.06 s;
+  - single-loop throughput: no lower (charts 13,819–13,967 → 14,262–14,366
+    requests a second).
+  No answer and nothing in the protocol changes.
 - **Fixed: non-ASCII paths on Windows, for every open.** The catalog
   writer, `de::trim`, `spk::write_spk`, the engine's sniff of an
   ephemeris's kind and `add_hypotheticals` opened their files in the ANSI
