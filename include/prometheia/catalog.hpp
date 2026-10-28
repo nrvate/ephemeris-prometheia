@@ -30,7 +30,8 @@ namespace prometheia::catalog {
 
 inline constexpr uint32_t kMagic = 0x314D5045u; // "EPM1" little-endian
 inline constexpr uint16_t kFormatMajor = 1;
-inline constexpr uint16_t kFormatMinor = 1; // 1.1: kCovariance records
+// 1.1: kCovariance records; 1.2: kOrbitClass and kHasProvDes.
+inline constexpr uint16_t kFormatMinor = 2;
 inline constexpr uint32_t kHeaderSize = 64;
 inline constexpr uint32_t kFooterSize = 48;
 
@@ -51,7 +52,43 @@ struct RecordFlags {
     static constexpr uint8_t kDiameter = 1u << 2;   // diameter present
     static constexpr uint8_t kHasName = 1u << 3;    // a proper name follows pdes in the pool
     static constexpr uint8_t kCovariance = 1u << 4; // full orbit covariance present (1.1)
+    static constexpr uint8_t kOrbitClass = 1u << 5; // SBDB orbit class byte present (1.2)
+    static constexpr uint8_t kHasProvDes = 1u << 6; // a provisional designation follows (1.2)
 };
+
+// SBDB's orbit classes (its `class` field), coded in one byte (1.2). The
+// codes are fixed for the life of the format; 0 is "not recorded". Every
+// class in the 2026-10 SBDB holdings is here, and PAA, which SBDB documents.
+enum class OrbitClass : uint8_t {
+    Unknown = 0,
+    AST = 1,  // asteroid, unclassified
+    IEO = 2,  // Atira: orbit inside the Earth's
+    ATE = 3,  // Aten
+    APO = 4,  // Apollo
+    AMO = 5,  // Amor
+    MCA = 6,  // Mars-crosser
+    IMB = 7,  // inner main belt
+    MBA = 8,  // main belt
+    OMB = 9,  // outer main belt
+    TJN = 10, // Jupiter trojan
+    CEN = 11, // centaur
+    TNO = 12, // trans-Neptunian object
+    PAA = 13, // parabolic asteroid
+    HYA = 14, // hyperbolic asteroid
+    JFc = 20, // Jupiter-family comet
+    JFC = 21, // Jupiter-family comet, by the classical period criterion
+    HTC = 22, // Halley-type comet
+    ETc = 23, // Encke-type comet
+    CTc = 24, // Chiron-type comet
+    COM = 25, // comet, unclassified
+    PAR = 26, // parabolic comet
+    HYP = 27, // hyperbolic comet
+};
+
+// SBDB's code ("MBA", "JFc") for a class, and back; nullopt for a code the
+// table does not hold. Case matters: SBDB distinguishes JFc from JFC.
+std::string_view orbit_class_code(OrbitClass c);
+std::optional<OrbitClass> orbit_class_from_code(std::string_view code);
 
 // Index of element pair (i, j), 0 <= i <= j < 6, in the packed upper
 // triangle of a symmetric 6x6 matrix (row-major: (0,0), (0,1), .., (5,5)).
@@ -84,14 +121,17 @@ struct Record {
     double cov_epoch_jtdb = 0.0;
     double cov_elements[6] = {0, 0, 0, 0, 0, 0};
     double covariance[21] = {};
-    uint64_t name_offset = 0; // offset into the container's string pool
+    OrbitClass orbit_class = OrbitClass::Unknown; // flag kOrbitClass (1.2)
+    uint64_t name_offset = 0;                     // offset into the container's string pool
 
     bool has(uint8_t bit) const { return (flags & bit) != 0; }
 };
 
 struct Names {
-    std::string_view pdes; // primary designation, e.g. "1" or "2003 SB220"
-    std::string_view name; // proper name, e.g. "Ceres"; empty when absent
+    std::string_view pdes;     // primary designation, e.g. "1" or "2003 SB220"
+    std::string_view name;     // proper name, e.g. "Ceres"; empty when absent
+    std::string_view prov_des; // provisional designation of a numbered body (1.2),
+                               // e.g. "2013 FZ27"; empty when absent
 };
 
 // Splits the pool string a record points at into {pdes, name}.
@@ -111,9 +151,12 @@ public:
 
     // Appends one record. Records must arrive in strictly ascending spkid
     // order. `pdes` is the primary designation and must be non-empty; `name`
-    // is the optional proper name. Neither may contain NUL. The kHasName
-    // record flag is derived here, so callers need not set it.
-    Result<void> add(const Record& r, std::string_view pdes, std::string_view name = {});
+    // is the optional proper name; `prov_des` the optional provisional
+    // designation (kept only when it differs from pdes). None may contain
+    // NUL. The kHasName and kHasProvDes flags are derived here, and
+    // kOrbitClass from r.orbit_class, so callers need not set them.
+    Result<void> add(const Record& r, std::string_view pdes, std::string_view name = {},
+                     std::string_view prov_des = {});
 
     // Writes the string pool, chunk index, metadata, final header and footer,
     // and closes. The Writer is unusable afterwards.

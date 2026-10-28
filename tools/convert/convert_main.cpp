@@ -61,7 +61,8 @@ struct ParseOutcome {
     bool ok = false;
     bool skipped = false; // e.g. hyperbolic a>0 inconsistency in source data
     catalog::Record record;
-    std::string pdes, name;
+    std::string pdes, name, prov_des;
+    std::string bad_class; // an SBDB orbit class the format's table does not hold
 };
 
 double parse_double_or(const std::string& s, double fallback) {
@@ -178,8 +179,20 @@ ParseOutcome parse_row(const std::vector<std::string>& cols, const FieldMap& fm,
         r.flags |= catalog::RecordFlags::kCovariance;
     }
 
+    // SBDB's orbit class (1.2), from the fixed table; a class the table
+    // lacks stops the conversion by name rather than vanish.
+    const std::string& cls = col("class");
+    if (!cls.empty()) {
+        auto oc = catalog::orbit_class_from_code(cls);
+        if (!oc) {
+            out.bad_class = cls;
+            return out;
+        }
+        r.orbit_class = *oc;
+    }
     out.pdes = col("pdes");
     out.name = col("name");
+    out.prov_des = col("prov_des");
     out.record = r;
     out.ok = true;
     return out;
@@ -251,7 +264,7 @@ int main(int argc, char** argv) {
 
     std::vector<catalog::Record> records;
     records.reserve(1'600'000);
-    std::vector<std::string> pdes_all, name_all;
+    std::vector<std::string> pdes_all, name_all, prov_all;
     pdes_all.reserve(1'600'000);
     name_all.reserve(1'600'000);
     uint64_t skipped = 0, lines = 0;
@@ -294,6 +307,13 @@ int main(int argc, char** argv) {
                 pos = next + 1;
             }
             ParseOutcome p = parse_row(cols, *fm, lines);
+            if (!p.bad_class.empty()) {
+                std::fprintf(stderr,
+                             "line %llu: SBDB orbit class '%s' is not in the format's table "
+                             "(OrbitClass, include/prometheia/catalog.hpp): add it there\n",
+                             (unsigned long long)lines, p.bad_class.c_str());
+                return 1;
+            }
             if (p.skipped) {
                 ++skipped;
                 continue;
@@ -302,6 +322,7 @@ int main(int argc, char** argv) {
                 records.push_back(p.record);
                 pdes_all.push_back(std::move(p.pdes));
                 name_all.push_back(std::move(p.name));
+                prov_all.push_back(std::move(p.prov_des));
             }
         }
     }
@@ -327,7 +348,7 @@ int main(int argc, char** argv) {
             ++dupes;
             continue; // keep first occurrence
         }
-        auto e = writer.add(records[i], pdes_all[i], name_all[i]);
+        auto e = writer.add(records[i], pdes_all[i], name_all[i], prov_all[i]);
         if (!e.ok()) {
             std::fprintf(stderr, "add spkid %llu failed: %s\n",
                          (unsigned long long)records[i].spkid, e.error().message.c_str());

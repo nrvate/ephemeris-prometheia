@@ -16,8 +16,12 @@ using namespace prometheia;
 using catalog::BodyClass;
 using CborValue = prometheia::CborValue;
 using catalog::Names;
+using catalog::orbit_class_code;
+using catalog::orbit_class_from_code;
+using catalog::OrbitClass;
 using catalog::Reader;
 using catalog::Record;
+using catalog::record_names;
 using catalog::RecordFlags;
 using catalog::Writer;
 using catalog::WriterOptions;
@@ -269,7 +273,7 @@ TEST_CASE("writer_rejects_bad_input") {
     CHECK(!writer.add(bad_cov, "6").ok());
 
     Record unknown = make_asteroid(20000006);
-    unknown.flags |= uint8_t(1u << 5);
+    unknown.flags |= uint8_t(1u << 7); // bits 0-6 are defined (1.2)
     CHECK(!writer.add(unknown, "6").ok());
 
     Record hyper = make_asteroid(20000006);
@@ -492,4 +496,88 @@ TEST_CASE("crc32_matches_its_definition") {
     for (size_t off = 0; off < 8; ++off)
         for (size_t n = 0; off + n <= buf.size(); ++n)
             CHECK(prometheia::crc32(buf.data() + off, n) == reference(buf.data() + off, n));
+}
+
+TEST_CASE("format_1_2_orbit_class_and_provisional_designation") {
+    // 1.2 adds SBDB's orbit class (a byte) and a numbered body's provisional
+    // designation (in the pool, after the name). Every combination round-
+    // trips through lookup, for_each and for_each_name.
+    const std::string path = temp_path("v12");
+    {
+        auto w = Writer::create(path, WriterOptions{.chunk_records = 2});
+        REQUIRE(w.ok());
+        Record a = expected_for(20000001);
+        a.orbit_class = OrbitClass::MBA;
+        CHECK(w.value().add(a, "1", "Ceres").ok());
+        Record c = expected_for(20136199);
+        c.orbit_class = OrbitClass::TNO;
+        CHECK(w.value().add(c, "136199", "Eris", "2003 UB313").ok());
+        Record b = expected_for(20523671);
+        b.orbit_class = OrbitClass::TNO;
+        CHECK(w.value().add(b, "523671", "", "2013 FZ27").ok());
+        Record d = expected_for(54533005); // unnumbered: no prov_des kept
+        CHECK(w.value().add(d, "2017 OF201", "", "2017 OF201").ok());
+        Record bad = expected_for(54533006);
+        bad.orbit_class = OrbitClass(99);
+        CHECK(!w.value().add(bad, "x").ok());
+        CHECK(w.value().finish(make_meta()).ok());
+    }
+    auto r = Reader::open(path);
+    REQUIRE(r.ok());
+    auto one = r.value().lookup(20523671);
+    REQUIRE(one.ok());
+    CHECK(one.value().orbit_class == OrbitClass::TNO);
+    CHECK(one.value().has(RecordFlags::kHasProvDes));
+    CHECK(!one.value().has(RecordFlags::kHasName));
+    const Names n = record_names(r.value().name_pool(), one.value());
+    CHECK(n.pdes == "523671");
+    CHECK(n.name.empty());
+    CHECK(n.prov_des == "2013 FZ27");
+    std::vector<std::string> seen;
+    CHECK(r.value()
+              .for_each([&](const Record& rec, const Names& names) {
+                  seen.push_back(std::string(names.pdes) + "|" + std::string(names.name) + "|" +
+                                 std::string(names.prov_des) + "|" +
+                                 std::string(orbit_class_code(rec.orbit_class)));
+              })
+              .ok());
+    CHECK(seen == std::vector<std::string>{"1|Ceres||MBA", "136199|Eris|2003 UB313|TNO",
+                                           "523671||2013 FZ27|TNO", "2017 OF201|||"});
+    std::vector<std::string> named;
+    CHECK(r.value()
+              .for_each_name([&](uint64_t, const Names& names) {
+                  named.push_back(std::string(names.prov_des));
+              })
+              .ok());
+    CHECK(named == std::vector<std::string>{"", "2003 UB313", "2013 FZ27", ""});
+    // The code table round-trips, and case matters.
+    for (int code = 0; code < 256; ++code) {
+        const auto cls = OrbitClass(uint8_t(code));
+        const std::string_view s = orbit_class_code(cls);
+        if (!s.empty())
+            CHECK(orbit_class_from_code(s) == cls);
+    }
+    CHECK(orbit_class_from_code("JFc") == OrbitClass::JFc);
+    CHECK(orbit_class_from_code("JFC") == OrbitClass::JFC);
+    CHECK(!orbit_class_from_code("mba").has_value());
+}
+
+TEST_CASE("format_1_0_and_1_1_files_still_load") {
+    // The committed sample (1.0) and covariance overlay (1.1) predate 1.2:
+    // every record reads with no orbit class and no provisional designation.
+    for (const char* file : {"sample-100.epm", "covariance-7.epm"}) {
+        const std::string path =
+            (std::filesystem::path(__FILE__).parent_path() / "data" / file).string();
+        auto r = Reader::open(path);
+        REQUIRE(r.ok());
+        int records = 0;
+        CHECK(r.value()
+                  .for_each([&](const Record& rec, const Names& names) {
+                      ++records;
+                      CHECK(rec.orbit_class == OrbitClass::Unknown);
+                      CHECK(names.prov_des.empty());
+                  })
+                  .ok());
+        CHECK(records > 0);
+    }
 }

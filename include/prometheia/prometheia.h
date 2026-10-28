@@ -286,7 +286,8 @@ PROMETHEIA_API prometheia_status prometheia_engine_add_ephemeris(prometheia_engi
                                                                  prometheia_error* err);
 
 /* Resolves a designation or proper name ("1", "Ceres"; ASCII
- * case-insensitive) to the SPK-ID calc takes. */
+ * case-insensitive) to the SPK-ID calc takes. From a 1.2 catalog, a
+ * numbered body's old provisional designation too ("2013 FZ27"). */
 PROMETHEIA_API prometheia_status prometheia_engine_lookup(const prometheia_engine* engine,
                                                           const char* name, int* body,
                                                           prometheia_error* err);

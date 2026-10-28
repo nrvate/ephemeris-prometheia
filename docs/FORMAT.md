@@ -1,4 +1,4 @@
-# EPM1 — the Ephemeris Prometheia catalog container (version 1.1)
+# EPM1 — the Ephemeris Prometheia catalog container (version 1.2)
 
 **Status:** implemented by `src/catalog.cpp` (writer + reader), exercised by
 `tests/test_catalog.cpp`. This document is the normative spec.
@@ -53,7 +53,7 @@ HTTP Range) can locate the index from the tail alone.
 |----:|------|-------|
 | 0   | u32  | magic, `0x314D5045` ("EPM1" little-endian) |
 | 4   | u16  | format major (1; bump for breaking changes) |
-| 6   | u16  | format minor (1: adds the `kCovariance` record block; readers accept any minor of major 1 and reject unknown record flags) |
+| 6   | u16  | format minor (1: adds the `kCovariance` record block; 2: `kOrbitClass` and `kHasProvDes`; readers accept any minor of major 1 and reject unknown record flags) |
 | 8   | u32  | header size in bytes (64) |
 | 12  | u32  | flags: bit 0 = chunks are zstd-compressed |
 | 16  | u64  | record count |
@@ -114,7 +114,8 @@ order:
 | 7 | f32 ×2 | H magnitude, G slope — only if flag `kHg` |
 | 8 | f32 | diameter [km] — only if flag `kDiameter` |
 | 9 | f64 + f64 ×6 + f64 ×21 | covariance block — only if flag `kCovariance` (1.1): covariance epoch (JD TDB); the nominal cometary elements at that epoch {e, q [AU], tp [JD TDB], Ω [rad], ω [rad], i [rad]}; the 6×6 covariance of those elements, packed upper triangle row-major ((0,0), (0,1), …, (5,5)), units squared |
-| 10 | uvarint | name offset into the string pool |
+| 10 | u8 | SBDB orbit class — only if flag `kOrbitClass` (1.2): a code of the fixed table below |
+| 11 | uvarint | name offset into the string pool |
 
 Record flag bits:
 
@@ -128,6 +129,35 @@ Record flag bits:
   source publishes it (JPL SBDB `cov=mat`): its own epoch and element basis,
   so no conversion error enters the container. The six element sigmas
   (`kSigmas`) are uncorrelated summaries and cannot stand in for it.
+- bit 5 `kOrbitClass` (1.2) — the orbit-class byte is present.
+- bit 6 `kHasProvDes` (1.2) — the pool entry carries a provisional
+  designation after the pdes (and the name, when `kHasName`). Kept only for
+  a body whose primary designation differs from it, a numbered one.
+
+**Orbit classes** (1.2), SBDB's `class` codes, fixed for the life of the
+format (`OrbitClass` in `include/prometheia/catalog.hpp`). The code is a
+byte; 0 is "not recorded" and is never stored.
+
+| code | class | | code | class |
+|---:|---|---|---:|---|
+| 1 | AST asteroid, unclassified | | 20 | JFc Jupiter-family comet |
+| 2 | IEO Atira | | 21 | JFC Jupiter-family comet (classical period criterion) |
+| 3 | ATE Aten | | 22 | HTC Halley-type comet |
+| 4 | APO Apollo | | 23 | ETc Encke-type comet |
+| 5 | AMO Amor | | 24 | CTc Chiron-type comet |
+| 6 | MCA Mars-crosser | | 25 | COM comet, unclassified |
+| 7 | IMB inner main belt | | 26 | PAR parabolic comet |
+| 8 | MBA main belt | | 27 | HYP hyperbolic comet |
+| 9 | OMB outer main belt | | | |
+| 10 | TJN Jupiter trojan | | | |
+| 11 | CEN centaur | | | |
+| 12 | TNO trans-Neptunian object | | | |
+| 13 | PAA parabolic asteroid | | | |
+| 14 | HYA hyperbolic asteroid | | | |
+
+Every class in the 2026-10 SBDB holdings is in the table (21 of them; PAA
+is documented by SBDB and held none). A record with any other byte is
+corruption. The converter refuses a class the table lacks, naming it.
 
 **Writer validation** (records failing these are rejected at `add()`):
 strictly ascending spkid; all six elements and epoch finite; `e >= 0` and
@@ -143,7 +173,8 @@ high bit set on all but the final byte, at most 10 bytes.
 ## String pool
 
 Raw UTF-8. Per record: `pdes` NUL-terminated, then optionally `name`
-NUL-terminated when `kHasName` is set. A record's `name_offset` points at the
+NUL-terminated when `kHasName` is set, then optionally the provisional
+designation NUL-terminated when `kHasProvDes` is set (1.2). A record's `name_offset` points at the
 start of its `pdes`. The pool is not compressed in v1 (~15 MB at full-catalog
 scale); a future minor version may zstd-compress it without breaking the
 record format.

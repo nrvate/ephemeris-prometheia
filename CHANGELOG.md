@@ -13,6 +13,17 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **EPM1 1.2** ([docs/FORMAT.md](docs/FORMAT.md)): a record may carry SBDB's
+  orbit class, one byte from a fixed table of the 22 classes, and a numbered
+  body's old provisional designation in the string pool.
+  - Readers still read 1.0 and 1.1, with both fields absent.
+  - The converter, `prometheia-catalog-subset` and the refresh fold carry
+    the new fields.
+  - Lookup, and a subset list line, resolve the old designation ("2013
+    FZ27" finds 523671; maintainer, 2026-10-27, reversing the deferral of
+    2026-10-25).
+  - `sbdb_fetch.py` asks SBDB for `prov_des` from now on, so a catalog
+    carries it from the next full pull. Each record costs under a byte more.
 - **Rise, set and transit** ([docs/ENGINE.md](docs/ENGINE.md), "Rise, set and
   transit"):
   - of a body, star or hypothetical at a site, with the limb, refraction

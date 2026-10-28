@@ -309,7 +309,8 @@ printf("%s\n", r.source);    /* the element set's name */
 - **Bodies.** NAIF IDs (`PROMETHEIA_SUN`, `PROMETHEIA_MOON`,
   `PROMETHEIA_MARS`, … as system barycentres, as in [ENGINE.md](ENGINE.md)).
   Catalog bodies use their SPK-ID, which `prometheia_engine_lookup`
-  resolves from a designation or proper name.
+  resolves from a designation or proper name, and, from an EPM1 1.2
+  catalog, from a numbered body's old provisional designation.
 - **Time helpers.** Calendar ↔ JD, UTC ↔ TT across leap seconds
   (1972 onward), the default ΔT and TDB−TT, all as in [TIME.md](TIME.md).
 

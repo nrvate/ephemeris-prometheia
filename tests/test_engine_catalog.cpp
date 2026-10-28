@@ -998,6 +998,34 @@ TEST_CASE("engine_catalog_answers_independent_of_history") {
     same(a2, b2);
 }
 
+TEST_CASE("lookup_provisional_designation") {
+    // A 1.2 catalog carries a numbered body's old provisional designation,
+    // and lookup finds the body by it (maintainer, 2026-10-27); names()
+    // reports it.
+    TempFile tf_kernel("lkp-prov-k");
+    TempFile tf_cat("lkp-prov-c");
+    Engine e = open_synthetic(tf_kernel);
+    {
+        auto w = catalog::Writer::create(tf_cat.path.string(), catalog::WriterOptions{});
+        REQUIRE(w.ok());
+        catalog::Record r = make_record(kEls.a);
+        r.spkid = 20523671;
+        r.orbit_class = catalog::OrbitClass::TNO;
+        CHECK(w.value().add(r, "523671", "", "2013 FZ27").ok());
+        CHECK(w.value().finish(CborValue::make_map()).ok());
+    }
+    REQUIRE(e.add_catalog(tf_cat.path.string()).ok());
+    for (const char* q : {"523671", "2013 FZ27", "2013 fz27"}) {
+        auto id = e.lookup(q);
+        REQUIRE(id.ok());
+        CHECK(id.value() == 20523671);
+    }
+    auto names = e.names(20523671);
+    REQUIRE(names.ok());
+    CHECK(names.value().designation == "523671");
+    CHECK(names.value().provisional_designation == "2013 FZ27");
+}
+
 TEST_CASE("lookup_pdes_name_case") {
     TempFile tf_kernel("lkp-1-k");
     TempFile tf_cat("lkp-1-c");

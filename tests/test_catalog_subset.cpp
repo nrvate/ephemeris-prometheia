@@ -175,3 +175,39 @@ TEST_CASE("catalog_subset_stacks_overlays_newest_wins") {
     fs::remove(list);
     fs::remove(out);
 }
+
+TEST_CASE("catalog_subset_names_a_body_reached_by_its_old_designation") {
+    // A 1.2 overlay: a numbered body with its old provisional designation and
+    // orbit class. A list line by the old designation is served, the cutter
+    // says so on stderr (Astrolog's bundle records which body it got), and
+    // the cut carries both fields.
+    const fs::path overlay = temp_path("overlay12.epm"), list = temp_path("old.txt"),
+                   out = temp_path("old.epm");
+    {
+        auto src = catalog::Reader::open(std::string(PROMETHEIA_SOURCE_DIR) +
+                                         "/tests/data/sample-100.epm");
+        REQUIRE(src.ok());
+        auto ceres = src.value().lookup(20000001);
+        REQUIRE(ceres.ok());
+        catalog::Record r = ceres.value();
+        r.spkid = 20523794;
+        r.orbit_class = catalog::OrbitClass::TNO;
+        auto w = catalog::Writer::create(overlay.string(), catalog::WriterOptions{});
+        REQUIRE(w.ok());
+        REQUIRE(w.value().add(r, "523794", "", "2015 RR245").ok());
+        REQUIRE(w.value().finish(CborValue::make_map()).ok());
+    }
+    write(list, "2015 RR245\nCeres\n");
+    std::string err;
+    REQUIRE(run_subset(list, out, err, overlay.string() + " ") == 0);
+    CHECK(err.find("'2015 RR245' -> 523794 (old designation)") != std::string::npos);
+    CHECK(err.find("Ceres") == std::string::npos); // reached by its name: nothing said
+    auto cut = catalog::Reader::open(out.string());
+    REQUIRE(cut.ok());
+    auto got = cut.value().lookup(20523794);
+    REQUIRE(got.ok());
+    CHECK(got.value().orbit_class == catalog::OrbitClass::TNO);
+    CHECK(catalog::record_names(cut.value().name_pool(), got.value()).prov_des == "2015 RR245");
+    for (const fs::path& p : {overlay, list, out})
+        fs::remove(p);
+}

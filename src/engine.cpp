@@ -1282,6 +1282,8 @@ struct Engine::Impl {
                 entries.emplace_back(name_hash(lowercase(n.pdes)), spkid);
             if (!n.name.empty())
                 entries.emplace_back(name_hash(lowercase(n.name)), spkid);
+            if (!n.prov_des.empty()) // a numbered body's old designation (1.2)
+                entries.emplace_back(name_hash(lowercase(n.prov_des)), spkid);
         });
         if (!fe)
             return fe.error();
@@ -3349,7 +3351,8 @@ Result<int> Engine::lookup(std::string_view name) const {
             const catalog::Names n =
                 catalog::record_names(impl_->catalogs[i]->name_pool(), rec.value());
             if (Impl::lowercase(n.pdes) == key ||
-                (!n.name.empty() && Impl::lowercase(n.name) == key))
+                (!n.name.empty() && Impl::lowercase(n.name) == key) ||
+                (!n.prov_des.empty() && Impl::lowercase(n.prov_des) == key))
                 best = std::max(best, it->second);
         }
         if (best != 0)
@@ -3372,6 +3375,7 @@ Result<Engine::BodyNames> Engine::names(int spkid) const {
     BodyNames out;
     out.designation = n.pdes;
     out.name = n.name;
+    out.provisional_designation = n.prov_des;
     return out;
 }
 

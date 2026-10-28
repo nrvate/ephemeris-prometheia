@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <prometheia/catalog.hpp>
 
 #include <cmath>
@@ -23,9 +24,31 @@ namespace {
 
 constexpr uint32_t kFlagChunkZstd = kFlagZstd;
 constexpr size_t kIndexEntrySize = 40; // 4x u64, 2x u32
-constexpr uint8_t kKnownFlagMask =
-    uint8_t(RecordFlags::kSigmas | RecordFlags::kHg | RecordFlags::kDiameter |
-            RecordFlags::kHasName | RecordFlags::kCovariance);
+constexpr uint8_t kKnownFlagMask = uint8_t(
+    RecordFlags::kSigmas | RecordFlags::kHg | RecordFlags::kDiameter | RecordFlags::kHasName |
+    RecordFlags::kCovariance | RecordFlags::kOrbitClass | RecordFlags::kHasProvDes);
+
+struct OrbitClassCode {
+    OrbitClass cls;
+    std::string_view code;
+};
+constexpr OrbitClassCode kOrbitClassCodes[] = {
+    {OrbitClass::AST, "AST"}, {OrbitClass::IEO, "IEO"}, {OrbitClass::ATE, "ATE"},
+    {OrbitClass::APO, "APO"}, {OrbitClass::AMO, "AMO"}, {OrbitClass::MCA, "MCA"},
+    {OrbitClass::IMB, "IMB"}, {OrbitClass::MBA, "MBA"}, {OrbitClass::OMB, "OMB"},
+    {OrbitClass::TJN, "TJN"}, {OrbitClass::CEN, "CEN"}, {OrbitClass::TNO, "TNO"},
+    {OrbitClass::PAA, "PAA"}, {OrbitClass::HYA, "HYA"}, {OrbitClass::JFc, "JFc"},
+    {OrbitClass::JFC, "JFC"}, {OrbitClass::HTC, "HTC"}, {OrbitClass::ETc, "ETc"},
+    {OrbitClass::CTc, "CTc"}, {OrbitClass::COM, "COM"}, {OrbitClass::PAR, "PAR"},
+    {OrbitClass::HYP, "HYP"},
+};
+
+bool orbit_class_valid(uint8_t c) {
+    for (const OrbitClassCode& k : kOrbitClassCodes)
+        if (uint8_t(k.cls) == c)
+            return true;
+    return false;
+}
 
 // File offsets in 64 bits: long is 32 bits on Windows, and a full catalog
 // can pass 2 GB. Elsewhere long is the platform's 64-bit offset already.
@@ -89,6 +112,8 @@ void encode_record(std::string& out, const Record& r) {
         for (double v : r.covariance)
             put_f64(out, v);
     }
+    if (r.has(RecordFlags::kOrbitClass))
+        out.push_back(char(uint8_t(r.orbit_class)));
     put_uvarint(out, r.name_offset);
 }
 
@@ -160,6 +185,13 @@ const char* decode_record(const char* p, const char* end, std::string_view pool,
                 return fail("truncated covariance");
         }
     }
+    if (flags & RecordFlags::kOrbitClass) {
+        if (p == end)
+            return fail("truncated orbit class");
+        if (!orbit_class_valid(uint8_t(*p)))
+            return fail("unknown orbit class");
+        r.orbit_class = OrbitClass(uint8_t(*p++));
+    }
     if (!(p = get_uvarint(p, end, r.name_offset)))
         return fail("truncated name offset");
     if (r.name_offset > pool.size())
@@ -169,20 +201,38 @@ const char* decode_record(const char* p, const char* end, std::string_view pool,
 
 } // namespace
 
+std::string_view orbit_class_code(OrbitClass c) {
+    for (const OrbitClassCode& k : kOrbitClassCodes)
+        if (k.cls == c)
+            return k.code;
+    return {};
+}
+
+std::optional<OrbitClass> orbit_class_from_code(std::string_view code) {
+    for (const OrbitClassCode& k : kOrbitClassCodes)
+        if (k.code == code)
+            return k.cls;
+    return std::nullopt;
+}
+
 Names record_names(std::string_view pool, const Record& r) {
     if (r.name_offset >= pool.size())
         return {};
+    // pdes NUL, then the name NUL (kHasName), then the provisional
+    // designation NUL (kHasProvDes, 1.2), each only when flagged.
     std::string_view rest = pool.substr(r.name_offset);
-    const size_t nul = rest.find('\0');
-    if (nul == std::string_view::npos)
-        return {rest, {}};
+    auto next = [&rest]() {
+        const size_t nul = rest.find('\0');
+        const std::string_view s = nul == std::string_view::npos ? rest : rest.substr(0, nul);
+        rest = nul == std::string_view::npos ? std::string_view() : rest.substr(nul + 1);
+        return s;
+    };
     Names names;
-    names.pdes = rest.substr(0, nul);
-    if (r.has(RecordFlags::kHasName) && nul + 1 < rest.size()) {
-        std::string_view after = rest.substr(nul + 1);
-        const size_t nul2 = after.find('\0');
-        names.name = nul2 == std::string_view::npos ? after : after.substr(0, nul2);
-    }
+    names.pdes = next();
+    if (r.has(RecordFlags::kHasName))
+        names.name = next();
+    if (r.has(RecordFlags::kHasProvDes))
+        names.prov_des = next();
     return names;
 }
 
@@ -240,7 +290,8 @@ Result<void> Writer::flush_chunk() {
     return {};
 }
 
-Result<void> Writer::add(const Record& r, std::string_view pdes, std::string_view name) {
+Result<void> Writer::add(const Record& r, std::string_view pdes, std::string_view name,
+                         std::string_view prov_des) {
     if (f_ == nullptr)
         return make_error(ErrorCode::ArgumentError, "writer is closed");
     if (pdes.empty())
@@ -280,22 +331,31 @@ Result<void> Writer::add(const Record& r, std::string_view pdes, std::string_vie
                               "covariance block: non-finite value, negative variance, "
                               "or invalid e/q");
     }
-    if (pdes.find('\0') != std::string_view::npos || name.find('\0') != std::string_view::npos) {
-        return make_error(ErrorCode::ArgumentError, "NUL in pdes/name");
+    if (pdes.find('\0') != std::string_view::npos || name.find('\0') != std::string_view::npos ||
+        prov_des.find('\0') != std::string_view::npos) {
+        return make_error(ErrorCode::ArgumentError, "NUL in pdes/name/prov_des");
     }
+    if (r.orbit_class != OrbitClass::Unknown && !orbit_class_valid(uint8_t(r.orbit_class)))
+        return make_error(ErrorCode::ArgumentError, "unknown orbit class");
 
     Record out = r;
     out.body_class = r.body_class;
     out.name_offset = pool_.size();
-    if (name.empty()) {
-        out.flags &= uint8_t(~RecordFlags::kHasName);
-        pool_.append(pdes.data(), pdes.size());
-        pool_.push_back('\0');
-    } else {
+    // The flags that say what follows are derived from what is given.
+    out.flags &=
+        uint8_t(~(RecordFlags::kHasName | RecordFlags::kHasProvDes | RecordFlags::kOrbitClass));
+    if (r.orbit_class != OrbitClass::Unknown)
+        out.flags |= RecordFlags::kOrbitClass;
+    pool_.append(pdes.data(), pdes.size());
+    pool_.push_back('\0');
+    if (!name.empty()) {
         out.flags |= RecordFlags::kHasName;
-        pool_.append(pdes.data(), pdes.size());
-        pool_.push_back('\0');
         pool_.append(name.data(), name.size());
+        pool_.push_back('\0');
+    }
+    if (!prov_des.empty() && prov_des != pdes) {
+        out.flags |= RecordFlags::kHasProvDes;
+        pool_.append(prov_des.data(), prov_des.size());
         pool_.push_back('\0');
     }
 
@@ -605,6 +665,8 @@ Reader::for_each_name(const std::function<void(uint64_t spkid, const Names&)>& f
                 skip += 4;
             if (r.has(RecordFlags::kCovariance))
                 skip += (1 + 6 + 21) * 8;
+            if (r.has(RecordFlags::kOrbitClass))
+                skip += 1;
             if (end - p < std::ptrdiff_t(skip))
                 return make_error(ErrorCode::CorruptionError, "record: truncated");
             p += skip;

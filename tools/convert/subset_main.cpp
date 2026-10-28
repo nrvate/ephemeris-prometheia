@@ -8,8 +8,11 @@
 // names no time, so the same catalogs and list always give the same bytes.
 //
 // The list has one body per line: its number or primary designation as SBDB
-// gives it ("1", "2060", "2002 AW197") or its name ("Ceres"), matched ASCII
-// case-insensitively; '#' starts a comment. A line that matches no body, or
+// gives it ("1", "2060", "2002 AW197"), its name ("Ceres") or, from a 1.2
+// catalog, a numbered body's old provisional designation, matched ASCII
+// case-insensitively; '#' starts a comment. A line that reaches a body only by
+// its old provisional designation is served and named on stderr, as
+// "LIST:N: '2015 RR245' -> 523794 (old designation)". A line that matches no body, or
 // more than one, stops the cut and is named: nothing is guessed. With
 // --skip-missing such a line is named and left out, and the cut goes on.
 //
@@ -104,12 +107,13 @@ int main(int argc, char** argv) {
     // the engine, so a body named in an overlay answers to its new name.
     struct Newest {
         size_t reader;
-        std::string pdes, name;
+        std::string pdes, name, prov_des;
     };
     std::map<uint64_t, Newest> newest;
     for (size_t k = 0; k < readers.size(); ++k) {
         auto indexed = readers[k].for_each_name([&](uint64_t spkid, const catalog::Names& n) {
-            newest[spkid] = Newest{k, std::string(n.pdes), std::string(n.name)};
+            newest[spkid] =
+                Newest{k, std::string(n.pdes), std::string(n.name), std::string(n.prov_des)};
         });
         if (!indexed.ok()) {
             std::fprintf(stderr, "%s: %s\n", in_paths[k].c_str(), indexed.error().message.c_str());
@@ -121,14 +125,23 @@ int main(int argc, char** argv) {
         for (const auto& [spkid, n] : newest)
             wanted.insert(wanted.end(), spkid);
     }
-    // Every key a line may use, to the SPK-IDs it names.
+    // Every key a line may use, to the SPK-IDs it names; and the keys that
+    // are only some numbered body's old provisional designation (1.2), so a
+    // line that reaches a body that way says so.
     std::map<std::string, std::set<uint64_t>> keys;
+    std::set<std::string> current;
     if (!all) {
         for (const auto& [spkid, n] : newest) {
-            if (!n.pdes.empty())
+            if (!n.pdes.empty()) {
                 keys[fold(n.pdes)].insert(spkid);
-            if (!n.name.empty())
+                current.insert(fold(n.pdes));
+            }
+            if (!n.name.empty()) {
                 keys[fold(n.name)].insert(spkid);
+                current.insert(fold(n.name));
+            }
+            if (!n.prov_des.empty())
+                keys[fold(n.prov_des)].insert(spkid);
         }
     }
 
@@ -154,7 +167,11 @@ int main(int argc, char** argv) {
             problems.push_back(list_path + ":" + std::to_string(lineno) + ": '" + body +
                                "' matches " + std::to_string(it->second.size()) + " bodies");
         } else {
-            wanted.insert(*it->second.begin());
+            const uint64_t spkid = *it->second.begin();
+            wanted.insert(spkid);
+            if (!current.count(it->first))
+                std::fprintf(stderr, "%s:%d: '%s' -> %s (old designation)\n", list_path.c_str(),
+                             lineno, body.c_str(), newest[spkid].pdes.c_str());
         }
     }
     for (const std::string& p : problems)
@@ -181,7 +198,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         const catalog::Names n = catalog::record_names(reader.name_pool(), r.value());
-        if (auto e = writer.add(r.value(), n.pdes, n.name); !e.ok()) {
+        if (auto e = writer.add(r.value(), n.pdes, n.name, n.prov_des); !e.ok()) {
             std::fprintf(stderr, "spkid %llu: %s\n", (unsigned long long)spkid,
                          e.error().message.c_str());
             return 1;

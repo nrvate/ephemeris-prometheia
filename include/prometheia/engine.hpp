@@ -368,6 +368,7 @@ public:
     // does. The name is empty for a body catalogued by designation alone.
     struct BodyNames {
         std::string designation, name;
+        std::string provisional_designation; // a numbered body's old one (1.2 catalogs)
     };
     Result<BodyNames> names(int spkid) const;
 

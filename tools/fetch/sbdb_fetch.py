@@ -74,7 +74,7 @@ BASE_URL = "https://ssd-api.jpl.nasa.gov/sbdb_query.api"
 SINGLE_URL = "https://ssd-api.jpl.nasa.gov/sbdb.api"
 
 DEFAULT_FIELDS = [
-    "spkid", "pdes", "name", "class", "epoch",
+    "spkid", "pdes", "name", "prov_des", "class", "epoch",
     "e", "a", "i", "om", "w", "ma",
     "sigma_e", "sigma_a", "sigma_i", "sigma_om", "sigma_w", "sigma_ma",
     "H", "G", "diameter",
