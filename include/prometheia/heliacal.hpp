@@ -85,6 +85,9 @@ struct Options {
     bool moonlight = false;
     // Schaefer only: the dark-sky zenith brightness B_o of eq. 15a, nanoLamberts.
     double dark_sky_nl = 180.0;
+    // The finder tests days this far apart before it looks between them
+    // (0: four, and one for the Moon).
+    int day_step = 0;
     // How far past the start date the finder looks.
     double search_days = 800.0;
 };

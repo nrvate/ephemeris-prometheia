@@ -1291,9 +1291,8 @@ typedef struct prometheia_heliacal {
  * atmosphere, observer or model take the _init defaults. The object is any
  * prometheia_object; Schaefer's model needs a magnitude (the engine's
  * phenomena), so a hypothetical body or an orbit point needs ARCUS_VISIONIS.
- * PROMETHEIA_ERROR_NOT_FOUND when none falls within search_days (the Moon,
- * past 120 degrees of phase, has no magnitude and is not seen then). On error
- * *out is zeroed.
+ * PROMETHEIA_ERROR_NOT_FOUND when none falls within search_days. The Moon's V
+ * past 120 degrees of phase is Schaefer's eq. 12. On error *out is zeroed.
  */
 PROMETHEIA_API prometheia_status prometheia_heliacal_next(
     prometheia_engine* engine, const prometheia_object* object, double jd_start_tt,

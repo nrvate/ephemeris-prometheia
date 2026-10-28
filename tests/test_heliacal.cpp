@@ -269,7 +269,8 @@ TEST_CASE("heliacal_selected_events_against_swetest") {
     Engine e = std::move(opened).value();
     registry::Registry reg(e);
     const HeliacalFixture* picks[] = {fixture("Sirius", "Cairo", 1), fixture("Sirius", "Cairo", 2),
-                                      fixture("Venus", "Berlin", 1), fixture("Venus", "Berlin", 2)};
+                                      fixture("Venus", "Berlin", 1), fixture("Venus", "Berlin", 2),
+                                      fixture("Moon", "Rome", 3),    fixture("Moon", "Rome", 4)};
     for (const HeliacalFixture* f : picks) {
         REQUIRE(f != nullptr);
         const Run r = run_fixture(e, reg, *f, 1.2);
@@ -277,6 +278,27 @@ TEST_CASE("heliacal_selected_events_against_swetest") {
         MESSAGE(std::string(f->object)
                 << " " << std::string(f->site) << " event " << f->event << ": " << r.days << " d");
         CHECK(std::fabs(r.days) <= 3.5);
+    }
+}
+
+TEST_CASE("heliacal_moon_crescent_magnitude_is_paper_eq_12") {
+    // Table 5: the crescent Moon at a = 135 deg is V -7.89; the full Moon -12.73.
+    // The Moon's events are within two days of swetest's only because the
+    // finder uses it past the engine's 120 deg limit (docs/HELIACAL.md).
+    if (access(de440().c_str(), R_OK) != 0) {
+        MESSAGE("SKIP: no DE440 at " << de440());
+        return;
+    }
+    auto opened = Engine::open(de440());
+    REQUIRE(opened.ok());
+    Engine e = std::move(opened).value();
+    registry::Registry reg(e);
+    for (int ev : {3, 4}) {
+        const HeliacalFixture* f = fixture("Moon", "Rome", ev);
+        REQUIRE(f != nullptr);
+        const Run r = run_fixture(e, reg, *f, 1.2);
+        REQUIRE(r.ok);
+        CHECK(std::fabs(r.days) <= 2.0);
     }
 }
 

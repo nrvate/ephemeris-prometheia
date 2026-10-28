@@ -67,8 +67,10 @@ than the limiting magnitude of the sky behind it, less a margin:
 - **Brightness.** eq. 10, V = -16.57 - 2.5 log I (I in foot-candles).
 - **Sky.** eq. 14 (the scattering function) and eqs. 15a-e: night
   (B_o = 180 nL, "a typical value for a dark site"), moonlight, twilight, day
-  and their sum. The Moon's V is the engine's (to 120 deg of phase; beyond it
-  there is no Moon term).
+  and their sum. The Moon's V is the engine's to 120 deg of phase and the paper's
+  eq. 12 beyond it (-12.73 + 0.026|a| + 4e-9 a^4, at the mean distance; Table 5's
+  crescent at a = 135 deg, -7.89, is reproduced), because the young and old
+  crescents a heliacal event needs lie past 120 deg.
 - **Threshold.** The observer's pupil from his age (32) against the standard
   observer's (33); the correction factors F_b (31a, b: monocular is a factor
   sqrt 2), F_a (31e), F_sc (31i, 31l) and F_r (31f: S^-2 for a point source),
@@ -112,7 +114,7 @@ Each of these is a decision the code makes, in the order they matter:
 6. **Near the horizon** eq. 15a breaks down (the paper's section 3.17): the
    night sky is evaluated at Z = 80 deg at most, the value the paper uses
    there.
-7. **Moon term.** Zero with the Moon below the horizon or with no magnitude.
+7. **Moon term.** Zero with the Moon below the horizon.
    The finder's default leaves moonlight out (`moonlight`: off), so that it
    finds the object's own heliacal event rather than a night the Moon
    spares; `visibility_at` takes the same switch.
@@ -168,7 +170,7 @@ atmosphere printed beside each in `tests/heliacal_fixtures.inc`). Differences
 are ours less swetest's, in days of the event's UT1; the default margin 1.2
 and, in brackets, the paper's 0:
 
-- all 43 cases: 22 within 1 day (1), 33 within 3 days (11);
+- all 43 cases: 22 within 1 day (1), 35 within 3 days (11);
 - the 29 star cases (12 stars, six sites, and Sirius at Cairo in five
   atmospheres): 20 within 1 day (1), 26 within 3 (9);
 - the 24 star cases in the default atmosphere: 23 within 3 days, the worst
@@ -181,11 +183,56 @@ and, in brackets, the paper's 0:
   80 % humidity and +20 at a 10 km visual range: ours moves +1 and +10, and
   is 3.99 and 2.00 days off at 80 % and at 60 km, 11.0 days off at 10 km;
   a total coefficient of 0.35 gives +1.0 here against no change in swetest;
-- planets: Mercury, Saturn, Jupiter and Mars are -3..+5 days apart, except
-  Mars's setting (-33); Venus's evening first and morning last are -13 and
-  +11 days, the Moon's +4 and -3.1. These are the model's extended-source
-  and high-latitude weaknesses (Venus at 52 N), not found to have a
-  smaller cause.
+- planets (ours less swetest's, days): Mercury -1.0 and +1.0, Saturn +2.0
+  and 0, Jupiter -3.0 and +4.0, Mars +5.0 (rising) and -33.0 (setting), Venus
+  -2.0 and +3.0 (rising, setting) and -13.0 and +11.0 (evening first, morning
+  last); the Moon -1.0 (evening first) and +1.0 (morning last).
+
+### The planet and Moon misses, investigated
+
+Each test varied one thing and held the rest (the 43-case table, margin 1.2):
+
+- **A 1-day step instead of 4** (a short run skipped): every planet and Moon
+  result identical. Ruled out.
+- **The window, 3.5 h or 6 h** around sunrise or sunset: identical for all
+  but Mercury's setting (+0.01 d) and the Moon's (-0.04 d). Ruled out.
+- **Magnitude and phase passed in**: ours against swetest's printed V at its
+  event: Venus -3.89 and -3.96 (swetest -3.893, -3.960), Mars 1.25 (1.249),
+  Jupiter -1.80 (-1.805). Ruled out.
+- **The branch of the last-type events**: checked by the margin on each day
+  around swetest's (it falls through zero on the day found for Venus's
+  setting, Mars's and Jupiter's); the code takes the last visible day. Ruled
+  out.
+- **The Moon: a defect, fixed.** The engine's Moon V is NaN past 120 deg of
+  phase, so the young and old crescents were declared unseen: +4.0 and -3.1
+  days. With the paper's eq. 12 beyond 120 deg they are -1.0 and +1.0.
+- **Mars's setting: not a defect.** Mars (V 1.25) stands 6 deg up in the
+  evening at 24 deg elongation; its margin is -0.06 to -0.33 over the 24 days
+  around swetest's date and changes by 0.01 mag a day. Any model that differs
+  by 0.3 mag moves that event by weeks; the same holds for Mars's rising
+  (-0.36 to +0.26 over 24 days). The date there is not determined to better
+  than the detection margin's uncertainty.
+- **Venus's evening first and morning last, Jupiter, Mercury: elongation.**
+  Venus at Berlin stays 2.7-3.5 deg up for weeks, its margin moving 0.1 mag a
+  day, so a 1.4 mag disagreement is 12 days. The disagreement grows as the
+  object's elongation falls (Sirius at 48 deg is 1 day, Venus at 24 deg 13,
+  Jupiter at 13-19 deg 3-4). The one place the elongation enters is eq. 15c's
+  `max{1, dex[(rho_sun/90 deg) - 1.1]}`, which I implemented as printed and
+  which is 1 at every elongation below 99 deg (so the Sun's neighbourhood has
+  no extra glow). As a diagnostic, not a fix, the reversed reading
+  `max{1, dex[1.1 - rho/90 deg]}` (a brighter sky near the Sun) with the
+  margin held at 1.2 brings Venus to 0, 0, +1, -2 days, Jupiter to +1 and -1
+  and Mercury to +2 and -1, but spreads the stars (10 of 29 within a day, 23
+  within 3) and sends Mars's setting to -74; so it is a reading that explains
+  the direction and not a corrected model, and it was not adopted. A constant
+  fitted to close the gap was not tried.
+- **Not tested**: the point-source threshold for a bright planet (eqs. 35-36
+  are not implemented), and swetest's handling of Venus, which I cannot see.
+
+So: the stars and the Moon are fitted to a day or two; Mercury, Saturn and
+Jupiter to a few days; Mars and Venus's evening first and morning last are
+not determined by this model to better than weeks, and the numbers stand as
+measured.
 
 swetest here is a black box; its algorithm is unknown to me, so "disagrees"
 does not say which is right. Where it sits among observation is not
@@ -202,7 +249,7 @@ from 20 July, with margin 0, and +2.1 days with the default 1.2
 historical claim and not a calibration: the 1.2 was fitted on swetest's
 2026 output alone.
 
-**Cost.** The default test set (selected events, arcus visionis, the C API,
+**Cost.** The default test set (selected events including the Moon, arcus visionis, the C API,
 the checks of (a)) runs in 0.8 s in Release.
 
 ## Not done

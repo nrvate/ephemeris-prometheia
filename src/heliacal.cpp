@@ -249,17 +249,31 @@ struct Ctx {
     double dt_days(double jd_tt) const { return engine.delta_t_seconds(jd_tt) / 86400.0; }
 };
 
+// The Moon's V by eq. 12, m = -12.73 + 0.026 |a| + 4e-9 a^4, a the phase angle
+// in degrees (a = 0 at full Moon; Allen 1976), at the mean distance. The engine's
+// own Moon magnitude stops at 120 deg (docs/PHENOMENA.md); the young and old
+// crescents a heliacal event needs lie past it, and the paper's Table 5 lists
+// the crescent at a = 135 deg as -7.89, which this gives.
+double moon_v_eq12(double phase_angle_deg) {
+    const double a = std::fabs(phase_angle_deg);
+    return -12.73 + 0.026 * a + 4e-9 * a * a * a * a;
+}
+
 Result<Magnitudes> magnitudes(Ctx& c, double jd_tt) {
     Magnitudes m;
     auto p = c.engine.phenomena(c.object, jd_tt, c.calc);
     if (!p.ok())
         return p.error();
     m.v = p.value().magnitude;
+    if (is_moon(c.object) && !std::isfinite(m.v))
+        m.v = moon_v_eq12(p.value().phase_angle_deg);
     if (!is_moon(c.object) && c.options.model == Model::Schaefer && c.options.moonlight) {
         auto q = c.engine.phenomena(body_ref(301), jd_tt, c.calc);
         if (!q.ok())
             return q.error();
         m.moon_v = q.value().magnitude;
+        if (!std::isfinite(m.moon_v))
+            m.moon_v = moon_v_eq12(q.value().phase_angle_deg);
     }
     return m;
 }
@@ -532,7 +546,7 @@ Result<Found> next(Engine& engine, const Engine::ObjectRef& object, double jd_st
         return arg("a star has only the heliacal rising and setting");
     Ctx c(engine, object, site, atm, observer, options);
     const bool first = event == Event::Rising || event == Event::EveningFirst;
-    const int stride = is_moon(object) ? 1 : 4;
+    const int stride = options.day_step > 0 ? options.day_step : is_moon(object) ? 1 : 4;
     const int max_day = int(std::ceil(options.search_days));
     std::map<int, Day> days;
     auto S = [&](int j) -> const Day& {
