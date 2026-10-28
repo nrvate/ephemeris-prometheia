@@ -37,6 +37,7 @@ enum class Astrometry {
     Hipparcos,  // new reduction (van Leeuwen 2007), epoch J1991.25
     BrightStar, // Yale Bright Star Catalogue, J2000, 1" / 0.1 s
     Simbad,     // deep sky, J2000, no motion
+    Ngc2000,    // deep sky: NGC 2000.0 (Sinnott 1988), J2000 to 0.1 min and 1', no motion
 };
 
 struct Object {
@@ -46,6 +47,7 @@ struct Object {
 
     // Catalog numbers; 0 where the object has none.
     int hr = 0, hd = 0, hip = 0, flamsteed = 0, messier = 0;
+    int ngc = 0;         // NGC number, for the deep-sky objects the Messier list lacks
     int bayer = 0;       // Greek letter 1 (alpha) .. 24 (omega), 0 none
     int bayer_index = 0; // superscript (beta1 = 1), 0 none
     // IAU abbreviation ("Sco"): the catalog's designation constellation, else

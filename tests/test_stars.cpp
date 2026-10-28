@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <tuple>
 #include <unistd.h>
 
 #include <prometheia/engine.hpp>
@@ -104,6 +105,23 @@ TEST_CASE("stars_catalog_contents") {
     CHECK(stars::at(must_find("M 40")).kind == stars::Kind::DoubleStar);
     for (int n = 1; n <= 110; ++n) {
         CHECK(stars::find("M" + std::to_string(n)).ok());
+    }
+    // The Double Cluster, which the Messier list lacks, from NGC 2000.0:
+    // RA 02h19.0m and 02h22.4m, Dec +57 09' and +57 07', 30' across.
+    for (const auto& [ngc, ra, dec] :
+         {std::tuple{869, 34.75, 57.15}, {884, 35.6, 57.0 + 7.0 / 60}}) {
+        const std::string designation = "NGC " + std::to_string(ngc);
+        const stars::Object& c = stars::at(must_find(designation.c_str()));
+        CHECK(c.ngc == ngc);
+        CHECK(c.messier == 0);
+        CHECK(c.kind == stars::Kind::OpenCluster);
+        CHECK(c.astrometry == stars::Astrometry::Ngc2000);
+        CHECK(c.constellation == "Per");
+        CHECK(c.name() == designation);
+        CHECK(c.size_arcmin == 30.0);
+        CHECK(std::fabs(c.ra_deg - ra) < 1e-9);
+        CHECK(std::fabs(c.dec_deg - dec) < 1e-9);
+        CHECK(stars::find("ngc" + std::to_string(ngc)).value() == c.index);
     }
     CHECK(stars::constellations().size() == 88);
     CHECK(stars::greek_letter_name(24) == "omega");

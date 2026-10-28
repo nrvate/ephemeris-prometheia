@@ -21,7 +21,7 @@ namespace prometheia::stars {
 namespace {
 
 struct StarRecord {
-    int hr, hd, hip, flamsteed, messier, bayer, bayer_index;
+    int hr, hd, hip, flamsteed, messier, ngc, bayer, bayer_index;
     const char* constellation;
     int kind, source;
     double vmag, ra, dec, epoch, pmra, pmdec, parallax, rv, size;
@@ -276,6 +276,7 @@ struct Catalog {
             o.hip = r.hip;
             o.flamsteed = r.flamsteed;
             o.messier = r.messier;
+            o.ngc = r.ngc;
             o.bayer = r.bayer;
             o.bayer_index = r.bayer_index;
             o.vmag = r.vmag;
@@ -340,6 +341,9 @@ struct Catalog {
             add("messier" + std::to_string(o.messier), i, MatchQuality::Exact,
                 "M " + std::to_string(o.messier));
         }
+        if (o.ngc)
+            add("ngc" + std::to_string(o.ngc), i, MatchQuality::Exact,
+                "NGC " + std::to_string(o.ngc));
         const Constellation* c = constellation_by_abbreviation(o.constellation);
         if (!c) {
             return;
@@ -431,6 +435,9 @@ std::string Object::name() const {
     if (messier) {
         return "M " + std::to_string(messier);
     }
+    if (ngc) {
+        return "NGC " + std::to_string(ngc);
+    }
     if (hr) {
         return "HR " + std::to_string(hr);
     }
@@ -441,6 +448,8 @@ std::vector<std::string> Object::designations() const {
     std::vector<std::string> out;
     if (messier)
         out.push_back("M " + std::to_string(messier));
+    if (ngc)
+        out.push_back("NGC " + std::to_string(ngc));
     if (bayer) {
         out.push_back(bayer_designation());
         out.push_back(bayer_designation_long());

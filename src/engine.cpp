@@ -3879,9 +3879,9 @@ Result<CalcResult> Engine::calc_star(size_t star_index, double jd_tt, const Calc
             return r.error();
         Impl::set_distance_rate(res.pos, rate);
     }
-    static constexpr std::string_view kSources[] = {"Hipparcos new reduction (van Leeuwen 2007)",
-                                                    "Yale Bright Star Catalogue (1991)",
-                                                    "SIMBAD (CDS)"};
+    static constexpr std::string_view kSources[] = {
+        "Hipparcos new reduction (van Leeuwen 2007)", "Yale Bright Star Catalogue (1991)",
+        "SIMBAD (CDS)", "NGC 2000.0 (Sinnott 1988), NASA HEASARC"};
     res.provenance.source = kSources[int(star.astrometry)];
     res.provenance.precession = o.precession;
     if (o.sidereal != SiderealMode::Tropical) {

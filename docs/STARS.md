@@ -1,9 +1,9 @@
 # Fixed stars and deep-sky objects
 
 The fixed-star catalog covers the naked-eye sky, plus the 110 Messier
-objects.
+objects and the Double Cluster in Perseus (NGC 869 and 884).
 - **Lookup:** by any designation or name — Bayer, Flamsteed, HR, HD, HIP,
-  Messier, the IAU name, or a traditional name (Acrab = Graffias = β Scorpii
+  Messier, NGC (the two above), the IAU name, or a traditional name (Acrab = Graffias = β Scorpii
   = HR 5984).
 - **Positions:** computed like any other body. They carry the star's space
   motion, light deflection, aberration, precession and nutation into any
@@ -33,6 +33,7 @@ non-commercial terms.
 | SIMBAD, one query | radial velocities of Hipparcos stars (quality A–C, 91,438) | CDS: free use, acknowledge |
 | SIMBAD, one query | traditional "NAME" identifiers of HR stars: the cross-check of which star each curated name belongs to | CDS: free use, acknowledge |
 | NASA HEASARC Messier Nebulae table (from *Sky Catalogue 2000.0* vol. 2) | the Messier objects' constellations; a second set of positions to cross-check SIMBAD | US Government service |
+| NASA HEASARC NGC 2000.0 table (Sinnott 1988) | NGC 869 and 884: J2000 position to 0.1 min of RA and 1′ of Dec, type, size. SIMBAD was unreachable when they were added (2026-10-28) | US Government service |
 | Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42 | the constellation boundaries (Delporte 1930), equinox B1875.0 | CDS: free use, acknowledge |
 | Basic Fifth Fundamental Catalogue, FK5 Part I (Fricke et al. 1988), CDS I/149A | not used by the catalog: the outside check on its positions ("Checked against FK5") | CDS: free use, acknowledge |
 | Swiss Ephemeris general documentation (Astrodienst), published | not used by the catalog: the published definitions of the zodiacs defined at the instant (FRAMES.md). Read, never copied; its code is never read | published documentation |
@@ -81,10 +82,17 @@ checksums; `--check` reports whether the committed file is stale.
 - **Traditional names:** 39 curated names that the IAU list lacks, from
   `data/star_names.txt`.
 - **Messier:** the 110 Messier objects.
+- **NGC:** NGC 869 and 884, the Double Cluster (h and χ Persei), each 30′
+  across. Their positions are NGC 2000.0's, to 0.1 min and 1′, so they
+  carry `Astrometry::Ngc2000` and the source "NGC 2000.0 (Sinnott 1988),
+  NASA HEASARC". The traditional name Capulus is not in Allen (1899), so it
+  is not curated here.
 - **Constellations:** the 357 constellation boundary segments.
 
 Per object:
-- HR, HD, HIP, Flamsteed and Messier numbers;
+- HR, HD, HIP, Flamsteed, Messier and NGC numbers (the NGC number is in
+  the C++ `Object`; the C `prometheia_star` has no field for it, and its
+  `name` is the designation, "NGC 869");
 - the Bayer letter and superscript, and the constellation;
 - kind: star, galaxy, globular, open cluster, nebula, planetary nebula,
   supernova remnant, asterism, double star;

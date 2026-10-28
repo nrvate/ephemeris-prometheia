@@ -199,6 +199,8 @@ std::string star_designation(const stars::Object& s) {
         return "HIP " + std::to_string(s.hip);
     if (s.messier)
         return "M " + std::to_string(s.messier);
+    if (s.ngc)
+        return "NGC " + std::to_string(s.ngc);
     const std::vector<std::string> d = s.designations();
     return d.empty() ? s.name() : d.front();
 }

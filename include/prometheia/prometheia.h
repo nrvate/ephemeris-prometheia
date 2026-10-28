@@ -525,6 +525,7 @@ PROMETHEIA_API prometheia_status prometheia_calc_hypothetical_ut(prometheia_engi
 #define PROMETHEIA_ASTROMETRY_HIPPARCOS 0
 #define PROMETHEIA_ASTROMETRY_BRIGHT_STAR 1
 #define PROMETHEIA_ASTROMETRY_SIMBAD 2
+#define PROMETHEIA_ASTROMETRY_NGC2000 3 /* NGC 2000.0, 0.1 min and 1' (appended) */
 
 #define PROMETHEIA_MATCH_EXACT 0
 #define PROMETHEIA_MATCH_ALIAS 1 /* e.g. "Beta Sco" for beta1 Sco */

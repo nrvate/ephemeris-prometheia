@@ -13,6 +13,11 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **NGC 869 and 884, the Double Cluster, in the star catalog.** Found by
+  designation ("NGC 869", `star:NGC 869`), with the source NGC 2000.0
+  (Sinnott 1988, NASA HEASARC; positions to 0.1 min and 1′), because SIMBAD
+  could not be reached. `PROMETHEIA_ASTROMETRY_NGC2000` (3) is appended in
+  C; no struct changed (docs/STARS.md).
 - **Python: the last C calls** (A-17). `Context.calc_elements` with
   `Elements`, `Context.hypothetical` (a token's definition),
   `Context.catalog_bodies` and `Context.set_delta_t`. Every function in

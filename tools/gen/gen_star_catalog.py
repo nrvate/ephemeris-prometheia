@@ -21,6 +21,8 @@ checksums first) and data/star_names.txt (the curated traditional names).
   (1899); the passage matched is printed.
 - Messier objects: SIMBAD positions (ICRS, J2000), object types and sizes;
   constellations from NASA HEASARC's Messier table.
+- NGC 869 and 884, the Double Cluster, which the Messier list lacks: NASA
+  HEASARC's NGC 2000.0 table (Sinnott 1988), positions to 0.1 min and 1'.
 - Constellation boundaries (Roman 1987, CDS VI/42) for finding the
   constellation of any position.
 
@@ -250,6 +252,35 @@ def parse_heasarc_messier(raw_dir):
     # or NGC 5866) has long been disputed; SIMBAD takes NGC 5866.
     if set(range(1, 111)) - set(out) - {102}:
         fail(f"HEASARC returned {len(out)} Messier objects")
+    return out
+
+
+# The deep-sky objects outside the Messier list, by NGC number: the Double
+# Cluster in Perseus (h and chi Persei), which SIMBAD could not be reached
+# for (2026-10-28). NGC 2000.0 gives J2000 positions to 0.1 min of RA and 1'
+# of Dec; each cluster is 30' across.
+NGC_OBJECTS = (869, 884)
+NGC_TYPES = {"OC": KIND_OPEN}
+
+
+def parse_heasarc_ngc2000(raw_dir):
+    out = {}
+    with open(os.path.join(raw_dir, "heasarc-ngc2000.txt"), encoding="utf-8") as f:
+        for line in f:
+            cells = [c.strip() for c in line.split("|")]
+            m = re.fullmatch(r"NGC (\d+)", cells[0]) if cells else None
+            if not m or int(m.group(1)) not in NGC_OBJECTS or len(cells) < 6:
+                continue
+            h, mi = (float(x) for x in cells[1].split())
+            sign = -1.0 if cells[2].startswith("-") else 1.0
+            d, dm = (abs(float(x)) for x in cells[2].split())
+            if cells[5] not in NGC_TYPES:
+                fail(f"NGC {m.group(1)}: unmapped NGC 2000.0 type {cells[5]}")
+            out[int(m.group(1))] = {"ra": (h + mi / 60) * 15, "dec": sign * (d + dm / 60),
+                                    "kind": NGC_TYPES[cells[5]],
+                                    "size": float(cells[4]) if cells[4] != "null" else 0.0}
+    if sorted(out) != sorted(NGC_OBJECTS):
+        fail(f"NGC 2000.0 gave NGC {sorted(out)}, not {sorted(NGC_OBJECTS)}")
     return out
 
 
@@ -483,6 +514,13 @@ def main():
             "kind": m["kind"], "messier": n, "size": m["size"],
         })
     by_messier = {d["messier"]: d for d in deep}
+    for n, g in sorted(parse_heasarc_ngc2000(args.raw_dir).items()):
+        deep.append({
+            "hr": 0, "hd": 0, "hip": 0, "flamsteed": 0, "bayer": 0, "bayer_index": 0, "con": "",
+            "vmag": None, "sp": "", "ra": g["ra"], "dec": g["dec"], "epoch": J2000_EPOCH,
+            "pmra": 0.0, "pmdec": 0.0, "plx": 0.0, "rv": 0.0, "source": 3, "names": [],
+            "kind": g["kind"], "messier": 0, "ngc": n, "size": g["size"],
+        })
     heasarc = parse_heasarc_messier(args.raw_dir)
     messier_sep = []
     messier_disagrees = []
@@ -582,16 +620,18 @@ def main():
         "//   Yale Bright Star Catalogue, 5th rev. ed. (Hoffleit & Warren 1991), CDS V/50",
         "//   Hipparcos, the New Reduction (van Leeuwen 2007), CDS I/311",
         "//   SIMBAD (Wenger et al. 2000), CDS: HR-HIP identifications, names (a check),",
-        "//   radial velocities, Messier objects; NASA HEASARC Messier table",
+        "//   radial velocities, Messier objects; NASA HEASARC Messier and NGC 2000.0 tables",
         "//   IAU Catalog of Star Names, IAU WGSN (CC BY 4.0)",
         "//   data/star_names.txt, checked against Allen, Star-Names and Their Meanings (1899)",
         "// This research has made use of the SIMBAD database and the VizieR catalogue",
         "// access tool, CDS, Strasbourg, France.",
         f"// {len(stars)} Bright Star Catalogue stars ({sum(1 for s in stars.values() if s['source'] == 0)}"
         f" with Hipparcos astrometry), {len(extras)} further IAU-named Hipparcos stars,",
-        f"// {len(deep)} Messier objects; {attached} IAU names, {curated} curated names.",
-        "// Fields: HR, HD, HIP, Flamsteed, Messier, Bayer letter (1 = alpha), Bayer index,",
-        "// constellation, kind, astrometry source (0 Hipparcos, 1 BSC, 2 SIMBAD), V mag,",
+        f"// {sum(1 for d in deep if d['messier'])} Messier and {sum(1 for d in deep if d.get('ngc'))}"
+        f" NGC objects; {attached} IAU names, {curated} curated names.",
+        "// Fields: HR, HD, HIP, Flamsteed, Messier, NGC, Bayer letter (1 = alpha), Bayer index,",
+        "// constellation, kind, astrometry source (0 Hipparcos, 1 BSC, 2 SIMBAD, 3 NGC 2000.0),",
+        "// V mag,",
         "// RA and Dec (deg, ICRS) at epoch (Julian year), pm RA*cos(Dec) and pm Dec (mas/yr),",
         "// parallax (mas), radial velocity (km/s), size (arcmin), spectral type, names ('|'),",
         "// 1 where names[0] is the IAU WGSN name.",
@@ -599,8 +639,8 @@ def main():
     ]
     for s in objects:
         out.append(
-            "    {%d, %d, %d, %d, %d, %d, %d, %s, %d, %d, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d},"
-            % (s["hr"], s["hd"], s["hip"], s["flamsteed"], s["messier"], s["bayer"],
+            "    {%d, %d, %d, %d, %d, %d, %d, %d, %s, %d, %d, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d},"
+            % (s["hr"], s["hd"], s["hip"], s["flamsteed"], s["messier"], s.get("ngc", 0), s["bayer"],
                s["bayer_index"], c_str(s["con"]), s["kind"], s["source"],
                f(s["vmag"], 3), f(s["ra"], 10), f(s["dec"], 10), f(s["epoch"], 2),
                f(s["pmra"], 3), f(s["pmdec"], 3), f(s["plx"], 3), f(s["rv"], 2),
@@ -648,7 +688,7 @@ def main():
           f"SIMBAD {rv_from_simbad}, BSC vs SIMBAD median {pct(rv_diffs, 0.5):.1f} km/s, "
           f"{sum(1 for d in rv_diffs if d > 10)} of {len(rv_diffs)} over 10 km/s; Messier SIMBAD vs HEASARC median {pct(messier_sep, 0.5):.2f}' "
           f"max {max(messier_sep):.1f}'", file=sys.stderr)
-    print(f"{len(stars)} BSC stars, {len(extras)} extra IAU stars, {len(deep)} Messier; "
+    print(f"{len(stars)} BSC stars, {len(extras)} extra IAU stars, {len(deep)} deep sky; "
           f"{attached} IAU names attached, {unplaced} without a Hipparcos star; "
           f"{curated} curated names", file=sys.stderr)
     if args.check:

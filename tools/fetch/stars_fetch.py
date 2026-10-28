@@ -80,6 +80,13 @@ SOURCES = [
      "&fields=name,ra,dec,constell,object_type&format=text&resultmax=0&sortvar=name",
      "1ca05beaece80b825d55c00074980a23920a0f97c7b684faffe3daf4c098ed68", "NASA HEASARC Messier Nebulae table (from Sky Catalogue 2000.0 vol. 2), "
      "US Government service; cross-checks the Messier positions, gives constellations"),
+    ("heasarc-ngc2000", "heasarc-ngc2000.txt",
+     "https://heasarc.gsfc.nasa.gov/xamin/query?table=ngc2000"
+     "&fields=name,ra,dec,app_mag,ang_diameter,source_type&format=text&resultmax=0"
+     "&sortvar=name",
+     "57be53e2fea4bf6a7415541eb89bda70d8ade9c47cc30c336b9b7193eb7d6098",
+     "NASA HEASARC NGC 2000.0 table (Sinnott 1988), US Government service; "
+     "the Double Cluster, NGC 869 and 884, which the Messier list lacks"),
     ("roman-1987-readme", "VI_42_ReadMe", CDS + "VI/42/ReadMe", "b6a3e9ec21f902df084406e97d71754671c5787bee1cf49c109b3bc8cfc50ab9",
      "Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42; "
      "CDS: free use with acknowledgement"),

@@ -154,8 +154,8 @@ costs almost nothing once it is resolved.
 
 - **Facies (M 22), Aculeus (M 6), Acumen (M 7) and Capulus (NGC 869/884).**
   Allen (1899), which every curated star name must occur in, has none of
-  these four as a name. NGC 869 and NGC 884 are not in the catalog yet;
-  their positions will come from SIMBAD, through a pinned source in
-  `tools/fetch/stars_fetch.py`.
+  these four as a name. The objects themselves are served by designation:
+  `star:M 22`, `star:M 6`, `star:M 7`, and since 2026-10-28 `star:NGC 869`
+  and `star:NGC 884` ([STARS.md](STARS.md)).
 - **Orbit-point lookup by name for other bodies** ("Jupiter north node"). The
   id is the way to ask.
