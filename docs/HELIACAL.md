@@ -202,8 +202,20 @@ so this implementation sees an object at a fainter margin than swetest does.
 Dividing each difference by its spread gives the size of that offset in
 magnitudes. It is about 0.3 mag for the stars, about 0.8 for Saturn and for
 Venus's evening first and morning last, and about 1 for Mars. swetest is a
-black box here, and its algorithm is unknown to me, so the offset does not
-say which is nearer the sky. The one observation checked (d) fits margin 0.
+black box here, and its algorithm is unknown to me. One sign throughout is a
+difference of threshold or definition, not scatter: one of the two counts
+the object as seen sooner on both sides. Only sighting records can say
+which is nearer the sky, and swetest cannot. One has been checked (d), and
+it fits margin 0. Schaefer 1987 (JHA Suppl. 18, S19; 556 reported sightings)
+is where more would come from, and it has not been read.
+
+**Mars** is the exception in size: 11 days early at rising and 21 late at
+setting, with spreads of 3 and 5. It is the case most sensitive to the
+margin (+21 days at margin 0, -72 at 1.2): its margin falls slowly while it
+sets, about 0.04 mag a day near the event and less before it, so a
+difference of about 1 mag between two models moves it by weeks. Whether
+that difference lies in the threshold, in the sky term, or in swetest is
+not measured.
 
 ### How firm the date is
 

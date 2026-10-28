@@ -63,7 +63,8 @@ struct Atmosphere {
 struct Observer {
     double age_years = 36.0;
     double snellen_ratio = 1.0;
-    bool binocular = true; // false: monocular, a factor sqrt(2) in the threshold (eq. 31b)
+    bool binocular =
+        true; // both eyes, not the optical aid; false: one eye, sqrt(2) in the threshold (eq. 31b)
 };
 
 struct Options {

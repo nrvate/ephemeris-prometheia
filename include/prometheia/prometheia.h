@@ -1226,7 +1226,7 @@ typedef struct prometheia_air {
 PROMETHEIA_API void prometheia_air_init(prometheia_air* atmosphere);
 
 /* The eye: age in years, the Snellen ratio (1 is 20/20, 2 is 20/10), and
- * binocular (nonzero) or monocular vision. */
+ * binocular: both eyes (nonzero) or one; the eyes, not the optical aid. */
 typedef struct prometheia_observer {
     double age_years, snellen_ratio;
     int binocular;
