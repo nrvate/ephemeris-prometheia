@@ -58,9 +58,9 @@ struct Eclipse {
     double contact_ut1[kContacts] = {};
 };
 
-// The first eclipse of the kinds in the bitmask whose greatest eclipse is
-// after (before, with backward) jd_start_tt. NotFound after ~160 years of
-// none; the Engine's coverage errors pass through.
+// The first eclipse of the kinds in the bitmask (0: any) whose greatest
+// eclipse is strictly after (before, with backward) jd_start_tt. NotFound
+// after ~160 years of none; the Engine's coverage errors pass through.
 Result<Eclipse> next(Engine& engine, double jd_start_tt, unsigned kinds = kAllKinds,
                      bool backward = false);
 

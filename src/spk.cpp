@@ -79,11 +79,8 @@ std::string trimmed(const char* p, size_t n) {
     return std::string(p, end);
 }
 
-bool read_at(std::ifstream& f, uint64_t off, char* buf, size_t n) {
-    f.clear();
-    f.seekg(std::streamoff(off));
-    f.read(buf, std::streamsize(n));
-    return uint64_t(f.gcount()) == n;
+bool read_at(const io::RandomAccessFile& f, uint64_t off, char* buf, size_t n) {
+    return f.read_exact(off, buf, n);
 }
 
 bool is_integral(double v) {
@@ -95,13 +92,11 @@ bool is_integral(double v) {
 Result<SpkFile> SpkFile::open(const std::string& path) {
     SpkFile out;
     out.path_ = path;
-    out.file_.open(path, std::ios::binary);
-    if (!out.file_.is_open()) {
-        return make_error(ErrorCode::IoError, "cannot open '" + path + "'");
-    }
-    out.file_.seekg(0, std::ios::end);
-    const std::streamoff end = out.file_.tellg();
-    const uint64_t size = end < 0 ? 0 : uint64_t(end);
+    auto opened = io::RandomAccessFile::open(path);
+    if (!opened.ok())
+        return opened.error();
+    out.file_ = std::move(opened).value();
+    const uint64_t size = out.file_.size();
 
     char fr[kRecordBytes];
     if (size < kRecordBytes || !read_at(out.file_, 0, fr, kRecordBytes)) {

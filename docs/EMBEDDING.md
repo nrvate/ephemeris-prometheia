@@ -176,8 +176,12 @@ this machine, which is too long for the gate:
   - Floating-point `std::from_chars` (`src/hypotheticals.cpp`), which
     Apple's libc++ long lacked. Where `__cpp_lib_to_chars` is not
     advertised, a classic-locale stream reads the number.
-  - Catalog offsets through a 32-bit `long` on Windows. The catalog reader
-    uses `_fseeki64` and `_ftelli64` there.
+  - Catalog offsets through a 32-bit `long` on Windows. The DE, SPK and
+    catalog readers now share `io::RandomAccessFile` (`src/io.cpp`), which
+    reads at 64-bit offsets: `pread` on POSIX, `ReadFile` with an
+    `OVERLAPPED` offset on Windows, where the UTF-8 path is widened for
+    `CreateFileW`, so a path outside the ANSI code page opens. That Windows
+    branch has not been compiled yet.
   - Headers reached only transitively. The first pass added `<cstdint>`
     where the audit named it and missed `src/frames.cpp`. GCC 13's
     libstdc++ no longer pulls `<cstdint>` in, so Astrolog's Ubuntu 24.04

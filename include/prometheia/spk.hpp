@@ -22,11 +22,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
 #include <string>
 #include <vector>
 
 #include "prometheia/error.hpp"
+#include "prometheia/io.hpp"
 
 namespace prometheia::spk {
 
@@ -120,8 +120,8 @@ private:
     std::string internal_name_;
     std::string path_;
     bool swap_ = false;
-    int32_t forward_ = 0; // first summary record: comments fill records 2 .. forward_ - 1
-    mutable std::ifstream file_;
+    int32_t forward_ = 0;       // first summary record: comments fill records 2 .. forward_ - 1
+    io::RandomAccessFile file_; // positional reads: no shared file position
     // One cached record per segment: index into segments_ -> record.
     mutable std::vector<uint64_t> cached_index_;
     mutable std::vector<std::vector<double>> cached_record_;

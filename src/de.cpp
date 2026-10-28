@@ -78,19 +78,9 @@ std::string trimmed(const char* p, size_t n) {
     return std::string(p, end);
 }
 
-uint64_t file_size(std::ifstream& f) {
-    f.seekg(0, std::ios::end);
-    const std::streamoff size = f.tellg();
-    f.seekg(0);
-    return size < 0 ? 0 : uint64_t(size);
-}
-
-bool read_at(std::ifstream& f, uint64_t off, std::string& buf, size_t n) {
+bool read_at(const io::RandomAccessFile& f, uint64_t off, std::string& buf, size_t n) {
     buf.assign(n, '\0');
-    f.clear();
-    f.seekg(std::streamoff(off));
-    f.read(buf.data(), std::streamsize(n));
-    return uint64_t(f.gcount()) == n;
+    return f.read_exact(off, buf.data(), n);
 }
 
 // SS/FF/NN sanity: returns the data-record count, or 0 when implausible.
@@ -230,11 +220,11 @@ std::optional<double> DeFile::constant(std::string_view name) const {
 Result<DeFile> DeFile::open(const std::string& path) {
     DeFile out;
     out.path_ = path;
-    out.file_.open(path, std::ios::binary);
-    if (!out.file_.is_open()) {
-        return make_error(ErrorCode::IoError, "cannot open '" + path + "'");
-    }
-    const uint64_t size = file_size(out.file_);
+    auto opened = io::RandomAccessFile::open(path);
+    if (!opened.ok())
+        return opened.error();
+    out.file_ = std::move(opened).value();
+    const uint64_t size = out.file_.size();
     if (size < kEpochOffset + 24) {
         return make_error(ErrorCode::FormatError,
                           "file too small to be a DE binary: '" + path + "'");
@@ -299,10 +289,7 @@ Result<void> DeFile::load_record(uint64_t index) const {
     // byte order is not the machine's: the same doubles the byte-by-byte
     // reader assembles, without the copy (a fresh instant loads a record).
     cache_.resize(size_t(header_.record_doubles));
-    file_.clear();
-    file_.seekg(std::streamoff((index + 2) * rec_len));
-    file_.read(reinterpret_cast<char*>(cache_.data()), std::streamsize(rec_len));
-    if (uint64_t(file_.gcount()) != rec_len) {
+    if (!file_.read_exact((index + 2) * rec_len, cache_.data(), size_t(rec_len))) {
         cached_record_ = ~uint64_t{0};
         return make_error(ErrorCode::CorruptionError,
                           "truncated data record " + std::to_string(index) + " in '" + path_ + "'");
@@ -499,11 +486,13 @@ Result<TrimResult> trim(const std::string& in_path, const std::string& out_path,
     cut.start_jed = h.start_jed + double(first) * h.interval_days;
     cut.end_jed = h.start_jed + double(last) * h.interval_days;
 
-    std::ifstream in(in_path, std::ios::binary);
+    auto in_file = io::RandomAccessFile::open(in_path);
+    if (!in_file.ok())
+        return in_file.error();
+    const io::RandomAccessFile& in = in_file.value();
     std::ofstream out(out_path, std::ios::binary | std::ios::trunc);
-    if (!in || !out)
-        return make_error(ErrorCode::IoError,
-                          "cannot open '" + in_path + "' or '" + out_path + "'");
+    if (!out)
+        return make_error(ErrorCode::IoError, "cannot open '" + out_path + "'");
     const uint64_t rec_len = uint64_t(h.record_doubles) * 8;
     std::string rec;
     if (!read_at(in, 0, rec, size_t(rec_len)))

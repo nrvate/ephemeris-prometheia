@@ -50,24 +50,6 @@ bool orbit_class_valid(uint8_t c) {
     return false;
 }
 
-// File offsets in 64 bits: long is 32 bits on Windows, and a full catalog
-// can pass 2 GB. Elsewhere long is the platform's 64-bit offset already.
-int seek_to(std::FILE* f, uint64_t off, int whence) {
-#if defined(_WIN32)
-    return _fseeki64(f, static_cast<long long>(off), whence);
-#else
-    return std::fseek(f, static_cast<long>(off), whence);
-#endif
-}
-
-int64_t tell(std::FILE* f) {
-#if defined(_WIN32)
-    return _ftelli64(f);
-#else
-    return std::ftell(f);
-#endif
-}
-
 bool body_class_valid(uint8_t c) {
     return c == uint8_t(BodyClass::Asteroid) || c == uint8_t(BodyClass::Comet) ||
            c == uint8_t(BodyClass::Planet) || c == uint8_t(BodyClass::Other);
@@ -460,23 +442,18 @@ Result<void> Writer::finish(CborValue metadata) {
 
 Result<Reader> Reader::open(const std::string& path) {
     Reader r;
-    r.f_ = std::fopen(path.c_str(), "rb");
-    if (r.f_ == nullptr) {
-        return make_error(ErrorCode::IoError, "cannot open '" + path + "' for reading");
-    }
-    if (seek_to(r.f_, 0, SEEK_END) != 0) {
-        return make_error(ErrorCode::IoError, "seek failed");
-    }
-    const int64_t fsize = tell(r.f_);
+    auto opened = io::RandomAccessFile::open(path);
+    if (!opened.ok())
+        return opened.error();
+    r.f_ = std::move(opened).value();
+    const int64_t fsize = int64_t(r.f_.size());
     if (fsize < int64_t(kHeaderSize + kFooterSize)) {
         return make_error(ErrorCode::FormatError, "file too small to be EPM1");
     }
 
     auto read_at = [&](uint64_t off, size_t n, std::string& buf) -> Result<void> {
-        if (seek_to(r.f_, off, SEEK_SET) != 0)
-            return make_error(ErrorCode::IoError, "seek failed");
         buf.resize(n);
-        if (std::fread(buf.data(), 1, n, r.f_) != n)
+        if (!r.f_.read_exact(off, buf.data(), n))
             return make_error(ErrorCode::IoError, "short read");
         return {};
     };
@@ -580,10 +557,8 @@ Result<const std::string*> Reader::load_chunk(uint64_t chunk_index) const {
     }
     const ChunkEntry& e = entries_[size_t(chunk_index)];
     std::string stored;
-    if (seek_to(f_, e.data_offset, SEEK_SET) != 0)
-        return make_error(ErrorCode::IoError, "seek to chunk failed");
     stored.resize(size_t(e.stored_size));
-    if (std::fread(stored.data(), 1, stored.size(), f_) != stored.size())
+    if (!f_.read_exact(e.data_offset, stored.data(), stored.size()))
         return make_error(ErrorCode::IoError, "short read of chunk");
 
     std::string raw;

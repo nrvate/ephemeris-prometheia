@@ -24,6 +24,7 @@ src/engine.cpp
 src/frames.cpp
 src/houses.cpp
 src/hypotheticals.cpp
+src/io.cpp
 src/kepler.cpp
 src/lunar_eclipse.cpp
 src/phenomena.cpp

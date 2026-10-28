@@ -21,13 +21,13 @@
 #define PROMETHEIA_DE_HPP
 
 #include <cstdint>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "prometheia/error.hpp"
+#include "prometheia/io.hpp"
 
 namespace prometheia::de {
 
@@ -127,7 +127,7 @@ private:
 
     Header header_;
     std::string path_;
-    mutable std::ifstream file_;
+    io::RandomAccessFile file_; // positional reads: no shared file position
     mutable uint64_t cached_record_ = ~uint64_t{0};
     mutable std::vector<double> cache_;
 };

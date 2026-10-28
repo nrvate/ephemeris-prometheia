@@ -25,6 +25,7 @@
 
 #include <prometheia/cbor.hpp>
 #include <prometheia/error.hpp>
+#include <prometheia/io.hpp>
 
 namespace prometheia::catalog {
 
@@ -228,7 +229,7 @@ private:
         uint32_t record_count;
     };
 
-    std::FILE* f_ = nullptr;
+    io::RandomAccessFile f_; // positional reads: no shared file position
     bool compressed_ = false;
     uint64_t record_count_ = 0;
     uint32_t chunk_records_ = 0;

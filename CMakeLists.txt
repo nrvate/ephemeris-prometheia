@@ -74,6 +74,7 @@ prometheia_test(mechanics tests/test_mechanics.cpp)
 prometheia_test(radau tests/test_radau.cpp)
 prometheia_test(de tests/test_de.cpp)
 prometheia_test(spk tests/test_spk.cpp)
+prometheia_test(io tests/test_io.cpp)
 prometheia_test(engine tests/test_engine.cpp)
 prometheia_test(engine_catalog tests/test_engine_catalog.cpp)
 

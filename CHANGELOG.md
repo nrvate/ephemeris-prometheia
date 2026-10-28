@@ -13,6 +13,16 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Positional file reads** (`prometheia/io.hpp`), A-12 of astromcp's port
+  plan. The DE, SPK and catalog readers read through one
+  `io::RandomAccessFile`. On POSIX it uses `pread`, retried on EINTR, at
+  64-bit offsets. On Windows it uses `ReadFile` with an `OVERLAPPED` offset,
+  and opens the UTF-8 path widened for `CreateFileW`, so a path outside the
+  ANSI code page opens. Reads carry their own offset, and no file position
+  is shared. Tests read one file from two threads, and read past 4 GiB in a
+  sparse file; with a shared position (seek, then read) the two-thread test
+  fails. The readers' record caches are still per reader (A-13). The catalog
+  reader no longer leaks its file handle. ABI unchanged.
 - **`prometheia_engine_delta_t(engine, jd_tt)`** gives an engine's own Delta T
   (its model, or the installed callback), so that a result given in TT can be
   turned into UT1 as the engine would (Python: `Context.delta_t`). The ABI is
