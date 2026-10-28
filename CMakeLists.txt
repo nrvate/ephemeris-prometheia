@@ -91,6 +91,7 @@ prometheia_test(c_api tests/test_c_api.cpp tests/c_api_smoke.c)
 target_link_libraries(test_c_api PRIVATE m)
 set_source_files_properties(tests/c_api_smoke.c PROPERTIES
   COMPILE_OPTIONS "-Wall;-Wextra;-pedantic;-Werror")
+prometheia_test(c_dataset tests/test_c_dataset.cpp)
 
 prometheia_test(time tests/test_time.cpp)
 prometheia_test(frames tests/test_frames.cpp)

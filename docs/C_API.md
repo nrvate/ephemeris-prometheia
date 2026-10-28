@@ -350,12 +350,92 @@ temperature, for refraction) already exists.
 - `prometheia_limiting_magnitude(sky_brightness_nl, observer)`: Schaefer's
   naked-eye limiting V for a point source on a uniform sky; NaN for bad input.
 
+## Datasets and threads
+
+One dataset holds the files, loaded once, and any number of engines,
+one per thread, compute from it ([ENGINE.md](ENGINE.md), "Threads").
+Additive: no existing struct or function changed (ABI version unchanged).
+The signatures were sent to the Astrolog side before they landed.
+
+```c
+typedef struct prometheia_dataset prometheia_dataset;
+
+prometheia_status prometheia_dataset_open(const char *ephemeris_path,
+                                          prometheia_dataset **out, prometheia_error *err);
+prometheia_status prometheia_dataset_add_ephemeris(prometheia_dataset *dataset,
+                                                   const char *ephemeris_path, prometheia_error *err);
+prometheia_status prometheia_dataset_add_catalog(prometheia_dataset *dataset,
+                                                 const char *catalog_path, prometheia_error *err);
+prometheia_status prometheia_dataset_add_perturbers(prometheia_dataset *dataset,
+                                                    const char *spk_path, prometheia_error *err);
+prometheia_status prometheia_dataset_add_hypotheticals(prometheia_dataset *dataset,
+                                                       const char *element_file_path,
+                                                       prometheia_error *err);
+prometheia_status prometheia_dataset_freeze(prometheia_dataset *dataset, prometheia_error *err);
+void prometheia_dataset_close(prometheia_dataset *dataset);
+
+prometheia_status prometheia_context_open(const prometheia_dataset *dataset,
+                                          prometheia_engine **out, prometheia_error *err);
+```
+
+- `prometheia_dataset_open` takes the same files, detected the same way,
+  as `prometheia_engine_open`, and the `_add_*` calls behave as the
+  engine's do. They are for one thread, before the freeze.
+- **Failures.** A refused file leaves the dataset exactly as it was, and
+  usable. A failed `prometheia_dataset_open` or `prometheia_context_open`
+  sets `*out` to `NULL`, as `prometheia_engine_open` does. `NULL` for the
+  dataset is `PROMETHEIA_ERROR_ARGUMENT` everywhere but
+  `prometheia_dataset_close`.
+- `prometheia_dataset_freeze` ends the adding: an `_add_*` call after it
+  is `PROMETHEIA_ERROR_ARGUMENT`. Freezing twice is fine.
+- `prometheia_context_open` gives an ordinary `prometheia_engine`: every
+  call that takes an engine takes it, and closes with
+  `prometheia_engine_close`. It refuses a dataset not yet frozen
+  (`PROMETHEIA_ERROR_ARGUMENT`). Several threads may open contexts from
+  one dataset at once.
+- The engine `_add_*` calls on a context are `PROMETHEIA_ERROR_ARGUMENT`:
+  its files are the dataset's.
+- **Reference-counted.** `prometheia_dataset_close` releases the handle;
+  the files stay loaded until the last context opened from it is closed as
+  well, so the handle may be closed as soon as the contexts are open.
+  `NULL` is a no-op. The handle itself is gone once closed: opening a
+  context from it afterwards is a use after free, not an error the library
+  can report.
+- **Threads.** A context, like an engine, serves one thread at a time;
+  each thread opens its own. What is computed from the files once for
+  every context is the dataset's, built by whichever context first needs
+  it, under the library's own locks:
+  - the catalogs' name indexes, and the distinct-body count
+    `prometheia_engine_catalog_bodies` returns;
+  - the planetary tables a catalog body is integrated through, in blocks
+    of a year;
+  - the Moon's apogee and perigee passages behind the interpolated
+    apsides, in blocks of 50 days.
+
+  Everything else a context computes is its own: the small bodies'
+  trajectories, its record cache, its frames and its Delta T. Every
+  answer is bit-identical to one engine's, whatever the order of the
+  questions and the number of threads. `tests/test_c_dataset.cpp` checks
+  that with six contexts asking the same 240 questions at once, starting
+  together on the shared caches, against an engine opened the ordinary
+  way. With every block sampled through one context's read scratch
+  instead of the caller's, all six threads fail it.
+- **Strings are per context.** The strings valid "until the next call"
+  (`prometheia_engine_ephemeris_span`'s source,
+  `prometheia_engine_catalog_info`'s path) are kept by each context, so a
+  sibling's call never overwrites them. `result.source`,
+  `prometheia_engine_source()` and the hypothetical tokens are the
+  dataset's and never change: they stay valid until the context is
+  closed.
+- `prometheia_engine_set_delta_t` is per context.
+
 ## Conventions
 
 - **Handles.** `prometheia_engine_open` creates an opaque engine and
   `prometheia_engine_close` frees it (`NULL` is a no-op). An engine is not
-  safe for concurrent use; give each thread its own. The library keeps no
-  process-wide state.
+  safe for concurrent use; give each thread its own, opened from one shared
+  dataset ("Datasets and threads"). The library keeps no process-wide
+  state.
 - **Status.** Fallible calls return `prometheia_status` (`PROMETHEIA_OK`
   = 0). The last parameter is an optional `prometheia_error*` (`NULL` is
   allowed) that receives the same code and a NUL-terminated message,

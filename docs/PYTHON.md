@@ -182,15 +182,20 @@ the C++ engine's, bit for bit.
   holds the stub to the module: every public name and method is in it, and
   nothing else.
 
-**Threads and memory** (measured 2026-10-27, this machine). Each context is
-an engine of its own until the shared dataset lands (A-14/A-15 of the
-astromcp port plan). So each context reads its files itself:
-- With DE440 alone, a context costs 0.5 MB and opens in 0.2 ms.
-- With DE440, the full 1,567,167-body catalog and SB441, a context costs
-  13.4 MB and opens in 227 ms. It grows to 42.5 MB once two catalog bodies
-  have been integrated (their trajectories and the perturber tables).
-- The Python shape, `Dataset` → `Context`, is the one the shared dataset
-  will keep.
+**Threads and memory** (measured 2026-10-28, this machine). A `Dataset`
+loads its files once, through the C dataset ([C_API.md](C_API.md),
+"Datasets and threads"), when its first context opens; every context after
+that is an engine on the same files:
+- The first context opens in 20 ms with DE440 alone, and in 206–233 ms
+  with DE440, the full 1,580,028-body catalog and SB441.
+- Each further context opens in about 0.01 ms and costs about 8 KB
+  either way, measured over 20 contexts each opened on its own thread.
+- After two catalog bodies at two instants each, a context costs 0.75 MB.
+  Their trajectories are the context's; the perturber tables they were
+  integrated through are the dataset's, built once.
+- Until 2026-10-28 each context read the files itself: 13.4 MB and 227 ms
+  per context with the full catalog and SB441, and 42.5 MB after two
+  catalog bodies.
 
 **For Cython callers.** `prometheia/cprometheia.pxd` is published with the
 package. It declares all of `prometheia.h`, every function `nogil` and

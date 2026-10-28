@@ -643,29 +643,42 @@ Engine e = Engine::open_context(corpus).value(); // one per thread
   offsets into the engine's own cursors (A-12, A-13), and everything else
   the Corpus holds. A catalog's name index and the count of distinct bodies
   are built on first use, under the Corpus's lock.
+- **Shared, built once (A-15):** the perturber tables a catalog body is
+  integrated through, one block per year of the fixed grid, and the Moon's
+  apsis passages behind the interpolated apsides, one block per 50 days.
+  Whichever engine first needs a block builds it, through its own read
+  cursors and outside the lock; it never changes after. Two engines that
+  build the same block at once get the same values, and the first kept
+  serves both. Each engine keeps the run of perturber blocks it has
+  reached and the block it last read from, so its coverage, and so its
+  answers, are what they were with tables of its own: 3,728 catalog-body
+  and apsis answers, marching backward, forward and at random, were
+  identical bit for bit before and after the change (2026-10-28).
 - **Per engine:** the read cursors, the frame, observer and Sun memos, the
-  nutation and TDB interpolators, the integrated small-body trajectories
-  and their sigma tracks, the asteroid perturber tables, and the natural
-  apsides' passages. Each engine integrates a catalog body for itself
-  (sharing those tables is A-15).
+  nutation and TDB interpolators, and the integrated small-body
+  trajectories and their sigma tracks.
 - **`Engine::open`** builds a private Corpus as before. Its `add_*` calls
   add to that Corpus and drop the engine's caches. An engine from
   `open_context` refuses `add_*` (ArgumentError), as does the frozen Corpus;
   `open_context` refuses a Corpus not frozen.
 
-**Memory per engine** (measured 2026-10-28, 200 engines on one frozen DE440
-corpus with sample-100.epm, RSS growth divided by 200):
+**Memory per engine** (measured 2026-10-28, 200 engines on one frozen corpus
+of DE440, sample-100.epm and the DE440-span SB441 kernel, RSS growth divided
+by 200; "before" is the engine as A-14 left it, with perturber tables of its
+own):
 
-| | per engine |
-|---|---:|
-| just opened | 8.0 KB |
-| after the planets at one instant | 241 KB |
-| after a catalog body too | 417 KB |
+| | before | after |
+|---|---:|---:|
+| just opened | 8.1 KB | 8.5 KB |
+| after the planets at one instant | 241 KB | 242 KB |
+| after a catalog body too | 650 KB | 263 KB |
+| after the same body 11 years on | 2,848 KB | 354 KB |
 
 Most of the 241 KB is the nutation interpolator's node cache (4096 x 56
-bytes), which is now allocated on first use: until 2026-10-28 every engine
-paid it at open. The catalog body's 176 KB is its trajectory and the
-perturber tables.
+bytes), which is allocated on first use: until 2026-10-28 every engine paid
+it at open. What a catalog body adds now is its own trajectory; the
+perturber tables it was integrated through (about 200 KB per year of
+coverage with SB441's sixteen masses) are the corpus's.
 
 **Checked:** `test_engine_threads` opens six engines on one frozen corpus and
 asks 1200 seeded questions at once across six threads: planets, catalog
@@ -673,14 +686,23 @@ bodies, sigma, orbit points with the natural apsides, stars, houses and name
 lookups. Every answer must be bit for bit the one a single engine gives to
 the same questions asked in reverse order. With one read scratch shared
 between the engines (fault-injected), the test fails on every run. It runs
-in 0.8 s, and in the gate. `tools/tsan.sh` builds `build-tsan/` and runs the
-file readers' tests and this one under ThreadSanitizer; it was clean on
-2026-10-28. It is outside the gate.
+in 0.8 s, and in the gate. `test_c_dataset` does the same through the C
+API (C_API.md, "Datasets and threads"). `tools/tsan.sh` builds
+`build-tsan/` and runs the file readers' tests and both of these under
+ThreadSanitizer; it was clean on 2026-10-28, after the shared tables, and
+reported a data race when the block map was read without its lock
+(fault-injected). It is outside the gate.
 
 **Single-thread cost:** `prometheia-engine-bench`, planets apparent, five
 alternating runs on one pinned core, median 3.83 us per call before the
 split and 4.05 after (+6 %), inside the bench's run-to-run spread of about
 20 %.
+The shared tables (A-15) cost nothing measurable on one thread. Whole
+`prometheia-engine-bench` runs, best of five in CPU cycles on one pinned
+core: planets apparent −2 %, the Moon's natural apogee +1 %. A run of
+3,728 catalog-body and apsis answers is 4 % faster (16.8 against 17.5
+billion cycles): the engine's first cut was 14 % slower until the block
+last read was kept and the Row was no longer zeroed before being filled.
 
 ## Performance
 

@@ -7,9 +7,12 @@
  * answer is bit-identical to the C++ engine's. Conventions:
  *
  *   - Handles are opaque. prometheia_engine_open() creates one,
- *     prometheia_engine_close() frees it. One engine per thread: an
- *     engine caches ephemeris records and is not safe for concurrent use.
- *     There is no process-wide state.
+ *     prometheia_engine_close() frees it. An engine caches ephemeris
+ *     records and serves one thread at a time. For several threads, load
+ *     the files once into a dataset and open an engine (a context) from it
+ *     per thread: the contexts share the dataset's state under the
+ *     library's own locks (see "Datasets", below). There is no
+ *     process-wide state.
  *   - Fallible functions return a prometheia_status (PROMETHEIA_OK = 0)
  *     and take an optional trailing prometheia_error* (NULL is fine) that
  *     receives the same code plus a message. No exception crosses this
@@ -286,6 +289,60 @@ PROMETHEIA_API prometheia_status prometheia_engine_add_ephemeris(prometheia_engi
                                                                  const char* ephemeris_path,
                                                                  prometheia_error* err);
 
+/* ---- Datasets (one set of files, an engine per thread) --------------------
+ *
+ * A dataset loads the files once; prometheia_context_open() gives an
+ * ordinary engine on it, which every call taking an engine accepts and
+ * prometheia_engine_close() frees. Added after library 0.7.3; the ABI
+ * version is unchanged, as no layout changed.
+ *
+ *   - dataset_open and the _add_* calls take the files the engine calls do,
+ *     detected the same way, and are for one thread. A refused file leaves
+ *     the dataset as it was, and usable. A failed open sets *out to NULL.
+ *   - prometheia_dataset_freeze() ends the adding: an _add_* call after it
+ *     is PROMETHEIA_ERROR_ARGUMENT. Freezing twice is fine.
+ *   - prometheia_context_open() refuses a dataset not yet frozen
+ *     (PROMETHEIA_ERROR_ARGUMENT) and sets *out to NULL on any failure.
+ *     Several threads may open contexts from one dataset at once. A
+ *     context refuses the engine _add_* calls (PROMETHEIA_ERROR_ARGUMENT).
+ *   - A context serves one thread at a time. What a context computes from
+ *     the files once for all (the catalogs' name indexes and body count,
+ *     the perturber tables, the Moon's apsis passages) is shared and
+ *     locked by the library; strings a context returns, including those
+ *     valid "until the next call", are its own. Every answer is
+ *     bit-identical to a single engine's.
+ *   - prometheia_dataset_close() releases the handle (NULL is a no-op); the
+ *     files stay loaded until the last context is closed too. The handle
+ *     itself is gone: opening a context from it afterwards is a use after
+ *     free, not an error the library can report.
+ *   - NULL for the dataset is PROMETHEIA_ERROR_ARGUMENT everywhere but
+ *     prometheia_dataset_close().
+ */
+typedef struct prometheia_dataset prometheia_dataset;
+
+PROMETHEIA_API prometheia_status prometheia_dataset_open(const char* ephemeris_path,
+                                                         prometheia_dataset** out,
+                                                         prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_dataset_add_ephemeris(prometheia_dataset* dataset,
+                                                                  const char* ephemeris_path,
+                                                                  prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_dataset_add_catalog(prometheia_dataset* dataset,
+                                                                const char* catalog_path,
+                                                                prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_dataset_add_perturbers(prometheia_dataset* dataset,
+                                                                   const char* spk_path,
+                                                                   prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_dataset_add_hypotheticals(prometheia_dataset* dataset,
+                                                                      const char* element_file_path,
+                                                                      prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_dataset_freeze(prometheia_dataset* dataset,
+                                                           prometheia_error* err);
+PROMETHEIA_API void prometheia_dataset_close(prometheia_dataset* dataset);
+
+PROMETHEIA_API prometheia_status prometheia_context_open(const prometheia_dataset* dataset,
+                                                         prometheia_engine** out,
+                                                         prometheia_error* err);
+
 /* Resolves a designation or proper name ("1", "Ceres"; ASCII
  * case-insensitive) to the SPK-ID calc takes. From a 1.2 catalog, a
  * numbered body's old provisional designation too ("2013 FZ27"). */
@@ -407,7 +464,8 @@ PROMETHEIA_API prometheia_status prometheia_calc_elements_ut(
  * redefines the tokens it carries. Tokens match ASCII case-insensitively.
  * Strings returned below, and the indexes prometheia_hypothetical_token
  * takes, are valid until the engine is closed or another element file is
- * added. Not thread-safe, like the rest of an engine.
+ * added. An engine serves one thread at a time; on a context the strings
+ * are the dataset's and stay put while the context lives.
  */
 PROMETHEIA_API prometheia_status prometheia_engine_add_hypotheticals(prometheia_engine* engine,
                                                                      const char* element_file_path,

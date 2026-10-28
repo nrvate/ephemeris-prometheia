@@ -59,6 +59,12 @@ struct prometheia_engine {
     }
 };
 
+// A dataset handle holds one reference to the corpus; each context opened
+// from it holds another.
+struct prometheia_dataset {
+    std::shared_ptr<Corpus> corpus;
+};
+
 namespace {
 
 prometheia_status to_status(ErrorCode code) {
@@ -114,6 +120,20 @@ prometheia_status guarded(prometheia_error* err, F&& f) {
     } catch (...) {
         return report(err, PROMETHEIA_ERROR_INTERNAL, "unknown internal error");
     }
+}
+
+// One of the dataset's add_* calls, after the common checks.
+template <typename Add>
+prometheia_status dataset_add(prometheia_dataset* dataset, const char* path, const char* what,
+                              prometheia_error* err, Add&& add) {
+    if (!dataset)
+        return argument(err, "dataset is NULL");
+    if (!path)
+        return argument(err, what);
+    return guarded(err, [&] {
+        Result<void> r = add(*dataset->corpus, std::string(path));
+        return r ? succeed(err) : report(err, r.error());
+    });
 }
 
 // The C sidereal values are the engine's (a static_cast passes them through).
@@ -419,6 +439,76 @@ prometheia_status prometheia_engine_open(const char* path, prometheia_engine** o
 
 void prometheia_engine_close(prometheia_engine* engine) {
     delete engine;
+}
+
+prometheia_status prometheia_dataset_open(const char* path, prometheia_dataset** out,
+                                          prometheia_error* err) {
+    if (out)
+        *out = nullptr;
+    if (!path)
+        return argument(err, "ephemeris path is NULL");
+    if (!out)
+        return argument(err, "output handle pointer is NULL");
+    return guarded(err, [&] {
+        auto c = Corpus::open(path);
+        if (!c)
+            return report(err, c.error());
+        *out = new prometheia_dataset{std::move(c).value()};
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_dataset_add_ephemeris(prometheia_dataset* dataset, const char* path,
+                                                   prometheia_error* err) {
+    return dataset_add(dataset, path, "ephemeris path is NULL", err,
+                       [](Corpus& c, const std::string& p) { return c.add_ephemeris(p); });
+}
+
+prometheia_status prometheia_dataset_add_catalog(prometheia_dataset* dataset, const char* path,
+                                                 prometheia_error* err) {
+    return dataset_add(dataset, path, "catalog path is NULL", err,
+                       [](Corpus& c, const std::string& p) { return c.add_catalog(p); });
+}
+
+prometheia_status prometheia_dataset_add_perturbers(prometheia_dataset* dataset, const char* path,
+                                                    prometheia_error* err) {
+    return dataset_add(dataset, path, "perturber kernel path is NULL", err,
+                       [](Corpus& c, const std::string& p) { return c.add_perturbers(p); });
+}
+
+prometheia_status prometheia_dataset_add_hypotheticals(prometheia_dataset* dataset,
+                                                       const char* element_file_path,
+                                                       prometheia_error* err) {
+    return dataset_add(dataset, element_file_path, "element file path is NULL", err,
+                       [](Corpus& c, const std::string& p) { return c.add_hypotheticals(p); });
+}
+
+prometheia_status prometheia_dataset_freeze(prometheia_dataset* dataset, prometheia_error* err) {
+    if (!dataset)
+        return argument(err, "dataset is NULL");
+    dataset->corpus->freeze();
+    return succeed(err);
+}
+
+void prometheia_dataset_close(prometheia_dataset* dataset) {
+    delete dataset;
+}
+
+prometheia_status prometheia_context_open(const prometheia_dataset* dataset,
+                                          prometheia_engine** out, prometheia_error* err) {
+    if (out)
+        *out = nullptr;
+    if (!dataset)
+        return argument(err, "dataset is NULL");
+    if (!out)
+        return argument(err, "output handle pointer is NULL");
+    return guarded(err, [&] {
+        auto e = Engine::open_context(dataset->corpus);
+        if (!e)
+            return report(err, e.error());
+        *out = new prometheia_engine{std::move(e).value(), {}, {}, {}, {}};
+        return succeed(err);
+    });
 }
 
 const char* prometheia_engine_source(const prometheia_engine* engine) {

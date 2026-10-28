@@ -678,6 +678,15 @@ struct EpochFrames {
 // ---------------------------------------------------------------------------
 // Small bodies: the barycentric force model fed from the ephemeris.
 
+// For a rare path that would keep its hot caller from being inlined.
+#if defined(__GNUC__) || defined(__clang__)
+#define PROMETHEIA_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define PROMETHEIA_NOINLINE __declspec(noinline)
+#else
+#define PROMETHEIA_NOINLINE
+#endif
+
 // The point masses that perturb (and attract) a catalog body. Mars..
 // Pluto are system barycentres — exactly where DE puts the mass, since
 // its GMs are system GMs; Earth and Moon are split from the EMB by
@@ -700,33 +709,48 @@ constexpr int kPerturberIds[] = {10, 199, 299, 399, 301, 4, 5, 6, 7, 8, 9};
 // depend on which body or instant the engine met first. (They did until
 // 2026-10-27: the blocks were anchored at the first instant asked for,
 // and Eros moved by up to 159 m with the order of requests.)
-class PerturberSet final : public PerturberStates {
+//
+// The blocks belong to the corpus (PerturberBlocks), and every engine on it
+// reads them: a block is sampled once, by whichever engine first needs it,
+// and never changes after. Each engine keeps the run of blocks it has
+// reached (PerturberSet), so its coverage, and so its answers, are what
+// they would be with blocks of its own.
+class PerturberBlocks {
 public:
-    // The planetary ephemeris, and the scratch every table is read through.
-    void attach(const Source* s, ReadScratch* scratch) {
-        source_ = s;
-        scratch_ = scratch;
-    }
+    static constexpr double kBlockDays = 365.25;
+    static constexpr int kBlockSamples = 128;
+    static constexpr double kGridEpoch = 2451545.0;                 // J2000 TDB
+    static constexpr double kGridStep = kBlockDays / kBlockSamples; // 1461/512 d, exact
 
-    // Adds the asteroid masses of a perturber kernel (after the Sun and
-    // planets) and drops every table built so far; they rebuild lazily.
+    static double grid_time(long j) { return kGridEpoch + double(j) * kGridStep; }
+
+    // The masses that act, in table order, and where their states come from.
+    struct Members {
+        std::vector<int> ids;
+        std::vector<const Source*> sources;
+        std::vector<double> mus;
+        long sun_index = -1;
+    };
+
+    // One grid block: rows of members().ids.size() samples, ascending epochs,
+    // both ends included, from `first` to `last`.
+    struct Block {
+        std::vector<TrajSample> samples;
+        size_t rows = 0;
+        double first = 0.0, last = 0.0;
+    };
+
+    // The planetary ephemeris, and the asteroid masses of a perturber kernel
+    // (after the Sun and planets). Only while the corpus is not frozen, so
+    // with no engine reading; every block built so far is dropped.
+    void attach(const Source* s) { source_ = s; }
     void attach_asteroids(const Source* s, std::vector<int> ids) {
         asteroid_source_ = s;
         asteroid_ids_ = std::move(ids);
-        reset();
-    }
-
-    void reset() {
-        built_ = false;
-        ok_ = true;
-        error_.clear();
-        sun_index_ = -1;
-        lo_ = hi_ = 0.0;
-        ids_.clear();
-        sources_.clear();
-        mus_.clear();
-        grid_.clear();
-        head_ = 0;
+        std::lock_guard<std::mutex> hold(m_);
+        built_.store(false, std::memory_order_relaxed);
+        members_ = Members{};
+        blocks_.clear();
     }
 
     // The span the tables can reach: the planetary ephemeris's, narrowed to
@@ -742,181 +766,54 @@ public:
         return {lo, hi};
     }
 
-    // Ends a failure once the engine has refused the request that met it
-    // and dropped what that request integrated. The tables themselves are
-    // whole: a block is added only after all its samples are read.
-    void clear_failure() {
-        if (ok_)
-            return;
-        if (ids_.empty()) {
-            reset();
-            return;
-        }
-        ok_ = true;
-        error_.clear();
-        error_code_ = ErrorCode::Ok;
-    }
-
-    // PerturberStates. ensure() builds the table on first use and then
-    // extends coverage. A failure (no masses at all, or an instant past the
-    // span) makes every state read zero until clear_failure(): the engine
-    // checks ok() after each integration, refuses that request, discards
-    // the trajectory it touched and clears the failure (2026-10-25: it used
-    // to stay for the engine's life, so one request near 1550 broke every
-    // catalog body for every later one).
-    void ensure(double t) override {
-        if (!ok_)
-            return;
-        if (!built_) {
-            build(t);
-            if (!ok_)
-                return;
-        }
-        while (ok_ && t > hi_)
-            extend(kBlockDays);
-        while (ok_ && t < lo_)
-            extend(-kBlockDays);
-    }
-
-    void state(size_t i, double t, double out[6]) override {
-        if (!ok_ || i >= ids_.size() || rows() == 0) {
-            for (int k = 0; k < 6; ++k)
-                out[k] = 0.0;
-            return;
-        }
-        const Row r = locate(t);
-        if (r.clamped)
-            copy_sample(at(r.lo, i), out);
-        else
-            r.weights.apply(at(r.lo, i), at(r.lo + 1, i), out);
-    }
-
-    // One interval lookup and one set of Hermite weights serve every mass:
-    // all tables share their sample epochs, stored row by row.
-    void states(double t, double* out) override {
-        const size_t n = ids_.size();
-        if (!ok_ || n == 0 || rows() == 0) {
-            for (size_t k = 0; k < 6 * n; ++k)
-                out[k] = 0.0;
-            return;
-        }
-        const Row r = locate(t);
-        for (size_t i = 0; i < n; ++i) {
-            if (r.clamped)
-                copy_sample(at(r.lo, i), out + 6 * i);
-            else
-                r.weights.apply(at(r.lo, i), at(r.lo + 1, i), out + 6 * i);
-        }
-    }
-
-    // Positions of every mass, and a velocity for one: the force model uses
-    // velocities only for the Sun's relativistic term, and interpolating
-    // them for all eleven was half of a small body's integration
-    // (2026-09-19). The same weights as states(), so the same values.
-    void positions(double t, double* out, long with_velocity) override {
-        const size_t n = ids_.size();
-        if (!ok_ || n == 0 || rows() == 0) {
-            for (size_t k = 0; k < 6 * n; ++k)
-                out[k] = 0.0;
-            return;
-        }
-        const Row r = locate(t);
-        for (size_t i = 0; i < n; ++i) {
-            if (r.clamped)
-                copy_sample(at(r.lo, i), out + 6 * i);
-            else if (long(i) == with_velocity)
-                r.weights.apply(at(r.lo, i), at(r.lo + 1, i), out + 6 * i);
-            else
-                r.weights.apply_position(at(r.lo, i), at(r.lo + 1, i), out + 6 * i);
-        }
-    }
-
-    size_t count() const override { return ids_.size(); }
-    const double* mus() const override { return mus_.data(); }
-    bool ok() const override { return ok_; }
-    long sun_index() const override { return sun_index_; }
-    long index_of(long id) const override {
-        for (size_t i = 0; i < ids_.size(); ++i)
-            if (ids_[i] == id)
-                return long(i);
-        return -1;
-    }
-
-private:
-    static constexpr double kBlockDays = 365.25;
-    static constexpr int kBlockSamples = 128;
-    static constexpr double kGridEpoch = 2451545.0;                 // J2000 TDB
-    static constexpr double kGridStep = kBlockDays / kBlockSamples; // 1461/512 d, exact
-
-    static double grid_time(long j) { return kGridEpoch + double(j) * kGridStep; }
-
-    void fail(ErrorCode code, std::string msg) {
-        if (ok_) {
-            ok_ = false;
-            error_code_ = code;
-            error_ = std::move(msg);
-        }
-    }
-
-    void build(double t) {
-        built_ = true;
-        // Membership is probed at J2000 when the span holds it, else at the
-        // span's middle: never at the instant that happened to come first.
+    // Probed once, at J2000 when the span holds it, else at the span's
+    // middle: never at the instant that happened to come first. No mass at
+    // all is an error, and is probed again next time.
+    Result<const Members*> members(ReadScratch& scratch) {
+        if (built_.load(std::memory_order_acquire))
+            return &members_;
+        std::lock_guard<std::mutex> hold(m_);
+        if (built_.load(std::memory_order_relaxed))
+            return &members_;
         const auto [span_lo, span_hi] = span();
         const double probe =
             span_lo < kGridEpoch && kGridEpoch < span_hi ? kGridEpoch : 0.5 * (span_lo + span_hi);
+        Members m;
         for (int id : kPerturberIds) {
             double st[6];
-            if (source_->barycentric(id, probe, st, *scratch_).ok()) {
+            if (source_->barycentric(id, probe, st, scratch).ok()) {
                 if (id == body::kSun)
-                    sun_index_ = long(ids_.size());
-                ids_.push_back(id);
-                sources_.push_back(source_);
-                mus_.push_back(gm_or_builtin(source_, id));
+                    m.sun_index = long(m.ids.size());
+                m.ids.push_back(id);
+                m.sources.push_back(source_);
+                m.mus.push_back(gm_or_builtin(source_, id));
             }
         }
-        if (asteroid_source_ && sun_index_ >= 0) {
+        if (asteroid_source_ && m.sun_index >= 0) {
             for (int id : asteroid_ids_) {
                 double st[6];
                 const double mu = gm_or_builtin(asteroid_source_, id);
-                if (mu > 0.0 && asteroid_source_->barycentric(id, probe, st, *scratch_).ok()) {
-                    ids_.push_back(id);
-                    sources_.push_back(asteroid_source_);
-                    mus_.push_back(mu);
+                if (mu > 0.0 && asteroid_source_->barycentric(id, probe, st, scratch).ok()) {
+                    m.ids.push_back(id);
+                    m.sources.push_back(asteroid_source_);
+                    m.mus.push_back(mu);
                 }
             }
         }
-        if (ids_.empty()) {
-            fail(ErrorCode::CoverageError,
-                 "the ephemeris carries none of the perturbing masses at JD " +
-                     std::to_string(probe) + " (outside its coverage?)");
-            return;
-        }
-        // The first block is the one holding t; at a block's start that is
-        // also the block before, which is the one inside the span at its end.
-        long b = long(std::floor((t - kGridEpoch) / kBlockDays));
-        if (grid_time(b * kBlockSamples) >= span_hi)
-            --b;
-        lo_block_ = hi_block_ = b;
-        add_block(b, true);
+        if (m.ids.empty())
+            return make_error(ErrorCode::CoverageError,
+                              "the ephemeris carries none of the perturbing masses at JD " +
+                                  std::to_string(probe) + " (outside its coverage?)");
+        members_ = std::move(m);
+        built_.store(true, std::memory_order_release);
+        return &members_;
     }
 
-    // Grows coverage by one block in the given direction (positive =
-    // forward): the grid block after the last one held, or before the first.
-    void extend(double days) {
-        if (days > 0.0) {
-            if (add_block(hi_block_ + 1, true))
-                ++hi_block_;
-        } else if (add_block(lo_block_ - 1, false)) {
-            --lo_block_;
-        }
-    }
-
-    // Samples grid block b, cut to the span, and joins it to the rows: at
-    // the end when forward, else in front. A sample the rows already hold
-    // (the shared block boundary) is not read twice. False, with the
-    // failure set, when the block lies outside the span or a read fails.
-    bool add_block(long b, bool forward) {
+    // Grid block b, cut to the span, sampled on first use through the
+    // caller's scratch. It is sampled outside the lock; two engines that
+    // sample the same block at once get the same values, and the first kept
+    // serves both. A coverage error when the block lies outside the span.
+    Result<std::shared_ptr<const Block>> block(long b, const Members& m, ReadScratch& scratch) {
         const auto [span_lo, span_hi] = span();
         const int n = kBlockSamples;
         const double a = grid_time(b * n), z = grid_time((b + 1) * n);
@@ -926,8 +823,12 @@ private:
                           "a catalog body is integrated only where the planetary ephemeris and "
                           "perturbers reach: JD %.1f .. %.1f TDB",
                           span_lo, span_hi);
-            fail(ErrorCode::CoverageError, buf);
-            return false;
+            return make_error(ErrorCode::CoverageError, buf);
+        }
+        {
+            std::lock_guard<std::mutex> hold(m_);
+            if (auto it = blocks_.find(b); it != blocks_.end())
+                return it->second;
         }
         std::vector<double> times;
         times.reserve(size_t(n) + 3);
@@ -940,27 +841,23 @@ private:
         }
         if (z > span_hi && times.back() < span_hi)
             times.push_back(span_hi);
-        if (rows() > 0) {
-            if (forward && times.front() == row_time(rows() - 1))
-                times.erase(times.begin());
-            else if (!forward && times.back() == row_time(0))
-                times.pop_back();
-        }
-        const size_t nb = ids_.size();
-        // block[i * nb + b]: sample i of the block. Epochs outer, bodies
+        const size_t nb = m.ids.size();
+        // samples[i * nb + k]: sample i of body k. Epochs outer, bodies
         // inner: the ephemeris keeps one record (every body, 32 days in
         // DE440) decoded, so this reads each record once where bodies-outer
         // read the block's dozen records once per body.
-        std::vector<TrajSample> block(times.size() * nb);
+        auto blk = std::make_shared<Block>();
+        blk->samples.resize(times.size() * nb);
+        blk->rows = times.size();
+        blk->first = times.front();
+        blk->last = times.back();
         for (size_t i = 0; i < times.size(); ++i) {
             for (size_t k = 0; k < nb; ++k) {
                 double st[6];
-                auto r = sources_[k]->barycentric(ids_[k], times[i], st, *scratch_);
-                if (!r) {
-                    fail(r.error().code, r.error().message);
-                    return false;
-                }
-                TrajSample& p = block[i * nb + k];
+                auto r = m.sources[k]->barycentric(m.ids[k], times[i], st, scratch);
+                if (!r)
+                    return r.error();
+                TrajSample& p = blk->samples[i * nb + k];
                 p.t = times[i];
                 p.px = st[0] / kAuKm;
                 p.py = st[1] / kAuKm;
@@ -970,29 +867,202 @@ private:
                 p.vz = st[5] / kAuKm;
             }
         }
-        if (forward) {
-            grid_.insert(grid_.end(), block.begin(), block.end());
-        } else {
-            // The new rows go in front, ascending, into the headroom kept
-            // there. Only when that runs out is the grid moved, into twice
-            // the room, so a backward march costs what a forward one does.
-            // (Inserting at the front moved the whole grid every block: 46%
-            // of a 1,000-instant backward query, 2026-09-19.)
-            const size_t k = block.size();
-            if (head_ < k) {
-                const size_t used = grid_.size() - head_;
-                const size_t room = std::max(k, used);
-                std::vector<TrajSample> moved(room + used);
-                std::copy(grid_.begin() + std::ptrdiff_t(head_), grid_.end(),
-                          moved.begin() + std::ptrdiff_t(room));
-                grid_ = std::move(moved);
-                head_ = room;
-            }
-            head_ -= k;
-            std::copy(block.begin(), block.end(), grid_.begin() + std::ptrdiff_t(head_));
+        std::lock_guard<std::mutex> hold(m_);
+        return blocks_.try_emplace(b, std::move(blk)).first->second;
+    }
+
+private:
+    const Source* source_ = nullptr;
+    const Source* asteroid_source_ = nullptr;
+    std::vector<int> asteroid_ids_;
+    std::mutex m_; // guards the members' build and the block map
+    std::atomic<bool> built_{false};
+    Members members_;
+    std::unordered_map<long, std::shared_ptr<const Block>> blocks_;
+};
+
+// One engine's view of the corpus's perturber tables: the run of blocks it
+// has reached, lo_block_ .. hi_block_, and its own failure state.
+class PerturberSet final : public PerturberStates {
+public:
+    using Block = PerturberBlocks::Block;
+
+    // The corpus's tables, and the scratch every block is read through.
+    // Forgets the blocks reached so far.
+    void attach(PerturberBlocks* store, ReadScratch* scratch) {
+        store_ = store;
+        scratch_ = scratch;
+        reset();
+    }
+
+    void reset() {
+        ok_ = true;
+        error_.clear();
+        error_code_ = ErrorCode::Ok;
+        members_ = nullptr;
+        blocks_.clear();
+        current_ = nullptr;
+        lo_ = hi_ = 0.0;
+    }
+
+    std::pair<double, double> span() const { return store_->span(); }
+
+    // Ends a failure once the engine has refused the request that met it
+    // and dropped what that request integrated. The tables themselves are
+    // whole: a block is kept only after all its samples are read.
+    void clear_failure() {
+        if (ok_)
+            return;
+        if (!members_) {
+            reset();
+            return;
         }
-        lo_ = row_time(0);
-        hi_ = row_time(rows() - 1);
+        ok_ = true;
+        error_.clear();
+        error_code_ = ErrorCode::Ok;
+    }
+
+    // PerturberStates. ensure() reaches the first block on first use and
+    // then extends coverage. A failure (no masses at all, or an instant
+    // past the span) makes every state read zero until clear_failure(): the
+    // engine checks ok() after each integration, refuses that request,
+    // discards the trajectory it touched and clears the failure
+    // (2026-10-25: it used to stay for the engine's life, so one request
+    // near 1550 broke every catalog body for every later one).
+    void ensure(double t) override {
+        if (!ok_)
+            return;
+        if (!members_) {
+            build(t);
+            if (!ok_)
+                return;
+        }
+        while (ok_ && t > hi_)
+            extend(true);
+        while (ok_ && t < lo_)
+            extend(false);
+    }
+
+    void state(size_t i, double t, double out[6]) override {
+        if (!ok_ || i >= count() || blocks_.empty()) {
+            for (int k = 0; k < 6; ++k)
+                out[k] = 0.0;
+            return;
+        }
+        const Row r = locate(t);
+        if (r.clamped)
+            copy_sample(r.a[i], out);
+        else
+            r.weights.apply(r.a[i], r.b[i], out);
+    }
+
+    // One interval lookup and one set of Hermite weights serve every mass:
+    // all tables share their sample epochs, stored row by row.
+    void states(double t, double* out) override {
+        const size_t n = count();
+        if (!ok_ || n == 0 || blocks_.empty()) {
+            for (size_t k = 0; k < 6 * n; ++k)
+                out[k] = 0.0;
+            return;
+        }
+        const Row r = locate(t);
+        for (size_t i = 0; i < n; ++i) {
+            if (r.clamped)
+                copy_sample(r.a[i], out + 6 * i);
+            else
+                r.weights.apply(r.a[i], r.b[i], out + 6 * i);
+        }
+    }
+
+    // Positions of every mass, and a velocity for one: the force model uses
+    // velocities only for the Sun's relativistic term, and interpolating
+    // them for all eleven was half of a small body's integration
+    // (2026-09-19). The same weights as states(), so the same values.
+    void positions(double t, double* out, long with_velocity) override {
+        const size_t n = count();
+        if (!ok_ || n == 0 || blocks_.empty()) {
+            for (size_t k = 0; k < 6 * n; ++k)
+                out[k] = 0.0;
+            return;
+        }
+        const Row r = locate(t);
+        for (size_t i = 0; i < n; ++i) {
+            if (r.clamped)
+                copy_sample(r.a[i], out + 6 * i);
+            else if (long(i) == with_velocity)
+                r.weights.apply(r.a[i], r.b[i], out + 6 * i);
+            else
+                r.weights.apply_position(r.a[i], r.b[i], out + 6 * i);
+        }
+    }
+
+    size_t count() const override { return members_ ? members_->ids.size() : 0; }
+    const double* mus() const override { return members_ ? members_->mus.data() : nullptr; }
+    bool ok() const override { return ok_; }
+    long sun_index() const override { return members_ ? members_->sun_index : -1; }
+    long index_of(long id) const override {
+        for (size_t i = 0; i < count(); ++i)
+            if (members_->ids[i] == id)
+                return long(i);
+        return -1;
+    }
+
+private:
+    static constexpr double kBlockDays = PerturberBlocks::kBlockDays;
+    static constexpr double kGridEpoch = PerturberBlocks::kGridEpoch;
+    static constexpr double kGridStep = PerturberBlocks::kGridStep;
+
+    void fail(ErrorCode code, std::string msg) {
+        if (ok_) {
+            ok_ = false;
+            error_code_ = code;
+            error_ = std::move(msg);
+        }
+    }
+
+    void build(double t) {
+        auto m = store_->members(*scratch_);
+        if (!m) {
+            fail(m.error().code, m.error().message);
+            return;
+        }
+        members_ = m.value();
+        // The first block is the one holding t; at a block's start that is
+        // also the block before, which is the one inside the span at its end.
+        const double span_hi = span().second;
+        long b = long(std::floor((t - kGridEpoch) / kBlockDays));
+        if (PerturberBlocks::grid_time(b * PerturberBlocks::kBlockSamples) >= span_hi)
+            --b;
+        lo_block_ = hi_block_ = b;
+        add_block(b, true);
+    }
+
+    // Grows coverage by one block in the given direction: the grid block
+    // after the last one held, or before the first.
+    void extend(bool forward) {
+        if (forward) {
+            if (add_block(hi_block_ + 1, true))
+                ++hi_block_;
+        } else if (add_block(lo_block_ - 1, false)) {
+            --lo_block_;
+        }
+    }
+
+    // Takes grid block b from the corpus's tables and joins it to the run:
+    // at the end when forward, else in front. False, with the failure set,
+    // when the block lies outside the span or a read fails.
+    bool add_block(long b, bool forward) {
+        auto blk = store_->block(b, *members_, *scratch_);
+        if (!blk) {
+            fail(blk.error().code, blk.error().message);
+            return false;
+        }
+        if (forward)
+            blocks_.push_back(std::move(blk).value());
+        else
+            blocks_.push_front(std::move(blk).value());
+        lo_ = blocks_.front()->first;
+        hi_ = blocks_.back()->last;
         return true;
     }
 
@@ -1028,43 +1098,74 @@ private:
         }
     };
 
-    size_t rows() const { return ids_.empty() ? 0 : (grid_.size() - head_) / ids_.size(); }
-    const TrajSample& at(size_t row, size_t b) const {
-        return grid_[head_ + row * ids_.size() + b];
-    }
-    double row_time(size_t row) const { return grid_[head_ + row * ids_.size()].t; }
-
     // Where t falls: a clamped row outside the coverage (the first or last
-    // sample, as before), else the interval [lo, lo + 1] and its weights.
-    // Rows are uniformly spaced, so the index is computed and then nudged
-    // past any rounding at the block seams.
+    // sample, as before), else the block holding it, the interval [lo, lo +
+    // 1] in that block, and its weights. Blocks and their rows are uniformly
+    // spaced, so each index is computed and then nudged past any rounding at
+    // the seams. Two blocks share the sample at their seam, and an instant
+    // on a sample is that sample exactly from either side (the weights are
+    // 0 and 1), so which block answers a seam does not change the answer.
+    // The block last used is tried first: an integration steps through one
+    // block for many calls (searching the run every call cost 14% of a
+    // catalog body, 2026-10-28).
     struct Row {
-        size_t lo = 0;
-        bool clamped = false;
+        const TrajSample* a = nullptr; // the row at or before t, every mass
+        const TrajSample* b = nullptr; // the row after it
+        bool clamped = false;          // answer row a as it is
         Hermite weights;
     };
     Row locate(double t) const {
-        const size_t nr = rows();
+        if (t <= lo_ || t >= hi_ || !current_ || t < current_->first || t > current_->last)
+            return locate_elsewhere(t);
+        return within(*current_, t);
+    }
+
+    // The rarer cases, kept out of locate() so that it inlines: an instant
+    // outside the coverage, or in another block than the last one.
+    PROMETHEIA_NOINLINE Row locate_elsewhere(double t) const {
         Row r;
-        if (nr < 2 || t <= row_time(0)) {
+        if (t <= lo_) {
+            r.a = blocks_.front()->samples.data();
             r.clamped = true;
             return r;
         }
-        if (t >= row_time(nr - 1)) {
-            r.lo = nr - 1;
+        if (t >= hi_) {
+            const Block& last = *blocks_.back();
+            r.a = last.samples.data() + (last.rows - 1) * count();
             r.clamped = true;
             return r;
         }
-        const double h = kBlockDays / double(kBlockSamples);
-        const double k = std::floor((t - row_time(0)) / h);
+        const long b =
+            std::clamp(long(std::floor((t - kGridEpoch) / kBlockDays)), lo_block_, hi_block_);
+        size_t bi = size_t(b - lo_block_);
+        while (bi > 0 && blocks_[bi]->first > t)
+            --bi;
+        while (bi + 1 < blocks_.size() && blocks_[bi]->last < t)
+            ++bi;
+        current_ = blocks_[bi].get();
+        return within(*current_, t);
+    }
+
+    // The interval of blk holding t, which lies in [blk.first, blk.last].
+    Row within(const Block& blk, double t) const {
+        const size_t nb = count(), nr = blk.rows;
+        if (nr < 2) {
+            Row r;
+            r.a = blk.samples.data();
+            r.clamped = true;
+            return r;
+        }
+        const auto row_time = [&](size_t row) { return blk.samples[row * nb].t; };
+        const double k = std::floor((t - row_time(0)) / kGridStep);
         size_t lo = k <= 0.0 ? 0 : std::min(size_t(k), nr - 2);
         while (lo > 0 && row_time(lo) > t)
             --lo;
         while (lo + 2 < nr && row_time(lo + 1) <= t)
             ++lo;
-        r.lo = lo;
-        r.weights = Hermite(row_time(lo), row_time(lo + 1), t);
-        return r;
+        // Made whole, not assigned into a zeroed Row: zeroing it first was
+        // a seventh of locate() (2026-10-28).
+        const TrajSample* a = blk.samples.data() + lo * nb;
+        return Row{a, a + nb, false, Hermite(row_time(lo), row_time(lo + 1), t)};
     }
 
     static void copy_sample(const TrajSample& p, double out[6]) {
@@ -1076,24 +1177,16 @@ private:
         out[5] = p.vz;
     }
 
-    const Source* source_ = nullptr;
+    PerturberBlocks* store_ = nullptr;
     ReadScratch* scratch_ = nullptr;
     bool ok_ = true;
-    long sun_index_ = -1;
-    bool built_ = false;
     std::string error_;
     ErrorCode error_code_ = ErrorCode::Ok;
-    double lo_ = 0.0, hi_ = 0.0;         // first and last row epochs
-    long lo_block_ = 0, hi_block_ = 0;   // grid blocks held, inclusive
-    std::vector<int> ids_;               // NAIF ids of the masses, table order
-    std::vector<const Source*> sources_; // where each mass's states come from
-    const Source* asteroid_source_ = nullptr;
-    std::vector<int> asteroid_ids_;
-    // Rows of ids_.size() samples, ascending epochs, from grid_[head_]; the
-    // slots before head_ are headroom for backward blocks.
-    std::vector<TrajSample> grid_;
-    size_t head_ = 0;
-    std::vector<double> mus_;
+    const PerturberBlocks::Members* members_ = nullptr; // the corpus's, once probed
+    double lo_ = 0.0, hi_ = 0.0;                        // first and last sample epochs reached
+    long lo_block_ = 0, hi_block_ = 0;                  // grid blocks reached, inclusive
+    std::deque<std::shared_ptr<const Block>> blocks_;
+    mutable const Block* current_ = nullptr; // the block locate() last answered from
 
 public:
     const std::string& error() const { return error_; }
@@ -1242,6 +1335,15 @@ uint64_t fnv1a(std::string_view lower) {
 // What a Corpus holds. Written only by Corpus::open and add_*, before the
 // Corpus is frozen; afterwards every member is read-only but the name indexes
 // and the distinct-body count, which are built on first use under `lazy`.
+// A natural lunar apsis passage (Engine::Impl::natural_apsis).
+struct ApsisPassage {
+    double t;   // TDB
+    double res; // rad: longitude less mean apse and model
+    double lat; // rad
+    double r;   // km
+};
+using ApsisBlock = std::array<std::vector<ApsisPassage>, 2>; // [0] perigees, [1] apogees
+
 struct Corpus::Data {
     std::unique_ptr<Source> source; // always a ChainSource (chain, below)
     ChainSource* chain = nullptr;
@@ -1283,6 +1385,34 @@ struct Corpus::Data {
     std::deque<NameIndex> name_indexes;
     std::optional<uint64_t> distinct_bodies; // catalog_bodies(), until add_catalog()
     std::mutex lazy;                         // guards building either
+
+    // The tables a catalog body is integrated through, sampled once for
+    // every engine on the corpus.
+    PerturberBlocks perturber_blocks;
+
+    // The Moon's apsis passages by block (Engine::Impl::ensure_apsides),
+    // each block scanned once for every engine; dropped when an ephemeris is
+    // added.
+    std::unordered_map<long, std::shared_ptr<const ApsisBlock>> apsis_blocks;
+    std::mutex apsis_lock; // guards apsis_blocks
+
+    // Block k, scanned by `scan` on first use. The scan runs outside the
+    // lock; two engines that scan the same block at once find the same
+    // passages, and the first kept serves both. The pointer is for reading
+    // at once: a block lives until an ephemeris is added.
+    template <typename Scan>
+    Result<const ApsisBlock*> apsis_block(long k, Scan&& scan) {
+        {
+            std::lock_guard<std::mutex> hold(apsis_lock);
+            if (auto it = apsis_blocks.find(k); it != apsis_blocks.end())
+                return it->second.get();
+        }
+        auto found = std::make_shared<ApsisBlock>();
+        if (auto r = scan(*found); !r)
+            return r.error();
+        std::lock_guard<std::mutex> hold(apsis_lock);
+        return apsis_blocks.try_emplace(k, std::move(found)).first->second.get();
+    }
 
     Data() {
         frames::frame_bias_matrix(bias);
@@ -1392,13 +1522,7 @@ struct Engine::Impl {
 
     // The perturber tables read the corpus's planetary ephemeris and, when it
     // has one, its asteroid kernel; again after an add_* changes either.
-    void attach_perturbers() {
-        perturbers.attach(source.get(), &scratch);
-        if (asteroids)
-            perturbers.attach_asteroids(asteroids.get(), corpus.asteroid_masses);
-        else
-            perturbers.reset();
-    }
+    void attach_perturbers() { perturbers.attach(&corpus.perturber_blocks, &scratch); }
 
     // The element frame's rotation for the fixed equinoxes, kept apart from
     // the three-slot date cache, which a light-time solve and its rate
@@ -2517,22 +2641,16 @@ struct Engine::Impl {
     // interpolation is a cubic Hermite whose slopes at each node are those of
     // the quartic through it and its two neighbours on each side, so the curve
     // and its rate are continuous.
-    struct ApsisPassage {
-        double t;   // TDB
-        double res; // rad: longitude less mean apse and model
-        double lat; // rad
-        double r;   // km
-    };
     std::vector<ApsisPassage> apsis_passages[2]; // [0] perigees, [1] apogees
     // Passages are scanned in fixed blocks of kApsisBlockDays on a grid of
     // TDB, and every block scanned is kept (the ephemeris's whole span is a
-    // few thousand blocks, about a megabyte). So each block is scanned once
-    // per engine, and a passage's time does not depend on which instant was
+    // few thousand blocks, about a megabyte), by the corpus for every engine
+    // on it. So each block is scanned once, and a passage's time does not
+    // depend on which instant was
     // asked first: until 2026-09-19 the scan started 100 days before
     // whatever instant came first, which moved the passages' last bits, and
     // was rescanned whenever an instant fell more than a year away.
     static constexpr double kApsisBlockDays = 50.0;
-    std::unordered_map<long, std::array<std::vector<ApsisPassage>, 2>> apsis_blocks;
     long apsis_k_lo = 1, apsis_k_hi = 0; // the blocks apsis_passages holds
 
     // The Moon relative to the Earth, geometric: ICRF km, km/day.
@@ -2657,18 +2775,16 @@ struct Engine::Impl {
         apsis_k_lo = 1;
         apsis_k_hi = 0;
         for (long k = k_lo; k <= k_hi; ++k) {
-            auto it = apsis_blocks.find(k);
-            if (it == apsis_blocks.end()) {
-                std::array<std::vector<ApsisPassage>, 2> found;
+            auto blk = corpus.apsis_block(k, [&](ApsisBlock& found) {
                 const double a = double(k) * kApsisBlockDays;
-                auto r = scan_apsides(a, a + kApsisBlockDays, found);
-                if (!r)
-                    return r;
-                it = apsis_blocks.emplace(k, std::move(found)).first;
-            }
+                return scan_apsides(a, a + kApsisBlockDays, found);
+            });
+            if (!blk)
+                return blk.error();
+            const ApsisBlock& found = *blk.value();
             for (int i = 0; i < 2; ++i)
-                apsis_passages[i].insert(apsis_passages[i].end(), it->second[size_t(i)].begin(),
-                                         it->second[size_t(i)].end());
+                apsis_passages[i].insert(apsis_passages[i].end(), found[size_t(i)].begin(),
+                                         found[size_t(i)].end());
         }
         // A passage on a seam between two blocks is found by both.
         for (auto& v : apsis_passages)
@@ -3320,7 +3436,6 @@ Result<void> Engine::add_ephemeris(const std::string& path) {
     impl_->small_bodies.clear();
     impl_->record_cache.clear();
     impl_->sigma_tracks.clear();
-    impl_->apsis_blocks.clear();
     impl_->apsis_k_lo = 1;
     impl_->apsis_k_hi = 0;
     impl_->forget_observers();
@@ -3355,6 +3470,7 @@ Result<std::shared_ptr<Corpus>> Corpus::open(const std::string& path) {
     chain->add(d.number(std::move(src).value()));
     d.chain = chain.get();
     d.source = std::move(chain);
+    d.perturber_blocks.attach(d.source.get());
     auto shipped = hypotheticals::parse(hypotheticals::shipped(), "data/hypotheticals.jsonl");
     if (!shipped)
         return shipped.error(); // a build defect: the file is checked by the tests
@@ -3370,6 +3486,9 @@ Result<void> Corpus::add_ephemeris(const std::string& path) {
         return src.error();
     d_->chain->add(d_->number(std::move(src).value()));
     d_->refresh_overlay_source();
+    // A passage scan may have stopped at the old span's edge, and its block
+    // would keep refusing an instant the new file covers.
+    d_->apsis_blocks.clear();
     return {};
 }
 
@@ -3402,7 +3521,6 @@ Result<void> Corpus::add_perturbers(const std::string& path) {
     if (!f)
         return f.error();
     auto src = std::make_unique<AsteroidSource>(std::move(f).value(), d_->source.get());
-    src->slot = d_->next_slot++;
     if (src->bodies().empty())
         return make_error(ErrorCode::FormatError,
                           path + " carries no heliocentric numbered-asteroid segments");
@@ -3413,9 +3531,12 @@ Result<void> Corpus::add_perturbers(const std::string& path) {
     if (massive.empty())
         return make_error(ErrorCode::FormatError,
                           path + ": no body with a known mass (DE MAnnnn constant or built-in)");
+    // Numbered only now, so that a refused file leaves the corpus as it was.
+    src->slot = d_->next_slot++;
     d_->perturber_note = " + " + std::to_string(massive.size()) + " " + src->description;
     d_->asteroids = std::move(src);
     d_->asteroid_masses = std::move(massive);
+    d_->perturber_blocks.attach_asteroids(d_->asteroids.get(), d_->asteroid_masses);
     d_->refresh_overlay_source();
     return {};
 }

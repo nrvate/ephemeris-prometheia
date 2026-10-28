@@ -13,6 +13,20 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Datasets in C, and shared perturber and apsis tables (A-15).**
+  `prometheia_dataset_open`, `_add_*`, `_freeze` and `_close`, with
+  `prometheia_context_open`, load the files once for an engine per thread
+  (docs/C_API.md, "Datasets and threads"). Additive: the ABI version stays
+  6, and the signatures went to the Astrolog side before they landed. The
+  perturber tables a catalog body is integrated through, and the Moon's
+  apsis passages, are now built once per corpus and shared by its engines
+  (docs/ENGINE.md, "Threads"). Answers are bit-identical to before: 3,728
+  catalog-body and apsis answers compared. A catalog-body run is 4% faster
+  in cycles, best of five. `test_c_dataset` runs six contexts on six
+  threads against one engine, and catches a block sampled through the
+  wrong scratch. Python's `Dataset` now loads its files once, through the
+  C dataset, and its contexts share them. A refused perturber kernel no
+  longer uses up a read slot.
 - **Fixed: non-ASCII paths on Windows, for every open.** The catalog
   writer, `de::trim`, `spk::write_spk`, the engine's sniff of an
   ephemeris's kind and `add_hypotheticals` opened their files in the ANSI

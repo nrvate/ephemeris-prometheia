@@ -1358,34 +1358,60 @@ cdef class Context:
         return out
 
 
-cdef Context open_context(object dataset):
-    cdef Context ctx = Context.__new__(Context)
+cdef class _Files:
+    """The C dataset under a Dataset: its files, loaded once and frozen."""
+    cdef c.prometheia_dataset* d
+
+    def __cinit__(self):
+        self.d = NULL
+
+    def __dealloc__(self):
+        # The contexts opened from it keep the files loaded.
+        c.prometheia_dataset_close(self.d)
+        self.d = NULL
+
+
+cdef _Files load_files(object dataset):
+    cdef _Files files = _Files.__new__(_Files)
     cdef c.prometheia_error err
     cdef c.prometheia_status st
     cdef bytes path = dataset.ephemeris.encode()
-    st = c.prometheia_engine_open(path, &ctx.e, &err)
+    st = c.prometheia_dataset_open(path, &files.d, &err)
     if st != c.PROMETHEIA_OK:
         fail(st, &err)
     for p in dataset.ephemerides:
         path = p.encode()
-        st = c.prometheia_engine_add_ephemeris(ctx.e, path, &err)
+        st = c.prometheia_dataset_add_ephemeris(files.d, path, &err)
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
     for p in dataset.catalogs:
         path = p.encode()
-        st = c.prometheia_engine_add_catalog(ctx.e, path, &err)
+        st = c.prometheia_dataset_add_catalog(files.d, path, &err)
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
     for p in dataset.perturbers:
         path = p.encode()
-        st = c.prometheia_engine_add_perturbers(ctx.e, path, &err)
+        st = c.prometheia_dataset_add_perturbers(files.d, path, &err)
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
     for p in dataset.hypotheticals:
         path = p.encode()
-        st = c.prometheia_engine_add_hypotheticals(ctx.e, path, &err)
+        st = c.prometheia_dataset_add_hypotheticals(files.d, path, &err)
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
+    st = c.prometheia_dataset_freeze(files.d, &err)
+    if st != c.PROMETHEIA_OK:
+        fail(st, &err)
+    return files
+
+
+cdef Context open_context(object dataset):
+    cdef _Files files = dataset._files()
+    cdef Context ctx = Context.__new__(Context)
+    cdef c.prometheia_error err
+    cdef c.prometheia_status st = c.prometheia_context_open(files.d, &ctx.e, &err)
+    if st != c.PROMETHEIA_OK:
+        fail(st, &err)
     ctx.owner = PyThread_get_thread_ident()
     ctx.dataset = dataset
     return ctx
@@ -1399,8 +1425,9 @@ class Dataset:
                 catalogs=["sbdb.epm"], perturbers=["ephe/sb441-n16.bsp"])
 
     context() opens a new engine over them; local() keeps one per thread.
-    Until the engine's shared dataset lands (docs/PYTHON.md, "Native"), each
-    context is an engine of its own and reads the files itself.
+    The files are loaded once, by the first context; every context shares
+    them, and what is built from them once (docs/C_API.md, "Datasets and
+    threads").
     """
 
     def __init__(self, ephemeris, *, ephemerides=(), catalogs=(), perturbers=(),
@@ -1411,6 +1438,16 @@ class Dataset:
         self.perturbers = tuple(str(p) for p in perturbers)
         self.hypotheticals = tuple(str(p) for p in hypotheticals)
         self._local = threading.local()
+        self._lock = threading.Lock()
+        self._loaded = None
+
+    def _files(self):
+        # Loaded on first use, once, whichever thread asks first; a failure
+        # is raised to that caller and the next one tries again.
+        with self._lock:
+            if self._loaded is None:
+                self._loaded = load_files(self)
+            return self._loaded
 
     def context(self):
         """A new context, for the calling thread."""

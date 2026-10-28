@@ -160,6 +160,32 @@ cdef extern from "prometheia/prometheia.h" nogil:
     prometheia_status prometheia_engine_lookup(const prometheia_engine* engine, const char* name,
                                                int* body, prometheia_error* err) noexcept
 
+    # Datasets: one set of files, an engine per thread
+    ctypedef struct prometheia_dataset:
+        pass
+
+    prometheia_status prometheia_dataset_open(const char* ephemeris_path,
+                                              prometheia_dataset** out,
+                                              prometheia_error* err) noexcept
+    prometheia_status prometheia_dataset_add_ephemeris(prometheia_dataset* dataset,
+                                                       const char* ephemeris_path,
+                                                       prometheia_error* err) noexcept
+    prometheia_status prometheia_dataset_add_catalog(prometheia_dataset* dataset,
+                                                     const char* catalog_path,
+                                                     prometheia_error* err) noexcept
+    prometheia_status prometheia_dataset_add_perturbers(prometheia_dataset* dataset,
+                                                        const char* spk_path,
+                                                        prometheia_error* err) noexcept
+    prometheia_status prometheia_dataset_add_hypotheticals(prometheia_dataset* dataset,
+                                                           const char* element_file_path,
+                                                           prometheia_error* err) noexcept
+    prometheia_status prometheia_dataset_freeze(prometheia_dataset* dataset,
+                                                prometheia_error* err) noexcept
+    void prometheia_dataset_close(prometheia_dataset* dataset) noexcept
+    prometheia_status prometheia_context_open(const prometheia_dataset* dataset,
+                                              prometheia_engine** out,
+                                              prometheia_error* err) noexcept
+
     prometheia_status prometheia_calc(prometheia_engine* engine, int body, double jd_tt,
                                       const prometheia_options* opts, prometheia_result* result,
                                       prometheia_error* err) noexcept

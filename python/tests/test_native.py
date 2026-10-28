@@ -220,14 +220,18 @@ class Engine(unittest.TestCase):
             ctx.calc(4, 2451545.0, scale="utc")
 
     def test_one_context_per_thread(self):
+        # The Moon, and a catalog body: its perturber tables are the
+        # dataset's, built by whichever thread first needs each block.
         jds = [2451545.0 + 37.3 * k for k in range(40)]
-        want = [self.ds.context().calc(n.BODIES["moon"], jd).lon_deg for jd in jds]
+        bodies = (n.BODIES["moon"], 20000001)
+        ask = lambda ctx, jd: [ctx.calc(b, jd).lon_deg for b in bodies]
+        want = [ask(self.ds.context(), jd) for jd in jds]
         got, errors = {}, []
 
         def work(i):
             try:
                 ctx = self.ds.local()
-                got[i] = [ctx.calc(n.BODIES["moon"], jd).lon_deg for jd in reversed(jds)][::-1]
+                got[i] = [ask(ctx, jd) for jd in reversed(jds)][::-1]
             except Exception as e:  # pragma: no cover - reported below
                 errors.append(e)
         threads = [threading.Thread(target=work, args=(i,)) for i in range(6)]
@@ -249,6 +253,13 @@ class Engine(unittest.TestCase):
         closed.close()
         with self.assertRaises(prometheia.Error):
             closed.calc(4, 2451545.0)
+
+    def test_dataset_reports_a_bad_file_at_each_context(self):
+        bad = n.Dataset(DE440, catalogs=["/nonexistent.epm"])
+        for _ in range(2):  # not loaded, so tried again
+            with self.assertRaises(prometheia.Error) as e:
+                bad.context()
+            self.assertEqual(e.exception.code, "io")
 
     def test_horizon(self):
         import math
