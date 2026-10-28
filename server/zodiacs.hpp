@@ -20,6 +20,7 @@ struct ZodiacToken {
 inline constexpr ZodiacToken kZodiacTokens[] = {
     {"fagan-bradley", SiderealMode::FaganBradley},
     {"lahiri", SiderealMode::Lahiri},
+    {"raman", SiderealMode::Raman},
     {"galcent-0sag", SiderealMode::GalacticCentre0Sag},
     {"true-citra", SiderealMode::TrueCitra},
     {"true-revati", SiderealMode::TrueRevati},
@@ -39,7 +40,7 @@ inline constexpr ZodiacToken kZodiacTokens[] = {
 // (protocol v4 §3.5a; engine.hpp, SiderealMode).
 constexpr bool defined_at_instant(SiderealMode m) {
     return m != SiderealMode::Tropical && m != SiderealMode::FaganBradley &&
-           m != SiderealMode::Lahiri && m != SiderealMode::User;
+           m != SiderealMode::Lahiri && m != SiderealMode::Raman && m != SiderealMode::User;
 }
 
 } // namespace prometheia::server

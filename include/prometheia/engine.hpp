@@ -105,6 +105,7 @@ enum class SiderealMode : int {
     Tropical = -1,
     FaganBradley = 0,
     Lahiri = 1,
+    Raman = 3,                      // (Y - 397) x 50 1/3", a linear rule (docs/FRAMES.md)
     GalacticCentre0Sag = 17,        // Sgr A* at 240°
     TrueCitra = 27,                 // Spica (alpha Vir) at 180°
     TrueRevati = 28,                // zeta Psc at 359°50'

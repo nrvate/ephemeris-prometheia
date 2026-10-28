@@ -103,6 +103,7 @@ PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION *
 #define PROMETHEIA_SIDEREAL_TROPICAL (-1)
 #define PROMETHEIA_SIDEREAL_FAGAN_BRADLEY 0
 #define PROMETHEIA_SIDEREAL_LAHIRI 1
+#define PROMETHEIA_SIDEREAL_RAMAN 3 /* (Y - 397) x 50 1/3", a linear rule (after 0.7.3) */
 /* Zodiacs defined at the instant (library 0.4): the anchor's true position
  * held at a fixed longitude on the true ecliptic of date. Numbered as the
  * ephemeris protocol's A.11 tokens. They have no anchor epoch, so

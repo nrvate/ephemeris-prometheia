@@ -256,7 +256,8 @@ TEST_CASE("server_handshake") {
         CHECK(c.Observer(eph::kObsBary));
         CHECK(c.Zodiac("fagan-bradley"));
         CHECK(c.Zodiac("user"));
-        CHECK(!c.Zodiac("raman"));
+        CHECK(c.Zodiac("raman"));
+        CHECK(!c.Zodiac("deluce"));
         CHECK(c.TimeScale(eph::kTimeUT1));
         CHECK(c.TimeScale(eph::kTimeTDB));
         CHECK(c.deltaTModel == kDeltaTModelName);
@@ -629,7 +630,7 @@ TEST_CASE("server_profiles") {
     }
     SUBCASE("a zodiac this engine does not serve is refused") {
         eph::Profile pf;
-        pf.zodiac = "raman";
+        pf.zodiac = "deluce";
         eph::Request req = base_request(jd, 1);
         req.profiles[0] = pf;
         req.objs = {body_obj(5)};

@@ -631,3 +631,32 @@ TEST_CASE("refraction_at_the_cutoff") {
     CHECK(refraction_from_apparent_deg(gap, air) == 0.0);
     CHECK(gap + refraction_from_true_deg(gap, air) > c);
 }
+
+TEST_CASE("raman_ayanamsa_is_his_linear_rule") {
+    // Raman, Hindu Predictive Astrology (1938), App. A p. 445: the ayanamsha
+    // is (Y - 397) x 50 1/3", Y the Julian year (TT). The mean value is the
+    // formula's own, to 0.001", at 1912, 1938 and 2000; the true one adds the
+    // nutation in longitude, like every zodiac on the ecliptic of date.
+    for (double year : {1912.0, 1938.0, 2000.0}) {
+        const double jd = 2451545.0 + (year - 2000.0) * 365.25;
+        const auto a = ayanamsa(3, jd);
+        REQUIRE(a.has_value());
+        const double want_arcsec = (year - 397.0) * (151.0 / 3.0);
+        CHECK(std::fabs(a->mean_deg * 3600.0 - want_arcsec) < 0.001);
+        double dpsi, deps;
+        nutation(jd, dpsi, deps);
+        CHECK(std::fabs((a->true_deg - a->mean_deg) - dpsi * 180.0 / 3.14159265358979323846) <
+              1e-12);
+    }
+    // At J2000: 22 deg 24' 44.333" mean. The Swiss Ephemeris prints
+    // 22 deg 24' 24.92" there; the 19" is its definition against Raman's
+    // formula (docs/FRAMES.md, the maintainer's D2).
+    const auto j2000 = ayanamsa(3, 2451545.0);
+    REQUIRE(j2000.has_value());
+    CHECK(std::fabs(j2000->mean_deg * 3600.0 - (22.0 * 3600 + 24 * 60 + 44.3333333)) < 0.001);
+    const auto anchor = ayanamsa_anchor(3);
+    REQUIRE(anchor.has_value());
+    CHECK(anchor->mean0_deg == 0.0);
+    CHECK(anchor->rate_arcsec_per_year == 151.0 / 3.0);
+    CHECK(!ayanamsa(2, 2451545.0).has_value()); // De Luce: not served
+}

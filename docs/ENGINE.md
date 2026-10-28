@@ -57,7 +57,7 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
 | `center` | `Geocentric`, `Topocentric` (+ `site`, WGS84), `Heliocentric`, `Barycentric` | geocentric |
 | `frame` | `ICRF`, `J2000` (ICRF + frame bias), `MeanOfDate` (+ IAU 2006 precession), `TrueOfDate` (+ IAU 2000A nutation) | true of date |
 | `coords` | `Ecliptic`, `Equatorial` | ecliptic |
-| `sidereal` | `Tropical`, `FaganBradley`, `Lahiri`, `User` (+ `sidereal_epoch_jtdb`, `sidereal_ayanamsa_deg`), and eleven zodiacs defined at the instant: `TrueCitra` … `GalacticEquatorMula` ([FRAMES.md](FRAMES.md), "Zodiacs defined at the instant") | tropical |
+| `sidereal` | `Tropical`, `FaganBradley`, `Lahiri`, `Raman`, `User` (+ `sidereal_epoch_jtdb`, `sidereal_ayanamsa_deg`), and eleven zodiacs defined at the instant: `TrueCitra` … `GalacticEquatorMula` ([FRAMES.md](FRAMES.md), "Zodiacs defined at the instant") | tropical |
 | `sidereal_plane` | `EclipticOfDate`, `EclipticOfAnchor`, `Invariable` (fixed planes: [FRAMES.md](FRAMES.md), "Sidereal planes") | ecliptic of date |
 | `precession` | `Vondrak2011`, `IAU2006` ([FRAMES.md](FRAMES.md)) | Vondrák 2011 (IAU 2006 before 2026-09-29) |
 | `light_time`, `deflection`, `aberration` | independent switches | all on |
@@ -75,7 +75,7 @@ ecliptic does not nutate, only the equinox slides by Δψ ([FRAMES.md](FRAMES.md
 ## Sidereal output (ayanamshas)
 
 `CalcOptions::sidereal` selects a sidereal zodiac for the output:
-`FaganBradley` and `Lahiri` (numbered like swetest's `-ay<mode>`), or
+`FaganBradley`, `Lahiri` and `Raman` (protocol v4's A.11 numbers), or
 `User`, anchored at `sidereal_epoch_jtdb` / `sidereal_ayanamsa_deg` —
 the **mean** ayanamsha at that TT epoch, the same convention as
 swetest's `-sidudef`. The ayanamsha at the query epoch is the anchor
@@ -111,6 +111,26 @@ epoch, IAE 1985). The tabulated anchor *values* are the Swiss Ephemeris
 output at those instants: the constants quoted in the literature for
 the same instants (24°02′31.36″ and 23°15′00″.658) differ from its own
 output by 3.7″ and 0.14″ — more than any model difference over ±200 yr.
+
+**Raman** (added 2026-10-27; the maintainer's D2) is his own linear rule,
+not an anchor carried by the precession:
+- **The rule.** The mean ayanamsha is (Y − 397) × 50⅓″, Y the Julian year
+  in TT (B. V. Raman, *Hindu Predictive Astrology*, 1938, App. A p. 445;
+  the rate, ch. X p. 84). The true ayanamsha adds the nutation in
+  longitude, as for every zodiac. The formula is the definition: the book's
+  own worked examples differ from it by up to 34″.
+- **Measured** (`raman_ayanamsa_is_his_linear_rule`). The formula's values
+  are reproduced to 0.001″ at 1912, 1938 and 2000.
+  - At J2000 the mean value is 22°24′44.33″, and `swetest` prints
+    22°24′24.92″ for its Raman. The 19″ is a different definition, recorded
+    rather than hidden.
+  - Against the general precession (Vondrák 2011) since 1938, the linear
+    rule runs +4.34″ ahead by 2026, −1.70″ behind by 2500, and −152.40″
+    behind by 1000. Its rate stays 50⅓″ a year while the precession's
+    changes.
+- **Its anchor** is Julian year 397.0, where the rule gives 0. So
+  `SiderealPlane::EclipticOfAnchor` is the ecliptic and equinox of 397,
+  with A0 = 0.
 
 ## Pipeline
 

@@ -153,6 +153,7 @@ class Engine(unittest.TestCase):
         cases = [({}, {}),
                  ({"zodiac": "lahiri"}, {"zodiac": "lahiri"}),
                  ({"zodiac": "true-citra"}, {"zodiac": "true-citra"}),
+                 ({"zodiac": "raman"}, {"zodiac": "raman"}),
                  ({"frame": "j2000"}, {"frame": "j2000"}),
                  ({"corrections": "geometric"}, {"corrections": "geometric"}),
                  ({"observer": "heliocentric"}, {"observer": "heliocentric"}),

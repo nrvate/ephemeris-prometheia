@@ -1866,9 +1866,7 @@ struct Engine::Impl {
             auto a = sidereal_anchor(o, jd_tt);
             if (!a)
                 return a.error();
-            const double mean = a.value().mean0_deg +
-                                frames::precession_in_longitude_deg(jd_tt, model) -
-                                frames::precession_in_longitude_deg(a.value().t0_jtdb, model);
+            const double mean = frames::anchored_mean_deg(a.value(), jd_tt, model);
             const double dpsi = o.frame == Frame::TrueOfDate
                                     ? frames_at(jd_tt, true, o.precession).dpsi * kRad2Deg
                                     : 0.0;

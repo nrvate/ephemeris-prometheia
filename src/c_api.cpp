@@ -108,6 +108,7 @@ prometheia_status guarded(prometheia_error* err, F&& f) {
 // The C sidereal values are the engine's (a static_cast passes them through).
 static_assert(PROMETHEIA_SIDEREAL_FAGAN_BRADLEY == int(SiderealMode::FaganBradley));
 static_assert(PROMETHEIA_SIDEREAL_LAHIRI == int(SiderealMode::Lahiri));
+static_assert(PROMETHEIA_SIDEREAL_RAMAN == int(SiderealMode::Raman));
 static_assert(PROMETHEIA_SIDEREAL_GALCENT_0SAG == int(SiderealMode::GalacticCentre0Sag));
 static_assert(PROMETHEIA_SIDEREAL_TRUE_CITRA == int(SiderealMode::TrueCitra));
 static_assert(PROMETHEIA_SIDEREAL_TRUE_REVATI == int(SiderealMode::TrueRevati));
@@ -155,6 +156,7 @@ prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometh
     case PROMETHEIA_SIDEREAL_TROPICAL:
     case PROMETHEIA_SIDEREAL_FAGAN_BRADLEY:
     case PROMETHEIA_SIDEREAL_LAHIRI:
+    case PROMETHEIA_SIDEREAL_RAMAN:
     case PROMETHEIA_SIDEREAL_GALCENT_0SAG:
     case PROMETHEIA_SIDEREAL_TRUE_CITRA:
     case PROMETHEIA_SIDEREAL_TRUE_REVATI:

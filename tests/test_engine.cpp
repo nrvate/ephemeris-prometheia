@@ -1659,3 +1659,31 @@ TEST_CASE("de440_rise_set_finds_a_sun_up_for_minutes") {
     REQUIRE(before.ok());
     CHECK(before.value().outcome == Engine::Outcome::AlwaysBelow);
 }
+
+TEST_CASE("raman_zodiac_through_the_engine") {
+    // The engine's shift is frames' Raman ayanamsha: mean on the mean
+    // ecliptic of date, true on the true one, and its anchor plane is the
+    // ecliptic of Julian year 397, where his zodiac starts.
+    synth::TempFile tf("raman");
+    Engine e = synth::open_synthetic(tf);
+    CalcOptions o;
+    o.sidereal = SiderealMode::Raman;
+    const double jd = 2461000.5;
+    for (Frame f : {Frame::MeanOfDate, Frame::TrueOfDate}) {
+        o.frame = f;
+        auto r = e.calc(10, jd, o);
+        REQUIRE(r.ok());
+        REQUIRE(r.value().ayanamsa_deg.has_value());
+        const auto want = frames::ayanamsa(3, jd, frames::PrecessionModel::Vondrak2011);
+        REQUIRE(want.has_value());
+        CHECK(std::fabs(*r.value().ayanamsa_deg -
+                        (f == Frame::MeanOfDate ? want->mean_deg : want->true_deg)) *
+                  3600.0 <
+              1e-6);
+    }
+    o.frame = Frame::TrueOfDate;
+    o.sidereal_plane = SiderealPlane::EclipticOfAnchor;
+    auto anchored = e.calc(10, jd, o);
+    REQUIRE(anchored.ok());
+    CHECK(*anchored.value().ayanamsa_deg == 0.0); // A0 at year 397
+}

@@ -661,13 +661,28 @@ double precession_in_longitude_arcsec(double T) {
 // the same instants (24°02'31.36" and 23°15'00".658) differ from the
 // Swiss Ephemeris output; see docs/ENGINE.md.
 struct AyanAnchor {
+    int mode;
     double t0_jtdb;
     double mean0_deg;
+    double rate_arcsec_per_year; // 0: the general precession
 };
 constexpr AyanAnchor kAyanAnchors[] = {
-    {2433282.5, 24.0419327432}, // Fagan/Bradley: 1 Jan 1950
-    {2435553.5, 23.2455606650}, // Lahiri: 21 Mar 1956
+    {0, 2433282.5, 24.0419327432, 0.0}, // Fagan/Bradley: 1 Jan 1950
+    {1, 2435553.5, 23.2455606650, 0.0}, // Lahiri: 21 Mar 1956
+    // Raman (Hindu Predictive Astrology, 1938, App. A p. 445; the rate, ch.
+    // X p. 84): (Y - 397) x 50 1/3", Y the Julian year (TT). Zero at Julian
+    // year 397.0 = JD 2451545 - 1603 x 365.25, and a linear rule, not the
+    // precession: the formula defines it, not the book's worked examples
+    // (which differ from it by up to 34").
+    {3, 1866049.25, 0.0, 151.0 / 3.0},
 };
+
+const AyanAnchor* anchor_of(int mode) {
+    for (const AyanAnchor& a : kAyanAnchors)
+        if (a.mode == mode)
+            return &a;
+    return nullptr;
+}
 
 } // namespace
 
@@ -693,16 +708,27 @@ std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt) {
 }
 
 std::optional<AyanamsaAnchor> ayanamsa_anchor(int mode) {
-    if (mode < 0 || size_t(mode) >= sizeof kAyanAnchors / sizeof kAyanAnchors[0])
+    const AyanAnchor* a = anchor_of(mode);
+    if (!a)
         return std::nullopt;
-    return AyanamsaAnchor{kAyanAnchors[mode].t0_jtdb, kAyanAnchors[mode].mean0_deg};
+    return AyanamsaAnchor{a->t0_jtdb, a->mean0_deg, a->rate_arcsec_per_year};
+}
+
+double anchored_mean_deg(const AyanamsaAnchor& a, double jd_tt, PrecessionModel model) {
+    if (a.rate_arcsec_per_year != 0.0)
+        return a.mean0_deg + a.rate_arcsec_per_year * (jd_tt - a.t0_jtdb) / 365.25 / 3600.0;
+    return a.mean0_deg + precession_in_longitude_deg(jd_tt, model) -
+           precession_in_longitude_deg(a.t0_jtdb, model);
 }
 
 std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt, PrecessionModel model) {
-    if (mode < 0 || size_t(mode) >= sizeof kAyanAnchors / sizeof kAyanAnchors[0])
+    const auto a = ayanamsa_anchor(mode);
+    if (!a)
         return std::nullopt;
-    const AyanAnchor& a = kAyanAnchors[mode];
-    return ayanamsa_anchored(a.t0_jtdb, a.mean0_deg, jd_tt, model);
+    const double mean = anchored_mean_deg(*a, jd_tt, model);
+    double dpsi, deps;
+    nutation(jd_tt, dpsi, deps);
+    return Ayanamsa{mean, mean + dpsi * kRad2Deg};
 }
 
 double precession_in_longitude_deg(double jd_tt, PrecessionModel model) {

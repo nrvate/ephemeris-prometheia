@@ -167,8 +167,8 @@ struct Ayanamsa {
     double true_deg; // mean + nutation in longitude
 };
 
-// The published zodiacs by their conventional numbering (the Swiss
-// Ephemeris command-line -ay<mode>): 0 Fagan/Bradley, 1 Lahiri.
+// The published zodiacs by protocol v4's A.11 numbering: 0 Fagan/Bradley,
+// 1 Lahiri, 3 Raman (a linear rule; docs/FRAMES.md).
 // nullopt for any other mode.
 std::optional<Ayanamsa> ayanamsa(int mode, double jd_tt);
 
@@ -182,7 +182,13 @@ Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt);
 struct AyanamsaAnchor {
     double t0_jtdb;
     double mean0_deg;
+    // 0: the mean ayanamsha grows with the general precession in longitude.
+    // Otherwise it grows at this fixed rate (arcsec per Julian year), as a
+    // zodiac defined by a linear rule does (Raman, docs/FRAMES.md).
+    double rate_arcsec_per_year = 0.0;
 };
+// The mean ayanamsha of an anchor at a TT instant, by its growth rule.
+double anchored_mean_deg(const AyanamsaAnchor& a, double jd_tt, PrecessionModel model);
 std::optional<AyanamsaAnchor> ayanamsa_anchor(int mode);
 
 // The invariable plane of the solar system: the unit normal to the total

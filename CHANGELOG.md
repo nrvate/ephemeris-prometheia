@@ -13,6 +13,13 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **The Raman zodiac** ([docs/ENGINE.md](docs/ENGINE.md), "Sidereal output"):
+  Raman's own linear rule, (Y − 397) × 50⅓″ (*Hindu Predictive Astrology*,
+  1938), reproduced to 0.001″. It is 19″ from `swetest`'s Raman at J2000,
+  a difference of definition, recorded.
+  - In the engine (`SiderealMode::Raman`), the C API
+    (`PROMETHEIA_SIDEREAL_RAMAN` = 3, the A.11 number; ABI unchanged), the
+    JSON tools and v4 (token `raman`), and the binding.
 - **EPM1 1.2** ([docs/FORMAT.md](docs/FORMAT.md)): a record may carry SBDB's
   orbit class, one byte from a fixed table of the 22 classes, and a numbered
   body's old provisional designation in the string pool.
