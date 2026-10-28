@@ -330,6 +330,52 @@ class Engine(unittest.TestCase):
         with self.assertRaises(prometheia.Error):
             ctx.solar_eclipse_next(start, k_penumbra=2.0)
 
+    def test_heliacal(self):
+        import math
+        ctx = self.ds.local()
+        cairo = (31.2, 30.05)
+        # Sirius at Cairo: swetest's recorded heliacal rising is JD 2461258.613
+        # (docs/HELIACAL.md); ours is within three days, and is what the C test
+        # held to the same number.
+        h = ctx.heliacal_next(("star", "Sirius"), 2461222.5, cairo)
+        self.assertEqual((h.event, h.model), ("rising", "schaefer"))
+        self.assertLess(abs(h.jd_ut1 - 2461258.613), 3.5)
+        self.assertLessEqual(h.jd_ut1, h.optimum_ut1)
+        self.assertLessEqual(h.optimum_ut1, h.end_ut1)
+        self.assertGreater(h.margin, 0.0)
+        self.assertAlmostEqual(h.magnitude, -1.46, places=2)
+        self.assertEqual(h.options["detection_margin_mag"], 1.2)
+        self.assertEqual(h.atmosphere["relative_humidity_pct"], 40.0)
+        self.assertIsNone(h.atmosphere["visual_range_km"])
+        # The same through the registry id, and bit for bit the same.
+        again = ctx.heliacal_next("star:Sirius", 2461222.5, {"lon_deg": 31.2, "lat_deg": 30.05})
+        self.assertEqual(again.jd_tt, h.jd_tt)
+        # A hazier sky is a later rising; an arc is the caller's.
+        hazy = ctx.heliacal_next("star:Sirius", 2461222.5, cairo, visual_range_km=10.0)
+        self.assertGreater(hazy.jd_ut1, h.jd_ut1 + 3)
+        with self.assertRaises(prometheia.Error) as e:
+            ctx.heliacal_next("star:Sirius", 2461222.5, cairo, model="arcus-visionis")
+        self.assertEqual(e.exception.code, "argument")
+        arc = ctx.heliacal_next("star:Sirius", 2461222.5, cairo, model="arcus-visionis",
+                                arc_deg=10.0)
+        self.assertGreaterEqual(arc.sun_depression_deg, 10.0 - 1e-3)
+        self.assertIsNone(arc.limiting_magnitude)
+        with self.assertRaises(prometheia.Error) as e:
+            ctx.heliacal_next("star:Sirius", 2461222.5, cairo, event="evening-first")
+        self.assertEqual(e.exception.code, "argument")
+        with self.assertRaises(prometheia.Error):
+            ctx.heliacal_next("star:Sirius", 2461222.5, cairo, event="noon")
+        v = ctx.visibility_at("star:Sirius", h.optimum_tt, cairo)
+        self.assertTrue(v.visible)
+        self.assertAlmostEqual(v.margin, h.margin, places=9)
+        self.assertAlmostEqual(v.limiting_magnitude_outside + v.extinction_mag,
+                               v.limiting_magnitude, places=12)
+        # The limiting magnitude alone: Schaefer's 220 nL example, standard eye.
+        self.assertAlmostEqual(n.limiting_magnitude(220.0, age_years=25.0), 5.80, delta=0.03)
+        self.assertLess(n.limiting_magnitude(2000.0), n.limiting_magnitude(200.0))
+        with self.assertRaises(prometheia.Error):
+            n.limiting_magnitude(-1.0)
+
     def test_rise_set(self):
         import math
         ctx = self.ds.local()

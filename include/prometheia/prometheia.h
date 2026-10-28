@@ -1200,6 +1200,141 @@ PROMETHEIA_API prometheia_status prometheia_solar_eclipse_local_next_ex(
     const prometheia_solar_eclipse_options* options, prometheia_solar_local* out,
     prometheia_error* err);
 
+/* ---- Heliacal visibility (docs/HELIACAL.md) ------------------------------ */
+
+/* The events, numbered as swetest's -hev types. A star has the first two;
+ * a planet or the Moon all four (anything else is PROMETHEIA_ERROR_ARGUMENT). */
+#define PROMETHEIA_HELIACAL_RISING 1  /* morning first */
+#define PROMETHEIA_HELIACAL_SETTING 2 /* evening last */
+#define PROMETHEIA_HELIACAL_EVENING_FIRST 3
+#define PROMETHEIA_HELIACAL_MORNING_LAST 4
+
+/* How to decide that the object is seen: SCHAEFER (1993: the sky's light and
+ * the air's) or ARCUS_VISIONIS (the Sun's depression and the object's altitude). */
+#define PROMETHEIA_VISIBILITY_SCHAEFER 0
+#define PROMETHEIA_VISIBILITY_ARCUS_VISIONIS 1
+
+/* The air. Pressure and temperature give the refraction; the humidity the
+ * aerosol extinction unless one of the next two is finite (NaN: absent; not
+ * both): extinction_coefficient is the total k in magnitudes per air mass
+ * (day vision), visual_range_km a meteorological range. */
+typedef struct prometheia_air {
+    double pressure_hpa, temperature_c, relative_humidity_pct;
+    double extinction_coefficient, visual_range_km;
+} prometheia_air;
+/* 1013.25 hPa, 15 C, 40 %, both extinction inputs NaN. */
+PROMETHEIA_API void prometheia_air_init(prometheia_air* atmosphere);
+
+/* The eye: age in years, the Snellen ratio (1 is 20/20, 2 is 20/10), and
+ * binocular (nonzero) or monocular vision. */
+typedef struct prometheia_observer {
+    double age_years, snellen_ratio;
+    int binocular;
+} prometheia_observer;
+/* 36 years, 1, binocular. */
+PROMETHEIA_API void prometheia_observer_init(prometheia_observer* observer);
+
+/* The model and its parameters. kind is PROMETHEIA_VISIBILITY_*.
+ * ARCUS_VISIONIS: the Sun must be at least arcus_visionis_deg below the
+ * geometric horizon (no default: NaN is PROMETHEIA_ERROR_ARGUMENT) with the
+ * object at least object_altitude_deg above the apparent horizon.
+ * SCHAEFER: detection_margin_mag is how far above the 50 % threshold the
+ * object must stand (the default is a constant fitted to swetest, 0 is the
+ * paper's threshold); moonlight nonzero adds the Moon's light to the sky;
+ * dark_sky_nl is eq. 15a's B_o in nanoLamberts. search_days is how far the
+ * finder looks. */
+typedef struct prometheia_visibility_model {
+    int kind;
+    double arcus_visionis_deg, object_altitude_deg;
+    double detection_margin_mag;
+    int moonlight;
+    double dark_sky_nl;
+    double search_days;
+} prometheia_visibility_model;
+/* SCHAEFER, arc NaN, altitude 0, margin 1.2, no moonlight, 180 nL, 800 days. */
+PROMETHEIA_API void prometheia_visibility_model_init(prometheia_visibility_model* model);
+
+/* A heliacal event. Times are Julian dates, TT and UT1. The event is the
+ * start of the visibility window on the event's day; optimum is the moment
+ * of the largest margin and end the end of the window. The remaining fields
+ * are the circumstances at the optimum. NaN where a quantity does not apply
+ * (limiting_magnitude under ARCUS_VISIONIS). margin is in magnitudes
+ * (SCHAEFER: the limit at the eye less the object's dimmed magnitude, less
+ * the detection margin) or degrees (ARCUS_VISIONIS: the lesser of the Sun's
+ * depression beyond the arc and the object's altitude beyond the one asked).
+ * atmosphere, observer and model echo the inputs used. */
+typedef struct prometheia_heliacal {
+    int event, model;
+    double jd_tt, jd_ut1;
+    double optimum_tt, optimum_ut1;
+    double end_tt, end_ut1;
+    double magnitude;      /* V outside the atmosphere */
+    double object_alt_deg; /* apparent altitude */
+    double object_az_deg;  /* from north through east */
+    double sun_depression_deg;
+    double sun_separation_deg;
+    double sky_brightness_nl;
+    double extinction_k;       /* total, magnitudes per air mass, as used */
+    double extinction_mag;     /* the object's dimming, eq. 8b */
+    double limiting_magnitude; /* at the eye, extinction included */
+    double margin;
+    prometheia_air atmosphere;
+    prometheia_observer observer;
+    prometheia_visibility_model options;
+} prometheia_heliacal;
+
+/*
+ * The first heliacal event of the object strictly after jd_start_tt (a TT
+ * Julian date): by day, the first (RISING, EVENING_FIRST) or last (SETTING,
+ * MORNING_LAST) of a run of days on which the object is seen at the best
+ * moment of the morning or evening twilight, under the model. NULL
+ * atmosphere, observer or model take the _init defaults. The object is any
+ * prometheia_object; Schaefer's model needs a magnitude (the engine's
+ * phenomena), so a hypothetical body or an orbit point needs ARCUS_VISIONIS.
+ * PROMETHEIA_ERROR_NOT_FOUND when none falls within search_days (the Moon,
+ * past 120 degrees of phase, has no magnitude and is not seen then). On error
+ * *out is zeroed.
+ */
+PROMETHEIA_API prometheia_status prometheia_heliacal_next(
+    prometheia_engine* engine, const prometheia_object* object, double jd_start_tt,
+    const prometheia_site* site, const prometheia_air* atmosphere,
+    const prometheia_observer* observer, const prometheia_visibility_model* model, int event,
+    prometheia_heliacal* out, prometheia_error* err);
+
+/* One moment's visibility. The limiting magnitude is outside the atmosphere
+ * (the faintest V seen there) and at the eye (extinction included); the
+ * object is seen where margin is above 0 (SCHAEFER: magnitudes, less the
+ * detection margin; ARCUS_VISIONIS: degrees, see prometheia_heliacal). */
+typedef struct prometheia_visibility {
+    double jd_tt, jd_ut1;
+    double magnitude, object_alt_deg, object_az_deg;
+    double sun_alt_deg; /* true */
+    double sun_separation_deg;
+    double sky_brightness_nl;
+    double extinction_k, extinction_rayleigh, extinction_ozone, extinction_aerosol;
+    double extinction_mag;
+    double limiting_magnitude_outside, limiting_magnitude;
+    double margin;
+    int visible;
+    int night_vision; /* the sky was dark enough for 0.51 um extinction */
+} prometheia_visibility;
+
+/* The visibility of an object at a TT instant from a site, under the model
+ * (ARCUS_VISIONIS gives the geometry and the margin only; the Schaefer
+ * fields are NaN). An object below the horizon has visible 0 and margin
+ * -infinity (SCHAEFER). */
+PROMETHEIA_API prometheia_status prometheia_visibility_at(
+    prometheia_engine* engine, const prometheia_object* object, double jd_tt,
+    const prometheia_site* site, const prometheia_air* atmosphere,
+    const prometheia_observer* observer, const prometheia_visibility_model* model,
+    prometheia_visibility* out, prometheia_error* err);
+
+/* The faintest V (at the eye, before extinction) a naked-eye observer sees
+ * as a point source on a uniform sky of sky_brightness_nl nanoLamberts
+ * (Schaefer 1993 eqs. 29-34, 10). NaN for a non-positive brightness. */
+PROMETHEIA_API double prometheia_limiting_magnitude(double sky_brightness_nl,
+                                                    const prometheia_observer* observer);
+
 #ifdef __cplusplus
 }
 #endif

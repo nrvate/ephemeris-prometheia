@@ -23,6 +23,7 @@ src/elements.cpp
 src/engine.cpp
 src/frames.cpp
 src/houses.cpp
+src/heliacal.cpp
 src/hypotheticals.cpp
 src/io.cpp
 src/kepler.cpp

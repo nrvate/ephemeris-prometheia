@@ -723,3 +723,91 @@ cdef extern from "prometheia/prometheia.h" nogil:
         prometheia_engine* engine, double jd_start_tt, const prometheia_site* site,
         int backward, const prometheia_solar_eclipse_options* options,
         prometheia_solar_local* out, prometheia_error* err) noexcept
+
+    # Heliacal visibility
+    int PROMETHEIA_HELIACAL_RISING
+    int PROMETHEIA_HELIACAL_SETTING
+    int PROMETHEIA_HELIACAL_EVENING_FIRST
+    int PROMETHEIA_HELIACAL_MORNING_LAST
+    int PROMETHEIA_VISIBILITY_SCHAEFER
+    int PROMETHEIA_VISIBILITY_ARCUS_VISIONIS
+
+    ctypedef struct prometheia_air:
+        double pressure_hpa
+        double temperature_c
+        double relative_humidity_pct
+        double extinction_coefficient
+        double visual_range_km
+
+    ctypedef struct prometheia_observer:
+        double age_years
+        double snellen_ratio
+        int binocular
+
+    ctypedef struct prometheia_visibility_model:
+        int kind
+        double arcus_visionis_deg
+        double object_altitude_deg
+        double detection_margin_mag
+        int moonlight
+        double dark_sky_nl
+        double search_days
+
+    ctypedef struct prometheia_heliacal:
+        int event
+        int model
+        double jd_tt
+        double jd_ut1
+        double optimum_tt
+        double optimum_ut1
+        double end_tt
+        double end_ut1
+        double magnitude
+        double object_alt_deg
+        double object_az_deg
+        double sun_depression_deg
+        double sun_separation_deg
+        double sky_brightness_nl
+        double extinction_k
+        double extinction_mag
+        double limiting_magnitude
+        double margin
+        prometheia_air atmosphere
+        prometheia_observer observer
+        prometheia_visibility_model options
+
+    ctypedef struct prometheia_visibility:
+        double jd_tt
+        double jd_ut1
+        double magnitude
+        double object_alt_deg
+        double object_az_deg
+        double sun_alt_deg
+        double sun_separation_deg
+        double sky_brightness_nl
+        double extinction_k
+        double extinction_rayleigh
+        double extinction_ozone
+        double extinction_aerosol
+        double extinction_mag
+        double limiting_magnitude_outside
+        double limiting_magnitude
+        double margin
+        int visible
+        int night_vision
+
+    void prometheia_air_init(prometheia_air* atmosphere) noexcept
+    void prometheia_observer_init(prometheia_observer* observer) noexcept
+    void prometheia_visibility_model_init(prometheia_visibility_model* model) noexcept
+    prometheia_status prometheia_heliacal_next(
+        prometheia_engine* engine, const prometheia_object* object, double jd_start_tt,
+        const prometheia_site* site, const prometheia_air* atmosphere,
+        const prometheia_observer* observer, const prometheia_visibility_model* model,
+        int event, prometheia_heliacal* out, prometheia_error* err) noexcept
+    prometheia_status prometheia_visibility_at(
+        prometheia_engine* engine, const prometheia_object* object, double jd_tt,
+        const prometheia_site* site, const prometheia_air* atmosphere,
+        const prometheia_observer* observer, const prometheia_visibility_model* model,
+        prometheia_visibility* out, prometheia_error* err) noexcept
+    double prometheia_limiting_magnitude(double sky_brightness_nl,
+                                         const prometheia_observer* observer) noexcept

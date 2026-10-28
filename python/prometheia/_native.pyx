@@ -615,6 +615,131 @@ cdef LunarEclipse lunar_eclipse_of(const c.prometheia_lunar_eclipse* x):
     return r
 
 
+HELIACAL_EVENTS = {"rising": c.PROMETHEIA_HELIACAL_RISING, "setting": c.PROMETHEIA_HELIACAL_SETTING,
+                   "evening-first": c.PROMETHEIA_HELIACAL_EVENING_FIRST,
+                   "morning-last": c.PROMETHEIA_HELIACAL_MORNING_LAST}
+VISIBILITY_MODELS = {"schaefer": c.PROMETHEIA_VISIBILITY_SCHAEFER,
+                     "arcus-visionis": c.PROMETHEIA_VISIBILITY_ARCUS_VISIONIS}
+_HELIACAL_NAMES = {v: k for k, v in HELIACAL_EVENTS.items()}
+_MODEL_NAMES = {v: k for k, v in VISIBILITY_MODELS.items()}
+
+
+class Heliacal:
+    """A heliacal event (Context.heliacal_next; docs/HELIACAL.md). jd_tt/jd_ut1
+    is the event, the start of the visibility window; optimum_* the best
+    moment and end_* the window's end. magnitude, object_alt_deg,
+    object_az_deg, sun_depression_deg, sun_separation_deg, sky_brightness_nl,
+    extinction_k, extinction_mag, limiting_magnitude and margin are the
+    circumstances at the optimum (None where the model has none). atmosphere,
+    observer and options echo the inputs used."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __repr__(self):
+        return "Heliacal(%s, %s, jd_ut1=%r)" % (self.event, self.model, self.jd_ut1)
+
+
+class Visibility:
+    """One moment's visibility (Context.visibility_at). limiting_magnitude is
+    at the eye, limiting_magnitude_outside outside the atmosphere; the object
+    is seen where margin is above 0 (visible)."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __repr__(self):
+        return "Visibility(visible=%r, margin=%r)" % (self.visible, self.margin)
+
+
+cdef int air_of(c.prometheia_air* a, c.prometheia_observer* o, c.prometheia_visibility_model* m,
+                pressure_hpa, temperature_c, humidity_pct, extinction_coefficient, visual_range_km,
+                age_years, snellen_ratio, binocular, model, arc_deg, object_altitude_deg,
+                detection_margin_mag, moonlight, dark_sky_nl, search_days) except -1:
+    c.prometheia_air_init(a)
+    c.prometheia_observer_init(o)
+    c.prometheia_visibility_model_init(m)
+    if pressure_hpa is not None:
+        a.pressure_hpa = pressure_hpa
+    if temperature_c is not None:
+        a.temperature_c = temperature_c
+    if humidity_pct is not None:
+        a.relative_humidity_pct = humidity_pct
+    if extinction_coefficient is not None:
+        a.extinction_coefficient = extinction_coefficient
+    if visual_range_km is not None:
+        a.visual_range_km = visual_range_km
+    if age_years is not None:
+        o.age_years = age_years
+    if snellen_ratio is not None:
+        o.snellen_ratio = snellen_ratio
+    if binocular is not None:
+        o.binocular = 1 if binocular else 0
+    m.kind = word(VISIBILITY_MODELS, model, "visibility model")
+    if arc_deg is not None:
+        m.arcus_visionis_deg = arc_deg
+    if object_altitude_deg is not None:
+        m.object_altitude_deg = object_altitude_deg
+    if detection_margin_mag is not None:
+        m.detection_margin_mag = detection_margin_mag
+    if moonlight is not None:
+        m.moonlight = 1 if moonlight else 0
+    if dark_sky_nl is not None:
+        m.dark_sky_nl = dark_sky_nl
+    if search_days is not None:
+        m.search_days = search_days
+    return 0
+
+
+cdef dict air_dict(const c.prometheia_air* a):
+    return {"pressure_hpa": a.pressure_hpa, "temperature_c": a.temperature_c,
+            "relative_humidity_pct": a.relative_humidity_pct,
+            "extinction_coefficient": nan_none(a.extinction_coefficient),
+            "visual_range_km": nan_none(a.visual_range_km)}
+
+
+cdef dict observer_dict(const c.prometheia_observer* o):
+    return {"age_years": o.age_years, "snellen_ratio": o.snellen_ratio,
+            "binocular": bool(o.binocular)}
+
+
+cdef dict model_dict(const c.prometheia_visibility_model* m):
+    return {"model": _MODEL_NAMES[m.kind], "arc_deg": nan_none(m.arcus_visionis_deg),
+            "object_altitude_deg": m.object_altitude_deg,
+            "detection_margin_mag": m.detection_margin_mag, "moonlight": bool(m.moonlight),
+            "dark_sky_nl": m.dark_sky_nl, "search_days": m.search_days}
+
+
+cdef int site_of(site, c.prometheia_site* out) except -1:
+    if isinstance(site, dict):
+        out.lon_deg, out.lat_deg = site["lon_deg"], site["lat_deg"]
+        out.height_m = site.get("height_m", 0.0)
+        return 0
+    if len(site) not in (2, 3):
+        raise Error("site is (lon_deg, lat_deg[, height_m])", code="argument")
+    out.lon_deg, out.lat_deg = site[0], site[1]
+    out.height_m = site[2] if len(site) == 3 else 0.0
+    return 0
+
+
+def limiting_magnitude(double sky_brightness_nl, *, age_years=None, snellen_ratio=None,
+                       binocular=None):
+    """The faintest V a naked-eye observer sees (before extinction) as a point
+    source on a uniform sky of sky_brightness_nl nanoLamberts: Schaefer (1993)
+    eqs. 29-34 and 10 (docs/HELIACAL.md). Defaults: 36 years, Snellen ratio 1,
+    binocular. Error code "argument" for a non-positive brightness."""
+    cdef c.prometheia_observer o
+    c.prometheia_observer_init(&o)
+    if age_years is not None:
+        o.age_years = age_years
+    if snellen_ratio is not None:
+        o.snellen_ratio = snellen_ratio
+    if binocular is not None:
+        o.binocular = 1 if binocular else 0
+    cdef double v = c.prometheia_limiting_magnitude(sky_brightness_nl, &o)
+    if v != v:
+        raise Error("sky brightness and observer must be positive", code="argument")
+    return v
+
+
 cdef class Context:
     """One engine over a Dataset's files, for the thread that made it."""
     cdef c.prometheia_engine* e
@@ -973,6 +1098,100 @@ cdef class Context:
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
         return solar_local_of(&out)
+
+    def heliacal_next(self, object, double jd_tt, site, *, event="rising", model="schaefer",
+                      pressure_hpa=None, temperature_c=None, humidity_pct=None,
+                      extinction_coefficient=None, visual_range_km=None, age_years=None,
+                      snellen_ratio=None, binocular=None, arc_deg=None, object_altitude_deg=None,
+                      detection_margin_mag=None, moonlight=None, dark_sky_nl=None,
+                      search_days=None):
+        """The first heliacal event of an object after jd_tt (TT; strictly
+        after) from site, (lon_deg, lat_deg[, height_m]): event is one of
+        HELIACAL_EVENTS ("rising" is the morning first, "setting" the evening
+        last; a star has only those two), model one of VISIBILITY_MODELS
+        ("schaefer", or "arcus-visionis" with arc_deg, the Sun's depression the
+        object needs, and object_altitude_deg). The air is pressure_hpa,
+        temperature_c, humidity_pct and at most one of extinction_coefficient
+        (total k, mag per air mass) and visual_range_km; the eye age_years,
+        snellen_ratio and binocular. detection_margin_mag, moonlight and
+        dark_sky_nl are Schaefer's (docs/HELIACAL.md); search_days how far to
+        look. Error code "not-found" when there is no event in that time.
+        Returns a Heliacal."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef c.prometheia_object obj
+        cdef list keep = []
+        object_of(object, &obj, keep)
+        cdef c.prometheia_site s
+        site_of(site, &s)
+        cdef c.prometheia_air a
+        cdef c.prometheia_observer o
+        cdef c.prometheia_visibility_model m
+        air_of(&a, &o, &m, pressure_hpa, temperature_c, humidity_pct, extinction_coefficient,
+               visual_range_km, age_years, snellen_ratio, binocular, model, arc_deg,
+               object_altitude_deg, detection_margin_mag, moonlight, dark_sky_nl, search_days)
+        cdef int ev = word(HELIACAL_EVENTS, event, "heliacal event")
+        cdef c.prometheia_heliacal out
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_heliacal_next(e, &obj, jd_tt, &s, &a, &o, &m, ev, &out, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return Heliacal(
+            event=_HELIACAL_NAMES[out.event], model=_MODEL_NAMES[out.model],
+            jd_tt=out.jd_tt, jd_ut1=out.jd_ut1, optimum_tt=out.optimum_tt,
+            optimum_ut1=out.optimum_ut1, end_tt=out.end_tt, end_ut1=out.end_ut1,
+            magnitude=nan_none(out.magnitude), object_alt_deg=out.object_alt_deg,
+            object_az_deg=out.object_az_deg, sun_depression_deg=out.sun_depression_deg,
+            sun_separation_deg=out.sun_separation_deg,
+            sky_brightness_nl=nan_none(out.sky_brightness_nl),
+            extinction_k=nan_none(out.extinction_k), extinction_mag=nan_none(out.extinction_mag),
+            limiting_magnitude=nan_none(out.limiting_magnitude), margin=out.margin,
+            atmosphere=air_dict(&out.atmosphere), observer=observer_dict(&out.observer),
+            options=model_dict(&out.options))
+
+    def visibility_at(self, object, double jd_tt, site, *, model="schaefer",
+                      pressure_hpa=None, temperature_c=None, humidity_pct=None,
+                      extinction_coefficient=None, visual_range_km=None, age_years=None,
+                      snellen_ratio=None, binocular=None, arc_deg=None, object_altitude_deg=None,
+                      detection_margin_mag=None, moonlight=None, dark_sky_nl=None):
+        """Whether, and by how much, an object is seen at a TT instant from
+        site: the limiting magnitude of the sky there against the object's
+        dimmed magnitude (Schaefer) or the Sun's and the object's altitudes
+        against the arc (arcus visionis). Arguments as heliacal_next.
+        Returns a Visibility."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef c.prometheia_object obj
+        cdef list keep = []
+        object_of(object, &obj, keep)
+        cdef c.prometheia_site s
+        site_of(site, &s)
+        cdef c.prometheia_air a
+        cdef c.prometheia_observer o
+        cdef c.prometheia_visibility_model m
+        air_of(&a, &o, &m, pressure_hpa, temperature_c, humidity_pct, extinction_coefficient,
+               visual_range_km, age_years, snellen_ratio, binocular, model, arc_deg,
+               object_altitude_deg, detection_margin_mag, moonlight, dark_sky_nl, None)
+        cdef c.prometheia_visibility out
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        with nogil:
+            st = c.prometheia_visibility_at(e, &obj, jd_tt, &s, &a, &o, &m, &out, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return Visibility(
+            jd_tt=out.jd_tt, jd_ut1=out.jd_ut1, magnitude=nan_none(out.magnitude),
+            object_alt_deg=out.object_alt_deg, object_az_deg=out.object_az_deg,
+            sun_alt_deg=out.sun_alt_deg, sun_separation_deg=out.sun_separation_deg,
+            sky_brightness_nl=nan_none(out.sky_brightness_nl),
+            extinction_k=nan_none(out.extinction_k),
+            extinction_rayleigh=nan_none(out.extinction_rayleigh),
+            extinction_ozone=nan_none(out.extinction_ozone),
+            extinction_aerosol=nan_none(out.extinction_aerosol),
+            extinction_mag=nan_none(out.extinction_mag),
+            limiting_magnitude_outside=nan_none(out.limiting_magnitude_outside),
+            limiting_magnitude=nan_none(out.limiting_magnitude), margin=out.margin,
+            visible=bool(out.visible), night_vision=bool(out.night_vision))
 
     def lookup(self, str name):
         """A catalog body's SPK-ID from its designation or name ("1",

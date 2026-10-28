@@ -24,6 +24,8 @@ LIMBS: dict[str, int]
 OUTCOMES: dict[int, str]
 KINDS: dict[str, int]
 SOLAR_KINDS: dict[str, int]
+HELIACAL_EVENTS: dict[str, int]
+VISIBILITY_MODELS: dict[str, int]
 Object = Union[int, str, Tuple[Literal["star"], Union[int, str]],
                Tuple[Literal["hypothetical"], str], Tuple[Literal["orbit-point"], int, str, str]]
 
@@ -215,6 +217,51 @@ class LunarEclipseLocal:
     altitude_deg: Tuple[Optional[float], ...]
     apparent_altitude_deg: Tuple[Optional[float], ...]
 
+class Heliacal:
+    """A heliacal event (Context.heliacal_next); jd_* is the start of the visibility window."""
+    event: Literal["rising", "setting", "evening-first", "morning-last"]
+    model: Literal["schaefer", "arcus-visionis"]
+    jd_tt: float
+    jd_ut1: float
+    optimum_tt: float
+    optimum_ut1: float
+    end_tt: float
+    end_ut1: float
+    magnitude: Optional[float]
+    object_alt_deg: float
+    object_az_deg: float
+    sun_depression_deg: float
+    sun_separation_deg: float
+    sky_brightness_nl: Optional[float]
+    extinction_k: Optional[float]
+    extinction_mag: Optional[float]
+    limiting_magnitude: Optional[float]
+    margin: float
+    atmosphere: dict[str, Optional[float]]
+    observer: dict[str, Any]
+    options: dict[str, Any]
+
+class Visibility:
+    """One moment's visibility (Context.visibility_at)."""
+    jd_tt: float
+    jd_ut1: float
+    magnitude: Optional[float]
+    object_alt_deg: float
+    object_az_deg: float
+    sun_alt_deg: float
+    sun_separation_deg: float
+    sky_brightness_nl: Optional[float]
+    extinction_k: Optional[float]
+    extinction_rayleigh: Optional[float]
+    extinction_ozone: Optional[float]
+    extinction_aerosol: Optional[float]
+    extinction_mag: Optional[float]
+    limiting_magnitude_outside: Optional[float]
+    limiting_magnitude: Optional[float]
+    margin: float
+    visible: bool
+    night_vision: bool
+
 class Context:
     """One engine over a Dataset's files, for the thread that made it."""
     dataset: "Dataset"
@@ -267,6 +314,29 @@ class Context:
                                  k_umbra: Optional[float] = None,
                                  k_penumbra: Optional[float] = None,
                                  sun_radius_km: Optional[float] = None) -> SolarLocal: ...
+    def heliacal_next(self, object: Object, jd_tt: float, site: Site, *,
+                      event: Literal["rising", "setting", "evening-first", "morning-last"] = "rising",
+                      model: Literal["schaefer", "arcus-visionis"] = "schaefer",
+                      pressure_hpa: Optional[float] = None, temperature_c: Optional[float] = None,
+                      humidity_pct: Optional[float] = None,
+                      extinction_coefficient: Optional[float] = None,
+                      visual_range_km: Optional[float] = None, age_years: Optional[float] = None,
+                      snellen_ratio: Optional[float] = None, binocular: Optional[bool] = None,
+                      arc_deg: Optional[float] = None, object_altitude_deg: Optional[float] = None,
+                      detection_margin_mag: Optional[float] = None,
+                      moonlight: Optional[bool] = None, dark_sky_nl: Optional[float] = None,
+                      search_days: Optional[float] = None) -> Heliacal: ...
+    def visibility_at(self, object: Object, jd_tt: float, site: Site, *,
+                      model: Literal["schaefer", "arcus-visionis"] = "schaefer",
+                      pressure_hpa: Optional[float] = None, temperature_c: Optional[float] = None,
+                      humidity_pct: Optional[float] = None,
+                      extinction_coefficient: Optional[float] = None,
+                      visual_range_km: Optional[float] = None, age_years: Optional[float] = None,
+                      snellen_ratio: Optional[float] = None, binocular: Optional[bool] = None,
+                      arc_deg: Optional[float] = None, object_altitude_deg: Optional[float] = None,
+                      detection_margin_mag: Optional[float] = None,
+                      moonlight: Optional[bool] = None,
+                      dark_sky_nl: Optional[float] = None) -> Visibility: ...
     def lookup(self, name: str) -> int: ...
     def phenomena(self, body: Object, jd: float, options: Optional[Options] = None,
                   scale: Scale = "tt") -> Phenomena: ...
@@ -318,3 +388,6 @@ def star_lookup(query: str, prefix: bool = False,
 def star_count() -> int: ...
 def star_info(index: int) -> dict[str, Any]: ...
 def constellation_at(ra_deg: float, dec_deg: float) -> str: ...
+def limiting_magnitude(sky_brightness_nl: float, *, age_years: Optional[float] = None,
+                       snellen_ratio: Optional[float] = None,
+                       binocular: Optional[bool] = None) -> float: ...

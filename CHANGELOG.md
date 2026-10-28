@@ -35,6 +35,21 @@ documented, not that it is frozen.
   sparse file; with a shared position (seek, then read) the two-thread test
   fails. The catalog
   reader no longer leaks its file handle. ABI unchanged.
+- **Heliacal visibility** ([docs/HELIACAL.md](docs/HELIACAL.md)), A-8 of
+  astromcp's port plan: the heliacal rising and setting of stars and, for
+  planets and the Moon, also the evening first and morning last, under
+  Schaefer's 1993 visibility model (air masses, layered extinction, sky
+  brightness, Hecht's threshold, the observer's age and Snellen ratio) or an
+  arcus visionis with the caller's arc. C: `prometheia_heliacal_next`,
+  `prometheia_visibility_at`, `prometheia_limiting_magnitude` with
+  `prometheia_air`, `prometheia_observer` and `prometheia_visibility_model`
+  and their `_init` functions (additive; the ABI version is unchanged);
+  Python: `Context.heliacal_next`, `Context.visibility_at`,
+  `limiting_magnitude`. Measured against swetest's `-hev` on DE440: of 29
+  star cases 20 are within a day and 26 within three, with one detection
+  margin (1.2 mag) fitted to swetest, not from the paper; the paper's own
+  threshold is 3 to 9 days early. Reproduces the paper's Table 3 to 0.9 %
+  and its 5.80 limiting magnitude at 220 nL to 0.006.
 - **`prometheia_engine_delta_t(engine, jd_tt)`** gives an engine's own Delta T
   (its model, or the installed callback), so that a result given in TT can be
   turned into UT1 as the engine would (Python: `Context.delta_t`). The ABI is

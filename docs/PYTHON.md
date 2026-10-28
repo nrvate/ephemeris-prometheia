@@ -243,6 +243,24 @@ magnitude, obscuration, the greatest-eclipse point, path width, contacts,
 horizon). `jd_start` and `jd_tt` are TT; `kinds` are `SOLAR_KINDS` names.
 Method and validation: [SOLAR_ECLIPSES.md](SOLAR_ECLIPSES.md).
 
+## Heliacal visibility
+
+`Context.heliacal_next(object, jd_tt, site, *, event="rising",
+model="schaefer", ...)` returns a `Heliacal`: the first event strictly after
+`jd_tt` (TT), as `jd_tt`/`jd_ut1` (the start of the visibility window),
+`optimum_*`, `end_*`, and the circumstances at the optimum. `event` is a
+`HELIACAL_EVENTS` name (`rising`, `setting`, `evening-first`, `morning-last`;
+a star has the first two), `model` a `VISIBILITY_MODELS` name (`schaefer`, or
+`arcus-visionis` with `arc_deg`, which has no default). `site` is
+`(lon_deg, lat_deg[, height_m])` or a dict. The air is `pressure_hpa`,
+`temperature_c`, `humidity_pct` and at most one of `extinction_coefficient`
+and `visual_range_km`; the eye `age_years`, `snellen_ratio`, `binocular`;
+also `object_altitude_deg`, `detection_margin_mag`, `moonlight`,
+`dark_sky_nl`, `search_days`. `visibility_at(object, jd_tt, site, ...)` is
+one moment (`Visibility`), and `limiting_magnitude(sky_brightness_nl, *,
+age_years, snellen_ratio, binocular)` the sky's limit alone. Method and
+validation: [HELIACAL.md](HELIACAL.md).
+
 ## Tests
 
 - **`python/tests`**, run by `tools/gate.sh` with ResourceWarnings as errors:

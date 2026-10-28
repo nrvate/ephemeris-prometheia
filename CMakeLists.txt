@@ -92,6 +92,7 @@ prometheia_test(lunar_eclipse tests/test_lunar_eclipse.cpp)
 prometheia_test(stars tests/test_stars.cpp)
 prometheia_test(registry tests/test_registry.cpp)
 prometheia_test(phenomena tests/test_phenomena.cpp)
+prometheia_test(heliacal tests/test_heliacal.cpp)
 prometheia_test(segments tests/test_segments.cpp)
 prometheia_test(solar_eclipse tests/test_solar_eclipse.cpp)
 

@@ -318,6 +318,38 @@ Additive: no existing struct or function changed (ABI version unchanged).
   696000 km; swetest's is 0.2725076 for both). Delta T is the engine's,
   including one installed with `prometheia_engine_set_delta_t`.
 
+## Heliacal visibility
+
+Method, validation and limits: [HELIACAL.md](HELIACAL.md). Additive: no
+existing struct or function changed (ABI version unchanged). The atmosphere
+struct is `prometheia_air`, because `prometheia_atmosphere` (pressure and
+temperature, for refraction) already exists.
+
+- `prometheia_heliacal_next(engine, object, jd_start_tt, site, air,
+  observer, model, event, out, err)`: the first heliacal event strictly
+  after `jd_start_tt` (TT). `event` is `PROMETHEIA_HELIACAL_RISING`,
+  `_SETTING`, `_EVENING_FIRST` or `_MORNING_LAST` (1..4, swetest's numbers; a
+  star has the first two). `site` is a `prometheia_site`; `air`
+  (`prometheia_air`: pressure, temperature, relative humidity, and NaN-able
+  `extinction_coefficient` or `visual_range_km`, not both), `observer`
+  (`prometheia_observer`: age, Snellen ratio, binocular) and `model`
+  (`prometheia_visibility_model`: `kind` `PROMETHEIA_VISIBILITY_SCHAEFER` or
+  `_ARCUS_VISIONIS`, the arc and object altitude, the detection margin,
+  moonlight, the dark-sky brightness, `search_days`) may be NULL for the
+  defaults of their `_init` functions. The result `prometheia_heliacal` has
+  the event (the start of the visibility window), the optimum and the end in
+  TT and UT1, and the circumstances at the optimum (V, altitude, azimuth, the
+  Sun's depression, sky brightness, extinction, limiting magnitude, margin),
+  with the inputs used echoed. `NOT_FOUND` when none falls within
+  `search_days`; `ARGUMENT` for a bad input, including arcus visionis without
+  an arc.
+- `prometheia_visibility_at(engine, object, jd_tt, site, air, observer,
+  model, out, err)`: one moment, `prometheia_visibility`: the limiting
+  magnitude outside the atmosphere and at the eye, the extinction by
+  component, the sky brightness, the margin and `visible`.
+- `prometheia_limiting_magnitude(sky_brightness_nl, observer)`: Schaefer's
+  naked-eye limiting V for a point source on a uniform sky; NaN for bad input.
+
 ## Conventions
 
 - **Handles.** `prometheia_engine_open` creates an opaque engine and

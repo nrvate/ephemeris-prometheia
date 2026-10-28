@@ -20,6 +20,7 @@
 
 #include "prometheia/engine.hpp"
 #include "prometheia/frames.hpp"
+#include "prometheia/heliacal.hpp"
 #include "prometheia/hypotheticals.hpp"
 #include "prometheia/lunar_eclipse.hpp"
 #include "prometheia/prometheia.hpp"
@@ -1830,6 +1831,248 @@ prometheia_status prometheia_solar_eclipse_local_next(prometheia_engine* engine,
                                                       prometheia_error* err) {
     return prometheia_solar_eclipse_local_next_ex(engine, jd_start_tt, site, backward, nullptr, out,
                                                   err);
+}
+
+// ---- heliacal visibility -----------------------------------------------------
+
+static_assert(PROMETHEIA_HELIACAL_RISING == int(heliacal::Event::Rising));
+static_assert(PROMETHEIA_HELIACAL_SETTING == int(heliacal::Event::Setting));
+static_assert(PROMETHEIA_HELIACAL_EVENING_FIRST == int(heliacal::Event::EveningFirst));
+static_assert(PROMETHEIA_HELIACAL_MORNING_LAST == int(heliacal::Event::MorningLast));
+
+void prometheia_air_init(prometheia_air* a) {
+    if (!a)
+        return;
+    const heliacal::Atmosphere d;
+    *a = prometheia_air{d.pressure_hpa, d.temperature_c, d.relative_humidity_pct,
+                        d.extinction_coefficient, d.visual_range_km};
+}
+
+void prometheia_observer_init(prometheia_observer* o) {
+    if (!o)
+        return;
+    const heliacal::Observer d;
+    *o = prometheia_observer{d.age_years, d.snellen_ratio, d.binocular ? 1 : 0};
+}
+
+void prometheia_visibility_model_init(prometheia_visibility_model* m) {
+    if (!m)
+        return;
+    const heliacal::Options d;
+    *m = prometheia_visibility_model{PROMETHEIA_VISIBILITY_SCHAEFER,
+                                     d.arcus_visionis_deg,
+                                     d.object_altitude_deg,
+                                     d.detection_margin_mag,
+                                     d.moonlight ? 1 : 0,
+                                     d.dark_sky_nl,
+                                     d.search_days};
+}
+
+extern "C++" {
+namespace {
+
+// The inputs of the heliacal calls, from their C structs (NULL: the defaults).
+struct HeliacalInputs {
+    heliacal::Atmosphere atm;
+    heliacal::Observer observer;
+    heliacal::Options options;
+    frames::GeoSite site;
+};
+
+bool heliacal_inputs(const prometheia_site* site, const prometheia_air* atm,
+                     const prometheia_observer* ob, const prometheia_visibility_model* model,
+                     HeliacalInputs& in, prometheia_error* err, prometheia_status& st) {
+    if (!site) {
+        st = argument(err, "site is NULL");
+        return false;
+    }
+    if (!(std::fabs(site->lat_deg) <= 90.0) || !std::isfinite(site->lon_deg) ||
+        !std::isfinite(site->height_m)) {
+        st = argument(err, "site out of range");
+        return false;
+    }
+    in.site = frames::GeoSite{site->lon_deg * kDegToRad, site->lat_deg * kDegToRad, site->height_m};
+    if (atm) {
+        in.atm.pressure_hpa = atm->pressure_hpa;
+        in.atm.temperature_c = atm->temperature_c;
+        in.atm.relative_humidity_pct = atm->relative_humidity_pct;
+        in.atm.extinction_coefficient = atm->extinction_coefficient;
+        in.atm.visual_range_km = atm->visual_range_km;
+    }
+    if (ob) {
+        in.observer.age_years = ob->age_years;
+        in.observer.snellen_ratio = ob->snellen_ratio;
+        in.observer.binocular = ob->binocular != 0;
+    }
+    if (model) {
+        if (model->kind != PROMETHEIA_VISIBILITY_SCHAEFER &&
+            model->kind != PROMETHEIA_VISIBILITY_ARCUS_VISIONIS) {
+            st = argument(err, "unknown visibility model");
+            return false;
+        }
+        if (!std::isfinite(model->detection_margin_mag) || !std::isfinite(model->search_days) ||
+            !(model->search_days > 0.0)) {
+            st = argument(err, "visibility model out of range");
+            return false;
+        }
+        in.options.model = model->kind == PROMETHEIA_VISIBILITY_ARCUS_VISIONIS
+                               ? heliacal::Model::ArcusVisionis
+                               : heliacal::Model::Schaefer;
+        in.options.arcus_visionis_deg = model->arcus_visionis_deg;
+        in.options.object_altitude_deg = model->object_altitude_deg;
+        in.options.detection_margin_mag = model->detection_margin_mag;
+        in.options.moonlight = model->moonlight != 0;
+        in.options.dark_sky_nl = model->dark_sky_nl;
+        in.options.search_days = model->search_days;
+    }
+    return true;
+}
+
+void fill_echo(const heliacal::Atmosphere& a, const heliacal::Observer& o,
+               const heliacal::Options& m, prometheia_air& oa, prometheia_observer& oo,
+               prometheia_visibility_model& om) {
+    oa = prometheia_air{a.pressure_hpa, a.temperature_c, a.relative_humidity_pct,
+                        a.extinction_coefficient, a.visual_range_km};
+    oo = prometheia_observer{o.age_years, o.snellen_ratio, o.binocular ? 1 : 0};
+    om = prometheia_visibility_model{m.model == heliacal::Model::ArcusVisionis
+                                         ? PROMETHEIA_VISIBILITY_ARCUS_VISIONIS
+                                         : PROMETHEIA_VISIBILITY_SCHAEFER,
+                                     m.arcus_visionis_deg,
+                                     m.object_altitude_deg,
+                                     m.detection_margin_mag,
+                                     m.moonlight ? 1 : 0,
+                                     m.dark_sky_nl,
+                                     m.search_days};
+}
+
+} // namespace
+} // extern "C++"
+
+prometheia_status prometheia_heliacal_next(prometheia_engine* engine,
+                                           const prometheia_object* object, double jd_start_tt,
+                                           const prometheia_site* site,
+                                           const prometheia_air* atmosphere,
+                                           const prometheia_observer* observer,
+                                           const prometheia_visibility_model* model, int event,
+                                           prometheia_heliacal* out, prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!object)
+        return argument(err, "object is NULL");
+    if (!out)
+        return argument(err, "output is NULL");
+    if (!std::isfinite(jd_start_tt))
+        return argument(err, "jd is not finite");
+    if (event < PROMETHEIA_HELIACAL_RISING || event > PROMETHEIA_HELIACAL_MORNING_LAST)
+        return argument(err, "unknown heliacal event");
+    HeliacalInputs in;
+    prometheia_status st = PROMETHEIA_OK;
+    if (!heliacal_inputs(site, atmosphere, observer, model, in, err, st))
+        return st;
+    return guarded(err, [&] {
+        Engine::ObjectRef ref;
+        if (prometheia_status s = to_ref(engine, *object, ref, err); s != PROMETHEIA_OK)
+            return s;
+        auto r = heliacal::next(engine->engine, ref, jd_start_tt, in.site, in.atm, in.observer,
+                                heliacal::Event(event), in.options);
+        if (!r)
+            return report(err, r.error());
+        const heliacal::Found& f = r.value();
+        out->event = event;
+        out->model = model ? model->kind : PROMETHEIA_VISIBILITY_SCHAEFER;
+        out->jd_tt = f.jd_tt;
+        out->jd_ut1 = f.jd_ut1;
+        out->optimum_tt = f.optimum_tt;
+        out->optimum_ut1 = f.optimum_ut1;
+        out->end_tt = f.end_tt;
+        out->end_ut1 = f.end_ut1;
+        const heliacal::Sight& s = f.at_optimum;
+        out->magnitude = s.scene.object_v;
+        out->object_alt_deg = s.scene.object_alt_deg;
+        out->object_az_deg = s.object_az_deg;
+        out->sun_depression_deg = s.sun_depression_deg;
+        out->sun_separation_deg = s.scene.sun_sep_deg;
+        const bool schaefer = f.model == heliacal::Model::Schaefer;
+        out->sky_brightness_nl = schaefer ? s.seen.sky_brightness_nl : std::nan("");
+        out->extinction_k = schaefer ? s.seen.k.total : std::nan("");
+        out->extinction_mag = schaefer ? s.seen.extinction_mag : std::nan("");
+        out->limiting_magnitude = schaefer ? s.seen.limit_at_eye_mag : std::nan("");
+        out->margin = s.margin;
+        fill_echo(f.atmosphere, f.observer, f.options, out->atmosphere, out->observer,
+                  out->options);
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_visibility_at(prometheia_engine* engine,
+                                           const prometheia_object* object, double jd_tt,
+                                           const prometheia_site* site,
+                                           const prometheia_air* atmosphere,
+                                           const prometheia_observer* observer,
+                                           const prometheia_visibility_model* model,
+                                           prometheia_visibility* out, prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!object)
+        return argument(err, "object is NULL");
+    if (!out)
+        return argument(err, "output is NULL");
+    if (!std::isfinite(jd_tt))
+        return argument(err, "jd is not finite");
+    HeliacalInputs in;
+    prometheia_status st = PROMETHEIA_OK;
+    if (!heliacal_inputs(site, atmosphere, observer, model, in, err, st))
+        return st;
+    return guarded(err, [&] {
+        Engine::ObjectRef ref;
+        if (prometheia_status s = to_ref(engine, *object, ref, err); s != PROMETHEIA_OK)
+            return s;
+        auto r = heliacal::sight_at(engine->engine, ref, jd_tt, in.site, in.atm, in.observer,
+                                    in.options);
+        if (!r)
+            return report(err, r.error());
+        const heliacal::Sight& s = r.value();
+        const double nan = std::nan("");
+        const bool schaefer = in.options.model == heliacal::Model::Schaefer;
+        out->jd_tt = s.jd_tt;
+        out->jd_ut1 = s.jd_ut1;
+        out->magnitude = s.scene.object_v;
+        out->object_alt_deg = s.scene.object_alt_deg;
+        out->object_az_deg = s.object_az_deg;
+        out->sun_alt_deg = s.scene.sun_alt_deg;
+        out->sun_separation_deg = s.scene.sun_sep_deg;
+        out->sky_brightness_nl = schaefer ? s.seen.sky_brightness_nl : nan;
+        out->extinction_k = schaefer ? s.seen.k.total : nan;
+        out->extinction_rayleigh = schaefer ? s.seen.k.rayleigh : nan;
+        out->extinction_ozone = schaefer ? s.seen.k.ozone : nan;
+        out->extinction_aerosol = schaefer ? s.seen.k.aerosol : nan;
+        out->extinction_mag = schaefer ? s.seen.extinction_mag : nan;
+        out->limiting_magnitude_outside = schaefer ? s.seen.limit_outside_mag : nan;
+        out->limiting_magnitude = schaefer ? s.seen.limit_at_eye_mag : nan;
+        out->margin = schaefer && s.scene.object_alt_deg < 0.0 ? -INFINITY : s.margin;
+        out->visible = out->margin > 0.0 ? 1 : 0;
+        out->night_vision = schaefer && s.seen.night_vision ? 1 : 0;
+        return succeed(err);
+    });
+}
+
+double prometheia_limiting_magnitude(double sky_brightness_nl,
+                                     const prometheia_observer* observer) {
+    if (!(sky_brightness_nl > 0.0) || !std::isfinite(sky_brightness_nl))
+        return std::nan("");
+    heliacal::Observer o;
+    if (observer) {
+        o.age_years = observer->age_years;
+        o.snellen_ratio = observer->snellen_ratio;
+        o.binocular = observer->binocular != 0;
+    }
+    if (!(o.age_years > 0.0) || !(o.snellen_ratio > 0.0))
+        return std::nan("");
+    return heliacal::limiting_magnitude(sky_brightness_nl, o);
 }
 
 } // extern "C"

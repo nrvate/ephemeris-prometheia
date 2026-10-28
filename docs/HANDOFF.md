@@ -42,8 +42,9 @@ are byte-identical.
   observations behind it (PHENOMENA.md).
 
 **Next:**
-- A-8, heliacal events after Schaefer. The sources are found: Schaefer
-  1993, Vistas in Astronomy 36:311, with his VISLIMIT.BAS as the oracle.
+- A-8, heliacal events after Schaefer: implemented (HELIACAL.md), with the
+  paper's equations and swetest's output as the oracles; Ptolemy's arcs and
+  Schaefer 1987 are not read.
 - Then A-12..A-16, and A-17 coverage.
 
 **Waiting on the maintainer:**
