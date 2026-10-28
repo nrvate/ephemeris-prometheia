@@ -15,6 +15,7 @@
 #include <prometheia/engine.hpp>
 #include <prometheia/frames.hpp>
 #include <prometheia/houses.hpp>
+#include <prometheia/prometheia.h>
 
 #include <doctest/doctest.h>
 
@@ -300,6 +301,8 @@ void sweep_cusp_order(int lat_tenths_step, double armc_step,
                         ++refused;
                         REQUIRE(h.error().code == ErrorCode::ArgumentError);
                         const std::string& m = h.error().message;
+                        // Whole through the C API's message buffer.
+                        CHECK(m.size() < size_t(PROMETHEIA_ERROR_MESSAGE_SIZE));
                         if (m.find("polar circle") != std::string::npos)
                             CHECK((sys == houses::System::Placidus || sys == houses::System::Koch));
                         if (m.find("fall out of zodiacal order") != std::string::npos)

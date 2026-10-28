@@ -1,7 +1,19 @@
 # prometheia (Python)
 
-Ephemeris Prometheia from Python, with no C extension: the package talks to a
-Prometheia server and gives you its JSON tools as methods.
+Ephemeris Prometheia from Python. `prometheia.Dataset` runs the engine in
+process through a native extension, built against an installed
+`libprometheia` (`pkg-config prometheia`) and Cython 3. `prometheia.Client`
+needs no compiler: it talks to a Prometheia server and gives you its JSON
+tools as methods.
+
+```python
+import prometheia
+
+ctx = prometheia.Dataset("ephe/linux_p1550p2650.440").local()   # this thread's engine
+mars = ctx.calc(4, 2451545.0, prometheia.Options(zodiac="lahiri"))
+```
+
+The client:
 
 ```python
 import prometheia

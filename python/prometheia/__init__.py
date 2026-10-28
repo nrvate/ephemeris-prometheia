@@ -1,8 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Ephemeris Prometheia from Python, with no C extension (docs/PYTHON.md).
+"""Ephemeris Prometheia from Python (docs/PYTHON.md): a native binding and a
+pure-Python client.
+
+``prometheia.Dataset`` and its per-thread ``Context`` run the engine in
+process through the C interface, when the native extension is built
+(``prometheia.native`` is then True): ``Dataset(de_file).local().calc(...)``.
 
 ``prometheia.Client`` gives the JSON tools as they are (docs/JSON_API.md), a
-whole chart or a series in one call, every answer with its provenance.
+whole chart or a series in one call, every answer with its provenance, over
+a server or a local prometheia-json; it needs no compiler.
 
 Where the answers come from, first match wins:
 
@@ -22,7 +28,15 @@ from ._errors import Error
 from ._transport import HttpTransport, StdioTransport, ToolError, discover
 
 __all__ = ["Client", "Error", "ToolError", "default_client", "set_server", "set_ephe_path",
-           "close"]
+           "close", "native"]
+
+try:
+    from ._native import Context, Dataset, Houses, Options, Position
+except ImportError:  # the extension is not built: the client alone
+    native = False
+else:
+    native = True
+    __all__ += ["Context", "Dataset", "Houses", "Options", "Position"]
 __version__ = "0.7.3"
 
 

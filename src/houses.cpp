@@ -133,10 +133,8 @@ Error undefined(System s, double lat_rad, double eps_rad) {
     char buf[512];
     std::snprintf(buf, sizeof buf,
                   "%s cusps are undefined at latitude %.4f deg, inside the polar circle (%.4f deg "
-                  "at this date), where part of the ecliptic never rises or sets. Porphyry, "
-                  "Equal, Whole Sign, Alcabitius, Morinus and Meridian answer at this latitude, "
-                  "and Regiomontanus, Campanus and Topocentric wherever their cusps stay in "
-                  "zodiacal order",
+                  "at this date), where part of the ecliptic never rises or sets. Porphyry and "
+                  "every system but Placidus and Koch answer here while their cusps stay in order",
                   std::string(name(s)).c_str(), lat_rad / kDeg, 90.0 - eps_rad / kDeg);
     return make_error(ErrorCode::ArgumentError, buf);
 }
@@ -253,10 +251,9 @@ std::string_view name(System s) {
 Error out_of_order(System s, double lat_rad, double armc_rad) {
     char buf[512];
     std::snprintf(buf, sizeof buf,
-                  "%s cusps fall out of zodiacal order at latitude %.4f deg at this sidereal time "
-                  "(ARMC %.4f deg): near the pole the ecliptic crosses the system's house circles "
-                  "out of sequence, so its houses would overlap. Porphyry, Equal, Whole Sign, "
-                  "Alcabitius, Morinus and Meridian answer at every latitude short of the pole",
+                  "%s cusps fall out of zodiacal order at latitude %.4f deg, ARMC %.4f deg: near "
+                  "the pole the ecliptic crosses the house circles out of sequence, so the houses "
+                  "overlap. Porphyry, Equal, Whole Sign, Alcabitius, Morinus and Meridian answer",
                   std::string(name(s)).c_str(), lat_rad / kDeg, wrap_deg(armc_rad / kDeg));
     return make_error(ErrorCode::ArgumentError, buf);
 }

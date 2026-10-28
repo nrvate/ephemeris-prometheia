@@ -142,10 +142,13 @@ releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list:
   `swetest` at its own sidereal time to 0.0056″; Placidus and Koch are
   refused inside a polar circle, and any system where its cusps fall out of
   zodiacal order. [docs/HOUSES.md](docs/HOUSES.md).
-- **Python** — `python/prometheia`, pure Python with no C extension:
-  `prometheia.Client` gives the JSON tools as methods, every answer with its
-  provenance. It talks to `prometheia-json` over stdio or HTTP, or to
-  `prometheiad` in protocol v4.
+- **Python** — `python/prometheia`, in two parts:
+  - A native Cython binding (`Dataset`, a `Context` per thread, `Options`)
+    runs the engine in process, bit for bit the C interface's. It publishes
+    `cprometheia.pxd` for nogil Cython callers.
+  - `prometheia.Client` gives the JSON tools as methods, every answer with
+    its provenance, over `prometheia-json` (stdio or HTTP) or `prometheiad`
+    (protocol v4). It is pure Python.
   [docs/PYTHON.md](docs/PYTHON.md).
 - **Client-server cross-testing** — the reference client against
   `prometheiad` and the Astrolog project's own server, refereed by JPL

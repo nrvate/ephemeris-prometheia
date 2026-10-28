@@ -13,6 +13,14 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Python: a native binding** ([docs/PYTHON.md](docs/PYTHON.md), "Native").
+  `prometheia.Dataset`, a `Context` per thread, and `Options` in the JSON
+  tools' words run the engine in process through the C interface, bit for
+  bit. Every call releases the GIL. `prometheia/cprometheia.pxd` declares
+  all of `prometheia.h` nogil and noexcept for Cython callers. The library is
+  built position-independent (bench cost +0.15%, within noise). `tools/gate.sh`
+  builds and tests the extension, and now runs the Python tests after the
+  Release build rather than before it.
 - **C API: houses, sidereal time, obliquity, rotations**
   ([docs/C_API.md](docs/C_API.md), "Houses"): `prometheia_calc_houses`,
   `_ut`, `prometheia_houses_from_armc`, `prometheia_sidereal_time_ut`,

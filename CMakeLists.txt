@@ -30,6 +30,11 @@ target_include_directories(prometheia PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(prometheia PUBLIC PkgConfig::ZSTD)
+# Position-independent, so the static archive links into a shared object:
+# the Python extension (python/, docs/PYTHON.md) is one. Measured on the
+# engine bench, five alternating runs each, 2026-10-27: geometric mean
+# +0.15%, every scenario within 3.3% either way, which is the noise.
+set_target_properties(prometheia PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_options(prometheia PRIVATE -Wall -Wextra -Werror)
 # No fused multiply-adds: a result must not depend on whether a compiler fused
 # a*b+c, which differs between scalar and vector code and between targets.

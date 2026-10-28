@@ -112,14 +112,6 @@ step python3 tools/check/fetchtest.py
 # their own structural selftest wired into no runner on 2026-09-20 -- a rule
 # existing is not a rule running -- and this is the reciprocal. It reads
 # files and starts nothing.
-# The Python package (python/, docs/PYTHON.md): flag translation and answer
-# shapes against a scripted client, calendar arithmetic, and a live run
-# against build/prometheia-json on DE440 when both are present (it SKIPs
-# otherwise). Under a second; ResourceWarnings are errors, so a leaked child
-# process or pipe fails here.
-echo "== python package (python/tests)"
-step env PYTHONPATH=python python3 -W error::ResourceWarning -m unittest discover -s python/tests
-
 echo "== runners (is every check run by something?)"
 step python3 tools/check/runners.py
 echo "== runners audit (by assertion)"
@@ -145,6 +137,31 @@ echo "== build/ (Release)"
 step cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 step cmake --build build -j"$jobs"
 tests build
+
+# The Python package (python/, docs/PYTHON.md), after the Release build it
+# runs against: the native extension built over build/libprometheia.a, then
+# the tests -- the native binding held bit for bit to prometheia-json, the
+# transports, and the live runs on DE440 when it is present (they SKIP
+# otherwise). Until 2026-10-27 this ran before the build, against whatever
+# build/ held from the last one. Cython comes from .venv-build
+# (docs/PYTHON.md, "Native": python3 -m venv .venv-build &&
+# .venv-build/bin/pip install Cython==3.0.11 setuptools==75.3.0 wheel==0.44.0),
+# or $PROMETHEIA_CYTHON_PYTHON.
+# ResourceWarnings are errors, so a leaked child process or pipe fails here.
+cython_python="${PROMETHEIA_CYTHON_PYTHON:-$PWD/.venv-build/bin/python}"
+native_ext() {
+    if ! "$cython_python" -c "import Cython" 2>/dev/null; then
+        echo "no Cython at $cython_python: python3 -m venv .venv-build &&"
+        echo "  .venv-build/bin/pip install Cython==3.0.11 setuptools==75.3.0 wheel==0.44.0 (docs/PYTHON.md, \"Native\")"
+        return 1
+    fi
+    (cd python && PKG_CONFIG_PATH="$OLDPWD/build" "$cython_python" setup.py -q build_ext \
+        --inplace -t "$OLDPWD/build/python-temp")
+}
+echo "== python native extension (python/prometheia/_native)"
+step native_ext
+echo "== python package (python/tests)"
+step env PYTHONPATH=python python3 -W error::ResourceWarning -m unittest discover -s python/tests
 
 echo "== build-asan/ (ASan+UBSan)"
 step cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPROMETHEIA_SANITIZE=ON

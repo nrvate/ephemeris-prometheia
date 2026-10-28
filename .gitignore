@@ -23,4 +23,9 @@ stars-raw/
 fuzz-corpus/
 fuzz-artifacts/
 .venv-oracle/
+.venv-build/
 erfa-raw/
+# The native Python extension, built by tools/gate.sh (docs/PYTHON.md)
+python/build/
+python/prometheia/_native.c
+python/prometheia/*.so
