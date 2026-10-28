@@ -2180,7 +2180,7 @@ TEST_CASE("server_houses_match_the_reference_rows") {
     const double kDeg = std::acos(-1.0) / 180.0;
     Sha256 rows_sha;
     std::string line;
-    int rows = 0, cells = 0;
+    int rows = 0, cells = 0, out_of_order = 0;
     double worst = 0.0, worst_placidus = 0.0;
     while (std::getline(in, line)) {
         if (line.empty() || line[0] == '#')
@@ -2213,6 +2213,26 @@ TEST_CASE("server_houses_match_the_reference_rows") {
                 continue;
             ++cells;
             const bool ok = k < 12 ? h.ok() : angles.ok();
+            // A system whose cusps fall out of zodiacal order is refused
+            // (2026-10-27). Where the row still gives cusps, they must be
+            // that row's own out-of-order cusps: their forward gaps go round
+            // the zodiac more than once.
+            if (k < 12 && !ok &&
+                h.error().message.find("fall out of zodiacal order") != std::string::npos) {
+                double around = 0.0;
+                bool numeric = true;
+                for (int j = 0; j < 12 && numeric; ++j) {
+                    const std::string &a = f[5 + size_t(j)], &b = f[5 + size_t((j + 1) % 12)];
+                    numeric = a != "refused" && a != "either" && b != "refused" && b != "either";
+                    if (numeric)
+                        around += std::fmod(std::stod(b) - std::stod(a) + 720.0, 360.0);
+                }
+                CHECK_MESSAGE((want == "refused" || (numeric && around > 540.0)), line, " point ",
+                              k + 1, ": refused as out of order, row in order");
+                if (k == 0)
+                    ++out_of_order;
+                continue;
+            }
             if (want == "refused") {
                 CHECK_MESSAGE(!ok, line, " point ", k + 1);
                 continue;
@@ -2242,6 +2262,7 @@ TEST_CASE("server_houses_match_the_reference_rows") {
                       "855a73426353f23a542c0601a317f9a704100806dd651d3fafa7360000a73b29",
                   "Astrolog's houses-rows.tsv changed: review it and re-pin");
     CHECK(rows == 2244);
-    std::printf("  houses-rows.tsv: %d rows, %d cells, worst %.6f\" (Placidus %.6f\")\n", rows,
-                cells, worst, worst_placidus);
+    std::printf("  houses-rows.tsv: %d rows, %d cells, worst %.6f\" (Placidus %.6f\"); %d rows "
+                "refused as out of order\n",
+                rows, cells, worst, worst_placidus, out_of_order);
 }

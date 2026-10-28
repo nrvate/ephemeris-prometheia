@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <initializer_list>
 #include <string>
 
 #include <prometheia/engine.hpp>
@@ -80,11 +81,20 @@ TEST_CASE("houses_match_swetest_at_its_own_armc") {
     // difference (the pole angle against swetest's epsilon_A) as the high
     // latitudes amplify it, and swetest's 7 printed decimals (0.0004").
     double worst = 0.0, worst_koch = 0.0;
-    int compared = 0;
+    int compared = 0, out_of_order = 0;
     for (const HouseFixture& f : kHouseFixtures) {
         const double jd_tt = f.jd_ut + f.delta_t_s / 86400.0;
         auto h = houses::compute(*houses::from_letter(f.system), f.v[14] * kDeg,
                                  swetest_obliquity(jd_tt), f.lat_deg * kDeg);
+        // Out-of-order cusps are refused, where swetest prints them (or, for
+        // Topocentric, reorders them): only Regiomontanus, Campanus and
+        // Topocentric, and only near a pole.
+        if (!h.ok() && h.error().message.find("fall out of zodiacal order") != std::string::npos) {
+            CHECK(std::string("RCT").find(f.system) != std::string::npos);
+            CHECK(std::fabs(f.lat_deg) > 63.0);
+            ++out_of_order;
+            continue;
+        }
         REQUIRE_MESSAGE(h.ok(), f.system, " ", f.lat_deg, ": ", h.error().message);
         const auto& g = h.value().angles;
         const double ours[17] = {h.value().cusp_deg[0],
@@ -121,8 +131,8 @@ TEST_CASE("houses_match_swetest_at_its_own_armc") {
         }
     }
     std::printf("  houses vs swetest: %d values, worst %.4f\" (Koch within 1 deg of the polar "
-                "circle %.4f\")\n",
-                compared, worst, worst_koch);
+                "circle %.4f\"); %d rows refused as out of order\n",
+                compared, worst, worst_koch, out_of_order);
 }
 
 TEST_CASE("placidus_and_koch_refuse_inside_the_polar_circle") {
@@ -142,10 +152,16 @@ TEST_CASE("placidus_and_koch_refuse_inside_the_polar_circle") {
             }
         }
     }
-    // Every other system answers there.
+    // Every other system answers there, save where Regiomontanus', Campanus'
+    // and Topocentric's cusps fall out of zodiacal order.
     for (char c : std::string("ORCAWBMXT"))
-        for (double armc = 0.0; armc < 360.0; armc += 15.0)
-            CHECK(houses::compute(*houses::from_letter(c), armc * kDeg, eps, 80.0 * kDeg).ok());
+        for (double armc = 0.0; armc < 360.0; armc += 15.0) {
+            auto h = houses::compute(*houses::from_letter(c), armc * kDeg, eps, 80.0 * kDeg);
+            CHECK_MESSAGE((h.ok() || (std::string("RCT").find(c) != std::string::npos &&
+                                      h.error().message.find("fall out of zodiacal order") !=
+                                          std::string::npos)),
+                          c, " armc ", armc);
+        }
     CHECK_FALSE(houses::compute(houses::System::Porphyry, 0.0, eps, 90.0 * kDeg).ok());
 }
 
@@ -153,14 +169,19 @@ TEST_CASE("house_axes_follow_their_definitions_inside_the_polar_circle") {
     // The MC is the ecliptic's culminating point (hour angle 0) in every
     // system, even below the horizon. Regiomontanus' and Campanus' cusp 10 is
     // the meridian's ecliptic point above the horizon (their circles' zenith
-    // half), which there can be the IC; Topocentric's cusp 10 is the MC
-    // (pole height 0), whatever the horizon.
+    // half); where that is the IC their cusps fall out of zodiacal order and
+    // the system is refused, so an answer's cusp 10 is always the MC
+    // (2026-10-27). Topocentric's cusp 10 is the MC (pole height 0), whatever
+    // the horizon.
     const double eps = true_obliquity(2451545.0);
     int ic_cases = 0;
     for (double lat : {67.0, 70.0, 80.0, -70.0}) {
         for (double armc = 0.0; armc < 360.0; armc += 5.0) {
             for (char c : std::string("RCT")) {
                 auto h = houses::compute(*houses::from_letter(c), armc * kDeg, eps, lat * kDeg);
+                if (!h.ok() &&
+                    h.error().message.find("fall out of zodiacal order") != std::string::npos)
+                    continue; // house_cusps_go_round_the_zodiac_once_or_are_refused
                 REQUIRE(h.ok());
                 const auto& g = h.value().angles;
                 const double mc_ra = std::atan2(std::sin(g.mc_deg * kDeg) * std::cos(eps),
@@ -178,7 +199,7 @@ TEST_CASE("house_axes_follow_their_definitions_inside_the_polar_circle") {
             }
         }
     }
-    CHECK(ic_cases > 0); // the case exists in this sample
+    CHECK(ic_cases == 0); // the IC as cusp 10 comes only out of order, refused
 }
 
 TEST_CASE("houses_every_cusp_follows_the_last") {
@@ -254,4 +275,63 @@ TEST_CASE("engine_houses_sidereal_whole_sign_counts_from_the_sidereal_ascendant"
     CalcOptions j2000;
     j2000.frame = Frame::J2000;
     CHECK_FALSE(e.value().houses_ut(houses::System::Placidus, 2451545.0, site, j2000).ok());
+}
+
+// Every system over a grid of latitudes (both hemispheres, to 89.9 deg),
+// ARMCs and obliquities: the twelve forward gaps between consecutive cusps
+// sum to 360 deg, or the system is refused with an ArgumentError. Out of
+// order, Regiomontanus, Campanus and Topocentric summed to 720-3960 deg near
+// the poles and their houses overlapped (found by the Astrolog side,
+// 2026-10-27). Only Placidus and Koch (beyond the polar circle) and those
+// three (out of order) may refuse short of the pole, save the instants when
+// the ecliptic lies along a defining circle. An answer's cusp 10 is the MC
+// wherever the system puts it there.
+void sweep_cusp_order(int lat_tenths_step, double armc_step,
+                      std::initializer_list<double> epsilons) {
+    int answered = 0, refused = 0;
+    for (int s = 0; s <= int(houses::System::Topocentric); ++s) {
+        const auto sys = houses::System(s);
+        for (int tenth = -899; tenth <= 899; tenth += lat_tenths_step) {
+            const double lat = tenth / 10.0;
+            for (double armc = 0.0; armc < 360.0; armc += armc_step) {
+                for (double eps_deg : epsilons) {
+                    auto h = houses::compute(sys, armc * kDeg, eps_deg * kDeg, lat * kDeg);
+                    if (!h.ok()) {
+                        ++refused;
+                        REQUIRE(h.error().code == ErrorCode::ArgumentError);
+                        const std::string& m = h.error().message;
+                        if (m.find("polar circle") != std::string::npos)
+                            CHECK((sys == houses::System::Placidus || sys == houses::System::Koch));
+                        if (m.find("fall out of zodiacal order") != std::string::npos)
+                            CHECK((sys == houses::System::Regiomontanus ||
+                                   sys == houses::System::Campanus ||
+                                   sys == houses::System::Topocentric));
+                        continue;
+                    }
+                    ++answered;
+                    double around = 0.0;
+                    for (int k = 0; k < 12; ++k)
+                        around += std::fmod(h.value().cusp_deg[(k + 1) % 12] -
+                                                h.value().cusp_deg[k] + 720.0,
+                                            360.0);
+                    if (std::fabs(around - 360.0) > 1e-9)
+                        FAIL_CHECK(houses::name(sys), " lat ", lat, " armc ", armc, " eps ",
+                                   eps_deg, ": gaps sum to ", around);
+                    if (sys == houses::System::Regiomontanus || sys == houses::System::Campanus)
+                        if (diff_arcsec(h.value().cusp_deg[9], h.value().angles.mc_deg) > 1e-6)
+                            FAIL_CHECK(houses::name(sys), " lat ", lat, " armc ", armc,
+                                       ": cusp 10 is not the MC");
+                }
+            }
+        }
+    }
+    std::printf("  cusp order: %d answered, %d refused\n", answered, refused);
+}
+
+TEST_CASE("house_cusps_go_round_the_zodiac_once_or_are_refused") {
+    sweep_cusp_order(5, 15.0, {23.44, 24.5}); // 0.5 deg, the gate's share
+}
+
+TEST_CASE("house_cusps_go_round_the_zodiac_once_dense" * doctest::skip()) {
+    sweep_cusp_order(1, 7.5, {22.0, 23.44, 24.5}); // 0.1 deg: 3 s in Release
 }

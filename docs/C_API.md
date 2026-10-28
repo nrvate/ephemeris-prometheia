@@ -77,6 +77,59 @@ catalog with a 100-body sample stacked on it (2026-10-25). This replaces
 parsing the `[N bodies]` text of a result's `source`, whose wording is not
 a contract.
 
+**Houses, sidereal time, obliquity, rotations** (added after 0.7.3; ABI
+version unchanged, as no existing layout changed; announced to the Astrolog
+side first, 2026-10-27). [HOUSES.md](HOUSES.md) has the definitions.
+
+```c
+prometheia_houses h;
+if (prometheia_calc_houses_ut(eph, PROMETHEIA_HOUSES_PLACIDUS, jd_ut1,
+                              8.55, 47.37, &opts, &h, &err) == PROMETHEIA_OK)
+    printf("Asc %.4f  MC %.4f  cusp 2 %.4f\n", h.asc_deg, h.mc_deg, h.cusp_deg[1]);
+```
+
+- `prometheia_calc_houses` (TT) and `_ut` (UT1) are `Engine::houses` and
+  `houses_ut`, bit for bit, and the same code as the JSON `houses` tool and
+  protocol v4 kind 6. The system is one of the `PROMETHEIA_HOUSES_*` values,
+  which are v4's A.22 numbers.
+  - The site's longitude is east positive and its latitude geodetic,
+    strictly inside ±90°.
+  - Only the zodiac and the precession model are read from the options.
+    The frame must stay `PROMETHEIA_FRAME_TRUE_OF_DATE`.
+  - The step between TT and UT1 uses the engine's ΔT, including a function
+    installed with `prometheia_engine_set_delta_t`, as `calc` and `calc_ut`
+    do (`c_api_houses_match_engine` checks the hook is called).
+  - A sidereal zodiac shifts every cusp and angle but the ARMC.
+- **Refusals** are `PROMETHEIA_ERROR_ARGUMENT`, with a message naming the
+  system and the reason. Another system is never put in its place:
+  - Placidus and Koch inside a polar circle;
+  - Regiomontanus, Campanus and Topocentric where their cusps fall out of
+    zodiacal order, near the poles;
+  - every system at a pole.
+  Every answer's twelve cusps go once round the zodiac.
+- **The angles:** `asc_deg` is the rising point at every latitude, and
+  `mc_deg` is the upper meridian (hour angle 0), even where it culminates
+  below the horizon. Every longitude is in [0, 360).
+- `prometheia_houses_from_armc(system, armc_deg, obliquity_deg, lat_deg, …)`
+  needs no engine and no instant: an oblique Ascendant, or a chart at a
+  reference latitude. It takes the **true** obliquity, and returns every
+  angle, the Vertex and equatorial Ascendant included. Given the ARMC and
+  obliquity `prometheia_calc_houses` reports, it agrees with that tropical
+  answer to 1e-6″. It is not bit for bit, because the ARMC passes through
+  degrees.
+- `prometheia_sidereal_time_ut(engine, jd_ut1, kind, opts, &deg, &err)` is
+  Greenwich mean (GMST, IAU 2006) or apparent (GAST) sidereal time as an
+  angle in [0, 360). GAST plus the east longitude is the houses' ARMC, to
+  1e-10″. `prometheia_obliquity(engine, jd_tt, kind, opts, &deg, &err)`
+  gives the mean or true obliquity. Both read only `opts->precession`.
+  Against ERFA over 1600–2200, the agreement is GMST 3e-8″, GAST 0.00015″,
+  mean obliquity 1e-11″ and true obliquity 0.00005″.
+- `prometheia_ecliptic_to_equatorial` and `_equatorial_to_ecliptic` rotate
+  about the equinox by a given obliquity. They are pure functions: no
+  engine, no instant, no status.
+- **Cusp speeds** are not served. If they come, they come as a separate
+  call with its own struct, so `prometheia_houses` keeps its layout.
+
 To build the library inside another project (a git submodule, plain make,
 no CMake), see [EMBEDDING.md](EMBEDDING.md).
 
@@ -245,7 +298,7 @@ Exported symbols carry default visibility, so a shared build
 
 ## Validation
 
-`tests/test_c_api.cpp`, 8 cases, runs everywhere on the synthetic kernel
+`tests/test_c_api.cpp` runs everywhere on the synthetic kernel
 and the in-tree `tests/data/sample-100.epm`:
 
 - **Bit-identity.** Twelve option combinations (all four centres and
@@ -259,6 +312,12 @@ and the in-tree `tests/data/sample-100.epm`:
   Out-of-range selectors, non-finite user anchors, coverage and observer
   errors all return the right status, a message and a zeroed result.
   Over-long messages are truncated. Time helpers equal `prometheia::time`.
+- **Houses** (`c_api_houses_match_engine`): all eleven systems at four
+  sites (two of them inside the Arctic circle), two instants, tropical and
+  Lahiri, TT and UT1, compared with `==` against `Engine`, refusals
+  included. `prometheia_houses_from_armc` reproduces each answer from its
+  ARMC and obliquity. Sidereal time and obliquity are checked against ERFA,
+  and the rotations against fixed points and round trips.
 - **Real C.** `tests/c_api_smoke.c` is compiled as C99 with
   `-Wall -Wextra -pedantic -Werror`. It opens, calcs, handles errors,
   installs a ΔT function pointer and converts leap-second UTC, all without

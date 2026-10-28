@@ -204,6 +204,13 @@ Ayanamsa ayanamsa_anchored(double t0_jtdb, double ayan0_mean_deg, double jd_tt,
 // motion of the mean equinox along the ecliptic of date.
 double precession_in_longitude_deg(double jd_tt);
 
+// Rotation about the equinox by an obliquity (radians in and out): ecliptic
+// longitude and latitude to right ascension and declination, and back.
+// Longitude and right ascension come out in [0, 2pi); latitude and
+// declination by atan2, never asin.
+void ecliptic_to_equatorial(double lon, double lat, double eps, double& ra, double& dec);
+void equatorial_to_ecliptic(double ra, double dec, double eps, double& lon, double& lat);
+
 // --- Sidereal time --------------------------------------------------
 
 // Earth Rotation Angle (radians, [0, 2pi)), a function of UT1 alone.

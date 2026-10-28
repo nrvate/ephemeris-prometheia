@@ -140,7 +140,8 @@ releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list:
   with the Ascendant, MC, ARMC, Vertex and equatorial Ascendant, tropical or
   sidereal, in the engine and the JSON/MCP `houses` tool. Cusps agree with
   `swetest` at its own sidereal time to 0.0056″; Placidus and Koch are
-  refused inside a polar circle. [docs/HOUSES.md](docs/HOUSES.md).
+  refused inside a polar circle, and any system where its cusps fall out of
+  zodiacal order. [docs/HOUSES.md](docs/HOUSES.md).
 - **Python** — `python/prometheia`, pure Python with no C extension:
   `prometheia.Client` gives the JSON tools as methods, every answer with its
   provenance. It talks to `prometheia-json` over stdio or HTTP, or to

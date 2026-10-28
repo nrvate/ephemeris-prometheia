@@ -537,6 +537,127 @@ typedef double (*prometheia_delta_t_fn)(void* user, double jd_tt);
 PROMETHEIA_API void prometheia_engine_set_delta_t(prometheia_engine* engine,
                                                   prometheia_delta_t_fn fn, void* user);
 
+/* ---- Houses, sidereal time, obliquity, rotations (after 0.7.3) -------------
+ *
+ * docs/HOUSES.md. Added after library 0.7.3; the ABI version is unchanged,
+ * as no existing layout changed. Angles are degrees throughout.
+ */
+
+/* House systems: ephemeris protocol v4's A.22 values. */
+#define PROMETHEIA_HOUSES_PLACIDUS 0
+#define PROMETHEIA_HOUSES_KOCH 1
+#define PROMETHEIA_HOUSES_PORPHYRY 2
+#define PROMETHEIA_HOUSES_REGIOMONTANUS 3
+#define PROMETHEIA_HOUSES_CAMPANUS 4
+#define PROMETHEIA_HOUSES_EQUAL 5
+#define PROMETHEIA_HOUSES_WHOLE_SIGN 6
+#define PROMETHEIA_HOUSES_ALCABITIUS 7
+#define PROMETHEIA_HOUSES_MORINUS 8
+#define PROMETHEIA_HOUSES_MERIDIAN 9
+#define PROMETHEIA_HOUSES_TOPOCENTRIC 10
+
+/* Every longitude below is ecliptic of date, true equinox, in [0, 360). */
+typedef struct prometheia_houses {
+    double cusp_deg[12]; /* cusps 1..12 at [0..11], each the next eastward */
+    /* The ecliptic's intersection with the eastern horizon: the rising
+     * point at every latitude, inside a polar circle too. */
+    double asc_deg;
+    /* The ecliptic's point on the upper meridian (hour angle 0), in every
+     * system, even where it culminates below the horizon. */
+    double mc_deg;
+    double armc_deg;   /* local apparent sidereal time as an angle; never sidereal-shifted */
+    double vertex_deg; /* the ecliptic's intersection with the prime vertical, in the west */
+    double equatorial_asc_deg; /* the ecliptic point at right ascension ARMC + 90 */
+    double obliquity_deg;      /* the true obliquity used */
+    double ayanamsa_deg;       /* the shift applied, with PROMETHEIA_HAS_AYANAMSA */
+    int flags;                 /* PROMETHEIA_HAS_AYANAMSA */
+} prometheia_houses;
+
+/*
+ * Cusps and angles at a TT (or, _ut, a UT1) Julian date for a site at
+ * geodetic longitude lon_deg (east positive) and latitude lat_deg (north
+ * positive, strictly inside +-90). The sidereal time needs UT1 and the
+ * obliquity TT; whichever is not given comes from the engine's Delta T,
+ * the same one calc and calc_ut use (the observed model, or the function
+ * installed with prometheia_engine_set_delta_t).
+ *
+ * From the options only the zodiac (sidereal, its user anchor) and the
+ * precession model enter. A sidereal zodiac shifts every cusp and angle but
+ * the ARMC, on the ecliptic of date only; Whole Sign's houses then follow
+ * the sidereal Ascendant's sign. The frame must be
+ * PROMETHEIA_FRAME_TRUE_OF_DATE (the default).
+ *
+ * The twelve cusps answered always go once round the zodiac in order.
+ * PROMETHEIA_ERROR_ARGUMENT, with a message naming the system and the
+ * reason, and never another system in its place:
+ *   - Placidus and Koch inside a polar circle (|lat| > 90 - obliquity);
+ *   - Regiomontanus and Campanus inside one, and Topocentric from about 1.6
+ *     degrees short of one, at the sidereal times their cusps fall out of
+ *     zodiacal order;
+ *   - every system at an instant when the ecliptic lies along one of its
+ *     defining circles (only on a polar circle's edge).
+ * On failure *out is zeroed.
+ */
+PROMETHEIA_API prometheia_status prometheia_calc_houses(
+    prometheia_engine* engine, int system, double jd_tt, double lon_deg, double lat_deg,
+    const prometheia_options* opts, prometheia_houses* out, prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_calc_houses_ut(
+    prometheia_engine* engine, int system, double jd_ut1, double lon_deg, double lat_deg,
+    const prometheia_options* opts, prometheia_houses* out, prometheia_error* err);
+
+/*
+ * Tropical cusps and every angle, Vertex and equatorial Ascendant included,
+ * from an ARMC, the TRUE obliquity (mean plus the nutation in obliquity, as
+ * prometheia_obliquity(..., PROMETHEIA_OBLIQUITY_TRUE, ...) gives) and a
+ * geodetic latitude, with no instant and no engine: an oblique Ascendant,
+ * or a chart at a reference latitude. Refused as prometheia_calc_houses is.
+ * Given the ARMC and obliquity prometheia_calc_houses reports, everything
+ * agrees with its tropical answer to 1e-6 arcsec: the ARMC passes through
+ * degrees. obliquity_deg is echoed; flags is 0.
+ */
+PROMETHEIA_API prometheia_status prometheia_houses_from_armc(int system, double armc_deg,
+                                                             double obliquity_deg, double lat_deg,
+                                                             prometheia_houses* out,
+                                                             prometheia_error* err);
+
+/*
+ * Greenwich sidereal time as an angle, [0, 360), at a UT1 Julian date (TT
+ * from the engine's Delta T, as for the houses): mean (GMST, IAU 2006) or apparent (GAST: plus
+ * the equation of the equinoxes under the options' precession model, the
+ * angle the houses' ARMC comes from). Add the east longitude for local
+ * sidereal time. Only opts->precession enters; NULL means the default.
+ */
+#define PROMETHEIA_SIDEREAL_TIME_MEAN 0
+#define PROMETHEIA_SIDEREAL_TIME_APPARENT 1
+PROMETHEIA_API prometheia_status prometheia_sidereal_time_ut(prometheia_engine* engine,
+                                                             double jd_ut1, int kind,
+                                                             const prometheia_options* opts,
+                                                             double* out_deg,
+                                                             prometheia_error* err);
+
+/*
+ * The obliquity of the ecliptic at a TT Julian date: mean, under the
+ * options' precession model, or true (plus the nutation in obliquity), the
+ * one the houses use. Only opts->precession enters; NULL means the default.
+ */
+#define PROMETHEIA_OBLIQUITY_MEAN 0
+#define PROMETHEIA_OBLIQUITY_TRUE 1
+PROMETHEIA_API prometheia_status prometheia_obliquity(prometheia_engine* engine, double jd_tt,
+                                                      int kind, const prometheia_options* opts,
+                                                      double* out_deg, prometheia_error* err);
+
+/*
+ * Rotation between ecliptic and equatorial coordinates about the equinox
+ * by an obliquity: a pure function, no instant. Longitude and right
+ * ascension in [0, 360), latitude and declination by atan2 (never asin).
+ */
+PROMETHEIA_API void prometheia_ecliptic_to_equatorial(double lon_deg, double lat_deg,
+                                                      double obliquity_deg, double* ra_deg,
+                                                      double* dec_deg);
+PROMETHEIA_API void prometheia_equatorial_to_ecliptic(double ra_deg, double dec_deg,
+                                                      double obliquity_deg, double* lon_deg,
+                                                      double* lat_deg);
+
 /* ---- Time scales (docs/TIME.md) -------------------------------------------- */
 
 /* JD of a proleptic Gregorian date and wall-clock time, in whatever

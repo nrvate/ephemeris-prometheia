@@ -261,7 +261,8 @@ digits cut):
     `unsupported`, `numerical-failure`, `data-unavailable`) and a sentence.
     The other objects are still answered. `houses` answers per system the
     same way, with one more code, `undefined-at-latitude`: Placidus or Koch
-    inside a polar circle.
+    inside a polar circle, or Regiomontanus, Campanus or Topocentric where
+    their cusps fall out of zodiacal order near the poles.
   - A whole-call error (`invalid-arguments`) is MCP's `isError` result, or
     HTTP 400 on `/v1`.
 

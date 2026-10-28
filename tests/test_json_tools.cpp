@@ -703,6 +703,25 @@ TEST_CASE("json_houses_are_the_engines") {
           std::string::npos);
     CHECK(polar["results"][1]["error"].is_null());
 
+    // Topocentric at 78.2 deg is refused, with the same code, at the hours
+    // its cusps fall out of zodiacal order.
+    int out_of_order = 0;
+    for (int hour = 0; hour < 24; ++hour) {
+        const Json at = {{"jd_tt", 2451545.0 + hour / 24.0}};
+        const Json topo = run(e, "houses",
+                              {{"time", at},
+                               {"site", {{"lon_deg", 15.63}, {"lat_deg", 78.22}}},
+                               {"systems", {"topocentric"}}});
+        const Json& err = topo["results"][0]["error"];
+        if (err.is_null())
+            continue;
+        ++out_of_order;
+        CHECK(err["code"] == "undefined-at-latitude");
+        CHECK(err["message"].get<std::string>().find("fall out of zodiacal order") !=
+              std::string::npos);
+    }
+    CHECK(out_of_order > 0);
+
     // Sidereal: the ayanamsha and the zodiac are in the answer.
     const Json sid = run(e, "houses", {{"time", t}, {"site", site}, {"zodiac", "lahiri"}});
     CHECK(sid["results"][0]["rows"][0].contains("ayanamsa_deg"));

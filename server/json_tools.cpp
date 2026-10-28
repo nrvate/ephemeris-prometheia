@@ -758,9 +758,11 @@ std::string error_code(const Error& e) {
     const std::string& m = e.message;
     if (e.code == ErrorCode::CoverageError)
         return "outside-coverage";
-    // A house system refused inside a polar circle, or at an instant when the
-    // ecliptic lies along one of its defining circles (docs/HOUSES.md).
-    if (m.find("cusps are undefined") != std::string::npos)
+    // A house system refused inside a polar circle, where its cusps fall
+    // out of zodiacal order, or at an instant when the ecliptic lies along
+    // one of its defining circles (docs/HOUSES.md).
+    if (m.find("cusps are undefined") != std::string::npos ||
+        m.find("cusps fall out of zodiacal order") != std::string::npos)
         return "undefined-at-latitude";
     if (m.find("numerical failure") != std::string::npos ||
         m.find("integration failed") != std::string::npos)
@@ -1375,7 +1377,9 @@ std::vector<Tool> tools() {
          "for a site and an instant or series, in one or more systems: Placidus, Koch, Porphyry, "
          "Regiomontanus, Campanus, Equal, Whole Sign, Alcabitius, Morinus, Meridian, "
          "Topocentric. Tropical, or sidereal on the ecliptic of date. Placidus and Koch are "
-         "refused inside a polar circle, never replaced by another system.",
+         "refused inside a polar circle, and Regiomontanus, Campanus and Topocentric where "
+         "their cusps fall out of zodiacal order near the poles, never replaced by another "
+         "system.",
          schema_houses()},
         {"convert_time",
          "Convert time",
@@ -1455,10 +1459,11 @@ std::string llms_txt() {
 - houses: cusps and angles for a "site" ({"lon_deg", "lat_deg"}) at "time",
   "times" or "series", in "systems" (default ["placidus"]; tokens or letters,
   e.g. "koch", "whole-sign", "W"), tropical or with a "zodiac". Placidus and
-  Koch inside a polar circle are an error (undefined-at-latitude), never
-  another system in their place. The MC is the culminating point in every
-  system; Regiomontanus' and Campanus' cusp 10 is the meridian point above
-  the horizon, which inside a polar circle can be the IC.
+  Koch inside a polar circle, and Regiomontanus, Campanus and Topocentric
+  where their cusps fall out of zodiacal order near the poles, are an error
+  (undefined-at-latitude), never another system in their place. The MC is
+  the culminating point in every system, and every answer's cusps go once
+  round the zodiac in order.
 - lookup: what a name could mean; with "prefix" it also matches a name by
   its start, or by the start of any word in it ("node" finds "true node").
 - capabilities: what is served, and the limits. Ask it before an asteroid

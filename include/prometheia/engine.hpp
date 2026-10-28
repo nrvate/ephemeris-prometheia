@@ -453,6 +453,21 @@ public:
     Result<HouseResult> houses_ut(houses::System system, double jd_ut1, const frames::GeoSite& site,
                                   const CalcOptions& opts = {});
 
+    // Greenwich sidereal time as an angle, degrees in [0, 360), at a UT1
+    // Julian date (TT from the engine's Delta T): mean (GMST, IAU 2006: the
+    // Earth Rotation Angle plus the precession in right ascension) or
+    // apparent (GAST: plus the equation of the equinoxes, from the nutation
+    // and the mean obliquity under `precession`), the angle houses() takes
+    // its ARMC from. Add the east longitude for local sidereal time.
+    Result<double> sidereal_time_ut(double jd_ut1, bool apparent,
+                                    Precession precession = Precession::Vondrak2011);
+
+    // The obliquity of the ecliptic at a TT Julian date, degrees: mean
+    // under `precession`, or true (plus the nutation in obliquity), the one
+    // houses() uses.
+    Result<double> obliquity(double jd_tt, bool true_obliquity,
+                             Precession precession = Precession::Vondrak2011);
+
     // Delta T model for UT inputs and topocentric Earth rotation. Not
     // owned; nullptr restores the default (time::ObservedDeltaT).
     void set_delta_t_model(const time::DeltaTModel* model);

@@ -6,6 +6,7 @@
 // is the boundary itself: option translation, NULL and range checks,
 // status codes and messages, the Delta T callback, and the time helpers.
 // tests/c_api_smoke.c drives the same interface from real C.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -757,3 +758,263 @@ TEST_CASE("c_api_hypotheticals_match_the_engine") {
     CHECK(std::string(err.message).find(":1:") != std::string::npos);
     CHECK(prometheia_hypothetical_count(c.e) == before + 1);
 }
+
+// ---- Houses, sidereal time, obliquity, rotations ---------------------------
+
+namespace {
+
+double erfa_delta_t(void* user, double) {
+    ++*static_cast<int*>(user);
+    return 69.184;
+}
+
+struct ErfaDeltaT final : time::DeltaTModel {
+    double delta_t_seconds(double) const override { return 69.184; }
+};
+
+bool same(const prometheia_houses& c, const Engine::HouseResult& r) {
+    bool eq = c.asc_deg == r.houses.angles.asc_deg && c.mc_deg == r.houses.angles.mc_deg &&
+              c.armc_deg == r.houses.angles.armc_deg &&
+              c.vertex_deg == r.houses.angles.vertex_deg &&
+              c.equatorial_asc_deg == r.houses.angles.equatorial_asc_deg &&
+              c.obliquity_deg == r.obliquity_deg &&
+              bool(c.flags & PROMETHEIA_HAS_AYANAMSA) == r.ayanamsa_deg.has_value();
+    for (int k = 0; k < 12; ++k)
+        eq = eq && c.cusp_deg[k] == r.houses.cusp_deg[size_t(k)];
+    if (r.ayanamsa_deg)
+        eq = eq && c.ayanamsa_deg == *r.ayanamsa_deg;
+    return eq;
+}
+
+bool zeroed(const prometheia_houses& h) {
+    static const prometheia_houses z{};
+    return std::memcmp(&h, &z, sizeof h) == 0;
+}
+
+double arcsec(double a_deg, double b_deg) {
+    return std::fabs(std::remainder(a_deg - b_deg, 360.0)) * 3600.0;
+}
+
+TEST_CASE("c_api_houses_match_engine") {
+    TempFile tf("capi-houses");
+    synth::write_linear_spk(tf.path);
+    auto cpp = Engine::open(tf.path.string());
+    CHandle c;
+    CHECK(prometheia_engine_open(tf.path.c_str(), &c.e, nullptr) == PROMETHEIA_OK);
+    if (!cpp.ok() || !c.e)
+        return;
+    // One Delta T on both paths: the C hook, the same constant in C++. The
+    // TT form needs UT1 for the sidereal time, so the hook must be called.
+    int calls = 0;
+    prometheia_engine_set_delta_t(c.e, erfa_delta_t, &calls);
+    const ErfaDeltaT fixed;
+    cpp.value().set_delta_t_model(&fixed);
+
+    const double sites[][2] = {{8.55, 47.37}, {-70.0, -30.0}, {18.96, 69.65}, {15.63, 78.22}};
+    int answered = 0, refused = 0;
+    double worst_armc = 0.0;
+    for (int system = PROMETHEIA_HOUSES_PLACIDUS; system <= PROMETHEIA_HOUSES_TOPOCENTRIC;
+         ++system) {
+        for (const auto& site : sites) {
+            for (double jd : {kJ2000 + 0.3, 2461000.71}) {
+                for (int sidereal : {PROMETHEIA_SIDEREAL_TROPICAL, PROMETHEIA_SIDEREAL_LAHIRI}) {
+                    for (bool ut : {false, true}) {
+                        prometheia_options o;
+                        prometheia_options_init(&o);
+                        o.sidereal = sidereal;
+                        CalcOptions co;
+                        co.sidereal = static_cast<SiderealMode>(sidereal);
+                        frames::GeoSite g;
+                        g.lon_rad = site[0] * kDegToRad;
+                        g.lat_rad = site[1] * kDegToRad;
+                        const auto s = static_cast<houses::System>(system);
+                        prometheia_houses out;
+                        prometheia_error err;
+                        const int before = calls;
+                        const prometheia_status st =
+                            ut ? prometheia_calc_houses_ut(c.e, system, jd, site[0], site[1], &o,
+                                                           &out, &err)
+                               : prometheia_calc_houses(c.e, system, jd, site[0], site[1], &o, &out,
+                                                        &err);
+                        CHECK(calls > before);
+                        auto r = ut ? cpp.value().houses_ut(s, jd, g, co)
+                                    : cpp.value().houses(s, jd, g, co);
+                        if (!r.ok()) {
+                            ++refused;
+                            CHECK(st == PROMETHEIA_ERROR_ARGUMENT);
+                            CHECK(std::string(err.message) == r.error().message.substr(0, 255));
+                            CHECK(zeroed(out));
+                            continue;
+                        }
+                        ++answered;
+                        REQUIRE(st == PROMETHEIA_OK);
+                        CHECK(same(out, r.value()));
+                        if (sidereal != PROMETHEIA_SIDEREAL_TROPICAL)
+                            continue;
+                        // The ARMC is the apparent sidereal time plus the
+                        // east longitude.
+                        double gast = 0.0;
+                        const double jd_ut1 = ut ? jd : jd - 69.184 / 86400.0;
+                        REQUIRE(prometheia_sidereal_time_ut(c.e, jd_ut1,
+                                                            PROMETHEIA_SIDEREAL_TIME_APPARENT, &o,
+                                                            &gast, nullptr) == PROMETHEIA_OK);
+                        worst_armc = std::max(worst_armc, arcsec(gast + site[0], out.armc_deg));
+                        // From the reported ARMC and obliquity, the tropical
+                        // cusps and angles again.
+                        prometheia_houses again;
+                        REQUIRE(prometheia_houses_from_armc(system, out.armc_deg, out.obliquity_deg,
+                                                            site[1], &again,
+                                                            nullptr) == PROMETHEIA_OK);
+                        for (int k = 0; k < 12; ++k)
+                            CHECK(arcsec(again.cusp_deg[k], out.cusp_deg[k]) < 1e-6);
+                        CHECK(arcsec(again.asc_deg, out.asc_deg) < 1e-6);
+                        CHECK(arcsec(again.mc_deg, out.mc_deg) < 1e-6);
+                        CHECK(arcsec(again.vertex_deg, out.vertex_deg) < 1e-6);
+                        CHECK(arcsec(again.equatorial_asc_deg, out.equatorial_asc_deg) < 1e-6);
+                        CHECK(again.armc_deg == out.armc_deg);
+                        CHECK(again.obliquity_deg == out.obliquity_deg);
+                        CHECK(again.flags == 0);
+                    }
+                }
+            }
+        }
+    }
+    CHECK(answered > 0);
+    CHECK(refused > 0); // Placidus and Koch at 69.65 and 78.22 deg
+    CHECK(worst_armc < 1e-6);
+    std::printf("  C houses: %d answered, %d refused; ARMC vs GAST + lon %.2e\"\n", answered,
+                refused, worst_armc);
+
+    // Refusals: by name, never another system; selectors out of range.
+    prometheia_houses out;
+    prometheia_error err;
+    CHECK(prometheia_calc_houses(c.e, PROMETHEIA_HOUSES_PLACIDUS, kJ2000, 20.0, 70.0, nullptr, &out,
+                                 &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(std::string(err.message).find("Placidus") != std::string::npos);
+    CHECK(std::string(err.message).find("polar circle") != std::string::npos);
+    CHECK(zeroed(out));
+    for (int bad : {-1, PROMETHEIA_HOUSES_TOPOCENTRIC + 1}) {
+        CHECK(prometheia_calc_houses(c.e, bad, kJ2000, 0.0, 0.0, nullptr, &out, &err) ==
+              PROMETHEIA_ERROR_ARGUMENT);
+        CHECK(prometheia_houses_from_armc(bad, 0.0, 23.4, 0.0, &out, &err) ==
+              PROMETHEIA_ERROR_ARGUMENT);
+    }
+    CHECK(prometheia_calc_houses(c.e, 0, kJ2000, 0.0, 90.0, nullptr, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_calc_houses(nullptr, 0, kJ2000, 0.0, 0.0, nullptr, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_calc_houses(c.e, 0, kJ2000, 0.0, 0.0, nullptr, nullptr, nullptr) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    prometheia_options o;
+    prometheia_options_init(&o);
+    o.frame = PROMETHEIA_FRAME_J2000;
+    CHECK(prometheia_calc_houses(c.e, 0, kJ2000, 0.0, 0.0, &o, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+}
+
+TEST_CASE("c_api_sidereal_time_and_obliquity_match_erfa") {
+    // ERFA 2.0.1 (pyerfa), as an output oracle: gmst06 and gst06a with
+    // TT - UT1 = 69.184 s; obl06, and obl06 + deps from nut06a.
+    struct Row {
+        double jd_ut1, gmst, gast, eps_mean, eps_true;
+    };
+    const Row rows[] = {
+        {2305445.123456, 321.952741185763, 321.9564814456212, 23.491283796328066,
+         23.492450456089617},
+        {2360232.623456, 143.1039396016146, 143.1083319092727, 23.471795915981186,
+         23.47215316474748},
+        {2415020.123456, 324.2568760187832, 324.2613012326038, 23.452289006292247,
+         23.451652110535676},
+        {2451545.123456, 325.0264664719626, 325.0229166972932, 23.439279400184166,
+         23.437676076066307},
+        {2488070.123456, 325.79683000944766, 325.7976622334302, 23.426269692045217,
+         23.428655719849356},
+        {2524595.123456, 326.5679665303294, 326.57082452152974, 23.413263218593727,
+         23.411047862639442},
+    };
+    TempFile tf("capi-st");
+    synth::write_linear_spk(tf.path);
+    CHandle c;
+    REQUIRE(prometheia_engine_open(tf.path.c_str(), &c.e, nullptr) == PROMETHEIA_OK);
+    int calls = 0;
+    prometheia_engine_set_delta_t(c.e, erfa_delta_t, &calls);
+    prometheia_options iau;
+    prometheia_options_init(&iau);
+    iau.precession = PROMETHEIA_PRECESSION_IAU2006;
+    double w_gmst = 0, w_gast = 0, w_mean = 0, w_true = 0, w_vondrak = 0;
+    for (const Row& r : rows) {
+        const double jd_tt = r.jd_ut1 + 69.184 / 86400.0;
+        double gmst, gast, gast_v, mean, tru;
+        REQUIRE(prometheia_sidereal_time_ut(c.e, r.jd_ut1, PROMETHEIA_SIDEREAL_TIME_MEAN, &iau,
+                                            &gmst, nullptr) == PROMETHEIA_OK);
+        REQUIRE(prometheia_sidereal_time_ut(c.e, r.jd_ut1, PROMETHEIA_SIDEREAL_TIME_APPARENT, &iau,
+                                            &gast, nullptr) == PROMETHEIA_OK);
+        REQUIRE(prometheia_sidereal_time_ut(c.e, r.jd_ut1, PROMETHEIA_SIDEREAL_TIME_APPARENT,
+                                            nullptr, &gast_v, nullptr) == PROMETHEIA_OK);
+        REQUIRE(prometheia_obliquity(c.e, jd_tt, PROMETHEIA_OBLIQUITY_MEAN, &iau, &mean, nullptr) ==
+                PROMETHEIA_OK);
+        REQUIRE(prometheia_obliquity(c.e, jd_tt, PROMETHEIA_OBLIQUITY_TRUE, &iau, &tru, nullptr) ==
+                PROMETHEIA_OK);
+        CHECK(gmst >= 0.0);
+        CHECK(gmst < 360.0);
+        w_gmst = std::max(w_gmst, arcsec(gmst, r.gmst));
+        w_gast = std::max(w_gast, arcsec(gast, r.gast));
+        w_vondrak = std::max(w_vondrak, arcsec(gast_v, r.gast));
+        w_mean = std::max(w_mean, arcsec(mean, r.eps_mean));
+        w_true = std::max(w_true, arcsec(tru, r.eps_true));
+    }
+    CHECK(calls > 0);
+    std::printf("  vs ERFA 1600-2200: GMST %.2e\", GAST %.2e\" (Vondrak %.2e\"), mean "
+                "obliquity %.2e\", true %.2e\"\n",
+                w_gmst, w_gast, w_vondrak, w_mean, w_true);
+    CHECK(w_gmst < 1e-6);
+    CHECK(w_gast < 0.001);
+    CHECK(w_mean < 1e-6);
+    CHECK(w_true < 0.001);
+
+    double out = 1.0;
+    prometheia_error err;
+    CHECK(prometheia_sidereal_time_ut(c.e, kJ2000, 2, nullptr, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(out == 0.0);
+    CHECK(prometheia_obliquity(c.e, kJ2000, -1, nullptr, &out, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    iau.precession = 7;
+    CHECK(prometheia_obliquity(c.e, kJ2000, 0, &iau, &out, &err) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_sidereal_time_ut(c.e, NAN, 0, nullptr, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_obliquity(nullptr, kJ2000, 0, nullptr, &out, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+}
+
+TEST_CASE("c_api_rotations") {
+    const double eps = 23.4392911;
+    double a, b, x, y;
+    // The ecliptic's north pole is at RA 270, Dec 90 - eps; the solstice
+    // point at RA 90, Dec eps; and the reverse.
+    prometheia_ecliptic_to_equatorial(0.0, 90.0, eps, &a, &b);
+    CHECK(arcsec(a, 270.0) < 1e-9);
+    CHECK(std::fabs(b - (90.0 - eps)) * 3600.0 < 1e-9);
+    prometheia_ecliptic_to_equatorial(90.0, 0.0, eps, &a, &b);
+    CHECK(arcsec(a, 90.0) < 1e-9);
+    CHECK(std::fabs(b - eps) * 3600.0 < 1e-9);
+    prometheia_equatorial_to_ecliptic(0.0, 90.0, eps, &a, &b);
+    CHECK(arcsec(a, 90.0) < 1e-9);
+    CHECK(std::fabs(b - (90.0 - eps)) * 3600.0 < 1e-9);
+    // Round trips, every longitude in [0, 360).
+    double worst = 0.0;
+    for (double lon = 0.0; lon < 360.0; lon += 13.7)
+        for (double lat = -89.0; lat <= 89.0; lat += 11.3) {
+            prometheia_ecliptic_to_equatorial(lon, lat, eps, &a, &b);
+            CHECK(a >= 0.0);
+            CHECK(a < 360.0);
+            prometheia_equatorial_to_ecliptic(a, b, eps, &x, &y);
+            CHECK(x >= 0.0);
+            CHECK(x < 360.0);
+            worst = std::max(
+                {worst, arcsec(x, lon) * std::cos(lat * kDegToRad), std::fabs(y - lat) * 3600.0});
+        }
+    CHECK(worst < 1e-9);
+    prometheia_ecliptic_to_equatorial(10.0, 10.0, eps, nullptr, nullptr); // NULL is fine
+}
+
+} // namespace

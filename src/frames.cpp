@@ -794,6 +794,33 @@ double earth_rotation_angle(double jd_ut1) {
     return theta * kTwoPi;
 }
 
+namespace {
+
+// Rotates the unit vector of (a, b) about x by angle e and returns the
+// spherical angles of the result: a in [0, 2pi), b by atan2, never asin.
+void rotate_x(double a, double b, double e, double& a_out, double& b_out) {
+    const double cb = std::cos(b), x = cb * std::cos(a), y = cb * std::sin(a), z = std::sin(b);
+    const double ce = std::cos(e), se = std::sin(e);
+    const double y2 = y * ce - z * se, z2 = y * se + z * ce;
+    double a2 = (x == 0.0 && y2 == 0.0) ? 0.0 : std::atan2(y2, x);
+    if (a2 < 0.0)
+        a2 += kTwoPi;
+    if (a2 >= kTwoPi)
+        a2 = 0.0;
+    a_out = a2;
+    b_out = std::atan2(z2, std::hypot(x, y2));
+}
+
+} // namespace
+
+void ecliptic_to_equatorial(double lon, double lat, double eps, double& ra, double& dec) {
+    rotate_x(lon, lat, eps, ra, dec);
+}
+
+void equatorial_to_ecliptic(double ra, double dec, double eps, double& lon, double& lat) {
+    rotate_x(ra, dec, -eps, lon, lat);
+}
+
 double gmst_rad(double jd_ut1, double jd_tt) {
     const double theta = earth_rotation_angle(jd_ut1) / kTwoPi;
     const double T = centuries(jd_tt);

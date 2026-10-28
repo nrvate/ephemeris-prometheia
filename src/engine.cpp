@@ -3622,6 +3622,32 @@ Result<Engine::HouseResult> Engine::houses_ut(houses::System system, double jd_u
     return houses_at(system, impl_->ut1_to_tt(jd_ut1), jd_ut1, site, o);
 }
 
+Result<double> Engine::sidereal_time_ut(double jd_ut1, bool apparent, Precession precession) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_ut1) || std::fabs(jd_ut1) > 1e8)
+        return make_error(ErrorCode::ArgumentError, "sidereal time needs a finite Julian date");
+    const double jd_tt = impl_->ut1_to_tt(jd_ut1);
+    double st = frames::gmst_rad(jd_ut1, jd_tt);
+    if (apparent) {
+        const auto& f = impl_->frames_at(jd_tt, true, precession);
+        st = frames::gast_rad(jd_ut1, jd_tt, f.dpsi, f.eps_mean);
+    }
+    double d = std::fmod(st * kRad2Deg, 360.0);
+    if (d < 0.0)
+        d += 360.0;
+    return d >= 360.0 ? 0.0 : d;
+}
+
+Result<double> Engine::obliquity(double jd_tt, bool true_obliquity, Precession precession) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt) || std::fabs(jd_tt) > 1e8)
+        return make_error(ErrorCode::ArgumentError, "the obliquity needs a finite Julian date");
+    const auto& f = impl_->frames_at(jd_tt, true_obliquity, precession);
+    return (true_obliquity ? f.eps_mean + f.deps : f.eps_mean) * kRad2Deg;
+}
+
 Result<CalcResult> Engine::calc_orbit_point_ut(int id, OrbitPoint point, OrbitElements elements,
                                                double jd_ut1, const CalcOptions& o) {
     if (!impl_)

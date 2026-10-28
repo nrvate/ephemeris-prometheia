@@ -68,21 +68,37 @@ date (66.56° in 2000).
     100° from anything meaningful.
   - We never substitute another system. `swetest` substitutes Porphyry and
     says so.
+- **Cusps out of zodiacal order are refused** (maintainer, 2026-10-27).
+  Every answer's twelve cusps go once round the zodiac, each the next
+  eastward, and their forward gaps sum to 360°. Where a system's
+  construction gives them out of order, its houses would overlap (the gaps
+  summed to 720–3960°), and the system is refused at that latitude and
+  sidereal time. It is never reordered or replaced. The Astrolog side
+  found the shape in their own house work and asked for the invariant.
+  - **Regiomontanus and Campanus** go out of order only inside a polar
+    circle, at some sidereal times: from 66.57° at ε = 23.44°, 0.01° past
+    the circle.
+  - **Topocentric** goes out of order from about 1.6° short of a polar
+    circle: 64.98° at ε = 23.44°, 63.87° at 24.5°, 66.50° at 22°. Each cusp
+    is the eastern point of its pole's horizon, taken literally, and the
+    pole heights j/3·tan φ there can exceed 90° − ε. `swetest` reorders
+    these cusps, but the definition gives no rule for reordering, so we
+    refuse instead.
+  - Below that, every system but Placidus and Koch answers at every
+    sidereal time. Porphyry, Equal, Whole Sign, Alcabitius, Morinus and
+    Meridian answer at every latitude short of the pole.
 - **Regiomontanus' and Campanus' cusp 10** is where their meridian circle
   meets the ecliptic on the zenith's half, which is above the horizon.
   - That is the MC, except when the MC culminates below the horizon, and
-    then it is the IC. Below the polar circles the two coincide, so a sweep
-    to ±66° cannot tell them apart.
+    then it is the IC. Wherever it is the IC, the cusps are out of order
+    and the system is refused, so in every answer cusp 10 is the MC.
   - `swetest` agrees on the cusp. It also reports that point as the MC for
     these systems, and for Topocentric. We keep the MC at hour angle 0.
-- **Topocentric** answers at every latitude short of the pole. Each cusp is
-  the eastern point of its pole's horizon, taken literally, and cusp 10 is
-  the MC.
-  - Inside a polar circle `swetest` reorders Topocentric cusps. When the MC
-    culminates below the horizon it takes the IC as cusp 10 and mirrors the
-    quadrants. At other hours it flips single opposite pairs.
-  - There, the pole heights j/3·tan φ can themselves exceed 90° − ε. The
-    definition gives no rule for reordering, so we do not reorder.
+- **Topocentric's cusp 10** is the MC.
+- **The Ascendant is the rising point at every latitude.** Inside a polar
+  circle the ecliptic's two horizon points can swap sides. The Ascendant is
+  always the eastern one: on the horizon to 1e-13° and never in the west,
+  over ±89.5° and every half degree of ARMC (258,480 cases, 2026-10-27).
 
 ## Where nothing is defined
 
@@ -115,13 +131,20 @@ date (66.56° in 2000).
     (67°, 70°, 80° and −70°, six hours each).
   - Graded at `swetest`'s own printed ARMC and on its obliquity (Vondrák's
     ε_A series plus nutation, [CROSS-TEST.md](CROSS-TEST.md)).
-  - 18,214 values; worst **0.0056″**.
+  - 17,969 values; worst **0.0056″**. The 15 polar rows where
+    Regiomontanus, Campanus or Topocentric fall out of zodiacal order are
+    refused, not compared (`swetest` prints them, reordering Topocentric's).
   - The exception is Koch within a degree of a polar circle, at **0.0334″**.
     There the MC's semi-arc moves cusp 11 by 0.087″ per milliarcsecond of
     obliquity (measured at −66°), and `swetest`'s nutation differs from the
     full IAU 2000A at the sub-milliarcsecond level. The bound there is 0.1″,
     and 0.01″ elsewhere.
-- **Sidereal time:** within 0.00075″ of ERFA's `gst06a`.
+- **Sidereal time:** within 0.00075″ of ERFA's `gst06a` at the fixtures'
+  ARMCs. Through the C API at six epochs over 1600–2200 with a fixed ΔT
+  (`c_api_sidereal_time_and_obliquity_match_erfa`): GMST 3e-8″ from
+  `gmst06`, GAST 0.00015″ from `gst06a`, the IAU 2006 mean obliquity 1e-11″
+  from `obl06`, and the true obliquity 0.00005″ from `obl06` plus
+  `nut06a`'s Δε.
   - `swetest`'s ARMC departs from that IAU 2006/2000A sidereal time by
     +1.26″ at 1600, +0.37″ at 1800, −1.79″ at 2100 and −0.68″ at 2200.
   - It agrees to its printed resolution over 1900–2026.
@@ -130,9 +153,15 @@ date (66.56° in 2000).
     sign.
 - **Checked from the definitions:**
   - the polar refusals on both sides of the circle, 0.001° apart;
-  - the other nine systems answering at 80°;
-  - Regiomontanus' and Campanus' cusp 10 above the horizon, which is the IC
-    in the sample;
+  - the other nine systems answering at 80°, save Regiomontanus, Campanus
+    and Topocentric where their cusps fall out of order;
+  - the cusp order itself: all eleven systems at every half degree of
+    latitude to ±89.9°, every 15° of ARMC and two obliquities, either going
+    once round the zodiac or refused, and only the systems named above
+    refusing (`house_cusps_go_round_the_zodiac_once_or_are_refused`; the
+    0.1°, 7.5°, three-obliquity sweep is a report case);
+  - Regiomontanus' and Campanus' cusp 10 above the horizon, and the MC in
+    every answer;
   - the MC at hour angle 0;
   - Topocentric's cusp 10 as the MC;
   - every house under 180°, running eastward;
@@ -145,6 +174,8 @@ date (66.56° in 2000).
 ## Served as
 
 - `Engine::houses` (TT) and `houses_ut` (UT1), C++;
+- the C API's `prometheia_calc_houses`, `_ut` and `prometheia_houses_from_armc`
+  ([C_API.md](C_API.md), "Houses");
 - the JSON/MCP `houses` tool ([JSON_API.md](JSON_API.md), "Houses");
 - protocol v4 object kind 6 in `prometheiad` ([SERVER.md](SERVER.md),
   "House points"), as the drop Astrolog wrote with us specifies (their
@@ -158,7 +189,10 @@ Astrolog's numeric rows, made from §3.5b's definitions alone by their
 `houses::compute` against them at each row's own ARMC and obliquity.
 - **Values:** worst 0.000002″, which is the cells' nine-decimal rounding,
   Placidus included.
-- **Refusals:** no disagreement in either direction.
+- **Refusals:** none where the rows refuse and we answer. Since
+  2026-10-27, 66 rows (Topocentric chiefly) give cusps where we refuse
+  them as out of zodiacal order. The test accepts a refusal there only
+  when the row's own cusps are out of order, and they are in all 66.
 - **The tolerance's history:** the rows were first printed to seven
   decimals, against a stated tolerance of 0.0001″ that seven decimals
   cannot express (their rounding alone is 0.00018″). We reported it, and

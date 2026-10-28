@@ -13,6 +13,19 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **C API: houses, sidereal time, obliquity, rotations**
+  ([docs/C_API.md](docs/C_API.md), "Houses"): `prometheia_calc_houses`,
+  `_ut`, `prometheia_houses_from_armc`, `prometheia_sidereal_time_ut`,
+  `prometheia_obliquity`, `prometheia_ecliptic_to_equatorial` and
+  `_equatorial_to_ecliptic`, with the `prometheia_houses` struct. The ABI
+  version is unchanged; the shape was announced to Astrolog first.
+- **Houses whose cusps fall out of zodiacal order are refused**
+  ([docs/HOUSES.md](docs/HOUSES.md), "Inside a polar circle"). Near the
+  poles, Regiomontanus, Campanus and Topocentric gave cusps whose houses
+  overlapped (the gaps summed to 720–3960°). They are now refused there with
+  a message naming the system, and never reordered or replaced. The change
+  reaches every surface: the engine, the C API, the JSON tool and v4 kind 6.
+  Topocentric is affected from about 1.6° short of a polar circle.
 - **Catalog answers no longer depend on request order**
   ([docs/ENGINE.md](docs/ENGINE.md), "Memo"). The perturber tables were
   anchored at the first instant an engine was asked for, so asking for a

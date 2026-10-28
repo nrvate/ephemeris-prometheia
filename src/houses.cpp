@@ -134,8 +134,9 @@ Error undefined(System s, double lat_rad, double eps_rad) {
     std::snprintf(buf, sizeof buf,
                   "%s cusps are undefined at latitude %.4f deg, inside the polar circle (%.4f deg "
                   "at this date), where part of the ecliptic never rises or sets. Porphyry, "
-                  "Regiomontanus, Campanus, Equal, Whole Sign, Alcabitius, Morinus, Meridian and "
-                  "Topocentric answer at this latitude",
+                  "Equal, Whole Sign, Alcabitius, Morinus and Meridian answer at this latitude, "
+                  "and Regiomontanus, Campanus and Topocentric wherever their cusps stay in "
+                  "zodiacal order",
                   std::string(name(s)).c_str(), lat_rad / kDeg, 90.0 - eps_rad / kDeg);
     return make_error(ErrorCode::ArgumentError, buf);
 }
@@ -245,6 +246,19 @@ std::string_view token(System s) {
 }
 std::string_view name(System s) {
     return entry(s).name;
+}
+
+// Cusps that do not run once round the zodiac in order: their forward gaps
+// sum to 720 degrees or more instead of 360, so the houses overlap.
+Error out_of_order(System s, double lat_rad, double armc_rad) {
+    char buf[512];
+    std::snprintf(buf, sizeof buf,
+                  "%s cusps fall out of zodiacal order at latitude %.4f deg at this sidereal time "
+                  "(ARMC %.4f deg): near the pole the ecliptic crosses the system's house circles "
+                  "out of sequence, so its houses would overlap. Porphyry, Equal, Whole Sign, "
+                  "Alcabitius, Morinus and Meridian answer at every latitude short of the pole",
+                  std::string(name(s)).c_str(), lat_rad / kDeg, wrap_deg(armc_rad / kDeg));
+    return make_error(ErrorCode::ArgumentError, buf);
 }
 
 Result<Houses> compute(System s, double armc_rad, double eps_rad, double lat_rad) {
@@ -412,8 +426,16 @@ Result<Houses> compute(System s, double armc_rad, double eps_rad, double lat_rad
         }
         break;
     }
-    for (int k = 0; k < 12; ++k)
+    double around = 0.0;
+    for (int k = 0; k < 12; ++k) {
         h.cusp_deg[k] = wrap_deg(c[k] / kDeg);
+        around += wrap_rad(c[(k + 1) % 12] - c[k]);
+    }
+    // In order, the gaps sum to one turn, to rounding; out of order, to two
+    // or more. Regiomontanus and Campanus can do this only inside a polar
+    // circle, Topocentric from about 1.6 degrees short of one (2026-10-27).
+    if (around > 3.0 * kPi)
+        return out_of_order(s, lat_rad, armc_rad);
     return h;
 }
 

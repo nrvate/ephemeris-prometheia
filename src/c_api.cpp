@@ -122,6 +122,18 @@ static_assert(PROMETHEIA_SIDEREAL_USER == int(SiderealMode::User));
 static_assert(PROMETHEIA_SIDEREAL_PLANE_DATE == int(SiderealPlane::EclipticOfDate));
 static_assert(PROMETHEIA_SIDEREAL_PLANE_ANCHOR == int(SiderealPlane::EclipticOfAnchor));
 static_assert(PROMETHEIA_SIDEREAL_PLANE_INVARIABLE == int(SiderealPlane::Invariable));
+// The C house systems are protocol v4's A.22 values, which are the engine's.
+static_assert(PROMETHEIA_HOUSES_PLACIDUS == int(houses::System::Placidus));
+static_assert(PROMETHEIA_HOUSES_KOCH == int(houses::System::Koch));
+static_assert(PROMETHEIA_HOUSES_PORPHYRY == int(houses::System::Porphyry));
+static_assert(PROMETHEIA_HOUSES_REGIOMONTANUS == int(houses::System::Regiomontanus));
+static_assert(PROMETHEIA_HOUSES_CAMPANUS == int(houses::System::Campanus));
+static_assert(PROMETHEIA_HOUSES_EQUAL == int(houses::System::Equal));
+static_assert(PROMETHEIA_HOUSES_WHOLE_SIGN == int(houses::System::WholeSign));
+static_assert(PROMETHEIA_HOUSES_ALCABITIUS == int(houses::System::Alcabitius));
+static_assert(PROMETHEIA_HOUSES_MORINUS == int(houses::System::Morinus));
+static_assert(PROMETHEIA_HOUSES_MERIDIAN == int(houses::System::Meridian));
+static_assert(PROMETHEIA_HOUSES_TOPOCENTRIC == int(houses::System::Topocentric));
 
 // C options -> CalcOptions, rejecting out-of-range selector fields.
 prometheia_status translate(const prometheia_options& c, CalcOptions& o, prometheia_error* err) {
@@ -206,6 +218,75 @@ void fill(const CalcResult& r, prometheia_result& out) {
     // Provenance strings are std::string members of the engine, so the
     // view's data is NUL-terminated.
     out.source = r.provenance.source.empty() ? "" : r.provenance.source.data();
+}
+
+void fill(const houses::Houses& h, prometheia_houses& out) {
+    for (int k = 0; k < 12; ++k)
+        out.cusp_deg[k] = h.cusp_deg[size_t(k)];
+    out.asc_deg = h.angles.asc_deg;
+    out.mc_deg = h.angles.mc_deg;
+    out.armc_deg = h.angles.armc_deg;
+    out.vertex_deg = h.angles.vertex_deg;
+    out.equatorial_asc_deg = h.angles.equatorial_asc_deg;
+}
+
+bool house_system(int system, houses::System& s, prometheia_error* err, prometheia_status& status) {
+    if (system < PROMETHEIA_HOUSES_PLACIDUS || system > PROMETHEIA_HOUSES_TOPOCENTRIC) {
+        status = argument(err, "house system out of range");
+        return false;
+    }
+    s = static_cast<houses::System>(system);
+    return true;
+}
+
+template <typename Call>
+prometheia_status houses_common(prometheia_engine* engine, int system, double jd, double lon_deg,
+                                double lat_deg, const prometheia_options* opts,
+                                prometheia_houses* out, prometheia_error* err, Call call) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!out)
+        return argument(err, "houses output is NULL");
+    houses::System s{};
+    if (prometheia_status st; !house_system(system, s, err, st))
+        return st;
+    return guarded(err, [&] {
+        CalcOptions o;
+        if (opts) {
+            if (prometheia_status st = translate(*opts, o, err); st != PROMETHEIA_OK)
+                return st;
+        }
+        frames::GeoSite site;
+        site.lon_rad = lon_deg * kDegToRad;
+        site.lat_rad = lat_deg * kDegToRad;
+        auto r = call(engine->engine, s, jd, site, o);
+        if (!r)
+            return report(err, r.error());
+        fill(r.value().houses, *out);
+        out->obliquity_deg = r.value().obliquity_deg;
+        if (r.value().ayanamsa_deg) {
+            out->ayanamsa_deg = *r.value().ayanamsa_deg;
+            out->flags |= PROMETHEIA_HAS_AYANAMSA;
+        }
+        return succeed(err);
+    });
+}
+
+// The precession model a call reads from its options (NULL: the default).
+bool precession_of(const prometheia_options* opts, Precession& p, prometheia_error* err,
+                   prometheia_status& status) {
+    p = CalcOptions{}.precession;
+    if (!opts)
+        return true;
+    if (opts->precession != PROMETHEIA_PRECESSION_IAU2006 &&
+        opts->precession != PROMETHEIA_PRECESSION_VONDRAK2011) {
+        status = argument(err, "options: precession model out of range");
+        return false;
+    }
+    p = static_cast<Precession>(opts->precession);
+    return true;
 }
 
 // NUL-terminated copy, truncated to fit.
@@ -773,6 +854,114 @@ prometheia_status prometheia_calc_star_ut(prometheia_engine* engine, int index, 
                        [](Engine& e, int i, double jd, const CalcOptions& o) {
                            return e.calc_star_ut(size_t(i), jd, o);
                        });
+}
+
+prometheia_status prometheia_calc_houses(prometheia_engine* engine, int system, double jd_tt,
+                                         double lon_deg, double lat_deg,
+                                         const prometheia_options* opts, prometheia_houses* out,
+                                         prometheia_error* err) {
+    return houses_common(engine, system, jd_tt, lon_deg, lat_deg, opts, out, err,
+                         [](Engine& e, houses::System s, double jd, const frames::GeoSite& site,
+                            const CalcOptions& o) { return e.houses(s, jd, site, o); });
+}
+
+prometheia_status prometheia_calc_houses_ut(prometheia_engine* engine, int system, double jd_ut1,
+                                            double lon_deg, double lat_deg,
+                                            const prometheia_options* opts, prometheia_houses* out,
+                                            prometheia_error* err) {
+    return houses_common(engine, system, jd_ut1, lon_deg, lat_deg, opts, out, err,
+                         [](Engine& e, houses::System s, double jd, const frames::GeoSite& site,
+                            const CalcOptions& o) { return e.houses_ut(s, jd, site, o); });
+}
+
+prometheia_status prometheia_houses_from_armc(int system, double armc_deg, double obliquity_deg,
+                                              double lat_deg, prometheia_houses* out,
+                                              prometheia_error* err) {
+    if (out)
+        std::memset(out, 0, sizeof *out);
+    if (!out)
+        return argument(err, "houses output is NULL");
+    houses::System s{};
+    if (prometheia_status st; !house_system(system, s, err, st))
+        return st;
+    return guarded(err, [&] {
+        auto h = houses::compute(s, armc_deg * kDegToRad, obliquity_deg * kDegToRad,
+                                 lat_deg * kDegToRad);
+        if (!h)
+            return report(err, h.error());
+        fill(h.value(), *out);
+        out->obliquity_deg = obliquity_deg;
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_sidereal_time_ut(prometheia_engine* engine, double jd_ut1, int kind,
+                                              const prometheia_options* opts, double* out_deg,
+                                              prometheia_error* err) {
+    if (out_deg)
+        *out_deg = 0.0;
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!out_deg)
+        return argument(err, "sidereal time output is NULL");
+    if (kind != PROMETHEIA_SIDEREAL_TIME_MEAN && kind != PROMETHEIA_SIDEREAL_TIME_APPARENT)
+        return argument(err, "sidereal time kind out of range");
+    Precession p{};
+    if (prometheia_status st; !precession_of(opts, p, err, st))
+        return st;
+    return guarded(err, [&] {
+        auto r =
+            engine->engine.sidereal_time_ut(jd_ut1, kind == PROMETHEIA_SIDEREAL_TIME_APPARENT, p);
+        if (!r)
+            return report(err, r.error());
+        *out_deg = r.value();
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_obliquity(prometheia_engine* engine, double jd_tt, int kind,
+                                       const prometheia_options* opts, double* out_deg,
+                                       prometheia_error* err) {
+    if (out_deg)
+        *out_deg = 0.0;
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!out_deg)
+        return argument(err, "obliquity output is NULL");
+    if (kind != PROMETHEIA_OBLIQUITY_MEAN && kind != PROMETHEIA_OBLIQUITY_TRUE)
+        return argument(err, "obliquity kind out of range");
+    Precession p{};
+    if (prometheia_status st; !precession_of(opts, p, err, st))
+        return st;
+    return guarded(err, [&] {
+        auto r = engine->engine.obliquity(jd_tt, kind == PROMETHEIA_OBLIQUITY_TRUE, p);
+        if (!r)
+            return report(err, r.error());
+        *out_deg = r.value();
+        return succeed(err);
+    });
+}
+
+void prometheia_ecliptic_to_equatorial(double lon_deg, double lat_deg, double obliquity_deg,
+                                       double* ra_deg, double* dec_deg) {
+    double ra = 0.0, dec = 0.0;
+    frames::ecliptic_to_equatorial(lon_deg * kDegToRad, lat_deg * kDegToRad,
+                                   obliquity_deg * kDegToRad, ra, dec);
+    if (ra_deg)
+        *ra_deg = ra / kDegToRad;
+    if (dec_deg)
+        *dec_deg = dec / kDegToRad;
+}
+
+void prometheia_equatorial_to_ecliptic(double ra_deg, double dec_deg, double obliquity_deg,
+                                       double* lon_deg, double* lat_deg) {
+    double lon = 0.0, lat = 0.0;
+    frames::equatorial_to_ecliptic(ra_deg * kDegToRad, dec_deg * kDegToRad,
+                                   obliquity_deg * kDegToRad, lon, lat);
+    if (lon_deg)
+        *lon_deg = lon / kDegToRad;
+    if (lat_deg)
+        *lat_deg = lat / kDegToRad;
 }
 
 const char* prometheia_constellation_at(double ra_deg, double dec_deg) {

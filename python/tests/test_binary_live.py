@@ -106,7 +106,7 @@ class Binary(unittest.TestCase):
                      {"point": "ascending-node", "of": "Mars", "method": "mean"}]),
                  lambda c: c.houses(time=t, site={"lon_deg": 18.4, "lat_deg": -33.9},
                                     systems=["W"], zodiac="lahiri"),
-                 lambda c: c.houses(time=t, site={"lon_deg": 0.0, "lat_deg": 70.0},
+                 lambda c: c.houses(time=t, site={"lon_deg": 0.0, "lat_deg": 66.0},
                                     systems=["R"])]
         # One system per call: v4 bounds the objects in a request (WELCOME), 16 points each.
         calls += [lambda c, h=h: c.houses(time=t, site=site, zodiac="lahiri", systems=[h])
@@ -125,6 +125,10 @@ class Binary(unittest.TestCase):
             err = c.houses(time=t, site=polar, systems=["placidus"])["results"][0]["error"]
             self.assertEqual(err["code"], "undefined-at-latitude")
             self.assertIn("polar circle", err["message"])
+            # Regiomontanus' cusps fall out of zodiacal order here at this hour.
+            err = c.houses(time=t, site=polar, systems=["R"])["results"][0]["error"]
+            self.assertEqual(err["code"], "undefined-at-latitude")
+            self.assertIn("fall out of zodiacal order", err["message"])
             err = c.positions(time=t, objects=[{"asteroid": "2060"}])["results"][0]["error"]
             self.assertTrue(err["message"])  # no catalog on this server: refused, not zeros
         err = self.stdio.positions(time=t, objects=["Chiron"])["results"][0]["error"]

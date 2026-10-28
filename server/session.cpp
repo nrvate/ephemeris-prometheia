@@ -299,10 +299,12 @@ std::string house_point_name(houses::System sys, uint8_t point) {
     return out + " cusp " + std::to_string(point);
 }
 
-// A house system's refusal (a polar circle, a pole, a degenerate instant) is
-// "undefined here"; anything else is classified as for any object.
+// A house system's refusal (a polar circle, cusps out of zodiacal order, a
+// pole, a degenerate instant) is "undefined here"; anything else is
+// classified as for any object.
 bool house_undefined(const Error& e) {
     return e.message.find("cusps are undefined") != std::string::npos ||
+           e.message.find("cusps fall out of zodiacal order") != std::string::npos ||
            e.message.find("strictly between -90 and 90") != std::string::npos;
 }
 
@@ -981,8 +983,9 @@ private:
                 // nor the instant.
                 const bool undefined = house_undefined(v.error());
                 s.first_err = undefined ? "this house system has no cusps here: inside a polar "
-                                          "circle, at a pole, or where the ecliptic lies along "
-                                          "one of its circles"
+                                          "circle, where its cusps fall out of zodiacal order, "
+                                          "at a pole, or where the ecliptic lies along one of "
+                                          "its circles"
                                         : clean_err_text(v.error());
                 s.code = undefined ? eph::kOErrUndefinedHere : obj_err_of(v.error());
             }

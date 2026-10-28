@@ -37,8 +37,9 @@ with prometheia.Client(ephemeris="ephe") as c:   # a directory with DE440, or a 
 - **Polar latitudes:** a system with no defined cusps there refuses; it never
   substitutes another. That is Placidus and Koch inside a polar circle.
   Topocentric, which the first version of this plan listed too, is built
-  from pole heights, is defined at every latitude short of the pole, and
-  answers.
+  from pole heights and defined at every latitude short of the pole. Since
+  2026-10-27 it, Regiomontanus and Campanus are refused where their cusps
+  fall out of zodiacal order ([HOUSES.md](HOUSES.md)).
 - **Home:** `python/` in this repository, versioned with the releases and
   covered by `tools/gate.sh`. Publishing to PyPI is a later, separate
   decision.
