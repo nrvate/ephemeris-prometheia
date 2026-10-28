@@ -174,6 +174,13 @@ std::optional<Kind> kind_from_name(std::string_view name);
 std::string_view standing_name(Standing s);    // "none", "iau", "traditional", "defined"
 std::string_view quality_name(MatchQuality q); // "exact", "alias", "old-designation", "prefix"
 
+namespace detail {
+// A catalog float as the decimal it was written from (H -1.26 is -1.26, not
+// -1.2599999904632568): the shortest decimal that reads back as the float,
+// read as a double. Exposed for the tests of its two code paths.
+double widened(float f);
+} // namespace detail
+
 } // namespace prometheia::registry
 
 #endif // PROMETHEIA_REGISTRY_HPP

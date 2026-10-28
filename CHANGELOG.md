@@ -13,6 +13,12 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Fixed: the build for macOS below 26.** The object registry (A-9)
+  called floating-point `std::to_chars` and `std::from_chars`, which Apple's
+  libc++ marks unavailable below macOS 13.3 and 26.0. Astrolog's macOS 12
+  build failed on them. They are now behind the `__cpp_lib_to_chars` guard
+  `src/hypotheticals.cpp` already uses, with a classic-locale fallback equal
+  to `to_chars` bit for bit (docs/EMBEDDING.md, "Platforms").
 - **Corpus and engines** ([docs/ENGINE.md](docs/ENGINE.md), "Threads"),
   A-14 of astromcp's port plan. What an engine reads is a `Corpus`
   (`Corpus::open`, `add_*`, `freeze`). A frozen corpus is read-only and

@@ -75,6 +75,12 @@ prometheia_test(radau tests/test_radau.cpp)
 prometheia_test(de tests/test_de.cpp)
 prometheia_test(spk tests/test_spk.cpp)
 prometheia_test(io tests/test_io.cpp)
+prometheia_test(widened tests/test_widened.cpp)
+# The same, through the code path of platforms without floating-point
+# <charconv> (Apple's libc++ below macOS 26): registry.cpp built again here
+# with the fallbacks, ahead of the library's copy.
+prometheia_test(widened_fallbacks tests/test_widened.cpp src/registry.cpp)
+target_compile_definitions(test_widened_fallbacks PRIVATE PROMETHEIA_PORTABLE_FALLBACKS)
 prometheia_test(engine tests/test_engine.cpp)
 prometheia_test(engine_catalog tests/test_engine_catalog.cpp)
 prometheia_test(engine_threads tests/test_engine_threads.cpp)

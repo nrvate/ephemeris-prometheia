@@ -8,7 +8,11 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <iomanip>
+#include <ios>
 #include <limits>
+#include <locale>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -202,16 +206,6 @@ std::string star_designation(const stars::Object& s) {
 Kind star_kind(const stars::Object& s) {
     return s.kind == stars::Kind::Star || s.kind == stars::Kind::DoubleStar ? Kind::Star
                                                                             : Kind::DeepSky;
-}
-
-// A catalog float as the decimal it was written from: H -1.26 reads back
-// as -1.2599999904632568 when widened bit for bit.
-double widened(float f) {
-    char buf[32];
-    const auto r = std::to_chars(buf, buf + sizeof buf, f);
-    double d = double(f);
-    std::from_chars(buf, r.ptr, d);
-    return d;
 }
 
 int quality_rank(MatchQuality q) {
@@ -560,11 +554,11 @@ struct Registry::Impl {
         out.designation = cb.names.designation;
         out.provisional_designation = cb.names.provisional_designation;
         if (r.flags & catalog::RecordFlags::kHg) {
-            out.h_mag = widened(r.h_mag);
-            out.g_slope = widened(r.g_slope);
+            out.h_mag = detail::widened(r.h_mag);
+            out.g_slope = detail::widened(r.g_slope);
         }
         if (r.flags & catalog::RecordFlags::kDiameter)
-            out.diameter_km = widened(r.diameter_km);
+            out.diameter_km = detail::widened(r.diameter_km);
         out.elements_epoch_jd = r.epoch_jtdb;
         // Two-body mean motion about the Sun, the body massless (the
         // Gaussian constant), and retrograde negative.
@@ -1037,5 +1031,62 @@ Result<Page> Registry::list(const Filter& f, uint64_t cursor, size_t max) {
     page.next = section < kSecEnd ? cursor_of(section, index) : 0;
     return page;
 }
+
+namespace detail {
+
+// A catalog float as the decimal it was written from: H -1.26 reads back
+// as -1.2599999904632568 when widened bit for bit. The decimal is the
+// shortest that reads back as the float. With floating-point <charconv>
+// (__cpp_lib_to_chars), to_chars finds it. Apple's libc++ marks the
+// floating-point to_chars and from_chars unavailable below macOS 13.3 and
+// 26.0, and advertises no __cpp_lib_to_chars; there, and under
+// PROMETHEIA_PORTABLE_FALLBACKS, which tests this path on Linux, it is the
+// first of 1 to 9 significant digits whose correctly rounded decimal reads
+// back as the float. Streams in the classic locale write and read it, so a
+// process locale's decimal comma cannot enter.
+double widened(float f) {
+    if (!std::isfinite(f))
+        return double(f);
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L &&                                \
+    !defined(PROMETHEIA_PORTABLE_FALLBACKS)
+    char buf[32];
+    const auto r = std::to_chars(buf, buf + sizeof buf, f);
+    double d = double(f);
+    std::from_chars(buf, r.ptr, d);
+    return d;
+#else
+    for (int digits = 1; digits <= std::numeric_limits<float>::max_digits10; ++digits) {
+        std::ostringstream out;
+        out.imbue(std::locale::classic());
+        out << std::setprecision(digits) << f;
+        const std::string text = out.str();
+        std::istringstream back(text);
+        back.imbue(std::locale::classic());
+        float g = 0.0f;
+        if (!(back >> g) || g != f)
+            continue;
+        // From 2^24 up every float is a whole number, and to_chars writes it
+        // in full when that is no longer than the shortest scientific form
+        // (the exact value wins the tie between fixed forms of one length).
+        if (std::fabs(f) >= 16777216.0f) {
+            std::ostringstream fixed, sci;
+            fixed.imbue(std::locale::classic());
+            sci.imbue(std::locale::classic());
+            fixed << std::fixed << std::setprecision(0) << double(f);
+            sci << std::scientific << std::setprecision(digits - 1) << f;
+            if (fixed.str().size() <= sci.str().size())
+                return double(f);
+        }
+        std::istringstream wide(text);
+        wide.imbue(std::locale::classic());
+        double d = 0.0;
+        if (wide >> d)
+            return d;
+    }
+    return double(f);
+#endif
+}
+
+} // namespace detail
 
 } // namespace prometheia::registry

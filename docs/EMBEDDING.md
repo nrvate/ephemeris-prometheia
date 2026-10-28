@@ -176,6 +176,17 @@ this machine, which is too long for the gate:
   - Floating-point `std::from_chars` (`src/hypotheticals.cpp`), which
     Apple's libc++ long lacked. Where `__cpp_lib_to_chars` is not
     advertised, a classic-locale stream reads the number.
+  - Floating-point `std::to_chars` and `std::from_chars` in the registry's
+    `widened()` (`src/registry.cpp`, A-9), which had no such guard.
+    Astrolog's macOS job failed on them (run 40640400077, our `2fdab7d`,
+    Xcode 26.6 SDK, `MACOSX_DEPLOYMENT_TARGET=12.0`): Apple's libc++ marks
+    them unavailable below macOS 13.3 and 26.0. They now sit behind the
+    same guard, and the fallback finds the shortest decimal with
+    classic-locale streams. It equals `to_chars` bit for bit on 2.2
+    million floats, random bit patterns included. `test_widened` checks
+    both paths in the gate: it is built a second time with
+    `PROMETHEIA_PORTABLE_FALLBACKS`, and a fault injected into the fallback
+    fails only that build.
   - Catalog offsets through a 32-bit `long` on Windows. The DE, SPK and
     catalog readers now share `io::RandomAccessFile` (`src/io.cpp`), which
     reads at 64-bit offsets: `pread` on POSIX, `ReadFile` with an
