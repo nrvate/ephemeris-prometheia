@@ -10,7 +10,8 @@ the GIL while the engine works.
 import threading
 
 from cpython.pythread cimport PyThread_get_thread_ident
-from libc.string cimport memset
+from cpython.mem cimport PyMem_Free, PyMem_Malloc
+from libc.string cimport memcpy, memset
 
 from prometheia cimport cprometheia as c
 
@@ -281,12 +282,40 @@ cdef class Event:
         return "Event(jd_ut1=%r, outcome=%r)" % (self.jd_ut1, self.outcome)
 
 
+KINDS = {"planet": c.PROMETHEIA_KIND_PLANET, "moon": c.PROMETHEIA_KIND_MOON,
+         "lunar-point": c.PROMETHEIA_KIND_LUNAR_POINT,
+         "orbit-point": c.PROMETHEIA_KIND_ORBIT_POINT,
+         "hypothetical": c.PROMETHEIA_KIND_HYPOTHETICAL, "star": c.PROMETHEIA_KIND_STAR,
+         "deep-sky": c.PROMETHEIA_KIND_DEEP_SKY, "asteroid": c.PROMETHEIA_KIND_ASTEROID,
+         "comet": c.PROMETHEIA_KIND_COMET}
+_KIND_NAMES = {v: k for k, v in KINDS.items()}
+_STANDINGS = {c.PROMETHEIA_STANDING_NONE: "none", c.PROMETHEIA_STANDING_IAU: "iau",
+              c.PROMETHEIA_STANDING_TRADITIONAL: "traditional",
+              c.PROMETHEIA_STANDING_DEFINED: "defined"}
+_QUALITIES = {c.PROMETHEIA_MATCH_EXACT: "exact", c.PROMETHEIA_MATCH_ALIAS: "alias",
+              c.PROMETHEIA_MATCH_OLD_DESIGNATION: "old-designation",
+              c.PROMETHEIA_MATCH_PREFIX: "prefix"}
+
+
 cdef int object_of(object obj, c.prometheia_object* out, list keep) except -1:
-    """A body by NAIF id (int); ("star", index or name); ("hypothetical",
-    token). keep holds the token's bytes while the call runs."""
+    """A body by NAIF id or SPK-ID (int); ("star", index or name);
+    ("hypothetical", token); ("orbit-point", body, point, method); or a
+    registry id (str: "sb:136199"). keep holds the bytes while the call runs."""
     memset(out, 0, sizeof(out[0]))
     if isinstance(obj, int):
         out.kind, out.id = c.PROMETHEIA_OBJECT_BODY, obj
+        return 0
+    if isinstance(obj, str):
+        token = obj.encode("utf-8")
+        keep.append(token)
+        out.kind, out.token = c.PROMETHEIA_OBJECT_ID, token
+        return 0
+    if isinstance(obj, tuple) and len(obj) == 4 and obj[0] == "orbit-point":
+        word(POINTS, obj[2], "point")
+        word(METHODS, obj[3], "method")
+        token = ("%s:%s" % (obj[2], obj[3])).encode("utf-8")
+        keep.append(token)
+        out.kind, out.id, out.token = c.PROMETHEIA_OBJECT_ORBIT_POINT, obj[1], token
         return 0
     if isinstance(obj, tuple) and len(obj) == 2 and obj[0] == "star":
         out.kind = c.PROMETHEIA_OBJECT_STAR
@@ -297,8 +326,79 @@ cdef int object_of(object obj, c.prometheia_object* out, list keep) except -1:
         keep.append(token)
         out.kind, out.token = c.PROMETHEIA_OBJECT_HYPOTHETICAL, token
         return 0
-    raise Error('an object is a NAIF id, ("star", index or name) or ("hypothetical", token)',
-                code="argument")
+    raise Error('an object is a NAIF id, ("star", index or name), ("hypothetical", token), '
+                '("orbit-point", body, point, method) or a registry id', code="argument")
+
+
+_RANK = {"exact": 0, "old-designation": 0, "alias": 1, "prefix": 2}
+
+
+cdef class Match:
+    """One object a lookup found (Context.object_lookup)."""
+    cdef readonly str id, kind, quality, name, matched
+    cdef public bint ambiguous
+
+    def __repr__(self):
+        return "Match(%r, %s, %s%s)" % (self.id, self.kind, self.quality,
+                                        ", ambiguous" if self.ambiguous else "")
+
+
+cdef Match match_of(const c.prometheia_object_match* m):
+    cdef Match out = Match.__new__(Match)
+    out.id, out.kind = text(m.id), _KIND_NAMES[m.kind]
+    out.quality, out.name, out.matched = _QUALITIES[m.quality], text(m.name), text(m.matched)
+    out.ambiguous = False
+    return out
+
+
+cdef object nan_none(double x):
+    return None if x != x else x
+
+
+cdef class ObjectInfo:
+    """What an object is (Context.object_info; docs/REGISTRY.md). Absent
+    values are None. object is the form calc() and rise_set() take."""
+    cdef readonly str id, kind, orbit_class, name, standing, standing_source
+    cdef readonly object number
+    cdef readonly str designation
+    cdef readonly list provisional_designations
+    cdef readonly object h_mag, g_slope, diameter_km, vmag, elements_epoch_jd
+    cdef readonly object mean_motion_deg_day, sidereal_mean_motion_deg_day, period_days
+    cdef readonly str source
+    cdef readonly object object
+
+    def __repr__(self):
+        return "ObjectInfo(%r, %s, %r)" % (self.id, self.kind, self.name)
+
+
+cdef ObjectInfo info_of(const c.prometheia_object_entry* i):
+    cdef ObjectInfo out = ObjectInfo.__new__(ObjectInfo)
+    out.id, out.kind = text(i.id), _KIND_NAMES[i.kind]
+    out.orbit_class = text(i.orbit_class) or None
+    out.name = text(i.name) or None
+    out.standing, out.standing_source = _STANDINGS[i.standing], text(i.standing_source) or None
+    out.number = i.number if i.number != 0 else None
+    out.designation = text(i.designation) or None
+    prov = text(i.provisional_designation)
+    out.provisional_designations = [prov] if prov else []
+    out.h_mag, out.g_slope = nan_none(i.h_mag), nan_none(i.g_slope)
+    out.diameter_km, out.vmag = nan_none(i.diameter_km), nan_none(i.vmag)
+    out.elements_epoch_jd = nan_none(i.elements_epoch_jd)
+    out.mean_motion_deg_day = nan_none(i.mean_motion_deg_day)
+    out.sidereal_mean_motion_deg_day = nan_none(i.sidereal_mean_motion_deg_day)
+    out.period_days = nan_none(i.period_days)
+    out.source = text(i.source) or None
+    token = text(i.object_token)
+    if i.object_kind == c.PROMETHEIA_OBJECT_STAR:
+        out.object = ("star", i.object_id)
+    elif i.object_kind == c.PROMETHEIA_OBJECT_HYPOTHETICAL:
+        out.object = ("hypothetical", token)
+    elif i.object_kind == c.PROMETHEIA_OBJECT_ORBIT_POINT:
+        point, method = token.split(":")
+        out.object = ("orbit-point", i.object_id, point, method)
+    else:
+        out.object = i.object_id
+    return out
 
 
 cdef bint is_ut(str scale) except -1:
@@ -345,18 +445,30 @@ cdef class Context:
                         "one per thread (Dataset.local())", code="argument")
         return self.e
 
-    def calc(self, int body, double jd, Options options=None, str scale="tt"):
-        """A body by NAIF id (catalog bodies by SPK-ID; BODIES names the
-        planets, lookup() the rest) at a TT or UT1 Julian date."""
+    def calc(self, object body, double jd, Options options=None, str scale="tt"):
+        """Any object at a TT or UT1 Julian date: a body by NAIF id
+        (catalog bodies by SPK-ID; BODIES names the planets), ("star", index
+        or name), ("hypothetical", token), ("orbit-point", body, point,
+        method), or a registry id from object_lookup() ("sb:136199")."""
         cdef c.prometheia_engine* e = self.engine()
         cdef const c.prometheia_options* o = opts_of(options)
         cdef c.prometheia_result r
         cdef c.prometheia_error err
         cdef c.prometheia_status st
         cdef bint ut = is_ut(scale)
-        with nogil:
-            st = (c.prometheia_calc_ut(e, body, jd, o, &r, &err) if ut
-                  else c.prometheia_calc(e, body, jd, o, &r, &err))
+        cdef int naif
+        cdef c.prometheia_object obj
+        cdef list keep = []
+        if type(body) is int:
+            naif = body
+            with nogil:
+                st = (c.prometheia_calc_ut(e, naif, jd, o, &r, &err) if ut
+                      else c.prometheia_calc(e, naif, jd, o, &r, &err))
+        else:
+            object_of(body, &obj, keep)
+            with nogil:
+                st = (c.prometheia_calc_object_ut(e, &obj, jd, o, &r, &err) if ut
+                      else c.prometheia_calc_object(e, &obj, jd, o, &r, &err))
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
         return position(&r)
@@ -553,6 +665,89 @@ cdef class Context:
         if st != c.PROMETHEIA_OK:
             fail(st, &err)
         return body
+
+    def object_lookup(self, str query, *, bint prefix=False, int limit=20):
+        """Every object answering to query in every namespace, best first
+        (docs/REGISTRY.md). Several matches of the best quality are an
+        ambiguity, and each says so (Match.ambiguous); nothing is chosen."""
+        cdef c.prometheia_engine* e = self.engine()
+        if limit < 1:
+            return []
+        cdef bytes q = query.encode("utf-8")
+        cdef c.prometheia_object_match* m = <c.prometheia_object_match*>PyMem_Malloc(
+            limit * sizeof(c.prometheia_object_match))
+        if m == NULL:
+            raise MemoryError()
+        cdef int n = 0
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        try:
+            st = c.prometheia_object_lookup(e, q, c.PROMETHEIA_LOOKUP_PREFIX if prefix else 0,
+                                            m, limit, &n, &err)
+            if st != c.PROMETHEIA_OK:
+                fail(st, &err)
+            out = [match_of(&m[k]) for k in range(n)]
+        finally:
+            PyMem_Free(m)
+        best = [x for x in out if _RANK[x.quality] == _RANK[out[0].quality]] if out else []
+        if len(best) > 1 and out[0].quality != "prefix":
+            for x in best:
+                x.ambiguous = True
+        return out
+
+    def object_info(self, str id):
+        """What an object is (ObjectInfo), by its registry id."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef bytes b = id.encode("utf-8")
+        cdef c.prometheia_object_entry i
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st = c.prometheia_object_info(e, b, &i, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return info_of(&i)
+
+    def object_list(self, *, kind=None, orbit_class=None, bint named_only=False,
+                    bint numbered_only=False, h_max=None, vmag_max=None, cursor=None,
+                    int limit=500):
+        """One page of registry ids passing every condition given, and the
+        cursor of the next page (None after the last). kind is a KINDS name
+        or a list of them."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef c.prometheia_object_filter f
+        c.prometheia_object_filter_init(&f)
+        if kind is not None:
+            for k in ([kind] if isinstance(kind, str) else kind):
+                f.kinds |= 1u << word(KINDS, k, "kind")
+        cdef bytes cls
+        if orbit_class is not None:
+            cls = str(orbit_class).encode("ascii")
+            if len(cls) > 7:
+                raise Error("orbit class %r is not an SBDB code" % (orbit_class,),
+                            code="argument")
+            memcpy(f.orbit_class, <const char*>cls, len(cls))
+        f.named_only, f.numbered_only = named_only, numbered_only
+        if h_max is not None:
+            f.h_max = h_max
+        if vmag_max is not None:
+            f.vmag_max = vmag_max
+        cdef unsigned long long cur = 0 if cursor is None else cursor
+        if limit < 1:
+            raise Error("limit is at least 1", code="argument")
+        cdef c.prometheia_object_match* m = <c.prometheia_object_match*>PyMem_Malloc(
+            limit * sizeof(c.prometheia_object_match))
+        if m == NULL:
+            raise MemoryError()
+        cdef int n = 0
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        try:
+            st = c.prometheia_object_list(e, &f, &cur, m, limit, &n, &err)
+            if st != c.PROMETHEIA_OK:
+                fail(st, &err)
+            ids = [text(m[k].id) for k in range(n)]
+        finally:
+            PyMem_Free(m)
+        return ids, (cur if cur != 0 else None)
 
     def hypotheticals(self):
         """The hypothetical tokens defined, in the order first defined."""

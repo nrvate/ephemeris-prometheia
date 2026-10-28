@@ -129,6 +129,12 @@ TEST_CASE("stars_lookup_forms") {
     CHECK(stars::find("ALPHA canis majoris").value() == must_find("Sirius"));
     CHECK(stars::find("Zuben Elgenubi").value() == must_find("Zubenelgenubi"));
     CHECK(stars::find("Messier 44").value() == must_find("Praesepe"));
+    CHECK(stars::at(must_find("Regulus")).iau_name);
+    CHECK(!stars::at(must_find("M 44")).iau_name);
+    CHECK(stars::at(must_find("Altarf")).iau_name); // names[0] is the IAU "Tarf"
+    // Allen (1899): Al Tarf, "the End", for beta Cancri.
+    CHECK(stars::find("Altarf").value() == must_find("bet Cnc"));
+    CHECK(stars::find("Tarf").value() == must_find("Altarf"));
     CHECK(stars::find("alf Psc").value() == must_find("Alrescha"));
     CHECK(stars::find("Cynosura").value() == must_find("Polaris"));
     // Prefix lookups add names that start with the query.

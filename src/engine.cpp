@@ -3792,6 +3792,40 @@ double body_radius_km(long id) {
 
 } // namespace
 
+Result<CalcResult> Engine::calc_object(const ObjectRef& object, double jd_tt,
+                                       const CalcOptions& o) {
+    switch (object.kind) {
+    case ObjectRef::Kind::Star:
+        if (object.id < 0)
+            return make_error(ErrorCode::ArgumentError, "a star index is 0 or more");
+        return calc_star(size_t(object.id), jd_tt, o);
+    case ObjectRef::Kind::Hypothetical:
+        return calc_hypothetical(object.token, jd_tt, o);
+    case ObjectRef::Kind::OrbitPoint:
+        return calc_orbit_point(int(object.id), object.point, object.method, jd_tt, o);
+    case ObjectRef::Kind::Body:
+        break;
+    }
+    return calc(int(object.id), jd_tt, o);
+}
+
+Result<CalcResult> Engine::calc_object_ut(const ObjectRef& object, double jd_ut1,
+                                          const CalcOptions& o) {
+    switch (object.kind) {
+    case ObjectRef::Kind::Star:
+        if (object.id < 0)
+            return make_error(ErrorCode::ArgumentError, "a star index is 0 or more");
+        return calc_star_ut(size_t(object.id), jd_ut1, o);
+    case ObjectRef::Kind::Hypothetical:
+        return calc_hypothetical_ut(object.token, jd_ut1, o);
+    case ObjectRef::Kind::OrbitPoint:
+        return calc_orbit_point_ut(int(object.id), object.point, object.method, jd_ut1, o);
+    case ObjectRef::Kind::Body:
+        break;
+    }
+    return calc_ut(int(object.id), jd_ut1, o);
+}
+
 Result<Engine::EventResult> Engine::rise_set_ut(const ObjectRef& object, Event event,
                                                 double jd_ut1_start, const frames::GeoSite& site,
                                                 const RiseSetOptions& ro) {
@@ -3816,19 +3850,7 @@ Result<Engine::EventResult> Engine::rise_set_ut(const ObjectRef& object, Event e
     o.precession = ro.precession;
     o.speed = false;
     o.sigma = false;
-    auto position = [&](double jd) -> Result<CalcResult> {
-        switch (object.kind) {
-        case ObjectRef::Kind::Star:
-            if (object.id < 0)
-                return make_error(ErrorCode::ArgumentError, "a star index is 0 or more");
-            return calc_star_ut(size_t(object.id), jd, o);
-        case ObjectRef::Kind::Hypothetical:
-            return calc_hypothetical_ut(object.token, jd, o);
-        case ObjectRef::Kind::Body:
-            break;
-        }
-        return calc_ut(int(object.id), jd, o);
-    };
+    auto position = [&](double jd) { return calc_object_ut(object, jd, o); };
     const double radius = object.kind == ObjectRef::Kind::Body ? body_radius_km(object.id) : 0.0;
     const double dip = frames::horizon_dip_deg(ro.dip_height_m);
     const double h0 =
@@ -4075,6 +4097,117 @@ Result<uint64_t> Engine::catalog_bodies() const {
     std::sort(ids.begin(), ids.end());
     impl_->distinct_bodies = uint64_t(std::unique(ids.begin(), ids.end()) - ids.begin());
     return *impl_->distinct_bodies;
+}
+
+Result<Engine::CatalogBody> Engine::catalog_body(int spkid) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    auto r = impl_->find_record_at(spkid);
+    if (!r.ok())
+        return r.error();
+    if (!r.value())
+        return make_error(ErrorCode::NotFound,
+                          "no loaded catalog carries body " + std::to_string(spkid));
+    const auto& [rec, catalog_i] = r.value().value();
+    const catalog::Names n = catalog::record_names(impl_->catalogs[catalog_i]->name_pool(), rec);
+    return CatalogBody{rec,
+                       BodyNames{std::string(n.pdes), std::string(n.name), std::string(n.prov_des)},
+                       catalog_i};
+}
+
+Result<void> Engine::for_each_catalog_record(
+    const std::function<void(size_t, const catalog::Record&, const catalog::Names&)>& fn) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    for (size_t i = 0; i < impl_->catalogs.size(); ++i) {
+        auto each = impl_->catalogs[i]->for_each(
+            [&](const catalog::Record& r, const catalog::Names& n) { fn(i, r, n); });
+        if (!each)
+            return each.error();
+    }
+    return {};
+}
+
+Result<void> Engine::for_each_catalog_name(
+    const std::function<void(size_t, uint64_t, const catalog::Names&)>& fn) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    for (size_t i = 0; i < impl_->catalogs.size(); ++i) {
+        auto each = impl_->catalogs[i]->for_each_name(
+            [&](uint64_t spkid, const catalog::Names& n) { fn(i, spkid, n); });
+        if (!each)
+            return each.error();
+    }
+    return {};
+}
+
+Result<double> Engine::orbit_point_mean_motion_deg_day(int id, OrbitPoint point) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    const bool node = point == OrbitPoint::AscendingNode || point == OrbitPoint::DescendingNode;
+    const auto unwrap = [](double d) { return d - kTwoPi * std::round(d / kTwoPi); };
+    if (id == body::kMoon) {
+        // Omega for the nodes, varpi = L - l for the apsides; both from the
+        // mean equinox of date, which general precession (phi[8]) fixes.
+        double lo[14], hi[14];
+        frames::fundamental_arguments(kJ2000 - 0.5, lo);
+        frames::fundamental_arguments(kJ2000 + 0.5, hi);
+        const double d = node ? unwrap(hi[13] - lo[13])
+                              : unwrap((hi[11] + hi[13] - hi[9]) - (lo[11] + lo[13] - lo[9]));
+        return (d - unwrap(hi[8] - lo[8])) * kRad2Deg;
+    }
+    int key = id;
+    if (id == body::kSun || id == body::kEarth)
+        key = body::kEarthMoonBary;
+    else if (id == 1 || id == 2)
+        key = id * 100 + 99;
+    else if (id >= 499 && id <= 999 && id % 100 == 99)
+        key = id / 100;
+    for (const MeanElementsFit& f : kMeanElements) {
+        if (f.id != key)
+            continue;
+        // The angle atan2(x, y) of a pair of quadratics in T, differentiated
+        // at T = 0: (y x' - x y') / (x^2 + y^2) per Julian century, on the
+        // J2000 ecliptic the fit is referred to.
+        const double* x = node ? f.p : f.h;
+        const double* y = node ? f.q : f.k;
+        const double rate = (y[0] * x[1] - x[0] * y[1]) / (x[0] * x[0] + y[0] * y[0]);
+        return rate / 36525.0 * kRad2Deg;
+    }
+    return make_error(ErrorCode::NotFound,
+                      "mean elements exist for the Moon and the major planets only");
+}
+
+Result<double> Engine::mean_motion_deg_day(int id) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (id == body::kMoon) {
+        // The mean longitude L = F + Omega is counted from the mean equinox
+        // of date; general precession (phi[8]) takes it back to a fixed one.
+        double lo[14], hi[14];
+        frames::fundamental_arguments(kJ2000 - 0.5, lo);
+        frames::fundamental_arguments(kJ2000 + 0.5, hi);
+        const auto unwrap = [](double d) { return d - kTwoPi * std::round(d / kTwoPi); };
+        const double rate = unwrap((hi[11] + hi[13]) - (lo[11] + lo[13])) - unwrap(hi[8] - lo[8]);
+        return rate * kRad2Deg;
+    }
+    int key = id;
+    if (id == body::kSun || id == body::kEarth)
+        key = body::kEarthMoonBary;
+    else if (id == 1 || id == 2)
+        key = id * 100 + 99;
+    else if (id >= 499 && id <= 999 && id % 100 == 99)
+        key = id / 100;
+    for (const MeanElementsFit& f : kMeanElements) {
+        if (f.id != key)
+            continue;
+        const double a = f.a[0];
+        const double mu = gm_or_builtin(impl_->source.get(), body::kSun) +
+                          gm_or_builtin(impl_->source.get(), key); // AU^3/day^2
+        return std::sqrt(mu / (a * a * a)) * kRad2Deg;
+    }
+    return make_error(ErrorCode::NotFound,
+                      "mean elements exist for the Moon and the major planets only");
 }
 
 } // namespace prometheia

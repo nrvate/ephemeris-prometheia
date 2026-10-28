@@ -62,6 +62,9 @@ struct Object {
     double size_arcmin = 0.0; // deep sky: major axis
     std::string_view spectral_type;
     std::vector<std::string_view> names; // IAU name first, then traditional
+    // names[0] is the IAU WGSN name (false when the object has none, or only
+    // curated traditional names such as Praesepe).
+    bool iau_name = false;
 
     // The display name: the first name, else the Bayer or Flamsteed
     // designation, else "M n", "HR n" or "HIP n".

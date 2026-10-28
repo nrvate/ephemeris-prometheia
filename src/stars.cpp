@@ -27,6 +27,7 @@ struct StarRecord {
     double vmag, ra, dec, epoch, pmra, pmdec, parallax, rv, size;
     const char* spectral;
     const char* names; // '|'-separated
+    int iau_name;      // 1 where names[0] is the IAU WGSN name
 };
 
 struct ConstellationBoundary {
@@ -287,6 +288,7 @@ struct Catalog {
             o.rv_km_s = r.rv;
             o.size_arcmin = r.size;
             o.spectral_type = r.spectral;
+            o.iau_name = r.iau_name != 0;
             const Constellation* c = constellation_by_abbreviation(r.constellation);
             o.constellation = c ? c->abbreviation : constellation_at(r.ra, r.dec);
             std::string_view names = r.names;

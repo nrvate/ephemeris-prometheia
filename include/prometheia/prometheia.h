@@ -752,14 +752,19 @@ PROMETHEIA_API prometheia_status prometheia_refraction(double altitude_deg, int 
  * version is unchanged, as no existing layout changed.
  */
 
-/* What to find events of. */
+/* What to find events of, and (prometheia_calc_object) what to compute.
+ * ORBIT_POINT and ID were added with the object registry, after 0.7.3. */
 #define PROMETHEIA_OBJECT_BODY 0         /* id: a NAIF id, or a catalog SPK-ID */
 #define PROMETHEIA_OBJECT_STAR 1         /* id: a star catalog index */
 #define PROMETHEIA_OBJECT_HYPOTHETICAL 2 /* token: a hypothetical body's */
+#define PROMETHEIA_OBJECT_ORBIT_POINT                                                              \
+    3                          /* id: the body; token: "<point>:<method>",                         \
+                                  e.g. "ascending-node:mean" (docs/REGISTRY.md) */
+#define PROMETHEIA_OBJECT_ID 4 /* token: a registry id, "naif:5", "sb:136199" */
 typedef struct prometheia_object {
     int kind;          /* PROMETHEIA_OBJECT_* */
-    int id;            /* BODY, STAR */
-    const char* token; /* HYPOTHETICAL */
+    int id;            /* BODY, STAR, ORBIT_POINT */
+    const char* token; /* HYPOTHETICAL, ORBIT_POINT, ID */
 } prometheia_object;
 
 #define PROMETHEIA_EVENT_RISE 0
@@ -857,6 +862,105 @@ PROMETHEIA_API double prometheia_delta_t(double jd_tt);
 /* TDB - TT in seconds at the geocentre: the full Fairhead & Bretagnon
    series, 787 terms (docs/TIME.md). */
 PROMETHEIA_API double prometheia_tdb_minus_tt(double jd_tt);
+
+/* ---- The object registry (after 0.7.3) --------------------------------------
+ *
+ * docs/REGISTRY.md: one id scheme for every object (naif:, sb:, orbit:, hyp:,
+ * star:), what each object is, lookup across every namespace and listing.
+ * The registry's indexes are built on first use and kept by the engine
+ * handle until a catalog is added. Added after library 0.7.3; the ABI
+ * version is unchanged, as no existing layout changed.
+ */
+#define PROMETHEIA_KIND_PLANET 0 /* the Sun, the planets (Mars-Pluto: barycentres), the Earth */
+#define PROMETHEIA_KIND_MOON 1
+#define PROMETHEIA_KIND_LUNAR_POINT 2 /* the Moon's nodes, apsides, Lilith */
+#define PROMETHEIA_KIND_ORBIT_POINT 3 /* any other body's */
+#define PROMETHEIA_KIND_HYPOTHETICAL 4
+#define PROMETHEIA_KIND_STAR 5
+#define PROMETHEIA_KIND_DEEP_SKY 6
+#define PROMETHEIA_KIND_ASTEROID 7
+#define PROMETHEIA_KIND_COMET 8
+
+#define PROMETHEIA_STANDING_NONE 0        /* a designation or number only */
+#define PROMETHEIA_STANDING_IAU 1         /* the IAU's: planets, WGSBN, WGSN */
+#define PROMETHEIA_STANDING_TRADITIONAL 2 /* a star's, cited (Allen 1899) */
+#define PROMETHEIA_STANDING_DEFINED 3     /* given by the object's own definition */
+
+#define PROMETHEIA_MATCH_OLD_DESIGNATION 3 /* a numbered body's old provisional one */
+#define PROMETHEIA_LOOKUP_PREFIX 1
+
+#define PROMETHEIA_ID_SIZE 96
+
+typedef struct prometheia_object_entry {
+    char id[PROMETHEIA_ID_SIZE];
+    int kind;            /* PROMETHEIA_KIND_* */
+    char orbit_class[8]; /* SBDB's code ("MBA", "JFc"), empty when none */
+    char name[64];       /* the proper name, empty when none */
+    int standing;        /* PROMETHEIA_STANDING_* */
+    char standing_source[160];
+    long long number; /* MPC number, 0 when none */
+    char designation[48];
+    char provisional_designation[48];
+    /* NaN where the object has none. Mean motion: the mean longitude's rate,
+     * deg/day, signed (retrograde negative), in the ecliptic of date and
+     * sidereally; the period is the sidereal one, days. */
+    double h_mag, g_slope, diameter_km, vmag, elements_epoch_jd;
+    double mean_motion_deg_day, sidereal_mean_motion_deg_day, period_days;
+    char source[160]; /* what answers for it: ephemeris, catalog file, star catalog, set */
+    /* How to compute it: a prometheia_object {object_kind, object_id,
+     * object_token} for prometheia_calc_object and prometheia_rise_set_ut. */
+    int object_kind, object_id;
+    char object_token[PROMETHEIA_ID_SIZE];
+} prometheia_object_entry;
+
+typedef struct prometheia_object_match {
+    char id[PROMETHEIA_ID_SIZE];
+    int kind;         /* PROMETHEIA_KIND_* */
+    int quality;      /* PROMETHEIA_MATCH_* */
+    char name[64];    /* the object's display name */
+    char matched[64]; /* what matched; empty in a listing */
+} prometheia_object_match;
+
+/* Every condition holds at once; one on a property passes only objects that
+ * have it (an H limit passes no star). kinds is a bitmask of
+ * 1 << PROMETHEIA_KIND_*, 0 for every kind; NaN limits are off. */
+typedef struct prometheia_object_filter {
+    unsigned kinds;
+    char orbit_class[8];
+    int named_only, numbered_only;
+    double h_max, vmag_max;
+} prometheia_object_filter;
+PROMETHEIA_API void prometheia_object_filter_init(prometheia_object_filter* filter);
+
+PROMETHEIA_API prometheia_status prometheia_object_info(prometheia_engine* engine, const char* id,
+                                                        prometheia_object_entry* info,
+                                                        prometheia_error* err);
+
+/* Every object answering to query, best first, into matches (up to max),
+ * *count the number written. Several of the best quality mean the query is
+ * ambiguous: nothing is chosen. */
+PROMETHEIA_API prometheia_status prometheia_object_lookup(prometheia_engine* engine,
+                                                          const char* query, int flags,
+                                                          prometheia_object_match* matches, int max,
+                                                          int* count, prometheia_error* err);
+
+/* One page of the objects passing filter (NULL: every object), from *cursor
+ * (0 at the start), up to max; *cursor is then the next page's, 0 when there
+ * is none. */
+PROMETHEIA_API prometheia_status prometheia_object_list(prometheia_engine* engine,
+                                                        const prometheia_object_filter* filter,
+                                                        unsigned long long* cursor,
+                                                        prometheia_object_match* objects, int max,
+                                                        int* count, prometheia_error* err);
+
+/* Any object, by the call that computes it (calc, calc_star,
+ * calc_hypothetical, calc_orbit_point). */
+PROMETHEIA_API prometheia_status prometheia_calc_object(
+    prometheia_engine* engine, const prometheia_object* object, double jd_tt,
+    const prometheia_options* opts, prometheia_result* result, prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_calc_object_ut(
+    prometheia_engine* engine, const prometheia_object* object, double jd_ut1,
+    const prometheia_options* opts, prometheia_result* result, prometheia_error* err);
 
 #ifdef __cplusplus
 }

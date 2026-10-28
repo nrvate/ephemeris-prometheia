@@ -22,7 +22,41 @@ BODIES: dict[str, int]
 EVENTS: dict[str, int]
 LIMBS: dict[str, int]
 OUTCOMES: dict[int, str]
-Object = Union[int, Tuple[Literal["star"], Union[int, str]], Tuple[Literal["hypothetical"], str]]
+KINDS: dict[str, int]
+Object = Union[int, str, Tuple[Literal["star"], Union[int, str]],
+               Tuple[Literal["hypothetical"], str], Tuple[Literal["orbit-point"], int, str, str]]
+
+class Match:
+    """One object a lookup found (Context.object_lookup)."""
+    id: str
+    kind: str
+    quality: str
+    name: str
+    matched: str
+    ambiguous: bool
+
+class ObjectInfo:
+    """What an object is (Context.object_info; docs/REGISTRY.md). Absent
+    values are None. object is the form calc() and rise_set() take."""
+    id: str
+    kind: str
+    orbit_class: Optional[str]
+    name: Optional[str]
+    standing: str
+    standing_source: Optional[str]
+    number: Optional[int]
+    designation: Optional[str]
+    provisional_designations: list[str]
+    h_mag: Optional[float]
+    g_slope: Optional[float]
+    diameter_km: Optional[float]
+    vmag: Optional[float]
+    elements_epoch_jd: Optional[float]
+    mean_motion_deg_day: Optional[float]
+    sidereal_mean_motion_deg_day: Optional[float]
+    period_days: Optional[float]
+    source: Optional[str]
+    object: Object
 
 class Options:
     """What a position call means, in the JSON tools' words; built once."""
@@ -77,7 +111,7 @@ class Context:
     def close(self) -> None: ...
     def __enter__(self) -> "Context": ...
     def __exit__(self, *exc: Any) -> None: ...
-    def calc(self, body: int, jd: float, options: Optional[Options] = None,
+    def calc(self, body: Object, jd: float, options: Optional[Options] = None,
              scale: Scale = "tt") -> Position: ...
     def calc_star(self, star: Union[int, str], jd: float, options: Optional[Options] = None,
                   scale: Scale = "tt") -> Position: ...
@@ -105,6 +139,13 @@ class Context:
                  dip_height_m: float = 0.0, window_days: float = 2.0, backward: bool = False,
                  options: Optional[Options] = None) -> Event: ...
     def lookup(self, name: str) -> int: ...
+    def object_lookup(self, query: str, *, prefix: bool = False, limit: int = 20) -> list[Match]: ...
+    def object_info(self, id: str) -> ObjectInfo: ...
+    def object_list(self, *, kind: Union[None, str, Sequence[str]] = None,
+                    orbit_class: Optional[str] = None, named_only: bool = False,
+                    numbered_only: bool = False, h_max: Optional[float] = None,
+                    vmag_max: Optional[float] = None, cursor: Optional[int] = None,
+                    limit: int = 500) -> Tuple[list[str], Optional[int]]: ...
     def hypotheticals(self) -> list[str]: ...
     def ephemeris_spans(self) -> list[Tuple[str, float, float]]: ...
     def catalogs(self) -> list[Tuple[str, int]]: ...

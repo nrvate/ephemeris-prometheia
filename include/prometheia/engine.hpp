@@ -36,12 +36,14 @@
 #define PROMETHEIA_ENGINE_HPP
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "prometheia/catalog.hpp"
 #include "prometheia/error.hpp"
 #include "prometheia/frames.hpp"
 #include "prometheia/houses.hpp"
@@ -500,13 +502,23 @@ public:
                                   const frames::Atmosphere* atmosphere,
                                   Precession precession = Precession::Vondrak2011);
 
-    // Something to find events of: a body by NAIF id or catalog SPK-ID, a
-    // star by catalog index, or a hypothetical body by token.
+    // Any object the engine computes: a body by NAIF id or catalog SPK-ID, a
+    // star by catalog index, a hypothetical body by token, or an orbit point
+    // of body `id` (point and method). calc_object() answers each by the
+    // call that computes it (calc, calc_star, calc_hypothetical,
+    // calc_orbit_point); rise_set_ut() finds its events. The object
+    // registry (prometheia/registry.hpp) gives every object's ObjectRef.
     struct ObjectRef {
-        enum class Kind { Body, Star, Hypothetical } kind = Kind::Body;
+        enum class Kind { Body, Star, Hypothetical, OrbitPoint } kind = Kind::Body;
         long id = 0;
         std::string token;
+        OrbitPoint point = OrbitPoint::AscendingNode; // OrbitPoint
+        OrbitElements method = OrbitElements::Mean;   // OrbitPoint
     };
+    Result<CalcResult> calc_object(const ObjectRef& object, double jd_tt,
+                                   const CalcOptions& opts = {});
+    Result<CalcResult> calc_object_ut(const ObjectRef& object, double jd_ut1,
+                                      const CalcOptions& opts = {});
 
     // Rise, set and transit (docs/ENGINE.md, "Rise, set and transit").
     enum class Event { Rise, Set, UpperTransit, LowerTransit };
@@ -565,6 +577,37 @@ public:
     };
     std::vector<CatalogInfo> catalogs() const;
     Result<uint64_t> catalog_bodies() const;
+
+    // What the object registry (prometheia/registry.hpp) reads of the
+    // catalogs: a body's newest record with its names and the catalog
+    // (index into catalogs()) holding it, NotFound when none does; and every
+    // record of every catalog, catalog by catalog in the order added, so
+    // that a later catalog's record of a body follows an earlier one's.
+    struct CatalogBody {
+        catalog::Record record;
+        BodyNames names;
+        size_t catalog = 0;
+    };
+    Result<CatalogBody> catalog_body(int spkid) const;
+    Result<void> for_each_catalog_record(
+        const std::function<void(size_t catalog, const catalog::Record&, const catalog::Names&)>&
+            fn) const;
+    Result<void> for_each_catalog_name(
+        const std::function<void(size_t catalog, uint64_t spkid, const catalog::Names&)>& fn) const;
+
+    // The sidereal mean motion (deg/day) of an ephemeris body about its
+    // centre, from the mean elements the engine fits to DE440 (docs/ENGINE.md,
+    // "Nodes and apsides"): n = sqrt(GM / a^3) at J2000, with GM the Sun's
+    // and the body's. The Sun's is the Earth-Moon barycentre's (its
+    // geocentric orbit is the Earth's reflected); the Moon's is its mean
+    // longitude's rate (the fundamental arguments) less general precession.
+    // NotFound for a body with no mean elements.
+    Result<double> mean_motion_deg_day(int id) const;
+    // The sidereal rate (deg/day) at J2000 of a mean orbit point's longitude:
+    // the Moon's from the fundamental arguments, a planet's from the fit's
+    // h, k (apsides) and p, q (nodes). NotFound where there are no mean
+    // elements.
+    Result<double> orbit_point_mean_motion_deg_day(int id, OrbitPoint point) const;
 
 private:
     struct Impl;

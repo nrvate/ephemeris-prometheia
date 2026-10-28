@@ -13,6 +13,26 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **The object registry** ([docs/REGISTRY.md](docs/REGISTRY.md)), A-9 of
+  astromcp's port plan. One id scheme covers every object: `naif:`, `sb:`,
+  `orbit:`, `hyp:` and `star:`. Numbered bodies keep their id across
+  catalog releases, and old designations still resolve. Three calls:
+  - **lookup** across every namespace, case, accent and punctuation
+    folded, with ambiguity reported rather than resolved;
+  - **info**: kind, SBDB orbit class, name and its standing, number,
+    designations, H, V, mean motion and period, source, and how to
+    compute the object;
+  - **listing** by kind, class, name, number, H and V, a page at a time.
+
+  The engine gains `calc_object(_ut)`, and `ObjectRef` gains orbit points.
+  The C API gains `prometheia_object_lookup`, `_info`, `_list`,
+  `prometheia_calc_object(_ut)` and the object kinds `ORBIT_POINT` and
+  `ID` (ABI unchanged). Python gains `Context.object_lookup`,
+  `object_info` and `object_list`, and `calc()` and `rise_set()` accept
+  every object form. The measured costs are in REGISTRY.md: on the full
+  catalog, the indexes take 0.75 s and 48 MB on first use.
+- **The star catalog** marks which names are the IAU's (`stars::Object::iau_name`),
+  and β Cnc answers to Altarf (Allen 1899's "Al Tarf").
 - **The Sun's nodes and apsides** ([docs/ENGINE.md](docs/ENGINE.md), "Nodes
   and apsides"). `calc_orbit_point` now answers the Sun with its geocentric
   orbit, which is the Earth's reflected, where it used to refuse it: the

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <new>
 #include <string>
 #include <string_view>
@@ -21,6 +22,7 @@
 #include "prometheia/frames.hpp"
 #include "prometheia/hypotheticals.hpp"
 #include "prometheia/prometheia.hpp"
+#include "prometheia/registry.hpp"
 #include "prometheia/time.hpp"
 
 using namespace prometheia;
@@ -46,6 +48,13 @@ struct prometheia_engine {
     mutable std::vector<Engine::EphemerisSpan> spans;
     // The same for prometheia_engine_catalog_info()'s path.
     mutable std::vector<Engine::CatalogInfo> catalogs;
+    // The object registry, made on first use (its indexes are lazy too).
+    std::unique_ptr<registry::Registry> registry_;
+    registry::Registry& registry() {
+        if (!registry_)
+            registry_ = std::make_unique<registry::Registry>(engine);
+        return *registry_;
+    }
 };
 
 namespace {
@@ -401,7 +410,7 @@ prometheia_status prometheia_engine_open(const char* path, prometheia_engine** o
         auto e = Engine::open(path);
         if (!e)
             return report(err, e.error());
-        *out = new prometheia_engine{std::move(e).value(), {}, {}, {}};
+        *out = new prometheia_engine{std::move(e).value(), {}, {}, {}, {}};
         return succeed(err);
     });
 }
@@ -1084,6 +1093,56 @@ void prometheia_rise_set_options_init(prometheia_rise_set_options* options) {
     options->backward = d.backward;
 }
 
+namespace {
+
+// A C object -> the engine's ObjectRef; a registry id is resolved.
+prometheia_status to_ref(prometheia_engine* engine, const prometheia_object& object,
+                         Engine::ObjectRef& ref, prometheia_error* err) {
+    switch (object.kind) {
+    case PROMETHEIA_OBJECT_BODY:
+        ref.kind = Engine::ObjectRef::Kind::Body;
+        ref.id = object.id;
+        return PROMETHEIA_OK;
+    case PROMETHEIA_OBJECT_STAR:
+        ref.kind = Engine::ObjectRef::Kind::Star;
+        ref.id = object.id;
+        return PROMETHEIA_OK;
+    case PROMETHEIA_OBJECT_HYPOTHETICAL:
+        if (!object.token)
+            return argument(err, "a hypothetical object needs a token");
+        ref.kind = Engine::ObjectRef::Kind::Hypothetical;
+        ref.token = object.token;
+        return PROMETHEIA_OK;
+    case PROMETHEIA_OBJECT_ORBIT_POINT: {
+        if (!object.token)
+            return argument(err, "an orbit point needs a token, \"<point>:<method>\"");
+        // The registry's own syntax, so that both spell a point one way.
+        auto parsed =
+            registry::parse_id("orbit:naif:" + std::to_string(object.id) + ":" + object.token);
+        if (!parsed)
+            return report(err, parsed.error());
+        ref.kind = Engine::ObjectRef::Kind::OrbitPoint;
+        ref.id = object.id;
+        ref.point = parsed.value().point;
+        ref.method = parsed.value().method;
+        return PROMETHEIA_OK;
+    }
+    case PROMETHEIA_OBJECT_ID: {
+        if (!object.token)
+            return argument(err, "an object id needs a token");
+        auto r = engine->registry().resolve(object.token);
+        if (!r)
+            return report(err, r.error());
+        ref = std::move(r).value();
+        return PROMETHEIA_OK;
+    }
+    default:
+        return argument(err, "object kind out of range");
+    }
+}
+
+} // namespace
+
 prometheia_status prometheia_rise_set_ut(prometheia_engine* engine, const prometheia_object* object,
                                          int event, double jd_ut1_start, double lon_deg,
                                          double lat_deg, double height_m,
@@ -1100,10 +1159,6 @@ prometheia_status prometheia_rise_set_ut(prometheia_engine* engine, const promet
         return argument(err, "object is NULL");
     if (!out)
         return argument(err, "event output is NULL");
-    if (object->kind < PROMETHEIA_OBJECT_BODY || object->kind > PROMETHEIA_OBJECT_HYPOTHETICAL)
-        return argument(err, "object kind out of range");
-    if (object->kind == PROMETHEIA_OBJECT_HYPOTHETICAL && !object->token)
-        return argument(err, "a hypothetical object needs a token");
     if (event < PROMETHEIA_EVENT_RISE || event > PROMETHEIA_EVENT_LOWER_TRANSIT)
         return argument(err, "event out of range");
     Precession p{};
@@ -1111,13 +1166,8 @@ prometheia_status prometheia_rise_set_ut(prometheia_engine* engine, const promet
         return st;
     return guarded(err, [&] {
         Engine::ObjectRef ref;
-        ref.kind = object->kind == PROMETHEIA_OBJECT_STAR ? Engine::ObjectRef::Kind::Star
-                   : object->kind == PROMETHEIA_OBJECT_HYPOTHETICAL
-                       ? Engine::ObjectRef::Kind::Hypothetical
-                       : Engine::ObjectRef::Kind::Body;
-        ref.id = object->id;
-        if (object->token)
-            ref.token = object->token;
+        if (prometheia_status st = to_ref(engine, *object, ref, err); st != PROMETHEIA_OK)
+            return st;
         Engine::RiseSetOptions ro;
         if (options) {
             ro.limb = options->limb;
@@ -1205,6 +1255,213 @@ double prometheia_delta_t(double jd_tt) {
 
 double prometheia_tdb_minus_tt(double jd_tt) {
     return time::tdb_minus_tt(jd_tt);
+}
+
+// ---- the object registry ---------------------------------------------------
+
+static_assert(PROMETHEIA_KIND_COMET == int(registry::Kind::Comet));
+static_assert(PROMETHEIA_STANDING_DEFINED == int(registry::Standing::Defined));
+
+void prometheia_object_filter_init(prometheia_object_filter* filter) {
+    if (!filter)
+        return;
+    std::memset(filter, 0, sizeof *filter);
+    filter->h_max = std::nan("");
+    filter->vmag_max = std::nan("");
+}
+
+prometheia_status prometheia_object_info(prometheia_engine* engine, const char* id,
+                                         prometheia_object_entry* info, prometheia_error* err) {
+    if (info)
+        std::memset(info, 0, sizeof *info);
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!id)
+        return argument(err, "id is NULL");
+    if (!info)
+        return argument(err, "info output is NULL");
+    return guarded(err, [&] {
+        auto r = engine->registry().info(id);
+        if (!r)
+            return report(err, r.error());
+        const registry::Info& i = r.value();
+        copy_string(info->id, sizeof info->id, i.id);
+        info->kind = int(i.kind);
+        copy_string(info->orbit_class, sizeof info->orbit_class, i.orbit_class);
+        copy_string(info->name, sizeof info->name, i.name);
+        info->standing = int(i.standing);
+        copy_string(info->standing_source, sizeof info->standing_source, i.standing_source);
+        info->number = i.number;
+        copy_string(info->designation, sizeof info->designation, i.designation);
+        copy_string(info->provisional_designation, sizeof info->provisional_designation,
+                    i.provisional_designation);
+        info->h_mag = i.h_mag;
+        info->g_slope = i.g_slope;
+        info->diameter_km = i.diameter_km;
+        info->vmag = i.vmag;
+        info->elements_epoch_jd = i.elements_epoch_jd;
+        info->mean_motion_deg_day = i.mean_motion_deg_day;
+        info->sidereal_mean_motion_deg_day = i.sidereal_mean_motion_deg_day;
+        info->period_days = i.period_days;
+        copy_string(info->source, sizeof info->source, i.source);
+        info->object_id = int(i.ref.id);
+        switch (i.ref.kind) {
+        case Engine::ObjectRef::Kind::Body:
+            info->object_kind = PROMETHEIA_OBJECT_BODY;
+            break;
+        case Engine::ObjectRef::Kind::Star:
+            info->object_kind = PROMETHEIA_OBJECT_STAR;
+            break;
+        case Engine::ObjectRef::Kind::Hypothetical:
+            info->object_kind = PROMETHEIA_OBJECT_HYPOTHETICAL;
+            copy_string(info->object_token, sizeof info->object_token, i.ref.token);
+            break;
+        case Engine::ObjectRef::Kind::OrbitPoint: {
+            info->object_kind = PROMETHEIA_OBJECT_ORBIT_POINT;
+            // The id's last two fields are the point and the method.
+            const size_t m = i.id.rfind(':');
+            const size_t p = i.id.rfind(':', m - 1);
+            copy_string(info->object_token, sizeof info->object_token, i.id.substr(p + 1));
+            break;
+        }
+        }
+        return succeed(err);
+    });
+}
+
+namespace {
+
+void fill_match(const registry::Match& m, prometheia_object_match& out) {
+    std::memset(&out, 0, sizeof out);
+    copy_string(out.id, sizeof out.id, m.id);
+    out.kind = int(m.kind);
+    switch (m.quality) {
+    case registry::MatchQuality::Exact:
+        out.quality = PROMETHEIA_MATCH_EXACT;
+        break;
+    case registry::MatchQuality::Alias:
+        out.quality = PROMETHEIA_MATCH_ALIAS;
+        break;
+    case registry::MatchQuality::OldDesignation:
+        out.quality = PROMETHEIA_MATCH_OLD_DESIGNATION;
+        break;
+    case registry::MatchQuality::Prefix:
+        out.quality = PROMETHEIA_MATCH_PREFIX;
+        break;
+    }
+    copy_string(out.name, sizeof out.name, m.name);
+    copy_string(out.matched, sizeof out.matched, m.matched);
+}
+
+} // namespace
+
+prometheia_status prometheia_object_lookup(prometheia_engine* engine, const char* query, int flags,
+                                           prometheia_object_match* matches, int max, int* count,
+                                           prometheia_error* err) {
+    if (count)
+        *count = 0;
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!query)
+        return argument(err, "query is NULL");
+    if (max < 0 || (max > 0 && !matches))
+        return argument(err, "matches needs room for max entries");
+    return guarded(err, [&] {
+        auto r =
+            engine->registry().lookup(query, (flags & PROMETHEIA_LOOKUP_PREFIX) != 0, size_t(max));
+        if (!r)
+            return report(err, r.error());
+        const auto& v = r.value();
+        for (size_t k = 0; k < v.size(); ++k)
+            fill_match(v[k], matches[k]);
+        if (count)
+            *count = int(v.size());
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_object_list(prometheia_engine* engine,
+                                         const prometheia_object_filter* filter,
+                                         unsigned long long* cursor,
+                                         prometheia_object_match* objects, int max, int* count,
+                                         prometheia_error* err) {
+    if (count)
+        *count = 0;
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!cursor)
+        return argument(err, "cursor is NULL");
+    if (max < 0 || (max > 0 && !objects))
+        return argument(err, "objects needs room for max entries");
+    return guarded(err, [&] {
+        registry::Filter f;
+        if (filter) {
+            f.kinds = filter->kinds;
+            f.orbit_class = std::string(filter->orbit_class,
+                                        strnlen(filter->orbit_class, sizeof filter->orbit_class));
+            f.named_only = filter->named_only != 0;
+            f.numbered_only = filter->numbered_only != 0;
+            f.h_max = filter->h_max;
+            f.vmag_max = filter->vmag_max;
+        }
+        auto r = engine->registry().list(f, *cursor, size_t(max));
+        if (!r)
+            return report(err, r.error());
+        const auto& v = r.value().objects;
+        for (size_t k = 0; k < v.size(); ++k)
+            fill_match(v[k], objects[k]);
+        if (count)
+            *count = int(v.size());
+        *cursor = r.value().next;
+        return succeed(err);
+    });
+}
+
+prometheia_status prometheia_calc_object(prometheia_engine* engine, const prometheia_object* object,
+                                         double jd_tt, const prometheia_options* opts,
+                                         prometheia_result* result, prometheia_error* err) {
+    if (!object) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        return argument(err, "object is NULL");
+    }
+    Engine::ObjectRef ref;
+    if (engine) {
+        if (prometheia_status st = guarded(err, [&] { return to_ref(engine, *object, ref, err); });
+            st != PROMETHEIA_OK) {
+            if (result)
+                std::memset(result, 0, sizeof *result);
+            return st;
+        }
+    }
+    return calc_common(engine, 0, jd_tt, opts, result, err,
+                       [&ref](Engine& e, int, double jd, const CalcOptions& o) {
+                           return e.calc_object(ref, jd, o);
+                       });
+}
+
+prometheia_status prometheia_calc_object_ut(prometheia_engine* engine,
+                                            const prometheia_object* object, double jd_ut1,
+                                            const prometheia_options* opts,
+                                            prometheia_result* result, prometheia_error* err) {
+    if (!object) {
+        if (result)
+            std::memset(result, 0, sizeof *result);
+        return argument(err, "object is NULL");
+    }
+    Engine::ObjectRef ref;
+    if (engine) {
+        if (prometheia_status st = guarded(err, [&] { return to_ref(engine, *object, ref, err); });
+            st != PROMETHEIA_OK) {
+            if (result)
+                std::memset(result, 0, sizeof *result);
+            return st;
+        }
+    }
+    return calc_common(engine, 0, jd_ut1, opts, result, err,
+                       [&ref](Engine& e, int, double jd, const CalcOptions& o) {
+                           return e.calc_object_ut(ref, jd, o);
+                       });
 }
 
 } // extern "C"

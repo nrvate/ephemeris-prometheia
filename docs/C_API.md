@@ -226,6 +226,37 @@ printf("%s\n", r.source);    /* the element set's name */
   malformed element file gives `PROMETHEIA_ERROR_FORMAT`, with the file and
   line in the message.
 
+**The object registry (after 0.7.3; ABI version unchanged).** One id scheme
+for every object, and lookup, description and listing across all of them
+([REGISTRY.md](REGISTRY.md)):
+
+```c
+prometheia_object_match m[20];
+int n = 0;
+prometheia_object_lookup(eph, "2003 VB12", 0, m, 20, &n, &err); /* m[0].id: "sb:90377" */
+prometheia_object_entry info;
+prometheia_object_info(eph, m[0].id, &info, &err);  /* name, number, class, mean motion */
+const prometheia_object obj = {info.object_kind, info.object_id, info.object_token};
+prometheia_calc_object(eph, &obj, jd_tt, &opts, &r, &err);
+```
+
+- `prometheia_object_lookup` writes up to `max` matches, best first. Several
+  of the best quality (`PROMETHEIA_MATCH_EXACT` or `_OLD_DESIGNATION`) mean
+  the query is ambiguous, and nothing is chosen. `PROMETHEIA_LOOKUP_PREFIX`
+  adds prefix matches.
+- `prometheia_object_info` fills a `prometheia_object_entry`. Absent numbers
+  are NaN, absent strings are empty, and strings are truncated to fit.
+- `prometheia_object_list` pages through the objects that pass a
+  `prometheia_object_filter` (start from `prometheia_object_filter_init`).
+  `*cursor` starts at 0, and is 0 again after the last page.
+- `prometheia_calc_object(_ut)` computes any object by the call that
+  computes it. `prometheia_object` gains two kinds:
+  `PROMETHEIA_OBJECT_ORBIT_POINT` (`id` the body, `token`
+  `"<point>:<method>"`) and `PROMETHEIA_OBJECT_ID` (`token` a registry id).
+  `prometheia_rise_set_ut` takes both as well.
+- The registry's indexes are built on first use and kept by the engine
+  handle until a catalog is added. REGISTRY.md has the measured cost.
+
 ## Conventions
 
 - **Handles.** `prometheia_engine_open` creates an opaque engine and

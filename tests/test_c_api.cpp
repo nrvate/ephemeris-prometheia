@@ -1190,3 +1190,98 @@ TEST_CASE("c_api_rise_set_matches_engine") {
 }
 
 } // namespace
+
+TEST_CASE("c_api_object_registry") {
+    TempFile tf("capi-registry");
+    synth::write_linear_spk(tf.path);
+    CHandle c;
+    prometheia_error err;
+    REQUIRE(prometheia_engine_open(tf.path.c_str(), &c.e, &err) == PROMETHEIA_OK);
+    const std::string sample = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
+    REQUIRE(prometheia_engine_add_catalog(c.e, sample.c_str(), &err) == PROMETHEIA_OK);
+
+    // Lookup: one exact match, its id, kind and name.
+    prometheia_object_match m[20];
+    int n = -1;
+    REQUIRE(prometheia_object_lookup(c.e, "Ceres", 0, m, 20, &n, &err) == PROMETHEIA_OK);
+    REQUIRE(n == 1);
+    CHECK(std::string(m[0].id) == "sb:1");
+    CHECK(m[0].kind == PROMETHEIA_KIND_ASTEROID);
+    CHECK(m[0].quality == PROMETHEIA_MATCH_EXACT);
+    REQUIRE(prometheia_object_lookup(c.e, "node", PROMETHEIA_LOOKUP_PREFIX, m, 20, &n, &err) ==
+            PROMETHEIA_OK);
+    CHECK(n >= 4);
+    CHECK(m[0].quality == PROMETHEIA_MATCH_PREFIX);
+    REQUIRE(prometheia_object_lookup(c.e, "Mars", 0, m, 0, &n, &err) == PROMETHEIA_OK);
+    CHECK(n == 0); // no room asked for, none written
+
+    // Info, and the object it gives computes what calc_* computes.
+    prometheia_object_entry info;
+    REQUIRE(prometheia_object_info(c.e, "orbit:naif:301:ascending-node:mean", &info, &err) ==
+            PROMETHEIA_OK);
+    CHECK(info.kind == PROMETHEIA_KIND_LUNAR_POINT);
+    CHECK(std::string(info.name) == "mean node");
+    CHECK(info.standing == PROMETHEIA_STANDING_DEFINED);
+    CHECK(info.mean_motion_deg_day < 0.0);
+    CHECK(info.object_kind == PROMETHEIA_OBJECT_ORBIT_POINT);
+    CHECK(std::string(info.object_token) == "ascending-node:mean");
+    const prometheia_object node{info.object_kind, info.object_id, info.object_token};
+    prometheia_result via, direct;
+    REQUIRE(prometheia_calc_object(c.e, &node, kJ2000, nullptr, &via, &err) == PROMETHEIA_OK);
+    REQUIRE(prometheia_calc_orbit_point(c.e, 301, PROMETHEIA_ORBIT_ASCENDING_NODE,
+                                        PROMETHEIA_ELEMENTS_MEAN, kJ2000, nullptr, &direct,
+                                        &err) == PROMETHEIA_OK);
+    CHECK(via.lon_deg == direct.lon_deg);
+    CHECK(via.lat_deg == direct.lat_deg);
+
+    REQUIRE(prometheia_object_info(c.e, "sb:Ceres", &info, &err) == PROMETHEIA_OK);
+    CHECK(std::string(info.id) == "sb:1");
+    CHECK(info.number == 1);
+    CHECK(std::string(info.standing_source) == "IAU WGSBN");
+    CHECK(info.object_kind == PROMETHEIA_OBJECT_BODY);
+    CHECK(info.object_id == 20000001);
+    CHECK(std::isnan(info.vmag));
+
+    // By id string: every kind of object.
+    for (const char* id :
+         {"naif:5", "sb:1", "hyp:cupido", "star:HR 3982", "orbit:naif:5:perihelion:mean"}) {
+        const prometheia_object byid{PROMETHEIA_OBJECT_ID, 0, id};
+        REQUIRE(prometheia_object_info(c.e, id, &info, &err) == PROMETHEIA_OK);
+        const prometheia_object byref{info.object_kind, info.object_id,
+                                      info.object_kind == PROMETHEIA_OBJECT_BODY ||
+                                              info.object_kind == PROMETHEIA_OBJECT_STAR
+                                          ? nullptr
+                                          : info.object_token};
+        REQUIRE_MESSAGE(prometheia_calc_object(c.e, &byid, kJ2000, nullptr, &via, &err) ==
+                            PROMETHEIA_OK,
+                        id, ": ", err.message);
+        REQUIRE(prometheia_calc_object(c.e, &byref, kJ2000, nullptr, &direct, &err) ==
+                PROMETHEIA_OK);
+        CHECK_MESSAGE(via.lon_deg == direct.lon_deg, id);
+    }
+    const prometheia_object nosuch{PROMETHEIA_OBJECT_ID, 0, "sb:Nosuchbody"};
+    CHECK(prometheia_calc_object(c.e, &nosuch, kJ2000, nullptr, &via, &err) ==
+          PROMETHEIA_ERROR_NOT_FOUND);
+    const prometheia_object badpoint{PROMETHEIA_OBJECT_ORBIT_POINT, 5, "top:mean"};
+    CHECK(prometheia_calc_object(c.e, &badpoint, kJ2000, nullptr, &via, &err) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(prometheia_object_info(c.e, "bogus", &info, &err) == PROMETHEIA_ERROR_ARGUMENT);
+
+    // Listing: the hypotheticals, two to a page.
+    prometheia_object_filter f;
+    prometheia_object_filter_init(&f);
+    f.kinds = 1u << PROMETHEIA_KIND_HYPOTHETICAL;
+    unsigned long long cursor = 0;
+    int total = 0;
+    do {
+        REQUIRE(prometheia_object_list(c.e, &f, &cursor, m, 2, &n, &err) == PROMETHEIA_OK);
+        for (int k = 0; k < n; ++k)
+            CHECK(std::string(m[k].id).rfind("hyp:", 0) == 0);
+        total += n;
+    } while (cursor != 0);
+    CHECK(total == prometheia_hypothetical_count(c.e));
+    std::strcpy(f.orbit_class, "XYZ");
+    f.kinds = 0;
+    cursor = 0;
+    CHECK(prometheia_object_list(c.e, &f, &cursor, m, 2, &n, &err) == PROMETHEIA_ERROR_ARGUMENT);
+}

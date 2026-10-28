@@ -46,6 +46,7 @@ eps Boo: Izar
 
 # Cancer
 alp Cnc: Acubens, Sertan
+bet Cnc: Altarf
 gam Cnc: Asellus Borealis
 del Cnc: Asellus Australis
 
@@ -202,5 +203,7 @@ gam Vir: Porrima
 eps Vir: Vindemiatrix
 
 # Deep sky
+# Not in Allen's text, so not admitted: Facies (M 22), Aculeus (M 6), Acumen (M 7),
+# Capulus (Double Cluster; Allen has only the inflected "in capulo ensis").
 M 44: Praesepe
 M 45: Pleiades

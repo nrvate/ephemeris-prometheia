@@ -314,6 +314,50 @@ class Engine(unittest.TestCase):
         with self.assertRaises(prometheia.Error):
             ctx.rise_set("Sun", "rise", start, lon, lat)
 
+    def test_object_registry(self):
+        ctx = self.ds.local()
+        # One namespace-wide lookup; ambiguity is reported, not resolved.
+        (mars,) = ctx.object_lookup("mars")
+        self.assertEqual((mars.id, mars.kind, mars.quality, mars.ambiguous),
+                         ("naif:4", "planet", "exact", False))
+        self.assertEqual([m.id for m in ctx.object_lookup("Ceres")], ["sb:1"])
+        self.assertEqual(ctx.object_lookup("Lilith")[0].id, "orbit:naif:301:aphelion:mean")
+        self.assertTrue(all(m.quality == "prefix" for m in ctx.object_lookup("node", prefix=True)))
+        self.assertEqual(ctx.object_lookup("Nosuchbody"), [])
+        # Info, and calc by id, by the object info gives, and by the old forms.
+        ceres = ctx.object_info("sb:1")
+        self.assertEqual((ceres.kind, ceres.name, ceres.number, ceres.standing),
+                         ("asteroid", "Ceres", 1, "iau"))
+        self.assertIsNone(ceres.vmag)
+        self.assertAlmostEqual(ceres.sidereal_mean_motion_deg_day, 0.2141, delta=5e-4)
+        node = ctx.object_info("orbit:naif:301:ascending-node:mean")
+        self.assertEqual(node.object, ("orbit-point", 301, "ascending-node", "mean"))
+        self.assertLess(node.mean_motion_deg_day, 0.0)
+        jd = 2451545.0
+        for id_, old in (("sb:1", 20000001), ("star:HR 3982", ("star", "Regulus")),
+                         ("hyp:cupido", ("hypothetical", "cupido")),
+                         ("orbit:naif:301:ascending-node:mean", node.object)):
+            info = ctx.object_info(id_)
+            by_id, by_ref, by_old = (ctx.calc(id_, jd).lon_deg, ctx.calc(info.object, jd).lon_deg,
+                                     ctx.calc(old, jd).lon_deg)
+            self.assertEqual(by_id, by_ref, id_)
+            self.assertEqual(by_id, by_old, id_)
+        self.assertEqual(ctx.calc("naif:5", jd).lon_deg, ctx.calc(5, jd).lon_deg)
+        self.assertEqual(ctx.rise_set("naif:10", "rise", 2461119.5, 8.0, 47.0).outcome, "found")
+        with self.assertRaises(prometheia.Error) as e:
+            ctx.object_info("sb:Nosuchbody")
+        self.assertEqual(e.exception.code, "not-found")
+        # Listing, paged.
+        ids, cursor = ctx.object_list(kind="hypothetical", limit=3)
+        while cursor is not None:
+            more, cursor = ctx.object_list(kind="hypothetical", cursor=cursor, limit=3)
+            ids += more
+        self.assertEqual(ids, ["hyp:" + t for t in ctx.hypotheticals()])
+        bright, _ = ctx.object_list(kind=["star", "deep-sky"], vmag_max=1.0)
+        self.assertTrue(15 <= len(bright) <= 25)
+        with self.assertRaises(prometheia.Error):
+            ctx.object_list(kind="galaxy")
+
     def test_sidereal_time_is_the_houses_armc(self):
         ctx = self.ds.local()
         jd_ut1 = 2451545.0

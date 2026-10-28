@@ -78,7 +78,7 @@ checksums; `--check` reports whether the committed file is stale.
 - **Named stars:** 84 further IAU-named stars beyond the Bright Star
   Catalogue, with Hipparcos astrometry. 553 IAU names are attached. The 75
   without a Hipparcos star are mostly nicknames of nebulae and protostars.
-- **Traditional names:** 38 curated names that the IAU list lacks, from
+- **Traditional names:** 39 curated names that the IAU list lacks, from
   `data/star_names.txt`.
 - **Messier:** the 110 Messier objects.
 - **Constellations:** the 357 constellation boundary segments.
@@ -121,7 +121,7 @@ Per object:
 | Bright Star Catalogue J2000 position vs Hipparcos carried to J2000 | median 0.7″, 99% within 3.6″, max 15″ (8,997 stars); a match over 60″ is refused |
 | IAU name's HR/HIP/Bayer designations vs the star it attaches to | all agree (398 Bayer letters compared); a disagreement is fatal |
 | IAU printed coordinates vs the star | median 0.01″; 15 errata below |
-| curated names vs SIMBAD's NAME identifiers | 91 confirmed on the same star; a name SIMBAD gives to a different star is refused (this removed Scheat from δ Aqr, Deneb from ζ Aql and Algenib from α Per) |
+| curated names vs SIMBAD's NAME identifiers | 92 confirmed on the same star; a name SIMBAD gives to a different star is refused (this removed Scheat from δ Aqr, Deneb from ζ Aql and Algenib from α Per) |
 | one object per name | enforced |
 | Bright Star Catalogue radial velocities vs SIMBAD | median 1.3 km/s over 7,477 stars; 453 differ by over 10 km/s (spectroscopic binaries and variables, where SIMBAD's modern values are used) |
 | SIMBAD vs HEASARC Messier positions | median 0.58′, within half the object's size; 1 erratum below |

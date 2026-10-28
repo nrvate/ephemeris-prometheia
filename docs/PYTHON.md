@@ -116,8 +116,22 @@ the C++ engine's, bit for bit.
   - `dataset.local()` keeps one engine per thread.
 - A `Context` serves the thread that made it, and refuses any other thread
   by name. The calls on it:
-  - `calc(naif_id, jd, options, scale="tt"|"ut1")`; catalog bodies go by
-    SPK-ID, and `lookup(name)` finds it;
+  - `calc(object, jd, options, scale="tt"|"ut1")`. The object is a NAIF id
+    (catalog bodies go by SPK-ID, and `lookup(name)` finds it),
+    `("star", index or name)`, `("hypothetical", token)`,
+    `("orbit-point", body, point, method)`, or a registry id string
+    (`"sb:136199"`). An int takes the plain `prometheia_calc` path;
+  - the object registry ([REGISTRY.md](REGISTRY.md)):
+    - `object_lookup(query, *, prefix=False, limit=20)` gives `Match`es
+      (`id`, `kind`, `quality`, `name`, `matched`, `ambiguous`) across every
+      namespace;
+    - `object_info(id)` gives an `ObjectInfo`, with the kind, orbit class,
+      name and its standing, number, designations, H, V, mean motion and
+      period, source, and `object` (the form `calc` and `rise_set` take);
+    - `object_list(*, kind=, orbit_class=, named_only=, numbered_only=,
+      h_max=, vmag_max=, cursor=, limit=500)` gives `(ids, next_cursor)`,
+      and `next_cursor` is `None` after the last page. `KINDS` names the
+      kinds;
   - `calc_star(index or name, …)` and `calc_hypothetical(token, …)`;
   - `calc_orbit_point(body, point, method, …)`;
   - `houses(system, jd, lon, lat, options)`;
@@ -126,8 +140,7 @@ the C++ engine's, bit for bit.
   - `rise_set(object, event, jd_ut1_start, lon, lat, height_m=0, *,
     limb=, refraction=, atmosphere=, dip_height_m=, window_days=,
     backward=)` returns an `Event` (`jd_ut1`, NaN unless `outcome` is
-    `"found"`). The object is a NAIF id, `("star", index or name)` or
-    `("hypothetical", token)`;
+    `"found"`). The object takes any form `calc` takes;
   - `horizontal(jd_ut1, lon, lat, ra, dec, atmosphere=None, height_m=0)`
     and `equatorial_from_horizontal(…)`. The azimuth runs from north
     through east. An atmosphere is `"standard"`, `(hPa, °C)` or a dict, and

@@ -25,6 +25,7 @@ src/frames.cpp
 src/houses.cpp
 src/hypotheticals.cpp
 src/kepler.cpp
+src/registry.cpp
 src/segments.cpp
 src/spk.cpp
 src/stars.cpp

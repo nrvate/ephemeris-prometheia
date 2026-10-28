@@ -415,8 +415,12 @@ validation against ERFA (0.34 mas) are in [STARS.md](STARS.md).
 
 `Engine::rise_set_ut(object, event, jd_ut1_start, site, options)`, the C
 API's `prometheia_rise_set_ut` and the binding's `Context.rise_set` (added
-2026-10-27). The object is a body (NAIF id or catalog SPK-ID), a star or a
-hypothetical body. The event is a rise, a set, or an upper or lower transit.
+2026-10-27). The object is an `Engine::ObjectRef`: a body (NAIF id or
+catalog SPK-ID), a star, a hypothetical body or an orbit point. The same
+reference goes to `calc_object(_ut)`, which answers it by the call that
+computes it, and the object registry gives every object's
+([REGISTRY.md](REGISTRY.md)). An orbit point rises as a point, with no
+disc. The event is a rise, a set, or an upper or lower transit.
 The answer is the first event strictly after the start (or the last before
 it), within a window of days.
 

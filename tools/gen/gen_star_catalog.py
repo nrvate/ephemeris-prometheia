@@ -453,6 +453,7 @@ def main():
                 fail(f"IAU {row['name']}: Bayer {row['bayer']} but the star is "
                      f"{GREEK[target['bayer'] - 1]} {target['con']}")
             iau_bayer_checked += 1
+        target["iau"] = True
         if row["name"] not in target["names"]:
             target["names"].insert(len([n for n in target["names"] if n.startswith("\x00")]),
                                    row["name"])
@@ -592,17 +593,18 @@ def main():
         "// Fields: HR, HD, HIP, Flamsteed, Messier, Bayer letter (1 = alpha), Bayer index,",
         "// constellation, kind, astrometry source (0 Hipparcos, 1 BSC, 2 SIMBAD), V mag,",
         "// RA and Dec (deg, ICRS) at epoch (Julian year), pm RA*cos(Dec) and pm Dec (mas/yr),",
-        "// parallax (mas), radial velocity (km/s), size (arcmin), spectral type, names ('|').",
+        "// parallax (mas), radial velocity (km/s), size (arcmin), spectral type, names ('|'),",
+        "// 1 where names[0] is the IAU WGSN name.",
         "constexpr StarRecord kStarRecords[] = {",
     ]
     for s in objects:
         out.append(
-            "    {%d, %d, %d, %d, %d, %d, %d, %s, %d, %d, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s},"
+            "    {%d, %d, %d, %d, %d, %d, %d, %s, %d, %d, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d},"
             % (s["hr"], s["hd"], s["hip"], s["flamsteed"], s["messier"], s["bayer"],
                s["bayer_index"], c_str(s["con"]), s["kind"], s["source"],
                f(s["vmag"], 3), f(s["ra"], 10), f(s["dec"], 10), f(s["epoch"], 2),
                f(s["pmra"], 3), f(s["pmdec"], 3), f(s["plx"], 3), f(s["rv"], 2),
-               f(s["size"], 2), c_str(s["sp"]), c_str("|".join(s["names"]))))
+               f(s["size"], 2), c_str(s["sp"]), c_str("|".join(s["names"])), 1 if s.get("iau") else 0))
     out.append("};")
 
     # Constellation boundaries (Delporte 1930 as arranged by Roman 1987):

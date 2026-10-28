@@ -413,6 +413,8 @@ cdef extern from "prometheia/prometheia.h" nogil:
     int PROMETHEIA_OBJECT_BODY
     int PROMETHEIA_OBJECT_STAR
     int PROMETHEIA_OBJECT_HYPOTHETICAL
+    int PROMETHEIA_OBJECT_ORBIT_POINT
+    int PROMETHEIA_OBJECT_ID
 
     ctypedef struct prometheia_object:
         int kind
@@ -454,6 +456,77 @@ cdef extern from "prometheia/prometheia.h" nogil:
                                              const prometheia_options* opts,
                                              prometheia_event* out,
                                              prometheia_error* err) noexcept
+
+    # The object registry
+    int PROMETHEIA_KIND_PLANET
+    int PROMETHEIA_KIND_MOON
+    int PROMETHEIA_KIND_LUNAR_POINT
+    int PROMETHEIA_KIND_ORBIT_POINT
+    int PROMETHEIA_KIND_HYPOTHETICAL
+    int PROMETHEIA_KIND_STAR
+    int PROMETHEIA_KIND_DEEP_SKY
+    int PROMETHEIA_KIND_ASTEROID
+    int PROMETHEIA_KIND_COMET
+    int PROMETHEIA_STANDING_NONE
+    int PROMETHEIA_STANDING_IAU
+    int PROMETHEIA_STANDING_TRADITIONAL
+    int PROMETHEIA_STANDING_DEFINED
+    int PROMETHEIA_MATCH_OLD_DESIGNATION
+    int PROMETHEIA_LOOKUP_PREFIX
+    int PROMETHEIA_ID_SIZE
+
+    ctypedef struct prometheia_object_entry:
+        char id[96]
+        int kind
+        char orbit_class[8]
+        char name[64]
+        int standing
+        char standing_source[160]
+        long long number
+        char designation[48]
+        char provisional_designation[48]
+        double h_mag, g_slope, diameter_km, vmag, elements_epoch_jd
+        double mean_motion_deg_day, sidereal_mean_motion_deg_day, period_days
+        char source[160]
+        int object_kind, object_id
+        char object_token[96]
+
+    ctypedef struct prometheia_object_match:
+        char id[96]
+        int kind
+        int quality
+        char name[64]
+        char matched[64]
+
+    ctypedef struct prometheia_object_filter:
+        unsigned kinds
+        char orbit_class[8]
+        int named_only, numbered_only
+        double h_max, vmag_max
+
+    void prometheia_object_filter_init(prometheia_object_filter* filter) noexcept
+    prometheia_status prometheia_object_info(prometheia_engine* engine, const char* id,
+                                             prometheia_object_entry* info,
+                                             prometheia_error* err) noexcept
+    prometheia_status prometheia_object_lookup(prometheia_engine* engine, const char* query,
+                                               int flags, prometheia_object_match* matches,
+                                               int max, int* count,
+                                               prometheia_error* err) noexcept
+    prometheia_status prometheia_object_list(prometheia_engine* engine,
+                                             const prometheia_object_filter* filter,
+                                             unsigned long long* cursor,
+                                             prometheia_object_match* objects, int max,
+                                             int* count, prometheia_error* err) noexcept
+    prometheia_status prometheia_calc_object(prometheia_engine* engine,
+                                             const prometheia_object* object, double jd_tt,
+                                             const prometheia_options* opts,
+                                             prometheia_result* result,
+                                             prometheia_error* err) noexcept
+    prometheia_status prometheia_calc_object_ut(prometheia_engine* engine,
+                                                const prometheia_object* object, double jd_ut1,
+                                                const prometheia_options* opts,
+                                                prometheia_result* result,
+                                                prometheia_error* err) noexcept
 
     # Time scales
     double prometheia_jd_from_ymdhms(int year, int month, int day, int hour, int minute,
