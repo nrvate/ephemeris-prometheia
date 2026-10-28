@@ -63,6 +63,9 @@ SMALL_EPOCH = 2461200.5
 SMALL_OFFSETS_YR = [-100, -50, -25, -10, 0, 10, 25, 50, 100]
 SMALL_EPOCHS_TT = [SMALL_EPOCH + y * 365.25 for y in SMALL_OFFSETS_YR]
 SBEXT_YEARS = [1600, 1700, 1800, 1900, 2100, 2200, 2300, 2400, 2499]
+# Centaurs a century from their element epoch, where encounters with the
+# giant planets amplify everything (docs/VALIDATION.md, "Centaurs").
+CENTAUR_EPOCHS_TDB = [2415020.5, 2451545.0, 2488069.5]  # 1900, 2000, 2100
 SBEXT_EPOCHS_TDB = [2451545.0 + 365.25 * (y - 2000) for y in SBEXT_YEARS]
 
 # Outside DE440's span (1550-2650), where Horizons and this engine both answer
@@ -195,6 +198,11 @@ def requests():
     for name, number in SMALL_BODIES[:3]:
         out.append((f"sbext-helio-{name}", "small body heliocentric vectors, millennia out (TDB)",
                     vectors(f"{number};", "500@10", SBEXT_EPOCHS_TDB)))
+    # Two centaurs, heliocentric geometric vectors: a measurement for
+    # docs/VALIDATION.md, not a fixture (the generator skips them).
+    for name, number in [("chiron", "2060"), ("nessus", "7066")]:
+        out.append((f"centaur-helio-{name}", "centaur heliocentric vectors, 1900-2100 (TDB)",
+                    vectors(f"{number};", "500@10", CENTAUR_EPOCHS_TDB)))
     # The Moon's light-time-corrected (astrometric) vector asked in TDB:
     # grades the light-time solution with no time-scale conversion on either
     # side (docs/DE.md). Observer tables take only UT or TT.

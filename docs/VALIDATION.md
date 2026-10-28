@@ -162,6 +162,23 @@ by the same mechanism. Before the pin, asking for a comet first moved Eros
 by up to 159 m, Vesta 30 m and Ceres 21 m (1900–2100). After it, the
 answer is the same whatever came first.
 
+**Centaurs (measured 2026-10-27).** Chiron and Nessus are a century from
+their element epochs at 1900 and 2100. Encounters with the giant planets
+amplify every difference there. They were compared against Horizons'
+heliocentric geometric vectors at 1900, 2000 and 2100 (`centaur-helio-*` in
+`tools/fetch/horizons_fetch.py`, a measurement rather than a fixture). The
+run used DE440, the refreshed catalog and the SB441-N16 perturbers, the 16
+Horizons integrates with.
+
+| body | 1900 | 2000 | 2100 |
+|---|---:|---:|---:|
+| Chiron (2060) | 7.5 km | 1.1 km | 8.6 km |
+| Nessus (7066) | 31.3 km | 0.5 km | 9.2 km |
+
+Seen from the Earth, each is within 0.001″. The astromcp port's parity run
+found Nessus 112″ and 267″ from the Swiss Ephemeris at 1900 and 2100, and
+Chiron 0.6″. Those gaps are on the other side's precomputed file, not here.
+
 **Where the integration refuses:** with a kernel loaded, an instant outside
 its span is a coverage error naming the kernel's span (per-object errCode
 3, JSON `outside-coverage`). The trimmed `sb441-n16-de440span.bsp` covers

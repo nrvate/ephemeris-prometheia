@@ -79,6 +79,8 @@ def main():
     for name, purpose, params in hf.requests():
         if name.startswith("tdbtt-") or name.startswith("tdblt-"):
             continue  # a measurement of Horizons' TDB-TT (docs/TIME.md), not a fixture
+        if name.startswith("centaur-"):
+            continue  # a measurement for docs/VALIDATION.md, not a fixture
         if name.startswith("bary-"):
             continue  # a cross-test anchor (tools/check/crosstest.py), not an engine test
         path = os.path.join(args.raw_dir, name + ".json")
