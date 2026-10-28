@@ -160,8 +160,8 @@ announced to the Astrolog side first, 2026-10-27). [ENGINE.md](ENGINE.md),
 "Rise, set and transit", has the method and the measurements.
 - `prometheia_rise_set_ut(engine, &object, event, jd_ut1_start, lon, lat,
   height_m, &options, opts, &out, &err)`:
-  - the object is a `prometheia_object` naming a body, a star or a
-    hypothetical;
+  - the object is a `prometheia_object` naming a body, a star, a
+    hypothetical, an orbit point or a registry id;
   - the event is a rise, a set, or an upper or lower transit;
   - the answer is the first event after the start, or the last before it
     with `backward`.
@@ -169,7 +169,9 @@ announced to the Astrolog side first, 2026-10-27). [ENGINE.md](ENGINE.md),
   default, centre or lower), refraction (on by default) with its
   atmosphere, the dip's eye height (0 by default: the mathematical horizon,
   whatever the site's height), and the window in days (2 by default).
-- `height_m` gives the site's parallax and no dip.
+- `height_m` gives the site's parallax and no dip. An orbit point has none:
+  it rises as a direction seen from the Earth's centre (ENGINE.md, "Rise,
+  set and transit").
 - A window with no such event is `PROMETHEIA_OK`: `out.outcome` says
   ALWAYS_ABOVE, ALWAYS_BELOW or NOT_IN_WINDOW, and `out.jd_ut1` is NaN.
 - `c_api_rise_set_matches_engine` holds every outcome and time to `Engine`

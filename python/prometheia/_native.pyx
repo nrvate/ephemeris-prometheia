@@ -960,9 +960,11 @@ cdef class Context:
                  bint backward=False, Options options=None):
         """The first rise, set, upper- or lower-transit (EVENTS) strictly
         after jd_ut1_start (before, with backward) within window_days, at a
-        site; height_m gives the parallax, dip_height_m the dip (default 0:
-        the mathematical horizon). object is a NAIF id, ("star", index or
-        name) or ("hypothetical", token). A window with no such event is
+        site; height_m gives the parallax (none for an orbit point, a
+        direction seen from the Earth's centre), dip_height_m the dip
+        (default 0: the mathematical horizon). object is a NAIF id, ("star",
+        index or name), ("hypothetical", token), ("orbit-point", body,
+        point, method) or a registry id. A window with no such event is
         not an error: see Event.outcome."""
         cdef c.prometheia_engine* e = self.engine()
         cdef const c.prometheia_options* o = opts_of(options)

@@ -606,7 +606,8 @@ public:
     };
     // The first event strictly after jd_ut1_start (before, with backward)
     // at a site. The position is the topocentric apparent one from the site
-    // (its height gives the parallax). Rise and set are where the limb's
+    // (its height gives the parallax); an orbit point's is the geocentric
+    // apparent one, a direction with no parallax. Rise and set are where the limb's
     // true altitude is -dip - R(-dip), so the apparent limb is on the
     // observer's horizon; without refraction, -dip. Transits are where the
     // local apparent hour angle is 0 or 180 deg.

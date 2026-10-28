@@ -4117,7 +4117,12 @@ Result<Engine::EventResult> Engine::rise_set_ut(const ObjectRef& object, Event e
     if (!std::isfinite(ro.dip_height_m) || ro.dip_height_m < 0.0)
         return make_error(ErrorCode::ArgumentError, "the dip height is 0 m or more");
     CalcOptions o;
-    o.center = Center::Topocentric;
+    // An orbit point is a direction, not a place with a body in it: it is
+    // seen from the Earth's centre, with no site parallax. A lunar point's
+    // would be up to a degree (its distance is the Moon's), moving its rise
+    // by minutes; astromcp measured 233 s on the true node (2026-10-28).
+    o.center =
+        object.kind == ObjectRef::Kind::OrbitPoint ? Center::Geocentric : Center::Topocentric;
     o.site = site;
     o.frame = Frame::TrueOfDate;
     o.coords = Coords::Equatorial;

@@ -13,6 +13,17 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Fixed: orbit points rise without parallax.** `rise_set_ut` (and C's
+  `prometheia_rise_set_ut`, Python's `Context.rise_set`) now takes an orbit
+  point as a direction from the Earth's centre. It applied the site
+  parallax at the Moon's distance to the Moon's nodes and apsides, which
+  moved their rise and set by minutes: astromcp measured the true node 233
+  s late against libswe. The Moon's true and mean nodes and its osculating
+  apogee now match `swetest` to 0.04 s, disc centre without refraction
+  (docs/ENGINE.md, "Rise, set and transit"). Bodies, stars and
+  hypotheticals are unchanged.
+- **Tests: test_catalog's temporary files carry the process id**, as every
+  other test's do, so two gates at once no longer write each other's files.
 - **Datasets in C, and shared perturber and apsis tables (A-15).**
   `prometheia_dataset_open`, `_add_*`, `_freeze` and `_close`, with
   `prometheia_context_open`, load the files once for an engine per thread

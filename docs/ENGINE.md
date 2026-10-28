@@ -433,7 +433,14 @@ The answer is the first event strictly after the start (or the last before
 it), within a window of days.
 
 - **The position** is the topocentric apparent one from the site, the
-  Moon's parallax included. The site's height gives that parallax. The
+  Moon's parallax included. The site's height gives that parallax.
+  - An orbit point is the exception: it is seen from the Earth's centre, as
+    a direction with no parallax. A node or apsis has no body at its
+    distance, and a lunar point's parallax at the horizon, up to a degree,
+    moved its rise by minutes: 233 s for the true node at 19°N on
+    1968-06-21, measured by astromcp against libswe (2026-10-28).
+    `calc_object` with a topocentric observer still re-centres the point
+    on the site ([ORBIT-POINTS.md](ORBIT-POINTS.md), "From any observer"). The
   local apparent hour angle is GAST plus the east longitude, with TT from
   the engine's ΔT ([FRAMES.md](FRAMES.md), "The horizon").
 - **Rise and set** are where the limb's true altitude is h0 = −dip −

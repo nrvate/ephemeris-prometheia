@@ -1517,6 +1517,57 @@ Engine::ObjectRef body_ref(long id) {
 
 } // namespace
 
+// An orbit point rises as a direction from the Earth's centre, with no site
+// parallax: swetest's printed times (UT) for the Moon's true and mean nodes
+// and its osculating apogee, disc centre, no refraction, at 72.9E 19.1N
+// (astromcp's case: with the Moon's parallax, the true node rose 233 s
+// late).
+TEST_CASE("de440_orbit_points_rise_without_parallax_as_swetest") {
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    REQUIRE(opened.ok());
+    Engine& e = opened.value();
+    const frames::GeoSite site{72.9 * kDegToRad, 19.1 * kDegToRad, 0.0};
+    using Ev = Engine::Event;
+    struct Row {
+        OrbitPoint point;
+        OrbitElements method;
+        Ev event;
+        int d;
+        double want; // seconds of the UT day
+    };
+    const Row rows[] = {
+        {OrbitPoint::AscendingNode, OrbitElements::Osculating, Ev::Set, 21,
+         8 * 3600 + 17 * 60 + 31.6},
+        {OrbitPoint::AscendingNode, OrbitElements::Osculating, Ev::Rise, 21,
+         19 * 3600 + 58 * 60 + 2.4},
+        {OrbitPoint::AscendingNode, OrbitElements::Mean, Ev::Set, 21, 8 * 3600 + 12 * 60 + 56.5},
+        {OrbitPoint::AscendingNode, OrbitElements::Mean, Ev::Rise, 22, 19 * 3600 + 50 * 60 + 32.9},
+        {OrbitPoint::Aphelion, OrbitElements::Osculating, Ev::Set, 21, 11 * 3600 + 9 * 60 + 43.9},
+        {OrbitPoint::Aphelion, OrbitElements::Osculating, Ev::Rise, 22, 22 * 3600 + 6 * 60 + 12.3},
+    };
+    double worst = 0.0;
+    for (const Row& r : rows) {
+        Engine::RiseSetOptions o;
+        o.limb = 0;
+        o.refraction = false;
+        Engine::ObjectRef ref;
+        ref.kind = Engine::ObjectRef::Kind::OrbitPoint;
+        ref.id = 301;
+        ref.point = r.point;
+        ref.method = r.method;
+        const double day = ut_of(1968, 6, r.d, 0, 0, 0.0);
+        auto got = e.rise_set_ut(ref, r.event, day, site, o);
+        REQUIRE(got.ok());
+        REQUIRE(got.value().outcome == Engine::Outcome::Found);
+        const double d = std::fabs((got.value().jd_ut1 - day) * 86400.0 - r.want);
+        CHECK_MESSAGE(d < 1.0, "point ", int(r.point), " method ", int(r.method), ": ", d, " s");
+        worst = std::max(worst, d);
+    }
+    std::printf("  orbit points' rise/set vs swetest: %.2f s\n", worst);
+}
+
 TEST_CASE("de440_rise_set_and_transit_match_swetest") {
     if (!available(kDe440Path, "PROMETHEIA_DE440"))
         return;

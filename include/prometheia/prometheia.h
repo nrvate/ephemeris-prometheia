@@ -866,7 +866,8 @@ typedef struct prometheia_event {
  * outcome says why.
  *
  * The position is the topocentric apparent one from the site, the Moon's
- * parallax included, with TT from the engine's Delta T (the observed model,
+ * parallax included; an orbit point's is the geocentric apparent one, a
+ * direction with no parallax. TT comes from the engine's Delta T (the observed model,
  * or a function installed with prometheia_engine_set_delta_t). Only
  * opts->precession enters (NULL: the default).
  *   - Rise and set: the limb's true altitude is -dip - R(-dip), so the
