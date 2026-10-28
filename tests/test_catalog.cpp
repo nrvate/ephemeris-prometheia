@@ -7,6 +7,8 @@
 #include <thread>
 #include <vector>
 
+#include <unistd.h>
+
 #include <prometheia/catalog.hpp>
 #include <prometheia/cbor.hpp>
 #include <prometheia/crc32.hpp>
@@ -30,10 +32,13 @@ using catalog::WriterOptions;
 
 namespace {
 
+// The pid keeps two runs at once (the Release and ASan suites of two gates)
+// from writing each other's files.
 std::string temp_path(const char* tag) {
     static int counter = 0;
     return (std::filesystem::temp_directory_path() /
-            ("prometheia_test_" + std::string(tag) + "_" + std::to_string(counter++) + ".epm"))
+            ("prometheia_test_" + std::string(tag) + "_" + std::to_string(getpid()) + "_" +
+             std::to_string(counter++) + ".epm"))
         .string();
 }
 
