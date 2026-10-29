@@ -328,6 +328,7 @@ class Segments:
     def __exit__(self, *exc: object) -> None: ...
 
 SEGMENT_COMPONENTS: dict[str, int]
+SEGMENT_MAX_TERMS: int
 
 class SegmentRoot:
     """A root of segment_roots (docs/C_API.md, "Roots on segments")."""
@@ -347,6 +348,12 @@ def segment_roots(a: Union[Segments, Sequence[Segments]],
                   modulus: float = 0.0, start: Optional[float] = None,
                   end: Optional[float] = None, tol_days: float = 1e-6,
                   capacity: int = 256) -> SegmentRoots: ...
+
+def segment_roots_sum(terms: Sequence[Tuple[Union[Segments, Sequence[Segments]], float]], *,
+                      component: str = "lon", target: float = 0.0, target_rate: float = 0.0,
+                      target_jd_tt: Optional[float] = None, modulus: float = 0.0,
+                      start: Optional[float] = None, end: Optional[float] = None,
+                      tol_days: float = 1e-6, capacity: int = 256) -> SegmentRoots: ...
 
 class Context:
     """One engine over a Dataset's files, for the thread that made it."""

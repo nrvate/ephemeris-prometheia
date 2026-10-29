@@ -175,6 +175,11 @@ the C++ engine's, bit for bit.
     is a `SegmentRoots`: its `unresolved` counts the cells the search left at
     a halving limit, where a pair of roots that cancel may be lost, and a
     `RuntimeWarning` says so when it is above 0;
+  - `segment_roots_sum(terms, *, component=, target=, …)` is the same for a
+    sum of up to `SEGMENT_MAX_TERMS` `(term, c)` pairs ([C_API.md](C_API.md),
+    "Sums of more than two terms"). Terms naming the same handles combine,
+    and modulo 180 a midpoint is both of its points, so each branch gives
+    roots. `segment_roots` is this with one or two terms;
   - `houses(system, jd, lon, lat, options)`;
   - `sidereal_time(jd_ut1, "mean"|"apparent")` and
     `obliquity(jd_tt, "mean"|"true")`;
@@ -332,7 +337,9 @@ validation: [HELIACAL.md](HELIACAL.md).
     Then `segment_roots` against `Segments.eval` and `calc` (ingresses
     within `err_days`), the same list for capacities 1, 2 and 7, twelve
     month handles against one, the defaults, the refusals, and four threads
-    at once.
+    at once. And `segment_roots_sum`: equal to `segment_roots` for two
+    terms, a midpoint against a body over a year checked root by root
+    against `Segments.eval`, combining terms, and its refusals.
   - The live tests skip when the binaries or DE440 are absent.
 
 ## Phases

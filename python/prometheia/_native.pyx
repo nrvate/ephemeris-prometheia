@@ -970,6 +970,7 @@ cdef class Segments:
 
 
 
+SEGMENT_MAX_TERMS = c.PROMETHEIA_SEGMENTS_MAX_TERMS
 SEGMENT_COMPONENTS = {"lon": c.PROMETHEIA_SEGMENTS_LON, "lat": c.PROMETHEIA_SEGMENTS_LAT,
                       "lon_speed": c.PROMETHEIA_SEGMENTS_LON_SPEED,
                       "lat_speed": c.PROMETHEIA_SEGMENTS_LAT_SPEED}
@@ -1042,16 +1043,40 @@ def segment_roots(a, b=None, *, str component="lon", double ca=1.0, cb=None,
     until done, without the GIL; the list is the same for any capacity. When
     a cell was left unresolved, the list says how many and a RuntimeWarning
     is raised."""
-    if capacity < 1:  # the C call's capacity 0 counts; a list needs the roots
-        raise Error("capacity is at least 1", code="argument")
-    cdef list ta = term_of(a, "a")
-    cdef list tb = [] if b is None else term_of(b, "b")
     if b is None and cb is not None and cb != 0:
         raise Error("cb without b", code="argument")
-    cdef c.prometheia_segments_function f
+    terms = [(a, ca)]
+    if b is not None:
+        terms.append((b, -1.0 if cb is None else cb))
+    return roots_of_sum(terms, "segment_roots", component, target, target_rate, target_jd_tt,
+                        modulus, start, end, tol_days, capacity)
+
+
+def segment_roots_sum(terms, *, str component="lon", double target=0.0,
+                      double target_rate=0.0, target_jd_tt=None, double modulus=0.0,
+                      start=None, end=None, double tol_days=1e-6, int capacity=256):
+    """segment_roots for a sum of up to SEGMENT_MAX_TERMS terms, each a
+    (term, c) pair: f = sum of c X - (target + target_rate (t -
+    target_jd_tt)) (docs/C_API.md, "Sums of more than two terms"). Terms
+    naming the same handles combine; modulo 180 a midpoint is both of its
+    points, so its every branch gives roots. The window defaults to the span
+    every term covers."""
+    terms = list(terms)
+    if not terms or not all(isinstance(t, tuple) and len(t) == 2 for t in terms):
+        raise Error("terms is a non-empty list of (term, c) pairs", code="argument")
+    return roots_of_sum(terms, "segment_roots_sum", component, target, target_rate,
+                        target_jd_tt, modulus, start, end, tol_days, capacity)
+
+
+cdef object roots_of_sum(list terms, str name, str component, double target,
+                         double target_rate, object target_jd_tt, double modulus, object start,
+                         object end, double tol_days, int capacity):
+    """The resumed C search over (term, c) pairs, without the GIL."""
+    if capacity < 1:  # the C call's capacity 0 counts; a list needs the roots
+        raise Error("capacity is at least 1", code="argument")
+    cdef list handles = [term_of(t, "term %d" % k) for k, (t, _) in enumerate(terms)]
+    cdef c.prometheia_segments_sum f
     memset(&f, 0, sizeof(f))
-    f.ca = ca
-    f.cb = 0.0 if b is None else (-1.0 if cb is None else cb)
     f.component = word(SEGMENT_COMPONENTS, component, "component")
     f.target = target
     f.target_rate = target_rate
@@ -1061,15 +1086,11 @@ def segment_roots(a, b=None, *, str component="lon", double ca=1.0, cb=None,
     else:
         f.target_jd_tt = target_jd_tt
     f.modulus = modulus
-    cdef double s = ta[0].start if start is None else start
-    cdef double e = ta[len(ta) - 1].end if end is None else end
-    if tb:
-        if start is None:
-            s = max(s, tb[0].start)
-        if end is None:
-            e = min(e, tb[len(tb) - 1].end)
-    cdef const c.prometheia_segments** ha = NULL
-    cdef const c.prometheia_segments** hb = NULL
+    cdef double s = max(h[0].start for h in handles) if start is None else start
+    cdef double e = min(h[len(h) - 1].end for h in handles) if end is None else end
+    cdef int n = len(terms), k
+    cdef c.prometheia_segments_term* ts = NULL
+    cdef const c.prometheia_segments*** hs = NULL
     cdef c.prometheia_segments_root* buf = NULL
     cdef int count, i, unresolved
     cdef double resume
@@ -1078,21 +1099,28 @@ def segment_roots(a, b=None, *, str component="lon", double ca=1.0, cb=None,
     cdef SegmentRoot r
     out = SegmentRoots()
     try:
-        ha = handles_of(ta)
-        f.a = ha
-        f.na = len(ta)
-        if tb:
-            hb = handles_of(tb)
-            f.b = hb
-            f.nb = len(tb)
+        # The C call refuses more than PROMETHEIA_SEGMENTS_MAX_TERMS.
+        ts = <c.prometheia_segments_term*>PyMem_Malloc(n * sizeof(c.prometheia_segments_term))
+        hs = <const c.prometheia_segments***>PyMem_Malloc(n * sizeof(void*))
+        if ts == NULL or hs == NULL:
+            raise MemoryError()
+        for k in range(n):
+            hs[k] = NULL
+        for k in range(n):
+            hs[k] = handles_of(handles[k])
+            ts[k].handles = hs[k]
+            ts[k].count = len(handles[k])
+            ts[k].c = terms[k][1]
+        f.terms = ts
+        f.nterms = n
         buf = <c.prometheia_segments_root*>PyMem_Malloc(
             capacity * sizeof(c.prometheia_segments_root))
         if buf == NULL:
             raise MemoryError()
         while True:
             with nogil:
-                st = c.prometheia_segments_roots(&f, s, e, tol_days, buf, capacity, &count,
-                                                 &resume, &unresolved, &err)
+                st = c.prometheia_segments_roots_sum(&f, s, e, tol_days, buf, capacity, &count,
+                                                     &resume, &unresolved, &err)
             if st != c.PROMETHEIA_OK:
                 fail(st, &err)
             out.unresolved += unresolved
@@ -1103,18 +1131,21 @@ def segment_roots(a, b=None, *, str component="lon", double ca=1.0, cb=None,
                 out.append(r)
             if resume != resume:
                 if out.unresolved:
-                    _warnings.warn("segment_roots left %d cell(s) unresolved: a pair of roots "
-                                  "that cancel may be missing" % out.unresolved,
-                                  RuntimeWarning, stacklevel=2)
+                    _warnings.warn("%s left %d cell(s) unresolved: a pair of roots that cancel "
+                                   "may be missing" % (name, out.unresolved),
+                                   RuntimeWarning, stacklevel=3)
                 return out
             if not resume > s:
-                raise Error("segment_roots resumed at %r, not after %r" % (resume, s),
+                raise Error("%s resumed at %r, not after %r" % (name, resume, s),
                             code="internal")
             s = resume
     finally:
         PyMem_Free(buf)
-        PyMem_Free(hb)
-        PyMem_Free(ha)
+        if hs != NULL:
+            for k in range(n):
+                PyMem_Free(hs[k])
+        PyMem_Free(hs)
+        PyMem_Free(ts)
 
 cdef class Context:
     """One engine over a Dataset's files, for the thread that made it."""

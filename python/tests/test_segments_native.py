@@ -278,6 +278,37 @@ class SegmentRoots(unittest.TestCase):
             with self.assertRaises(prometheia.Error):
                 n.segment_roots(bad)
 
+    def test_sums(self):
+        two = [as_root(r) for r in n.segment_roots(self.moon, self.sun, modulus=90.0)]
+        self.assertEqual([as_root(r) for r in n.segment_roots_sum(
+            [(self.moon, 1.0), (self.sun, -1.0)], modulus=90.0)], two)
+        ctx = self.ds.context()
+        mars = ctx.fit_segments(n.BODIES["mars"], J2026, J2026 + 120.0)
+        # The Sun/Moon midpoint against Mars, modulo 180: both branches.
+        terms = [(self.sun, 0.5), (self.moon, 0.5), (mars, -1.0)]
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # no unresolved cell
+            roots = n.segment_roots_sum(terms, modulus=180.0)
+        self.assertEqual(roots.unresolved, 0)
+        self.assertGreater(len(roots), 2)
+        for r in roots:
+            self.assertGreaterEqual(r.jd_tt, self.sun.start)  # the window all three cover
+            self.assertLess(r.jd_tt, self.sun.end)
+            f = (0.5 * self.sun.eval(r.jd_tt).lon_deg + 0.5 * self.moon.eval(r.jd_tt).lon_deg
+                 - mars.eval(r.jd_tt).lon_deg)
+            self.assertLessEqual(abs(wrap(f, 180.0)), abs(r.slope) * r.err_days, r)
+        # Terms naming the same handles combine.
+        self.assertEqual(
+            [as_root(r) for r in n.segment_roots_sum(
+                [(self.sun, 0.5), (self.moon, 0.5), (self.sun, -1.0)], modulus=90.0)],
+            [as_root(r) for r in n.segment_roots_sum(
+                [(self.sun, -0.5), (self.moon, 0.5)], modulus=90.0)])
+        for bad in ([], [(self.sun, 1.0), (self.sun, -1.0)], [(self.sun, 1.0, 2.0)],
+                    [(self.sun, 1.0)] * (n.SEGMENT_MAX_TERMS + 1), [("sun", 1.0)]):
+            with self.assertRaises(prometheia.Error) as e:
+                n.segment_roots_sum(bad, modulus=90.0)
+            self.assertEqual(e.exception.code, "argument", bad)
+
     def test_threads_at_once(self):
         want = [as_root(r) for r in n.segment_roots(self.moon, self.sun, modulus=90.0)]
         got = [None] * 4

@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
@@ -109,7 +110,55 @@ struct Spec {
     int component;
     double target, target_rate, target_jd_tt, modulus;
     double from, to;
-    double step; // the oracle's grid, days
+    double step;                                 // the oracle's grid, days
+    std::vector<std::pair<Term, double>> more{}; // terms past two: roots_sum
+};
+
+// Every term of a Spec with its coefficient.
+std::vector<std::pair<Term, double>> terms_of(const Spec& s) {
+    std::vector<std::pair<Term, double>> out{{s.a, s.ca}};
+    if (!s.b.empty())
+        out.emplace_back(s.b, s.cb);
+    out.insert(out.end(), s.more.begin(), s.more.end());
+    return out;
+}
+
+// A Spec as prometheia_segments_sum, pointing into this object's arrays.
+class Sum {
+public:
+    explicit Sum(const Spec& s) : Sum(terms_of(s), s) {}
+    Sum(const std::vector<std::pair<Term, double>>& terms, const Spec& s) {
+        handles_.reserve(terms.size());
+        for (const auto& [term, c] : terms) {
+            std::vector<const prometheia_segments*> h;
+            for (const Fitted* f : term)
+                h.push_back(f->seg);
+            handles_.push_back(std::move(h));
+            terms_.push_back({nullptr, 0, c});
+        }
+        for (size_t i = 0; i < terms_.size(); ++i) {
+            terms_[i].handles = handles_[i].data();
+            terms_[i].count = int(handles_[i].size());
+        }
+        std::memset(&f_, 0, sizeof f_);
+        f_.terms = terms_.data();
+        f_.nterms = int(terms_.size());
+        f_.component = s.component;
+        f_.target = s.target;
+        f_.target_rate = s.target_rate;
+        f_.target_jd_tt = s.target_jd_tt;
+        f_.modulus = s.modulus;
+    }
+    Sum(const Sum&) = delete;
+    Sum& operator=(const Sum&) = delete;
+    const prometheia_segments_sum* get() const { return &f_; }
+    prometheia_segments_sum& edit() { return f_; }
+    prometheia_segments_term& term(size_t i) { return terms_[i]; }
+
+private:
+    std::vector<std::vector<const prometheia_segments*>> handles_;
+    std::vector<prometheia_segments_term> terms_;
+    prometheia_segments_sum f_;
 };
 
 // A Spec as the C struct, which points into this object's arrays.
@@ -153,7 +202,10 @@ double band_of(const Spec& s) {
                                                              : f->layout->err_rate_arcsec_per_day);
         return worst / 3600.0;
     };
-    return std::abs(s.ca) * term(s.a) + (s.b.empty() ? 0.0 : std::abs(s.cb) * term(s.b));
+    double band = 0.0;
+    for (const auto& [t, c] : terms_of(s))
+        band += std::abs(c) * term(t);
+    return band;
 }
 
 // The modulus the contract applies: LON's 0 means 360; other components
@@ -196,14 +248,14 @@ struct OracleRoot {
 // the same object and options, so the first one stands for the term.
 class Oracle {
 public:
-    Oracle(prometheia_engine* e, const Spec& s) : e_(e), s_(s), m_(modulus_of(s)) {}
+    Oracle(prometheia_engine* e, const Spec& s)
+        : e_(e), s_(s), m_(modulus_of(s)), terms_(terms_of(s)) {}
 
     // f unwrapped and df/dt.
     void at(double t, double* value, double* rate) const {
         double v = 0.0, r = 0.0;
-        term(s_.a.front(), s_.ca, t, &v, &r);
-        if (!s_.b.empty())
-            term(s_.b.front(), s_.cb, t, &v, &r);
+        for (const auto& [handles, c] : terms_)
+            term(handles.front(), c, t, &v, &r);
         *value = v - (s_.target + s_.target_rate * (t - s_.target_jd_tt));
         *rate = r - s_.target_rate;
     }
@@ -294,6 +346,7 @@ private:
     prometheia_engine* e_;
     const Spec& s_;
     double m_;
+    std::vector<std::pair<Term, double>> terms_;
 };
 
 std::vector<prometheia_segments_root> roots_of(const prometheia_segments_function* f, double from,
@@ -313,7 +366,30 @@ std::vector<prometheia_segments_root> roots_of(const prometheia_segments_functio
     return out;
 }
 
+std::vector<prometheia_segments_root> roots_of(const prometheia_segments_sum* f, double from,
+                                               double to, double tol_days = kTolDays) {
+    std::vector<prometheia_segments_root> out(4096);
+    int count = -1, unresolved = -1;
+    double resume = 0.0;
+    prometheia_error err;
+    const prometheia_status st = prometheia_segments_roots_sum(
+        f, from, to, tol_days, out.data(), int(out.size()), &count, &resume, &unresolved, &err);
+    REQUIRE_MESSAGE(st == PROMETHEIA_OK, err.message);
+    CHECK(unresolved == 0); // every root found
+    REQUIRE(count >= 0);
+    REQUIRE(count < int(out.size()));
+    CHECK(std::isnan(resume));
+    out.resize(count);
+    return out;
+}
+
+// Two terms or fewer through prometheia_segments_roots, more through
+// prometheia_segments_roots_sum.
 std::vector<prometheia_segments_root> roots_of(const Spec& s) {
+    if (!s.more.empty()) {
+        const Sum f(s);
+        return roots_of(f.get(), s.from, s.to);
+    }
     const Function f(s);
     return roots_of(f.get(), s.from, s.to);
 }
@@ -1019,6 +1095,178 @@ TEST_CASE("c_segment_roots_threads") {
                 CHECK(differ == 0);
             }
         }
+    }
+    prometheia_engine_close(e);
+}
+
+// Sums of more than two terms (prometheia_segments_roots_sum): a midpoint
+// against a body and against a midpoint, modulo 180, where every branch of
+// each midpoint is a root. The Sun crosses 0 Aries in March and the Moon
+// every month, so each term's wrap falls inside the window.
+TEST_CASE("c_segment_roots_sum_against_calc") {
+    prometheia_engine* e = open_engine();
+    if (!e) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    {
+        Fits fits(e);
+        const double y0 = kJ2026, y1 = kJ2026 + kYear;
+        const int ecl = PROMETHEIA_COORDS_ECLIPTIC, lon = PROMETHEIA_SEGMENTS_LON;
+        const Fitted* sun = fits.fit(PROMETHEIA_SUN, ecl, y0, y1, 0.001);
+        const Fitted* moon = fits.fit(PROMETHEIA_MOON, ecl, y0, y1, 0.001);
+        const Fitted* mars = fits.fit(PROMETHEIA_MARS, ecl, y0, y1, 0.001);
+        const Fitted* venus = fits.fit(PROMETHEIA_VENUS, ecl, y0, y1, 0.001);
+        const Fitted* jupiter = fits.fit(PROMETHEIA_JUPITER, ecl, y0, y1, 0.001);
+        const Spec three{"Sun/Moon midpoint = Mars",
+                         {sun},
+                         {moon},
+                         0.5,
+                         0.5,
+                         lon,
+                         0,
+                         0,
+                         0,
+                         180,
+                         y0,
+                         y1,
+                         0.05,
+                         {{{mars}, -1.0}}};
+        const Spec four{"Sun/Moon midpoint = Venus/Jupiter midpoint",
+                        {sun},
+                        {moon},
+                        0.5,
+                        0.5,
+                        lon,
+                        0,
+                        0,
+                        0,
+                        180,
+                        y0,
+                        y1,
+                        0.05,
+                        {{{venus}, -0.5}, {{jupiter}, -0.5}}};
+        for (const Spec& s : {three, four}) {
+            const Measured m = compare(e, s);
+            MESSAGE(s.name << ": " << m.roots << " roots, oracle " << m.oracle);
+            CHECK(m.roots == m.oracle);
+            CHECK(m.oracle > 5);
+            CHECK(m.tangent == 0);
+        }
+    }
+    prometheia_engine_close(e);
+}
+
+TEST_CASE("c_segment_roots_sum_terms") {
+    prometheia_engine* e = open_engine();
+    if (!e) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    {
+        Fits fits(e);
+        const double y0 = kJ2026, y1 = kJ2026 + 60;
+        const int ecl = PROMETHEIA_COORDS_ECLIPTIC, lon = PROMETHEIA_SEGMENTS_LON;
+        const int bodies[] = {PROMETHEIA_SUN,    PROMETHEIA_MOON,  PROMETHEIA_MERCURY,
+                              PROMETHEIA_VENUS,  PROMETHEIA_MARS,  PROMETHEIA_JUPITER,
+                              PROMETHEIA_SATURN, PROMETHEIA_URANUS};
+        std::vector<const Fitted*> f;
+        for (int b : bodies)
+            f.push_back(fits.fit(b, ecl, y0, y1, 0.001));
+        const Fitted *sun = f[0], *moon = f[1];
+        const Spec base{"", {sun}, {}, 1, 0, lon, 0, 0, 0, 90, y0, y1, 0};
+        using Terms = std::vector<std::pair<Term, double>>;
+        auto roots = [&](const Terms& t, double modulus = 90) {
+            Spec s = base;
+            s.modulus = modulus;
+            const Sum sum(t, s);
+            return roots_of(sum.get(), y0, y1);
+        };
+        auto status = [&](const Terms& t, double modulus = 90) {
+            Spec s = base;
+            s.modulus = modulus;
+            const Sum sum(t, s);
+            prometheia_segments_root out[8];
+            int count = 0;
+            double resume = 0.0;
+            prometheia_error err;
+            return prometheia_segments_roots_sum(sum.get(), y0, y1, kTolDays, out, 8, &count,
+                                                 &resume, nullptr, &err);
+        };
+        auto same_all = [](const std::vector<prometheia_segments_root>& x,
+                           const std::vector<prometheia_segments_root>& y) {
+            if (x.size() != y.size())
+                return false;
+            for (size_t i = 0; i < x.size(); ++i)
+                if (!same(x[i], y[i]))
+                    return false;
+            return true;
+        };
+
+        // prometheia_segments_roots is the sum of its two terms.
+        Spec phases = base;
+        phases.a = {moon};
+        phases.b = {sun};
+        phases.cb = -1;
+        const Function two(phases);
+        const std::vector<prometheia_segments_root> wrapped = roots_of(two.get(), y0, y1);
+        REQUIRE(wrapped.size() > 5);
+        CHECK(same_all(wrapped, roots({{{moon}, 1.0}, {{sun}, -1.0}})));
+
+        // Terms naming the same handles combine: half the Sun plus half the
+        // Moon less the Sun is half the Moon less half the Sun.
+        const auto merged = roots({{{sun}, 0.5}, {{moon}, 0.5}, {{sun}, -1.0}});
+        REQUIRE(merged.size() > 3);
+        CHECK(same_all(merged, roots({{{sun}, -0.5}, {{moon}, 0.5}})));
+        // Nothing left: refused.
+        CHECK(status({{{sun}, 1.0}, {{sun}, -1.0}}) == PROMETHEIA_ERROR_ARGUMENT);
+        CHECK(status({{{sun}, 0.0}, {{moon}, 0.0}}) == PROMETHEIA_ERROR_ARGUMENT);
+        // Each term's 360 c / M whole: a quarter of the Sun at M = 180 is not.
+        CHECK(status({{{sun}, 0.25}, {{moon}, 0.75}}, 180) == PROMETHEIA_ERROR_ARGUMENT);
+        CHECK(status({{{sun}, 0.5}, {{moon}, 0.25}}, 180) == PROMETHEIA_ERROR_ARGUMENT);
+        CHECK(status({{{sun}, 0.5}, {{moon}, 0.5}}, 180) == PROMETHEIA_OK);
+
+        // Up to PROMETHEIA_SEGMENTS_MAX_TERMS terms, and at least one.
+        Terms eight;
+        for (const Fitted* x : f)
+            eight.push_back({{x}, 1.0});
+        REQUIRE(eight.size() == PROMETHEIA_SEGMENTS_MAX_TERMS);
+        CHECK(status(eight, 0) == PROMETHEIA_OK);
+        Terms nine = eight;
+        nine.push_back({{moon}, 2.0});
+        Spec s = base;
+        {
+            const Sum sum(nine, s);
+            prometheia_segments_root out[8];
+            int count = 0;
+            double resume = 0.0;
+            CHECK(prometheia_segments_roots_sum(sum.get(), y0, y1, kTolDays, out, 8, &count,
+                                                &resume, nullptr,
+                                                nullptr) == PROMETHEIA_ERROR_ARGUMENT);
+        }
+        Sum one({{{sun}, 1.0}}, s);
+        prometheia_segments_root out[8];
+        int count = 0;
+        double resume = 0.0;
+        auto call = [&]() {
+            return prometheia_segments_roots_sum(one.get(), y0, y1, kTolDays, out, 8, &count,
+                                                 &resume, nullptr, nullptr);
+        };
+        CHECK(call() == PROMETHEIA_OK);
+        one.edit().nterms = 0;
+        CHECK(call() == PROMETHEIA_ERROR_ARGUMENT);
+        one.edit().nterms = 1;
+        one.term(0).count = 0; // a term with no handles
+        CHECK(call() == PROMETHEIA_ERROR_ARGUMENT);
+        one.term(0).count = 1;
+        const prometheia_segments* const* handles = one.term(0).handles;
+        one.term(0).handles = nullptr;
+        CHECK(call() == PROMETHEIA_ERROR_ARGUMENT);
+        one.term(0).handles = handles;
+        one.edit().terms = nullptr;
+        CHECK(call() == PROMETHEIA_ERROR_ARGUMENT);
+        CHECK(prometheia_segments_roots_sum(nullptr, y0, y1, kTolDays, out, 8, &count, &resume,
+                                            nullptr, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
     }
     prometheia_engine_close(e);
 }

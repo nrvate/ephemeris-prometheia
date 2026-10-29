@@ -19,6 +19,14 @@ documented, not that it is frozen.
   with one or two terms. Terms naming the same handles combine, and a flat
   sum is refused. Against brute force over 2026, 3- and 4-term midpoint
   searches had 0 missed and 0 extra roots, in about a millisecond a year.
+  - **The independent oracle** (`tests/test_c_segment_roots.cpp`), written
+    from the header's contract, agrees: the Sun/Moon midpoint against Mars
+    gave 13 roots and against the Venus/Jupiter midpoint 14, as bisection on
+    `prometheia_calc_object` did. Combining terms, the refusals, and the
+    wrapper equal bit for bit to a two-term sum are tested too. Four faults
+    injected into the sum code each made it fail.
+  - **Python:** `segment_roots_sum([(term, c), ...], ...)`, with
+    `SEGMENT_MAX_TERMS`; `segment_roots` now goes through it.
 - **`prometheia_object_coverage`** (docs/C_API.md, "Coverage"): the exact
   TT interval in which an object is answered with given options, so a
   caller can clip its fits to it. Python: `Context.object_coverage`.
