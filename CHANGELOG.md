@@ -50,6 +50,9 @@ documented, not that it is frozen.
 - **`prometheia_object_coverage`** (docs/C_API.md, "Coverage"): the exact
   TT interval in which an object is answered with given options, so a
   caller can clip its fits to it. Python: `Context.object_coverage`.
+  `prometheia_object_coverage_end` gives the last instant alone, exactly,
+  without integrating a catalog body whose own state reaches past the
+  observer's end: 2 ms for Chiron against about 2 s.
 
 - **A dataset's contexts share the folded name index** (docs/REGISTRY.md,
   "Cost"). The registry folded the catalogs' proper names in a pass of its

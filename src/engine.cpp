@@ -4481,6 +4481,32 @@ Result<uint64_t> Engine::catalog_bodies() const {
     return *d.distinct_bodies;
 }
 
+Result<std::pair<double, double>> Engine::catalog_state_span(int spkid) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    // A body the planetary files answer is never integrated (body_barycentric).
+    const auto [slo, shi] = impl_->source->span();
+    double probe[6];
+    auto direct = impl_->source->barycentric(spkid, 0.5 * (slo + shi), probe, impl_->scratch);
+    if (direct.ok() || direct.error().code != ErrorCode::NotFound)
+        return make_error(ErrorCode::NotFound, "body " + std::to_string(spkid) +
+                                                   " is answered by the planetary ephemeris");
+    auto r = impl_->find_record_at(spkid);
+    if (!r.ok())
+        return r.error();
+    if (!r.value())
+        return make_error(ErrorCode::NotFound,
+                          "no loaded catalog carries body " + std::to_string(spkid));
+    // The limits small_body_state and the memo apply.
+    auto [lo, hi] = impl_->perturbers.span();
+    if (!impl_->asteroids) {
+        const double epoch = r.value()->first.epoch_jtdb;
+        lo = std::max(lo, epoch - kNoPerturberSpanDays);
+        hi = std::min(hi, epoch + kNoPerturberSpanDays);
+    }
+    return std::make_pair(lo, hi);
+}
+
 Result<Engine::CatalogBody> Engine::catalog_body(int spkid) const {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");

@@ -1519,6 +1519,27 @@ PROMETHEIA_API prometheia_status prometheia_object_coverage(prometheia_engine* e
                                                             double* first_jd_tt, double* last_jd_tt,
                                                             prometheia_error* err);
 
+/*
+ * The last instant of prometheia_object_coverage alone, exact the same way,
+ * and cheap for a catalog body. It is read one light time before the
+ * instant, so where its own state (the perturber kernel, or 100 years from
+ * its element epoch without one) reaches past the observer's last instant,
+ * it ends where the Sun does, found without integrating it: milliseconds,
+ * against the integration across the whole span the full call needs (a
+ * second or two). Where its own state ends first, its light time decides,
+ * and the call integrates as prometheia_object_coverage does. Any other
+ * object costs what prometheia_object_coverage does. It succeeds and fails
+ * exactly where prometheia_object_coverage does, with the same end: an
+ * object answered in more than one piece of the planetary files is
+ * PROMETHEIA_ERROR_COVERAGE here too, never the last piece's end.
+ * *last_jd_tt is NaN on failure.
+ */
+PROMETHEIA_API prometheia_status prometheia_object_coverage_end(prometheia_engine* engine,
+                                                                const prometheia_object* object,
+                                                                const prometheia_options* opts,
+                                                                double* last_jd_tt,
+                                                                prometheia_error* err);
+
 /* An instant in the span; outside it, PROMETHEIA_ERROR_COVERAGE. No
  * allocation and no lock. On failure *out is zeroed. */
 PROMETHEIA_API prometheia_status prometheia_segments_eval(const prometheia_segments* segments,

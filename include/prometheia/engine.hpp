@@ -659,6 +659,13 @@ public:
         size_t catalog = 0;
     };
     Result<CatalogBody> catalog_body(int spkid) const;
+    // The TDB span in which a catalog body's own state can be integrated,
+    // read off the loaded files and its record without integrating: the
+    // planetary ephemeris's span, narrowed to the perturber kernel's, or
+    // without a kernel to 100 years either side of the element epoch.
+    // NotFound for a body the planetary ephemeris answers itself, or that
+    // no catalog carries.
+    Result<std::pair<double, double>> catalog_state_span(int spkid);
     Result<void> for_each_catalog_record(
         const std::function<void(size_t catalog, const catalog::Record&, const catalog::Names&)>&
             fn) const;

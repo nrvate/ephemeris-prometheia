@@ -722,6 +722,56 @@ interval never meets a refusal. Additive; the ABI version stays 6.
   - `PROMETHEIA_ERROR_ARGUMENT` for a NULL argument.
   - Both outputs are NaN on any failure.
 
+### The last instant alone
+
+```c
+prometheia_status prometheia_object_coverage_end(prometheia_engine *engine,
+    const prometheia_object *object, const prometheia_options *opts,
+    double *last_jd_tt, prometheia_error *err);
+```
+
+The last instant of `prometheia_object_coverage`, exact the same way. It is
+cheap for a catalog body, whose full coverage costs an integration across
+the whole span. astromcp asked for it: it clips a fit at the end of the
+ephemeris for a dozen catalog bodies at a time.
+- **Why the end is cheap.** A catalog body is read one light time before
+  the instant. Where its own state reaches past the observer's last
+  instant, it ends where the Sun does. Its own state is bounded by the
+  perturber kernel, or without one by 100 years from its element epoch, and
+  both are read off the files and its record. That end is found without
+  integrating the body.
+- **When its own state ends first,** its light time decides, and the call
+  integrates as the full one does: without a kernel, say, 100 years from
+  the epoch.
+- **Measured** on 2026-10-28, with DE440, the 1.58M-body catalog and the
+  DE440-span kernel. Chiron's end takes 2.2 ms, against about 2 s for
+  `prometheia_object_coverage`; Sedna's takes 1.9 ms. The end equals the
+  full call's to the bit.
+- **Same answer as the full call, always.** It succeeds and fails exactly
+  where `prometheia_object_coverage` does, with the same end. An object
+  answered in more than one piece of the planetary files is refused here
+  too, never given the last piece's end. When the Sun itself is answered in
+  pieces, the shortcut is not taken and the full search decides.
+- **The tests** are `c_object_coverage_end_of_a_catalog_body` and
+  `c_object_coverage_end_where_the_body_ends_first_or_in_pieces`. Each
+  checks the end against the full call to the bit, and checks that the
+  body is answered there and refused one double past. They cover:
+  - the shortcut taken, with DE440 cut to 2020–2040 and the kernel loaded;
+  - the body's own limit binding: without a kernel on the full DE440, its
+    100-year window; with a kernel cut to 2030 under planets to 2040, the
+    kernel;
+  - planetary files in pieces.
+
+  Two faults each fail them: taking the shortcut unchecked, and returning
+  the Sun's refusal when the files are in pieces.
+- **A catalog body and pieces.** A catalog body is integrated only within
+  the first planetary file's span, which the perturber tables follow,
+  starting from its element epoch. So it lies in one piece at most, and in
+  none when its epoch is outside the first file.
+- **Other objects** cost what `prometheia_object_coverage` does, a few
+  milliseconds.
+- **Errors** are as for that call. `*last_jd_tt` is NaN on failure.
+
 ## Datasets and threads
 
 One dataset holds the files, loaded once, and any number of engines,

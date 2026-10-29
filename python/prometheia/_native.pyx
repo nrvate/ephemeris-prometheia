@@ -1250,6 +1250,24 @@ cdef class Context:
             fail(st, &err)
         return (first, last)
 
+    def object_coverage_end(self, object body, Options options=None):
+        """The last TT instant of object_coverage alone, exact the same way;
+        milliseconds for a catalog body, where the full call integrates
+        across the span (docs/C_API.md, "Coverage")."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef const c.prometheia_options* o = opts_of(options)
+        cdef c.prometheia_object obj
+        cdef list keep = []
+        cdef double last
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        object_of(body, &obj, keep)
+        with nogil:
+            st = c.prometheia_object_coverage_end(e, &obj, o, &last, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return last
+
     def calc_star(self, star, double jd, Options options=None, str scale="tt"):
         """A fixed star or Messier object by catalog index or name."""
         cdef c.prometheia_engine* e = self.engine()

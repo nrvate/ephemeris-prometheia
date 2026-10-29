@@ -942,3 +942,7 @@ cdef extern from "prometheia/prometheia.h" nogil:
         prometheia_engine* engine, const prometheia_object* object,
         const prometheia_options* opts, double* first_jd_tt, double* last_jd_tt,
         prometheia_error* err) noexcept
+
+    prometheia_status prometheia_object_coverage_end(
+        prometheia_engine* engine, const prometheia_object* object,
+        const prometheia_options* opts, double* last_jd_tt, prometheia_error* err) noexcept

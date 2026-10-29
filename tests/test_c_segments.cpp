@@ -23,12 +23,14 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <unistd.h>
 
 #include <prometheia/de.hpp>
 #include <prometheia/prometheia.h>
+#include <prometheia/spk.hpp>
 
 #include <doctest/doctest.h>
 
@@ -536,6 +538,156 @@ TEST_CASE("c_object_coverage") {
     CHECK(prometheia_object_coverage(e, nullptr, &o, &first, &last, nullptr) ==
           PROMETHEIA_ERROR_ARGUMENT);
     prometheia_engine_close(e);
+}
+
+TEST_CASE("c_object_coverage_end_of_a_catalog_body") {
+    // A catalog body read one light time before the instant ends where the
+    // observer does when its own state reaches further: the Sun's end,
+    // found without integrating it. Checked against the body itself at that
+    // instant and one double past it. DE440 is cut to 2020-2040 so that
+    // check integrates 15 years, not 600 (the gate runs it under ASan).
+    if (!readable(de440_path()) || !readable(perturbers_path())) {
+        MESSAGE("SKIP: DE440 or the perturber kernel not found");
+        return;
+    }
+    const std::string cut = (std::filesystem::temp_directory_path() /
+                             ("prometheia_test_coverage_end_" + std::to_string(getpid()) + ".440"))
+                                .string();
+    REQUIRE(prometheia::de::trim(de440_path(), cut, 2458849.5, 2466154.5).ok());
+    const std::string sample = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
+    prometheia_engine* e = nullptr;
+    REQUIRE(prometheia_engine_open(cut.c_str(), &e, nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_add_catalog(e, sample.c_str(), nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_add_perturbers(e, perturbers_path().c_str(), nullptr) ==
+            PROMETHEIA_OK);
+    const prometheia_options o = defaults();
+    const prometheia_object sun{PROMETHEIA_OBJECT_BODY, 10, nullptr};
+    const prometheia_object ceres{PROMETHEIA_OBJECT_BODY, 20000001, nullptr};
+    double first = 0.0, sun_last = 0.0, last = 0.0;
+    prometheia_error err;
+    REQUIRE(prometheia_object_coverage(e, &sun, &o, &first, &sun_last, &err) == PROMETHEIA_OK);
+    REQUIRE(prometheia_object_coverage_end(e, &ceres, &o, &last, &err) == PROMETHEIA_OK);
+    CHECK(last == sun_last);
+    prometheia_result r;
+    CHECK(prometheia_calc_object(e, &ceres, last, &o, &r, nullptr) == PROMETHEIA_OK);
+    CHECK(prometheia_calc_object(e, &ceres, std::nextafter(last, 1e300), &o, &r, nullptr) ==
+          PROMETHEIA_ERROR_COVERAGE);
+    // Any other object: the full call's end.
+    REQUIRE(prometheia_object_coverage_end(e, &sun, &o, &last, &err) == PROMETHEIA_OK);
+    CHECK(last == sun_last);
+    prometheia_engine_close(e);
+    std::filesystem::remove(cut);
+
+    // Without the kernel the body's own 100-year window ends first, so its
+    // light time decides and the call integrates: the full call's end.
+    prometheia_engine* bare = open_engine(false);
+    REQUIRE(bare);
+    REQUIRE(prometheia_engine_add_catalog(bare, sample.c_str(), nullptr) == PROMETHEIA_OK);
+    double full_first = 0.0, full_last = 0.0;
+    REQUIRE(prometheia_object_coverage(bare, &ceres, &o, &full_first, &full_last, &err) ==
+            PROMETHEIA_OK);
+    REQUIRE(prometheia_object_coverage_end(bare, &ceres, &o, &last, &err) == PROMETHEIA_OK);
+    CHECK(last == full_last);
+    CHECK(last < 2500000.0); // 100 years from a 2020s epoch, long before 2650
+    CHECK(prometheia_calc_object(bare, &ceres, last, &o, &r, nullptr) == PROMETHEIA_OK);
+    CHECK(prometheia_calc_object(bare, &ceres, std::nextafter(last, 1e300), &o, &r, nullptr) ==
+          PROMETHEIA_ERROR_COVERAGE);
+    prometheia_engine_close(bare);
+}
+
+TEST_CASE("c_object_coverage_end_where_the_body_ends_first_or_in_pieces") {
+    // The branches the shortcut does not take, each against the full call to
+    // the bit (Astrolog's review): a perturber kernel ending before the
+    // planetary file, and planetary files in pieces.
+    if (!readable(de440_path()) || !readable(perturbers_path())) {
+        MESSAGE("SKIP: DE440 or the perturber kernel not found");
+        return;
+    }
+    const auto temp = [](const char* tag, const char* ext) {
+        return (std::filesystem::temp_directory_path() /
+                ("prometheia_test_coverage_end_" + std::string(tag) + "_" +
+                 std::to_string(getpid()) + ext))
+            .string();
+    };
+    const std::string sample = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
+    const prometheia_options o = defaults();
+    const prometheia_object ceres{PROMETHEIA_OBJECT_BODY, 20000001, nullptr};
+    const prometheia_object moon{PROMETHEIA_OBJECT_BODY, 301, nullptr};
+    const auto et = [](double jd) { return (jd - 2451545.0) * 86400.0; };
+    prometheia_result r;
+    prometheia_error err;
+    double first = 0.0, full_last = 0.0, last = 0.0;
+
+    // 1. The kernel ends in 2030, the planets in 2040: the body ends first.
+    const std::string planets = temp("planets", ".440"), kernel = temp("kernel", ".bsp");
+    REQUIRE(prometheia::de::trim(de440_path(), planets, 2458849.5, 2466154.5).ok());
+    {
+        auto src = prometheia::spk::SpkFile::open(perturbers_path());
+        REQUIRE(src.ok());
+        auto segs = prometheia::spk::trim_segments(src.value(), et(2458849.5), et(2462502.5));
+        REQUIRE(segs.ok());
+        REQUIRE(prometheia::spk::write_spk(kernel, "TEST", "", segs.value()).ok());
+    }
+    prometheia_engine* e = nullptr;
+    REQUIRE(prometheia_engine_open(planets.c_str(), &e, nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_add_catalog(e, sample.c_str(), nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_add_perturbers(e, kernel.c_str(), nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_object_coverage(e, &ceres, &o, &first, &full_last, &err) == PROMETHEIA_OK);
+    REQUIRE(prometheia_object_coverage_end(e, &ceres, &o, &last, &err) == PROMETHEIA_OK);
+    CHECK(last == full_last);
+    CHECK(last < 2462600.0); // the kernel's 2030, not the planets' 2040
+    CHECK(prometheia_calc_object(e, &ceres, last, &o, &r, nullptr) == PROMETHEIA_OK);
+    CHECK(prometheia_calc_object(e, &ceres, std::nextafter(last, 1e300), &o, &r, nullptr) ==
+          PROMETHEIA_ERROR_COVERAGE);
+    prometheia_engine_close(e);
+
+    // 2. Planetary files in two pieces, no kernel. The Moon is answered in
+    //    both and refused by both calls. A catalog body is integrated only
+    //    within the first file's span (the perturber tables follow it), from
+    //    its element epoch (2025 here), so it lies in one piece at most:
+    //    - 2000-2040 first: answered there, by both calls with the same end;
+    //    - 2000-2010 or 1600-1700 first: the epoch is outside, so it is
+    //      answered nowhere and both calls refuse.
+    //    The Sun is answered in both pieces throughout, so the shortcut's own
+    //    coverage call refuses and the full search decides.
+    const std::string a1 = temp("a1", ".440"), a2 = temp("a2", ".440");
+    const std::string b1 = temp("b1", ".440"), b2 = temp("b2", ".440");
+    REQUIRE(prometheia::de::trim(de440_path(), a1, 2451544.5, 2455197.5).ok()); // 2000-2010
+    REQUIRE(prometheia::de::trim(de440_path(), a2, 2455293.5, 2458849.5).ok()); // 2010-2020
+    REQUIRE(prometheia::de::trim(de440_path(), b1, 2305447.5, 2341972.5).ok()); // 1600-1700
+    REQUIRE(prometheia::de::trim(de440_path(), b2, 2451544.5, 2466154.5).ok()); // 2000-2040
+    const struct {
+        std::string first, second;
+        bool answered;
+    } layouts[] = {{b2, b1, true}, {a1, a2, false}, {b1, b2, false}};
+    for (const auto& l : layouts) {
+        prometheia_engine* g = nullptr;
+        REQUIRE(prometheia_engine_open(l.first.c_str(), &g, nullptr) == PROMETHEIA_OK);
+        REQUIRE(prometheia_engine_add_ephemeris(g, l.second.c_str(), nullptr) == PROMETHEIA_OK);
+        REQUIRE(prometheia_engine_add_catalog(g, sample.c_str(), nullptr) == PROMETHEIA_OK);
+        INFO(l.first, " then ", l.second);
+        const prometheia_status full =
+            prometheia_object_coverage(g, &ceres, &o, &first, &full_last, nullptr);
+        const prometheia_status end = prometheia_object_coverage_end(g, &ceres, &o, &last, nullptr);
+        CHECK(full == (l.answered ? PROMETHEIA_OK : PROMETHEIA_ERROR_COVERAGE));
+        CHECK(end == full);
+        if (l.answered) {
+            CHECK(last == full_last);
+            CHECK(prometheia_calc_object(g, &ceres, last, &o, &r, nullptr) == PROMETHEIA_OK);
+            CHECK(prometheia_calc_object(g, &ceres, std::nextafter(last, 1e300), &o, &r, nullptr) ==
+                  PROMETHEIA_ERROR_COVERAGE);
+        } else {
+            CHECK(std::isnan(last));
+        }
+        CHECK(prometheia_object_coverage(g, &moon, &o, &first, &full_last, nullptr) ==
+              PROMETHEIA_ERROR_COVERAGE);
+        CHECK(prometheia_object_coverage_end(g, &moon, &o, &last, nullptr) ==
+              PROMETHEIA_ERROR_COVERAGE);
+        CHECK(std::isnan(last));
+        prometheia_engine_close(g);
+    }
+    for (const std::string& f : {planets, kernel, a1, a2, b1, b2})
+        std::filesystem::remove(f);
 }
 
 TEST_CASE("c_object_coverage_with_a_gap") {

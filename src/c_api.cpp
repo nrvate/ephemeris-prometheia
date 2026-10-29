@@ -2302,6 +2302,88 @@ std::vector<double> segment_cuts(Engine& e, const Engine::ObjectRef& ref, const 
     return cuts;
 }
 
+// The interval calc answers ref in with o, each end to adjacent doubles
+// (prometheia_object_coverage).
+prometheia_status coverage_of(Engine& e, const Engine::ObjectRef& ref, const CalcOptions& o,
+                              double* first_jd_tt, double* last_jd_tt, prometheia_error* err) {
+    // Every answer needs the planetary files, so the instants answered lie
+    // within their spans. Spans that overlap or touch make one piece;
+    // between pieces nothing is answered, so the gaps are known exactly.
+    const std::vector<Engine::EphemerisSpan> spans = e.ephemeris_spans();
+    if (spans.empty())
+        return report(err, PROMETHEIA_ERROR_COVERAGE, "coverage: no planetary file is loaded");
+    std::vector<std::pair<double, double>> pieces;
+    for (const Engine::EphemerisSpan& sp : spans)
+        pieces.emplace_back(time::tt_from_tdb(sp.first_jd_tdb), time::tt_from_tdb(sp.last_jd_tdb));
+    std::sort(pieces.begin(), pieces.end());
+    size_t merged = 0;
+    for (size_t i = 1; i < pieces.size(); ++i) {
+        if (pieces[i].first <= pieces[merged].second)
+            pieces[merged].second = std::max(pieces[merged].second, pieces[i].second);
+        else
+            pieces[++merged] = pieces[i];
+    }
+    pieces.resize(merged + 1);
+    Error last_error = make_error(ErrorCode::CoverageError, "coverage: never answered");
+    const auto answered = [&](double jd) {
+        auto c = e.calc_object(ref, jd, o);
+        if (!c)
+            last_error = c.error();
+        return c.ok();
+    };
+    // Probe each piece; the object must be answered in one of them only.
+    constexpr int kProbes = 64;
+    double probe[kProbes + 1];
+    bool ok[kProbes + 1];
+    int first = -1, last = -1;
+    size_t found = pieces.size();
+    for (size_t p = 0; p < pieces.size(); ++p) {
+        const auto [lo, hi] = pieces[p];
+        double at[kProbes + 1];
+        bool hit[kProbes + 1];
+        int f = -1, l = -1;
+        for (int k = 0; k <= kProbes; ++k) {
+            at[k] = k == kProbes ? hi : lo + (hi - lo) * k / kProbes;
+            hit[k] = answered(at[k]);
+            if (hit[k]) {
+                if (f < 0)
+                    f = k;
+                l = k;
+            }
+        }
+        if (f < 0)
+            continue;
+        if (found != pieces.size())
+            return report(err, PROMETHEIA_ERROR_COVERAGE,
+                          "coverage: the object is answered in more than one interval (the "
+                          "loaded planetary files leave a gap)");
+        found = p;
+        first = f;
+        last = l;
+        std::copy(at, at + kProbes + 1, probe);
+        std::copy(hit, hit + kProbes + 1, ok);
+    }
+    if (first < 0)
+        return report(err, last_error);
+    for (int k = first; k <= last; ++k)
+        if (!ok[k])
+            return report(err, PROMETHEIA_ERROR_COVERAGE,
+                          "coverage: the object is not answered across one interval");
+    // Each edge to adjacent doubles, between the last refused probe and
+    // the first answered one (or the files' own edge, if answered).
+    const auto edge = [&](double bad, double good) {
+        while (true) {
+            const double mid = bad + (good - bad) / 2;
+            if (mid == bad || mid == good)
+                return good;
+            (answered(mid) ? good : bad) = mid;
+        }
+    };
+    *first_jd_tt = first == 0 ? probe[0] : edge(probe[first - 1], probe[first]);
+    *last_jd_tt = last == kProbes ? probe[kProbes] : edge(probe[last + 1], probe[last]);
+    return succeed(err);
+}
+
 } // namespace
 
 extern "C" {
@@ -2469,84 +2551,62 @@ prometheia_status prometheia_object_coverage(prometheia_engine* engine,
             if (prometheia_status st = translate(*opts, o, err); st != PROMETHEIA_OK)
                 return st;
         }
-        Engine& e = engine->engine;
-        // Every answer needs the planetary files, so the instants answered lie
-        // within their spans. Spans that overlap or touch make one piece;
-        // between pieces nothing is answered, so the gaps are known exactly.
-        const std::vector<Engine::EphemerisSpan> spans = e.ephemeris_spans();
-        if (spans.empty())
-            return report(err, PROMETHEIA_ERROR_COVERAGE, "coverage: no planetary file is loaded");
-        std::vector<std::pair<double, double>> pieces;
-        for (const Engine::EphemerisSpan& sp : spans)
-            pieces.emplace_back(time::tt_from_tdb(sp.first_jd_tdb),
-                                time::tt_from_tdb(sp.last_jd_tdb));
-        std::sort(pieces.begin(), pieces.end());
-        size_t merged = 0;
-        for (size_t i = 1; i < pieces.size(); ++i) {
-            if (pieces[i].first <= pieces[merged].second)
-                pieces[merged].second = std::max(pieces[merged].second, pieces[i].second);
-            else
-                pieces[++merged] = pieces[i];
+        double first = nan, last = nan;
+        const prometheia_status st = coverage_of(engine->engine, ref, o, &first, &last, err);
+        if (st == PROMETHEIA_OK) {
+            *first_jd_tt = first;
+            *last_jd_tt = last;
         }
-        pieces.resize(merged + 1);
-        Error last_error = make_error(ErrorCode::CoverageError, "coverage: never answered");
-        const auto answered = [&](double jd) {
-            auto c = e.calc_object(ref, jd, o);
-            if (!c)
-                last_error = c.error();
-            return c.ok();
-        };
-        // Probe each piece; the object must be answered in one of them only.
-        constexpr int kProbes = 64;
-        double probe[kProbes + 1];
-        bool ok[kProbes + 1];
-        int first = -1, last = -1;
-        size_t found = pieces.size();
-        for (size_t p = 0; p < pieces.size(); ++p) {
-            const auto [lo, hi] = pieces[p];
-            double at[kProbes + 1];
-            bool hit[kProbes + 1];
-            int f = -1, l = -1;
-            for (int k = 0; k <= kProbes; ++k) {
-                at[k] = k == kProbes ? hi : lo + (hi - lo) * k / kProbes;
-                hit[k] = answered(at[k]);
-                if (hit[k]) {
-                    if (f < 0)
-                        f = k;
-                    l = k;
+        return st;
+    });
+}
+
+prometheia_status prometheia_object_coverage_end(prometheia_engine* engine,
+                                                 const prometheia_object* object,
+                                                 const prometheia_options* opts, double* last_jd_tt,
+                                                 prometheia_error* err) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    if (last_jd_tt)
+        *last_jd_tt = nan;
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!object)
+        return argument(err, "object is NULL");
+    if (!last_jd_tt)
+        return argument(err, "last_jd_tt is NULL");
+    return guarded(err, [&] {
+        Engine::ObjectRef ref;
+        if (prometheia_status st = to_ref(engine, *object, ref, err); st != PROMETHEIA_OK)
+            return st;
+        CalcOptions o;
+        if (opts) {
+            if (prometheia_status st = translate(*opts, o, err); st != PROMETHEIA_OK)
+                return st;
+        }
+        Engine& e = engine->engine;
+        double first = nan, last = nan;
+        // A catalog body is read one light time before the instant, so where
+        // its own state reaches past the observer's last instant, it ends
+        // there too: the Sun's end, found without integrating it. Otherwise
+        // (a kernel or a 100-year window ending first) its light time
+        // decides, and only the integration knows it.
+        if (ref.kind == Engine::ObjectRef::Kind::Body) {
+            if (auto span = e.catalog_state_span(int(ref.id)); span.ok()) {
+                // The Sun refused (files in pieces): the body may still be
+                // answered in one piece only, which the full search decides.
+                Engine::ObjectRef sun;
+                sun.id = body::kSun;
+                if (coverage_of(e, sun, o, &first, &last, nullptr) == PROMETHEIA_OK &&
+                    span.value().second >= time::tdb_from_tt(last)) {
+                    *last_jd_tt = last;
+                    return succeed(err);
                 }
             }
-            if (f < 0)
-                continue;
-            if (found != pieces.size())
-                return report(err, PROMETHEIA_ERROR_COVERAGE,
-                              "coverage: the object is answered in more than one interval (the "
-                              "loaded planetary files leave a gap)");
-            found = p;
-            first = f;
-            last = l;
-            std::copy(at, at + kProbes + 1, probe);
-            std::copy(hit, hit + kProbes + 1, ok);
         }
-        if (first < 0)
-            return report(err, last_error);
-        for (int k = first; k <= last; ++k)
-            if (!ok[k])
-                return report(err, PROMETHEIA_ERROR_COVERAGE,
-                              "coverage: the object is not answered across one interval");
-        // Each edge to adjacent doubles, between the last refused probe and
-        // the first answered one (or the files' own edge, if answered).
-        const auto edge = [&](double bad, double good) {
-            while (true) {
-                const double mid = bad + (good - bad) / 2;
-                if (mid == bad || mid == good)
-                    return good;
-                (answered(mid) ? good : bad) = mid;
-            }
-        };
-        *first_jd_tt = first == 0 ? probe[0] : edge(probe[first - 1], probe[first]);
-        *last_jd_tt = last == kProbes ? probe[kProbes] : edge(probe[last + 1], probe[last]);
-        return succeed(err);
+        const prometheia_status st = coverage_of(e, ref, o, &first, &last, err);
+        if (st == PROMETHEIA_OK)
+            *last_jd_tt = last;
+        return st;
     });
 }
 
