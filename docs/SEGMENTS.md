@@ -292,6 +292,11 @@ its ingresses, returns, stations, aspect windows and declination searches.
   - The call reports how many such cells met the window (`*unresolved`), so
     a search that found every root can be told from one that may not
     have.
+    `tests/test_segment_roots_limits.cpp` forces a limit: no halving, and
+    separately a narrowest cell wider than a piece. On 60 days of the
+    Moon's latitude the count is then above 0, while the same window at the
+    default limits counts 0 and finds all four nodes. With the counter
+    disabled, the test fails.
 - **Order.** Roots strictly increase. Two levels solved to a coarse
   `tol_days` could share an instant; the later one is then moved to the
   next double. So a resume, which starts at a root and includes it, never

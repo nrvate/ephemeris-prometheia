@@ -15,6 +15,14 @@ namespace prometheia::segment_roots {
 // back to back; nb is 0 for no second term. The caller has checked every
 // field: modulus is resolved (360 for a longitude asked with 0) and is 0 for
 // any other component.
+// Where halving a cell stops (docs/SEGMENTS.md, "Roots", "Limits"). Only
+// tests change them, to reach a limit on purpose.
+struct Limits {
+    int max_depth = 40;          // halvings of a piece
+    int max_cells = 1 << 14;     // cells in one piece
+    double min_cell_days = 1e-6; // the narrowest cell, whatever tol_days asks
+};
+
 struct Function {
     const prometheia_segments* const* a = nullptr;
     int na = 0;
@@ -24,6 +32,7 @@ struct Function {
     int component = PROMETHEIA_SEGMENTS_LON;
     double target = 0.0, target_rate = 0.0, target_jd_tt = 0.0;
     double modulus = 0.0;
+    Limits limits;
 };
 
 // Writes the roots in [from, to), in time order, at most capacity of them

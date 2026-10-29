@@ -1576,7 +1576,8 @@ typedef struct prometheia_segments_root {
 
 /*
  * The roots in [jd_tt_start, jd_tt_end), strictly increasing, each to
- * tol_days.
+ * tol_days. Roots are always solved to 1e-6 day at least, so a tol_days
+ * coarser than that changes nothing and buys no speed.
  * At most capacity are written to out and *count says how many;
  * *jd_tt_resume is then the instant of the first root not written, the
  * jd_tt_start of a call that carries on, or NaN when every root was

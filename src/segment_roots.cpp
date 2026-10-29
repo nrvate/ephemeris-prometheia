@@ -24,11 +24,8 @@ namespace {
 constexpr double kPi = 3.14159265358979323846; // M_PI is not ISO C++
 constexpr double kR = 180.0 / kPi;
 constexpr int kN = 16;                  // interpolation degree on a cell
-constexpr int kMaxDepth = 40;           // halvings of a piece
-constexpr int kMaxCells = 1 << 14;      // cells per piece before structure is given up
 constexpr int kMaxSolveSteps = 200;     // per root; bisection alone needs ~60
 constexpr int64_t kMaxLevels = 1 << 20; // levels one run may cross
-constexpr double kMinCellDays = 1e-6;   // the narrowest cell, whatever tol_days asks
 // Roots are solved at least this finely, so that slope, err_days and the
 // tangent flag, read at the root, do not depend on a coarse tol_days.
 constexpr double kSolveDays = 1e-6;
@@ -334,8 +331,8 @@ private:
         }
         ip.c[0] *= 0.5;
         ip.c[kN] *= 0.5;
-        const bool can_split =
-            depth < kMaxDepth && cells_ < kMaxCells && t1 - t0 > 2.0 * kMinCellDays;
+        const bool can_split = depth < f_.limits.max_depth && cells_ < f_.limits.max_cells &&
+                               t1 - t0 > 2.0 * f_.limits.min_cell_days;
         const double tail = std::fabs(ip.c[kN - 1]) + std::fabs(ip.c[kN]);
         // Below this the tail is rounding, however small the band.
         double size = 0.0;
