@@ -2471,15 +2471,24 @@ prometheia_status prometheia_object_coverage(prometheia_engine* engine,
         }
         Engine& e = engine->engine;
         // Every answer needs the planetary files, so the instants answered lie
-        // within their span; probe across it for one that is answered.
+        // within their spans. Spans that overlap or touch make one piece;
+        // between pieces nothing is answered, so the gaps are known exactly.
         const std::vector<Engine::EphemerisSpan> spans = e.ephemeris_spans();
         if (spans.empty())
             return report(err, PROMETHEIA_ERROR_COVERAGE, "coverage: no planetary file is loaded");
-        double lo = std::numeric_limits<double>::infinity(), hi = -lo;
-        for (const Engine::EphemerisSpan& sp : spans) {
-            lo = std::min(lo, time::tt_from_tdb(sp.first_jd_tdb));
-            hi = std::max(hi, time::tt_from_tdb(sp.last_jd_tdb));
+        std::vector<std::pair<double, double>> pieces;
+        for (const Engine::EphemerisSpan& sp : spans)
+            pieces.emplace_back(time::tt_from_tdb(sp.first_jd_tdb),
+                                time::tt_from_tdb(sp.last_jd_tdb));
+        std::sort(pieces.begin(), pieces.end());
+        size_t merged = 0;
+        for (size_t i = 1; i < pieces.size(); ++i) {
+            if (pieces[i].first <= pieces[merged].second)
+                pieces[merged].second = std::max(pieces[merged].second, pieces[i].second);
+            else
+                pieces[++merged] = pieces[i];
         }
+        pieces.resize(merged + 1);
         Error last_error = make_error(ErrorCode::CoverageError, "coverage: never answered");
         const auto answered = [&](double jd) {
             auto c = e.calc_object(ref, jd, o);
@@ -2487,26 +2496,44 @@ prometheia_status prometheia_object_coverage(prometheia_engine* engine,
                 last_error = c.error();
             return c.ok();
         };
+        // Probe each piece; the object must be answered in one of them only.
         constexpr int kProbes = 64;
         double probe[kProbes + 1];
         bool ok[kProbes + 1];
         int first = -1, last = -1;
-        for (int k = 0; k <= kProbes; ++k) {
-            probe[k] = k == kProbes ? hi : lo + (hi - lo) * k / kProbes;
-            ok[k] = answered(probe[k]);
-            if (ok[k]) {
-                if (first < 0)
-                    first = k;
-                last = k;
+        size_t found = pieces.size();
+        for (size_t p = 0; p < pieces.size(); ++p) {
+            const auto [lo, hi] = pieces[p];
+            double at[kProbes + 1];
+            bool hit[kProbes + 1];
+            int f = -1, l = -1;
+            for (int k = 0; k <= kProbes; ++k) {
+                at[k] = k == kProbes ? hi : lo + (hi - lo) * k / kProbes;
+                hit[k] = answered(at[k]);
+                if (hit[k]) {
+                    if (f < 0)
+                        f = k;
+                    l = k;
+                }
             }
+            if (f < 0)
+                continue;
+            if (found != pieces.size())
+                return report(err, PROMETHEIA_ERROR_COVERAGE,
+                              "coverage: the object is answered in more than one interval (the "
+                              "loaded planetary files leave a gap)");
+            found = p;
+            first = f;
+            last = l;
+            std::copy(at, at + kProbes + 1, probe);
+            std::copy(hit, hit + kProbes + 1, ok);
         }
         if (first < 0)
             return report(err, last_error);
         for (int k = first; k <= last; ++k)
             if (!ok[k])
                 return report(err, PROMETHEIA_ERROR_COVERAGE,
-                              "coverage: the object is not answered across one interval (the "
-                              "loaded files leave a gap)");
+                              "coverage: the object is not answered across one interval");
         // Each edge to adjacent doubles, between the last refused probe and
         // the first answered one (or the files' own edge, if answered).
         const auto edge = [&](double bad, double good) {

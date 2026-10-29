@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <thread>
@@ -26,6 +27,7 @@
 
 #include <unistd.h>
 
+#include <prometheia/de.hpp>
 #include <prometheia/prometheia.h>
 
 #include <doctest/doctest.h>
@@ -534,6 +536,49 @@ TEST_CASE("c_object_coverage") {
     CHECK(prometheia_object_coverage(e, nullptr, &o, &first, &last, nullptr) ==
           PROMETHEIA_ERROR_ARGUMENT);
     prometheia_engine_close(e);
+}
+
+TEST_CASE("c_object_coverage_with_a_gap") {
+    // Two cuts of DE440 that do not touch, 2000-2010 and from about 96 days
+    // later to 2020: an object answered in both pieces is refused, never
+    // given the hull, and a cut alone gives its own span (Astrolog's
+    // review). The gap is narrower than probes spread over the hull would
+    // be (114 days), so only the files' own spans can find it.
+    if (!readable(de440_path())) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    const auto temp = [](const char* tag) {
+        return (std::filesystem::temp_directory_path() /
+                ("prometheia_test_coverage_" + std::string(tag) + "_" + std::to_string(getpid()) +
+                 ".440"))
+            .string();
+    };
+    const std::string early = temp("early"), late = temp("late");
+    REQUIRE(prometheia::de::trim(de440_path(), early, 2451544.5, 2455197.5).ok());
+    REQUIRE(prometheia::de::trim(de440_path(), late, 2455293.5, 2458849.5).ok());
+    const prometheia_options o = defaults();
+    const prometheia_object moon{PROMETHEIA_OBJECT_BODY, 301, nullptr};
+    double first = 0.0, last = 0.0;
+    prometheia_error err;
+
+    prometheia_engine* one = nullptr;
+    REQUIRE(prometheia_engine_open(early.c_str(), &one, nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_object_coverage(one, &moon, &o, &first, &last, &err) == PROMETHEIA_OK);
+    CHECK(first > 2451500.0);
+    CHECK(last < 2455300.0);
+    prometheia_engine_close(one);
+
+    prometheia_engine* two = nullptr;
+    REQUIRE(prometheia_engine_open(early.c_str(), &two, nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_add_ephemeris(two, late.c_str(), nullptr) == PROMETHEIA_OK);
+    CHECK(prometheia_object_coverage(two, &moon, &o, &first, &last, &err) ==
+          PROMETHEIA_ERROR_COVERAGE);
+    CHECK(std::isnan(first));
+    CHECK(std::isnan(last));
+    prometheia_engine_close(two);
+    std::filesystem::remove(early);
+    std::filesystem::remove(late);
 }
 
 TEST_CASE("c_segments_shared_across_threads") {

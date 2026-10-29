@@ -1498,11 +1498,20 @@ prometheia_segments_fit(prometheia_engine* engine, const prometheia_object* obje
  * instants a fit may span. It is narrower than the planetary files' span by
  * the body's light time, and for a catalog body it is also bounded by the
  * perturber kernel. A fit takes rates (speed on), so ask with the options
- * the fit will use. The engine is probed at 65 instants across the files'
- * span and bisected at each edge, about a hundred position calls.
- * PROMETHEIA_ERROR_COVERAGE when the object is answered nowhere (or with the
- * engine's own error), or not across one interval (the files leave a gap);
- * the engine's error for an unknown object. NaN in both on failure.
+ * the fit will use.
+ *
+ * Coverage is one interval or the call fails. Planetary files that overlap
+ * or touch make one piece; files that leave a gap between them make two,
+ * and an object answered in more than one piece is
+ * PROMETHEIA_ERROR_COVERAGE: such a caller asks prometheia_engine_ephemeris_span
+ * for the pieces. An object answered only within one piece (a catalog body
+ * whose window lies inside it) succeeds. Each piece is probed at 65
+ * instants and the answered one bisected at each edge, about a hundred
+ * position calls a piece.
+ * PROMETHEIA_ERROR_COVERAGE also when the object is answered nowhere (or the
+ * engine's own error), or not across one interval within a piece (a hole
+ * narrower than the probes' spacing is not seen); the engine's error for an
+ * unknown object. NaN in both on failure.
  */
 PROMETHEIA_API prometheia_status prometheia_object_coverage(prometheia_engine* engine,
                                                             const prometheia_object* object,

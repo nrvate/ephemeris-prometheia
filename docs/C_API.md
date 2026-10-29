@@ -694,16 +694,30 @@ interval never meets a refusal. Additive; the ABI version stays 6.
   - an orbit point reads its focus;
   - a catalog body also needs the perturber kernel.
 - **Options.** A fit takes rates, so ask with the options the fit will use.
-- **How.** The engine is asked at 65 instants across the files' span, and
-  each edge is bisected: about a hundred position calls.
+- **How.** The engine is asked at 65 instants across each piece, and each
+  edge of the answered one is bisected: about a hundred position calls a
+  piece.
   - For an ephemeris body, an orbit point or a star that takes 1–6 ms.
   - A catalog body integrates across the whole span, 1.8 s for Ceres over
     DE440 (measured 2026-10-28).
   - Cache the answer; it changes only when files are added.
+- **One interval, or a refusal.** The planetary files' spans are merged,
+  and spans that overlap or touch make one piece. Files that leave a gap
+  between them make two pieces, say a 1900–2100 cut beside a 2500–2600 one.
+  - An object answered in more than one piece is refused with
+    `PROMETHEIA_ERROR_COVERAGE`, never given the hull. A caller then reads
+    the pieces from `prometheia_engine_ephemeris_span`.
+  - An object answered within one piece only succeeds: a catalog body
+    whose window lies inside it, say.
+  - The gaps come from the files' own spans, so they are found exactly,
+    however narrow. `c_object_coverage_with_a_gap` puts two DE440 cuts 96
+    days apart. Merged into one hull, the old probes 114 days apart missed
+    that gap; the test failed that way and passes now.
 - **Refusals.**
-  - `PROMETHEIA_ERROR_COVERAGE` when the object is answered nowhere, or not
-    across one interval because the loaded files leave a gap. A gap
-    narrower than the probes' spacing is not seen.
+  - `PROMETHEIA_ERROR_COVERAGE` when the object is answered nowhere, in
+    more than one piece, or not across one interval within a piece. A
+    hole inside one file narrower than the probes' spacing is not seen;
+    none is known.
   - The engine's own error for an unknown object.
   - `PROMETHEIA_ERROR_ARGUMENT` for a NULL argument.
   - Both outputs are NaN on any failure.
