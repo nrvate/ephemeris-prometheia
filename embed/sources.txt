@@ -30,6 +30,7 @@ src/kepler.cpp
 src/lunar_eclipse.cpp
 src/phenomena.cpp
 src/registry.cpp
+src/segment_roots.cpp
 src/segments.cpp
 src/solar_eclipse.cpp
 src/spk.cpp

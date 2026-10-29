@@ -13,6 +13,25 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Roots on segments** (docs/C_API.md, "Roots on segments";
+  docs/SEGMENTS.md, "Roots"). `prometheia_segments_roots` finds every
+  instant in a window where `ca·Xa + cb·Xb − target` passes 0. X is a
+  handle's longitude, latitude or one of their speeds, and the longitude
+  is taken modulo M.
+  - **Uses:** ingresses, returns, aspects and phases, midpoints on their
+    axis, stations, and declination against a moving target.
+  - **Bounds.** Each term is made continuous across its segment bounds and
+    across back-to-back handles, so a bound never doubles or hides a root.
+  - **Grazes** within the fits' tolerance are flagged `tangent`, not merged.
+  - **Determinism.** Answers do not depend on the window, and a resumed
+    search gives the same doubles.
+  - **Cost.** It needs no engine, lock, thread or allocation. A year of the
+    Moon's ingresses takes under a millisecond. Against bisection on
+    `prometheia_calc_object`, the worst error is under half the per-root
+    estimate `err_days`.
+  - **ABI.** Additive; the ABI version is unchanged. The fit's handle now
+    keeps its options, to refuse terms fitted in different coordinates.
+
 - **NGC 869 and 884, the Double Cluster, in the star catalog.** Found by
   designation ("NGC 869", `star:NGC 869`), with the source NGC 2000.0
   (Sinnott 1988, NASA HEASARC; positions to 0.1 min and 1′), because SIMBAD

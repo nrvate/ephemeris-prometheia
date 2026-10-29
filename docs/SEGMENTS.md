@@ -235,3 +235,108 @@ over 10,000 random instants, both ends included. "Eval" is one
   change** (`segment_cuts` in `src/c_api.cpp`), or a step no sample lands
   near becomes a silent error. Astrolog's review asked for this rule to be
   written down (2026-10-28).
+
+## Roots
+
+`prometheia_segments_roots` ([C_API.md](C_API.md), "Roots on segments")
+finds every instant in a window where a function of one or two fitted
+objects passes a target: f = ca·Xa + cb·Xb − target, the longitude taken
+modulo M. It is the scanner the section above describes, done once, in
+C++, for every caller (`src/segment_roots.cpp`). astromcp asked for it, for
+its ingresses, returns, stations, aspect windows and declination searches.
+
+**The method.**
+- **Pieces.** The window is cut into pieces, each where one segment of
+  each term overlaps. Each piece is searched whole, whatever the window, so
+  a root is the same double from any window that holds it.
+- **Continuity first.** At a bound each term's two sides may differ by up
+  to twice its tolerance. Half that step is spread linearly over the
+  segment on each side, so each term is continuous, and so is f. Without
+  this, a root at a bound is found twice or not at all.
+- **Interpolation.** On a piece, f is interpolated at the 17 Chebyshev
+  points of degree 16. A longitude is first unwrapped on each cell: from
+  one point to the next it moves by the step its own rate predicts, so the
+  interpolated f is continuous and never sees a wrap.
+  - The levels are the targets plus whole moduli, target + k·M. Those a run
+    passes are counted from its unwrapped ends, which is why a wrap is
+    never a root.
+  - A cell is halved until the series' last two coefficients are below 1%
+    of the band, or below 1e-13 of the series' size, whichever is larger.
+    The second floor is rounding. It ends the halving when the band is near
+    0, which a speed's declared rate error can be for a smooth handle.
+- **Monotone runs.** A Chebyshev series cannot vanish where |c₀| exceeds
+  the sum of the other coefficients. That bound, applied to the
+  interpolant's derivative, finds cells where f is monotone. Applied to
+  the second derivative, it finds cells with exactly one extremum, which is
+  then located on the derivative's series. Any other cell is halved.
+- **Counting and solving.** Between two consecutive breaks f is monotone.
+  - The levels it passes are counted from its values at the two ends, as
+    integers, so the count is exact and the same from both sides of a
+    shared end.
+  - Each level is then solved for on f itself, never on the interpolant,
+    with a bracketed secant (Illinois, with bisection when it stalls) to
+    `tol_days`.
+  - A root exactly at the end of a run belongs to that run, never to the
+    next.
+- **Limits.** Every call ends.
+  - A cell is not halved below 4 × `tol_days`, nor more than 40 times, nor
+    past 16,384 cells in one piece.
+  - A cell at a limit (a pole crossing in an equatorial longitude fit, say)
+    keeps its ends. Its roots are counted from them, so a pair inside it
+    that cancels is lost, but no root is invented and the call succeeds.
+- **Order.** Roots strictly increase. Two levels solved to a coarse
+  `tol_days` could share an instant; the later one is then moved to the
+  next double. So a resume, which starts at a root and includes it, never
+  writes one twice.
+- **Grazes.** Near an extremum within the band of the level, the fits
+  cannot tell one root from two or none. Crossings there are flagged
+  `tangent`, and so is an extremum that comes within the band without
+  crossing; that one is reported as a root of its own. The rule is local:
+  a crossing is tangent when slope²/(2|f″|) is within the band, so the
+  answer never depends on what the window holds.
+
+**Measured 2026-10-28** on an Intel i7-8700K, one thread, Release build,
+with the machine loaded (load average about 2.6).
+- **The data:** DE440 with `prometheia_segments_fit` at 0.001″, apparent
+  geocentric, ecliptic of date. The declination cases use the equatorial
+  fit. The year is 2026.
+- **Truth** is bisection on `prometheia_calc_object` to 60 halvings, from a
+  grid of 0.05–0.5 days.
+- **Solve precision:** `tol_days` 1e-6.
+- **"Worst"** is the worst time difference from truth. **Ratio** is the
+  worst of that difference over the root's own `err_days`.
+
+| search | roots | missed / extra | worst | ratio | time |
+|---|---:|---:|---:|---:|---:|
+| Moon sign ingresses (M = 30), a year | 160 | 0 / 0 | 0.042 s | 0.48 | 0.85 ms |
+| the same, 12 month handles back to back | 160 | 0 / 0 | 0.043 s | 0.48 | 0.81 ms |
+| the same, fitted at 1″ | 160 | 0 / 0 | 0.76 s | 0.43 | 0.81 ms |
+| Moon–Sun quarters (M = 90), separate fits | 50 | 0 / 0 | 0.042 s | 0.47 | 0.77 ms |
+| Sun/Moon midpoint at 15° (M = 180) | 15 | 0 / 0 | 0.039 s | 0.44 | 0.54 ms |
+| Moon declination at ± the obliquity, moving | 27 + 26 | 0 / 0 | 0.043 s | 0.46 | 0.48 ms |
+| Mercury stations (speed = 0) | 6 | 0 / 0 | 0.63 s | 0.03 | 0.16 ms |
+| Mars stations, 2026–2028 | 2 | 0 / 0 | 3.3 s | 0.18 | 0.20 ms |
+| Jupiter–Saturn, 8th harmonic (M = 45), 2019–2022 | 3 | 0 / 0 | 0.022 s | 0.03 | 0.74 ms |
+| Pluto back to its 2026-05-01 longitude | 2 | 0 / 0 | 0.77 s | 0.08 | 0.14 ms |
+| Neptune, the same | 2 | 0 / 0 | 0.049 s | 0.05 | 0.12 ms |
+| Saturn, the same | 2 | 0 / 0 | 0.012 s | 0.03 | 0.12 ms |
+| Moon ingresses, topocentric (72.9° E, 19.1° N), 90 days | 39 | 0 / 0 | 0.043 s | 0.48 | 0.97 ms |
+| Moon topocentric latitude at 2.5°, 90 days | 9 | 0 / 0 | 0.033 s | 0.35 | 2.5 ms |
+
+- **No root was missed or doubled.** A resumed search with `capacity` 1
+  returned the same 160 Moon ingresses, bit for bit, as one call.
+- **Roots on the bounds.** In a Moon fit at 1″, a root was placed exactly on
+  each of the 15 bounds by setting the target halfway across the step
+  there. This was done for longitude, latitude and longitude speed; the
+  steps were up to 0.28″, 0.02″ and 9.7″/day.
+  - Every bound gave exactly one root.
+  - With the continuity correction removed, every one of the 45 was missed.
+- **Grazes**, at each of Mercury's six stations in 2026 (band 0.001″):
+  - a target reached by half the band: two crossings 0.002–0.004 days
+    apart, both tangent;
+  - a target half a band beyond the extremum: one tangent root at the
+    station;
+  - three bands beyond: nothing;
+  - reached by three bands: two ordinary crossings, 9 to 14 minutes apart.
+- **Time** is a millisecond a year or less. It is spent mostly evaluating
+  the handles at 17 points per cell; no engine time is involved.

@@ -886,3 +886,33 @@ cdef extern from "prometheia/prometheia.h" nogil:
     const prometheia_segments_layout* prometheia_segments_get_layout(
         const prometheia_segments* segments) noexcept
     void prometheia_segments_close(prometheia_segments* segments) noexcept
+
+    # Roots on segments (docs/C_API.md, "Roots on segments")
+    int PROMETHEIA_SEGMENTS_LON
+    int PROMETHEIA_SEGMENTS_LAT
+    int PROMETHEIA_SEGMENTS_LON_SPEED
+    int PROMETHEIA_SEGMENTS_LAT_SPEED
+
+    ctypedef struct prometheia_segments_function:
+        const prometheia_segments* const* a
+        int na
+        const prometheia_segments* const* b
+        int nb
+        double ca
+        double cb
+        int component
+        double target
+        double target_rate
+        double target_jd_tt
+        double modulus
+
+    ctypedef struct prometheia_segments_root:
+        double jd_tt
+        double slope
+        double err_days
+        int tangent
+
+    prometheia_status prometheia_segments_roots(
+        const prometheia_segments_function* f, double jd_tt_start, double jd_tt_end,
+        double tol_days, prometheia_segments_root* out, int capacity, int* count,
+        double* jd_tt_resume, prometheia_error* err) noexcept

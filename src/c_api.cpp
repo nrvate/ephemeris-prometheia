@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -27,6 +28,7 @@
 #include "prometheia/registry.hpp"
 #include "prometheia/segments.hpp"
 #include "prometheia/time.hpp"
+#include "segment_roots.hpp"
 
 using namespace prometheia;
 
@@ -2178,6 +2180,7 @@ struct prometheia_segments {
     prometheia_segments_layout layout{};
     std::vector<double> bounds, mid, half, coef, dcoef;
     std::vector<int> degree;
+    prometheia_options opts{}; // as fitted: where the coordinates are
 };
 
 namespace {
@@ -2190,6 +2193,48 @@ constexpr double kSegmentTargetFraction = 0.8;
 constexpr double kSegmentMinDistanceAu = 1e-9;
 // How far inside a cut a piece's fit stops (docs/C_API.md, "Steps").
 constexpr double kSegmentCutGap = 1e-8;
+
+// Whether two fits' coordinates are the same: the centre, frame, coords and
+// zodiac they were fitted in. The corrections (light time, deflection,
+// aberration) are the caller's choice and may differ.
+bool same_place(const prometheia_options& a, const prometheia_options& b) {
+    if (a.center != b.center || a.frame != b.frame || a.coords != b.coords ||
+        a.sidereal != b.sidereal || a.precession != b.precession)
+        return false;
+    if (a.sidereal != PROMETHEIA_SIDEREAL_TROPICAL && a.sidereal_plane != b.sidereal_plane)
+        return false;
+    if (a.sidereal == PROMETHEIA_SIDEREAL_USER &&
+        (a.sidereal_epoch_jd != b.sidereal_epoch_jd ||
+         a.sidereal_ayanamsa_deg != b.sidereal_ayanamsa_deg))
+        return false;
+    if (a.center == PROMETHEIA_CENTER_TOPOCENTRIC &&
+        (a.site_lon_deg != b.site_lon_deg || a.site_lat_deg != b.site_lat_deg ||
+         a.site_height_m != b.site_height_m))
+        return false;
+    if (a.center == PROMETHEIA_CENTER_BODY && a.center_body != b.center_body)
+        return false;
+    return true;
+}
+
+// One term of a root search: handles back to back, inside the window.
+prometheia_status check_term(const prometheia_segments* const* hs, int n,
+                             const prometheia_options& place, double from, double to,
+                             prometheia_error* err) {
+    for (int h = 0; h < n; ++h) {
+        if (!hs[h])
+            return argument(err, "segments roots: a handle is NULL");
+        if (!same_place(hs[h]->opts, place))
+            return argument(err, "segments roots: the handles were fitted in different "
+                                 "coordinates (centre, frame, coords or zodiac)");
+        if (h > 0 && hs[h - 1]->layout.jd_tt_end != hs[h]->layout.jd_tt_start)
+            return argument(err, "segments roots: a term's handles must be back to back, "
+                                 "each ending where the next starts");
+    }
+    if (!(from >= hs[0]->layout.jd_tt_start && to <= hs[n - 1]->layout.jd_tt_end))
+        return report(err, PROMETHEIA_ERROR_COVERAGE,
+                      "segments roots: the window is outside the handles' span");
+    return PROMETHEIA_OK;
+}
 
 // Clenshaw's recurrence over n coefficients, as segments::Segment::position.
 double clenshaw(const double* c, int n, double u) {
@@ -2391,6 +2436,10 @@ prometheia_status prometheia_segments_fit(prometheia_engine* engine,
         l.err_rel_dist = err_rel_dist;
         l.err_rate_arcsec_per_day = err_rate;
         l.coords = opts ? opts->coords : PROMETHEIA_COORDS_ECLIPTIC;
+        if (opts)
+            h->opts = *opts;
+        else
+            prometheia_options_init(&h->opts);
         *out = h.release();
         return succeed(err);
     });
@@ -2447,6 +2496,76 @@ prometheia_segments_get_layout(const prometheia_segments* segments) {
 
 void prometheia_segments_close(prometheia_segments* segments) {
     delete segments;
+}
+
+prometheia_status prometheia_segments_roots(const prometheia_segments_function* f,
+                                            double jd_tt_start, double jd_tt_end, double tol_days,
+                                            prometheia_segments_root* out, int capacity, int* count,
+                                            double* jd_tt_resume, prometheia_error* err) {
+    if (count)
+        *count = 0;
+    if (jd_tt_resume)
+        *jd_tt_resume = std::numeric_limits<double>::quiet_NaN();
+    if (!f)
+        return argument(err, "f is NULL");
+    if (!count || !jd_tt_resume)
+        return argument(err, "count or jd_tt_resume is NULL");
+    if (capacity < 0 || (capacity > 0 && !out))
+        return argument(err, "segments roots: capacity is negative, or out is NULL");
+    if (!f->a || f->na < 1 || !f->a[0] || (f->nb > 0 && !f->b) || f->nb < 0)
+        return argument(err, "segments roots: a needs at least one handle, and b nb of them");
+    if (f->component < PROMETHEIA_SEGMENTS_LON || f->component > PROMETHEIA_SEGMENTS_LAT_SPEED)
+        return argument(err, "segments roots: unknown component");
+    if (!std::isfinite(jd_tt_start) || !std::isfinite(jd_tt_end) || !(jd_tt_end > jd_tt_start))
+        return argument(err, "segments roots: the window must be finite and end after it starts");
+    if (!(tol_days > 0.0) || !std::isfinite(tol_days))
+        return argument(err, "segments roots: tol_days must be positive and finite");
+    const double cb = f->nb > 0 ? f->cb : 0.0;
+    if (!std::isfinite(f->ca) || !std::isfinite(cb) || !std::isfinite(f->target) ||
+        !std::isfinite(f->target_rate) ||
+        (f->target_rate != 0.0 && !std::isfinite(f->target_jd_tt)) || !std::isfinite(f->modulus))
+        return argument(err, "segments roots: a field is not finite");
+    if (f->ca == 0.0 && cb == 0.0)
+        return argument(err, "segments roots: ca and cb are both 0");
+    double modulus = f->modulus;
+    if (f->component == PROMETHEIA_SEGMENTS_LON) {
+        if (modulus < 0.0)
+            return argument(err, "segments roots: the modulus is negative");
+        if (modulus == 0.0)
+            modulus = 360.0;
+        // A turn of either longitude must move f by whole moduli.
+        for (double c : {f->ca, cb}) {
+            const double turns = 360.0 * std::fabs(c) / modulus;
+            if (std::fabs(turns - std::round(turns)) > 1e-9 * std::max(1.0, turns))
+                return argument(err, "segments roots: 360 ca / modulus and 360 cb / modulus "
+                                     "must be whole numbers");
+        }
+    } else if (modulus != 0.0) {
+        return argument(err, "segments roots: only a longitude takes a modulus");
+    }
+    const prometheia_options& place = f->a[0]->opts;
+    if (prometheia_status st = check_term(f->a, f->na, place, jd_tt_start, jd_tt_end, err);
+        st != PROMETHEIA_OK)
+        return st;
+    if (f->nb > 0) {
+        if (prometheia_status st = check_term(f->b, f->nb, place, jd_tt_start, jd_tt_end, err);
+            st != PROMETHEIA_OK)
+            return st;
+    }
+    segment_roots::Function fn;
+    fn.a = f->a;
+    fn.na = f->na;
+    fn.b = f->b;
+    fn.nb = f->nb;
+    fn.ca = f->ca;
+    fn.cb = cb;
+    fn.component = f->component;
+    fn.target = f->target;
+    fn.target_rate = f->target_rate;
+    fn.target_jd_tt = f->target_jd_tt;
+    fn.modulus = modulus;
+    *count = segment_roots::find(fn, jd_tt_start, jd_tt_end, tol_days, out, capacity, jd_tt_resume);
+    return succeed(err);
 }
 
 } // extern "C"

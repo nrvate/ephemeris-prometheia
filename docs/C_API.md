@@ -486,6 +486,142 @@ void prometheia_segments_close(prometheia_segments *segments);
 - **Against `calc`.** The direction differs from `prometheia_calc_object`
   by up to the tolerance; segments are never bit-identical to direct calls.
 
+## Roots on segments
+
+Additive, so the ABI version stays 6. astromcp asked for it, and astromcp
+and the Astrolog side reviewed the signatures before they landed.
+[SEGMENTS.md](SEGMENTS.md), "Roots", has the method and the measurements.
+
+```c
+#define PROMETHEIA_SEGMENTS_LON       0  /* longitude, or right ascension; degrees */
+#define PROMETHEIA_SEGMENTS_LAT       1  /* latitude, or declination; degrees */
+#define PROMETHEIA_SEGMENTS_LON_SPEED 2  /* degrees per day */
+#define PROMETHEIA_SEGMENTS_LAT_SPEED 3
+
+typedef struct prometheia_segments_function {
+    const prometheia_segments *const *a; int na; /* handles back to back */
+    const prometheia_segments *const *b; int nb; /* nb 0: no second term */
+    double ca, cb;
+    int component;
+    double target, target_rate, target_jd_tt;
+    double modulus;
+} prometheia_segments_function;
+
+typedef struct prometheia_segments_root {
+    double jd_tt, slope, err_days;
+    int tangent;
+} prometheia_segments_root;
+
+prometheia_status prometheia_segments_roots(const prometheia_segments_function *f,
+    double jd_tt_start, double jd_tt_end, double tol_days,
+    prometheia_segments_root *out, int capacity, int *count,
+    double *jd_tt_resume, prometheia_error *err);
+```
+
+- **The function.** It is
+  `f(t) = ca·Xa(t) + cb·Xb(t) − (target + target_rate·(t − target_jd_tt))`,
+  where X is the chosen component of each term. With equatorial fits, the
+  longitude is the right ascension and the latitude the declination.
+  - **Typical uses:**
+    - an aspect or phase: `ca, cb` 1 and −1;
+    - a midpoint: 0.5 and 0.5;
+    - a crossing of a fixed point: 1 and 0, or `nb` 0;
+    - a station: `LON_SPEED` with target 0;
+    - out-of-bounds: `LAT` with the obliquity as a moving target.
+  - **The terms.** `nb` is 0 for a function of one object.
+  - **Handles and coordinates.** The two terms may come from different
+    fits, with bounds that never coincide. Every handle must have been
+    fitted in the same centre, frame, coords and zodiac. The corrections
+    (light time, deflection, aberration) may differ.
+- **Handles back to back.** A term may be several handles of one object,
+  each ending exactly where the next starts. A gap or an overlap is
+  refused. astromcp, for example, fits
+  each object in month chunks. The term is then one continuous function
+  across the joins, as across its own segment bounds.
+- **The modulus.**
+  - **Longitude only.** A longitude is taken modulo M in (−M/2, M/2]. M is
+    `modulus`, and 0 means 360. Roots are where that passes 0, never where
+    it wraps. The other components take no modulus (it must be 0).
+  - **Whole numbers.** `360·ca/M` and `360·cb/M` must be whole numbers.
+    Then a full turn of either longitude moves f by whole moduli, and its
+    wrap at 0° is never seen.
+  - **Midpoints.** A midpoint is asked at M = 180, its axis, or at 180/H
+    on a harmonic dial. Both midpoints come back, and the caller tells the
+    near one from the far. At M = 360 a midpoint is refused. Taking it
+    would mean picking a turn for each longitude, and the answer would
+    then depend on where the window starts.
+- **No double roots at bounds.** Each term is first made continuous: half
+  the step at each bound is spread linearly over the segments on either
+  side.
+  - **Why.** A fit's two sides may differ by up to twice its tolerance at a
+    bound. Without this, a root near a bound could be found twice or not
+    at all. A root placed exactly on each of the 15 bounds of a 1″ Moon
+    fit, in three components, is found all 45 times with the correction
+    and none without it.
+  - **What it costs.** Near a bound, f differs from `_eval` by at most half
+    the step there, which is within the fits' tolerance.
+- **The method.** The window is searched in pieces; a piece is where one
+  segment of each term overlaps.
+  - On each piece, f is interpolated at Chebyshev points, halving until
+    the series' tail is negligible.
+  - Bounds on the interpolant's first and second derivatives cut f into
+    monotone runs, with at most one extremum between two runs.
+  - Each run's roots are counted from f at its two ends, so a run never
+    yields more roots than f really crosses. Each root is then solved for
+    on f itself, bracketed, to `tol_days`.
+  - No grid is stepped. `tol_days` is only the precision of each root.
+  - **Every call ends.** A cell is halved at most 40 times and never below
+    4 × `tol_days`. A cell at that limit (a pole crossing, say) is counted
+    from its ends, and the call still succeeds.
+  - **Roots strictly increase,** so a resume never writes one twice.
+  - Two roots a few minutes apart, either side of a station, are both
+    found.
+- **Tangent.**
+  - **The band** is the fits' own error in f: |ca|·tol_a + |cb|·tol_b.
+    For an angle, tol is the term's largest `tolerance_arcsec`. For a
+    speed it is the largest declared `err_rate_arcsec_per_day`. Within the
+    band of 0, the fits cannot tell one root from two or none.
+  - **Flagged roots.** `tangent` is 1 in two cases:
+    - a crossing whose turn-back, slope²/(2|f″|), is within the band. Both
+      crossings of a graze are flagged;
+    - an extremum within the band of 0 that does not reach it. It is
+      reported as a root of its own, at the extremum, with slope about 0.
+  - **No root.** An extremum farther from 0 than the band gives nothing.
+  - **What the caller decides.** Grazes are reported, not merged.
+- **The window and resume.**
+  - **The window** is `[jd_tt_start, jd_tt_end)`, and must lie inside each
+    term's span (`PROMETHEIA_ERROR_COVERAGE` otherwise).
+  - **Same roots from any window.** Every piece is searched whole, whatever
+    the window, so a root is the same double from any window that holds
+    it. Back-to-back windows give each root once.
+  - **When the buffer fills.** At most `capacity` roots are written.
+    `*jd_tt_resume` is then the instant of the first root not written: the
+    start of a call that carries on. It is NaN when every root was
+    written. A loop of `capacity` 1 gives the same doubles as one call.
+  - **Counting only.** `capacity` 0 writes nothing (`out` may be NULL) and
+    counts every root.
+- **Accuracy.** The time error is about band/|slope|, plus `tol_days`.
+  `err_days` gives that estimate per root, and sqrt(2·band/|f″|) for a
+  tangent root. Measured against bisection on `prometheia_calc_object`,
+  the worst case was under half of `err_days` (SEGMENTS.md).
+  - **Near a pole.** Near a pole of the coordinates (latitude or
+    declination close to ±90°), the longitude and its rate are
+    ill-conditioned, and so are their roots.
+  - **The units of `slope`** are f's per day: degrees per day, or degrees
+    per day squared for a speed.
+- **Threads.** Nothing is read but the handles: no engine, no lock, no
+  thread, no allocation. Any number of threads may search the same handles
+  at once.
+- **Refusals.** `PROMETHEIA_ERROR_ARGUMENT` for:
+  - a NULL `f`, handle, `count` or `jd_tt_resume`, or `out` NULL with
+    `capacity` above 0, or a negative capacity;
+  - a window that is not finite or does not increase;
+  - a `tol_days` that is not positive and finite;
+  - a component out of range;
+  - handles fitted in different coordinates, or not back to back;
+  - `ca` and `cb` both 0, or a field that is not finite;
+  - a modulus the rules above refuse.
+
 ## Datasets and threads
 
 One dataset holds the files, loaded once, and any number of engines,

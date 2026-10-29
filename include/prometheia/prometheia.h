@@ -1506,6 +1506,110 @@ prometheia_segments_get_layout(const prometheia_segments* segments);
 /* NULL is a no-op. */
 PROMETHEIA_API void prometheia_segments_close(prometheia_segments* segments);
 
+/* ---- Roots on segments (docs/C_API.md, "Roots on segments") -----------------
+ *
+ * Every instant in a window where a function of one or two handles passes a
+ * target: ingresses, aspects, phases, midpoints, stations, declination
+ * crossings. Nothing but the handles is read: no engine, no lock, no thread
+ * and no allocation, so any number of threads may search the same handles
+ * at once. Added after library 0.7.3; the ABI version is unchanged.
+ */
+
+/* A handle's component, in the fit's coords (layout->coords). */
+#define PROMETHEIA_SEGMENTS_LON 0       /* longitude, or right ascension; degrees */
+#define PROMETHEIA_SEGMENTS_LAT 1       /* latitude, or declination; degrees */
+#define PROMETHEIA_SEGMENTS_LON_SPEED 2 /* degrees per day */
+#define PROMETHEIA_SEGMENTS_LAT_SPEED 3 /* degrees per day */
+
+/*
+ *   f(t) = ca X_a(t) + cb X_b(t) - (target + target_rate (t - target_jd_tt))
+ * X the component of a term. A term is na (nb) handles of one object back to
+ * back, each ending exactly where the next starts (a gap or an overlap is
+ * PROMETHEIA_ERROR_ARGUMENT), and is one continuous
+ * function across those joins as across its segment bounds. nb is 0 for no
+ * second term (b and cb are then not read). The two terms may come from
+ * different fits, but every handle must have been fitted in the same
+ * centre, frame, coords and zodiac (the corrections may differ).
+ *
+ * A longitude is taken modulo M = modulus (0: 360) in (-M/2, M/2]: its
+ * roots are where that passes 0, never where it wraps. 360 ca / M and
+ * 360 cb / M must be whole numbers, so a longitude's turn moves f by whole
+ * moduli and its wrap at 0 degrees is never seen: a midpoint (ca = cb = 0.5)
+ * is asked at M = 180, its axis, or 180 / H on a harmonic dial (both
+ * midpoints; the caller tells the near one from the far). The other
+ * components take no modulus (0). Near a pole of the coords (latitude or
+ * declination close to +-90), the longitude and its rate are
+ * ill-conditioned, and so are their roots.
+ */
+typedef struct prometheia_segments_function {
+    const prometheia_segments* const* a; /* na handles, in time order */
+    int na;                              /* at least 1 */
+    const prometheia_segments* const* b; /* nb handles; NULL when nb is 0 */
+    int nb;
+    double ca, cb;
+    int component;       /* PROMETHEIA_SEGMENTS_* */
+    double target;       /* degrees; degrees per day for a speed */
+    double target_rate;  /* the target's own rate, per day */
+    double target_jd_tt; /* the instant target holds at; not read when target_rate is 0 */
+    double modulus;
+} prometheia_segments_function;
+
+/*
+ * One root. The band is the fits' own error in f: |ca| tol_a + |cb| tol_b,
+ * tol a term's largest tolerance_arcsec for an angle, its largest
+ * err_rate_arcsec_per_day for a speed. Within the band of 0 the fits cannot
+ * tell one root from two or none, and tangent is 1 there:
+ *   - a crossing whose turn-back, slope^2 / (2 |f''|), is within the band
+ *     (both crossings of a graze are flagged);
+ *   - an extremum within the band of 0 that does not reach it: a root of its
+ *     own, at the extremum, with slope about 0.
+ * An extremum farther from 0 than the band is no root.
+ */
+typedef struct prometheia_segments_root {
+    double jd_tt;
+    double slope;    /* df/dt: degrees per day; per day squared for a speed */
+    double err_days; /* an estimate of the time error: band / |slope|, or for a
+                        tangent root sqrt(2 band / |f''|), plus tol_days */
+    int tangent;
+} prometheia_segments_root;
+
+/*
+ * The roots in [jd_tt_start, jd_tt_end), strictly increasing, each to
+ * tol_days.
+ * At most capacity are written to out and *count says how many;
+ * *jd_tt_resume is then the instant of the first root not written, the
+ * jd_tt_start of a call that carries on, or NaN when every root was
+ * written. capacity 0 writes nothing (out may be NULL) and counts them all.
+ *
+ * How (docs/SEGMENTS.md, "Roots"): f is searched piece by piece, a piece
+ * being where one segment of each term overlaps. On each, Chebyshev bounds
+ * on f' and f'' cut f into monotone runs; each run's roots are counted from
+ * its ends and solved for on f itself. No grid is stepped: tol_days is only
+ * the precision of each root.
+ *
+ * - A bound between two segments or handles is never a root and never
+ *   doubles one: each term is made continuous first, by spreading half the
+ *   step at each bound linearly over the segments either side of it. Near a
+ *   bound f therefore differs from what prometheia_segments_eval gives, by
+ *   at most half the step there (within the fits' tolerance).
+ * - The answer does not depend on the window: every piece is searched
+ *   whole, so a root is the same double from any window that holds it.
+ *   Back-to-back windows and a resumed search give each root exactly once.
+ * - The time error is about band / |slope|, plus tol_days: err_days.
+ *
+ * PROMETHEIA_ERROR_COVERAGE for a window outside a term's span;
+ * PROMETHEIA_ERROR_ARGUMENT for a NULL f, handle, count or jd_tt_resume, out
+ * NULL with capacity above 0, a negative capacity, a window not finite or
+ * not increasing, tol_days not positive and finite, a component out of
+ * range, handles fitted in different coordinates or not back to back, ca
+ * and cb both 0, a field not finite, or a modulus refused above. Nothing
+ * is read but the handles: no engine, no lock, no thread, no allocation.
+ */
+PROMETHEIA_API prometheia_status
+prometheia_segments_roots(const prometheia_segments_function* f, double jd_tt_start,
+                          double jd_tt_end, double tol_days, prometheia_segments_root* out,
+                          int capacity, int* count, double* jd_tt_resume, prometheia_error* err);
+
 #ifdef __cplusplus
 }
 #endif
