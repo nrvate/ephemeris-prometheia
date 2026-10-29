@@ -2387,7 +2387,8 @@ struct Engine::Impl {
                 return r;
             const double sun_to_body[3] = {tgt[0] - sun[0], tgt[1] - sun[1], tgt[2] - sun[2]};
             const double sun_to_obs[3] = {obs[0] - sun[0], obs[1] - sun[1], obs[2] - sun[2]};
-            apparent::light_deflection(p, sun_to_body, sun_to_obs, apparent::kSunGmOverC2Km, p);
+            apparent::light_deflection(p, sun_to_body, sun_to_obs, apparent::kSunGmOverC2Km,
+                                       apparent::kSunRadiusKm, p);
         }
         if (o.aberration)
             apparent::aberration(p, obs + 3, p);
@@ -2938,7 +2939,8 @@ struct Engine::Impl {
                 return r;
             const double sun_to_point[3] = {pt[0] - sun[0], pt[1] - sun[1], pt[2] - sun[2]};
             const double sun_to_obs[3] = {obs[0] - sun[0], obs[1] - sun[1], obs[2] - sun[2]};
-            apparent::light_deflection(p, sun_to_point, sun_to_obs, apparent::kSunGmOverC2Km, p);
+            apparent::light_deflection(p, sun_to_point, sun_to_obs, apparent::kSunGmOverC2Km,
+                                       apparent::kSunRadiusKm, p);
         }
         if (o.aberration)
             apparent::aberration(p, obs + 3, p);
@@ -3157,19 +3159,8 @@ struct Engine::Impl {
                 return r;
             const double sun_to_body[3] = {pos[0] - sun[0], pos[1] - sun[1], pos[2] - sun[2]};
             const double sun_to_obs[3] = {obs[0] - sun[0], obs[1] - sun[1], obs[2] - sun[2]};
-            // Skip a direction within the solar disc, where the formula's
-            // 1 + q.e denominator vanishes and the star is not visible.
-            const double qn =
-                std::sqrt(sun_to_body[0] * sun_to_body[0] + sun_to_body[1] * sun_to_body[1] +
-                          sun_to_body[2] * sun_to_body[2]);
-            const double en =
-                std::sqrt(sun_to_obs[0] * sun_to_obs[0] + sun_to_obs[1] * sun_to_obs[1] +
-                          sun_to_obs[2] * sun_to_obs[2]);
-            const double qe = (sun_to_body[0] * sun_to_obs[0] + sun_to_body[1] * sun_to_obs[1] +
-                               sun_to_body[2] * sun_to_obs[2]) /
-                              (qn * en);
-            if (1.0 + qe > 1e-9)
-                apparent::light_deflection(p, sun_to_body, sun_to_obs, apparent::kSunGmOverC2Km, p);
+            apparent::light_deflection(p, sun_to_body, sun_to_obs, apparent::kSunGmOverC2Km,
+                                       apparent::kSunRadiusKm, p);
         }
         if (o.aberration)
             apparent::aberration(p, obs + 3, p);

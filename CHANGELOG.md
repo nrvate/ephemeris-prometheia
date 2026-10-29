@@ -13,6 +13,23 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Deflection is tapered inside the solar disc** (docs/ENGINE.md,
+  "Gravitational deflection").
+  - **The defect.** For a body behind the Sun, the point-mass term grew
+    without bound toward the disc's centre. Uranus's longitude stepped
+    0.05° within a quarter hour at its 2029-06-04 conjunction.
+  - **What it broke.** Segment fits through such conjunctions were refused
+    (astromcp's report): 3 months of Mercury, 1 of Jupiter, 2 of Uranus,
+    and every June of Jupiter's mean node, in 1950–2050.
+  - **The fix.** Inside the disc the term is now scaled by
+    1 − (1 − (b/R)²)⁴. That is smooth at the limb and 0 at the centre, so
+    every one of 13,200 monthly fits succeeds.
+  - **Outside the disc** positions are unchanged, to the bit.
+  - **Stars**, which skipped deflection inside the disc, follow the same
+    taper.
+  - **Docs.** ENGINE.md and STARS.md no longer say deflection is skipped
+    for a barycentric observer; it is not, and has not been since §3.5a.
+
 - **Roots on segments** (docs/C_API.md, "Roots on segments";
   docs/SEGMENTS.md, "Roots"). `prometheia_segments_roots` finds every
   instant in a window where `ca·Xa + cb·Xb − target` passes 0. X is a

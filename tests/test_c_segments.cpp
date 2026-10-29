@@ -381,6 +381,79 @@ TEST_CASE("c_segments_within_tolerance") {
     prometheia_engine_close(e);
 }
 
+TEST_CASE("c_segments_through_a_solar_conjunction") {
+    // A body behind the Sun: the point-mass deflection grows without bound
+    // toward the disc's centre, so before the limb taper (docs/ENGINE.md,
+    // "Gravitational deflection") these fits were refused, at 74" and
+    // 1980", and the longitude stepped 0.05 degrees in a quarter hour.
+    prometheia_engine* e = open_engine(false);
+    if (!e) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    const Case cases[] = {
+        // Uranus 0.034 degrees from the Sun's centre on 2029-06-04, 16:20 UT.
+        {"Uranus", {PROMETHEIA_OBJECT_BODY, 7, nullptr}, defaults(), false},
+        // The Sun crosses Jupiter's mean node every June.
+        {"Jupiter mean node",
+         {PROMETHEIA_OBJECT_ORBIT_POINT, 5, "ascending-node:mean"},
+         defaults(),
+         false},
+    };
+    const double windows[][2] = {{2462289.0, 2462295.0}, {2461195.0, 2461225.0}};
+    unsigned seed = 7;
+    for (int k = 0; k < 2; ++k) {
+        const Case& c = cases[k];
+        const double from = windows[k][0], to = windows[k][1];
+        prometheia_segments* s = nullptr;
+        prometheia_error err;
+        REQUIRE_MESSAGE(prometheia_segments_fit(e, &c.object, from, to, &c.opts, 0.001, &s, &err) ==
+                            PROMETHEIA_OK,
+                        c.name, ": ", err.message);
+        const Measured m = measure(e, c, s, from, to, 300, seed++);
+        INFO(c.name, ": worst ", m.worst_arcsec, "\"");
+        CHECK(m.failures == 0);
+        CHECK(m.worst_arcsec <= 0.001);
+        prometheia_segments_close(s);
+    }
+    // And the position itself is smooth through the disc: 10-minute second
+    // differences of longitude across the conjunction, 229" before.
+    const prometheia_object uranus{PROMETHEIA_OBJECT_BODY, 7, nullptr};
+    const prometheia_options o = defaults();
+    const double centre = 2462292.18; // 2029-06-04 16:20 UT, near enough
+    double lon[3] = {};
+    double worst = 0.0;
+    for (int i = -72; i <= 72; ++i) {
+        prometheia_result r;
+        REQUIRE(prometheia_calc_object(e, &uranus, centre + i / 144.0, &o, &r, nullptr) ==
+                PROMETHEIA_OK);
+        lon[0] = lon[1];
+        lon[1] = lon[2];
+        lon[2] = r.lon_deg;
+        if (i >= -70)
+            worst = std::max(worst, std::fabs(lon[2] - 2.0 * lon[1] + lon[0]) * 3600.0);
+    }
+    INFO("worst second difference ", worst, "\"");
+    CHECK(worst < 0.05);
+    // The rate has no step either, minute by minute through both limb
+    // crossings (Uranus passes 0.002 degrees from the Sun's centre); it read
+    // -6.6 degrees a day before.
+    double prev = std::nan(""), worst_step = 0.0;
+    for (int i = -1440; i <= 1440; ++i) {
+        prometheia_result r;
+        REQUIRE(prometheia_calc_object(e, &uranus, centre + i / 1440.0, &o, &r, nullptr) ==
+                PROMETHEIA_OK);
+        CHECK(r.lon_speed > 0.05);
+        CHECK(r.lon_speed < 0.065);
+        if (!std::isnan(prev))
+            worst_step = std::max(worst_step, std::fabs(r.lon_speed - prev));
+        prev = r.lon_speed;
+    }
+    INFO("worst one-minute step in the rate ", worst_step, " deg/day");
+    CHECK(worst_step < 1e-4);
+    prometheia_engine_close(e);
+}
+
 TEST_CASE("c_segments_shared_across_threads") {
     // One handle, six threads evaluating it at once: every answer equals the
     // one thread's. And fits made on contexts of one dataset, on their own

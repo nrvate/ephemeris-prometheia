@@ -130,7 +130,7 @@ TEST_CASE("light_deflection_magnitudes") {
     const double p90[3] = {E, far, 0.0}; // observer->star
     const double q90[3] = {0.0, far, 0.0};
     double out[3];
-    apparent::light_deflection(p90, q90, sun_to_obs, apparent::kSunGmOverC2Km, out);
+    apparent::light_deflection(p90, q90, sun_to_obs, apparent::kSunGmOverC2Km, 0.0, out);
     CHECK(std::fabs(angle_as(p90, out) - eps_limb * kRad2As) < 1e-5);
     CHECK(std::fabs(angle_as(p90, out) * 1000.0 - 4.07) < 0.01);
     CHECK(out[0] / norm3(out) < p90[0] / norm3(p90)); // away from the Sun (+x)
@@ -140,9 +140,44 @@ TEST_CASE("light_deflection_magnitudes") {
     const double th = std::asin(R / E);
     const double pl[3] = {far * std::cos(th), far * std::sin(th), 0.0};
     const double ql[3] = {pl[0] - E, pl[1], 0.0};
-    apparent::light_deflection(pl, ql, sun_to_obs, apparent::kSunGmOverC2Km, out);
+    apparent::light_deflection(pl, ql, sun_to_obs, apparent::kSunGmOverC2Km, 0.0, out);
     CHECK(std::fabs(angle_as(pl, out) - 1.75) < 0.01);
     CHECK(std::fabs(norm3(out) / norm3(pl) - 1.0) < 1e-12);
+}
+
+TEST_CASE("light_deflection_limb_taper") {
+    // Sun at the origin, observer 1 AU along -x, the body 30 AU beyond the
+    // Sun with its line of sight passing at impact parameter b.
+    const double E = kAuKm, R = apparent::kSunRadiusKm, D = 30.0 * kAuKm;
+    const double sun_to_obs[3] = {-E, 0.0, 0.0};
+    const auto deflect = [&](double b, double radius, double out[3]) {
+        const double q[3] = {D, b * (E + D) / E, 0.0}; // sun->body
+        const double p[3] = {q[0] + E, q[1], 0.0};     // observer->body
+        apparent::light_deflection(p, q, sun_to_obs, apparent::kSunGmOverC2Km, radius, out);
+        return angle_as(p, out);
+    };
+    double a[3], b[3];
+    // Outside the disc the taper changes nothing, to the bit.
+    for (double x : {1.0000001, 1.5, 4.0, 400.0}) {
+        deflect(x * R, R, a);
+        deflect(x * R, 0.0, b);
+        CHECK(a[0] == b[0]);
+        CHECK(a[1] == b[1]);
+        CHECK(a[2] == b[2]);
+    }
+    // At the limb it is the full 1.75"-class deflection, and it falls
+    // smoothly to 0 at the centre instead of growing without bound.
+    CHECK(deflect(R, R, a) == doctest::Approx(deflect(R, 0.0, b)).epsilon(1e-9));
+    CHECK(deflect(0.0, R, a) == 0.0);
+    CHECK(deflect(0.01 * R, 0.0, b) > 100.0); // the point mass, untapered
+    CHECK(deflect(0.01 * R, R, a) < 0.1);     // about 4 (b / R) x 1.75"
+    double prev = deflect(1.2 * R, R, a), worst_step = 0.0;
+    for (int i = 1; i <= 1200; ++i) {
+        const double d = deflect((1.2 - 0.001 * i) * R, R, a);
+        worst_step = std::max(worst_step, std::fabs(d - prev));
+        prev = d;
+    }
+    CHECK(worst_step < 0.01); // no jump anywhere through the disc
 }
 
 TEST_CASE("frame_bias_matrix_values") {
@@ -252,7 +287,7 @@ TEST_CASE("engine_synthetic_corrections_compose") {
         p[i] = ra.value().pos.xyz_au[i] * kAuKm;
     const double sb[3] = {j[0] - s[0], j[1] - s[1], j[2] - s[2]};
     const double so[3] = {g[0] - s[0], g[1] - s[1], g[2] - s[2]};
-    apparent::light_deflection(p, sb, so, apparent::kSunGmOverC2Km, p);
+    apparent::light_deflection(p, sb, so, apparent::kSunGmOverC2Km, apparent::kSunRadiusKm, p);
     apparent::aberration(p, g + 3, p);
     double q[3];
     for (int i = 0; i < 3; ++i)

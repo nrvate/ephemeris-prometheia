@@ -223,8 +223,8 @@ computed in closed form (ENGINE.md, "Rates").
    - An object without a parallax is placed at 10¹⁰ AU (reported as its
      distance) and takes its proper motion only.
 2. **Parallax.** The observer's barycentric position is subtracted.
-3. **Light deflection** by the Sun (skipped within the solar disc, and for
-   Sun-centred or barycentric observers), then **aberration** from the
+3. **Light deflection** by the Sun (tapered to 0 inside the solar disc, as
+   for bodies, docs/ENGINE.md; skipped for a Sun-centred observer), then **aberration** from the
    observer's velocity, each as options say. `light_time` does not apply:
    a catalog position is already the direction light arrives from.
 4. **Output.** Frame bias, precession and nutation into the requested

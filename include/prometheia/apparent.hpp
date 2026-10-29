@@ -22,6 +22,9 @@ inline constexpr double kLightKmPerDay = 299792.458 * 86400.0;
 inline constexpr double kSunGmKm3S2 = 1.32712440041279419e11;
 inline constexpr double kSunGmOverC2Km = kSunGmKm3S2 / (299792.458 * 299792.458);
 
+// The Sun's radius (IAU 2015 nominal), km: where the deflection is tapered.
+inline constexpr double kSunRadiusKm = 695700.0;
+
 // Deflects the observer->body vector p by the gravity of a body of
 // gravitational radius gm_over_c2_km (the post-Newtonian single-body
 // form, Circular 179 chapter 7):
@@ -31,9 +34,20 @@ inline constexpr double kSunGmOverC2Km = kSunGmKm3S2 / (299792.458 * 299792.458)
 // with p, q, e unit vectors along observer->body, deflector->body and
 // deflector->observer, and E = |deflector->observer|. The result keeps
 // |p|. Inputs may alias out.
+//
+// The formula is a point mass's, and grows without bound as the line of
+// sight nears the deflector's centre (1 + q.e -> 0). Where the body lies
+// beyond the deflector and the line of sight passes within its radius
+// (impact parameter b < radius_km), the deflection is scaled by
+//   s = 1 - (1 - (b / radius)^2)^4,
+// which is 1 at the limb with its first three derivatives 0 there, and goes
+// as b^2 at the centre: the deflection falls to 0 there, and the apparent
+// place stays smooth through a conjunction. Outside the disc nothing
+// changes. The body is hidden there anyway; the taper only keeps the
+// position, and a fit through it, continuous (docs/ENGINE.md).
 inline void light_deflection(const double p[3], const double deflector_to_body[3],
                              const double deflector_to_observer[3], double gm_over_c2_km,
-                             double out[3]) {
+                             double radius_km, double out[3]) {
     const double pn = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
     const double qn = std::sqrt(deflector_to_body[0] * deflector_to_body[0] +
                                 deflector_to_body[1] * deflector_to_body[1] +
@@ -55,7 +69,21 @@ inline void light_deflection(const double p[3], const double deflector_to_body[3
     const double pq = u[0] * q[0] + u[1] * q[1] + u[2] * q[2];
     const double ep = e[0] * u[0] + e[1] * u[1] + e[2] * u[2];
     const double qe = q[0] * e[0] + q[1] * e[1] + q[2] * e[2];
-    const double f = 2.0 * gm_over_c2_km / en / (1.0 + qe);
+    double f = 2.0 * gm_over_c2_km / en / (1.0 + qe);
+    // The line of sight passes the deflector at distance along it -en (e.u),
+    // at b = en |e x u|; it is behind the body or the observer outside (0, pn).
+    const double along = -en * ep;
+    if (radius_km > 0.0 && along > 0.0 && along < pn) {
+        const double c0 = e[1] * u[2] - e[2] * u[1];
+        const double c1 = e[2] * u[0] - e[0] * u[2];
+        const double c2 = e[0] * u[1] - e[1] * u[0];
+        const double x2 = en * en * (c0 * c0 + c1 * c1 + c2 * c2) / (radius_km * radius_km);
+        if (x2 < 1.0) {
+            const double m = (1.0 - x2) * (1.0 - x2);
+            const double s = 1.0 - m * m;
+            f = s > 0.0 && 1.0 + qe > 0.0 ? f * s : 0.0;
+        }
+    }
     double w[3];
     for (int i = 0; i < 3; ++i)
         w[i] = u[i] + f * (pq * e[i] - ep * q[i]);

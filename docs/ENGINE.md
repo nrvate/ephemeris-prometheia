@@ -141,8 +141,7 @@ For a TT epoch *t*:
    barycentre (zero), any body (`Center::Body` with
    `CalcOptions::center_body`: a planet-centred observer, from the
    ephemeris or a catalog, moving with the body; the Sun's gravitational
-   deflection is skipped only when that body is the Sun or the
-   barycentre), or for topocentric the Earth plus the WGS84 site
+   deflection is skipped only when that body is the Sun), or for topocentric the Earth plus the WGS84 site
    rotated by GAST (UT1 from the ΔT model) into the true equator of date
    and carried to ICRF by (N·P·B)ᵀ, with site velocity ω × r (ω = the ERA
    rate, 2π · 1.00273781191135448 rad/day). Polar motion is neglected
@@ -156,14 +155,58 @@ For a TT epoch *t*:
    resolves only ~40 µs, which would otherwise put metre-class noise into
    the differenced rates. Orbit points do the same through their focus
    (ORBIT-POINTS.md, "How it is computed").
-3. **Gravitational deflection** by the Sun (skipped when the body is the
-   Sun or the observer is the Sun or the barycentre): with unit vectors
-   p (observer→body), q (Sun→body), e (Sun→observer) and E = |Sun→observer|,
+3. **Gravitational deflection** by the Sun (skipped when the body or the
+   observer is the Sun; the barycentre, ~0.005 AU from the Sun's centre,
+   is deflected from): with unit vectors p (observer→body), q (Sun→body),
+   e (Sun→observer) and E = |Sun→observer|,
 
    p₁ = p + (2GM/(c²E)) / (1 + q·e) · ((p·q) e − (e·p) q)
 
    GM/c² = 1.476625 km (DE440 GM☉). Checks: 4.07 mas at 90° elongation,
    1.75″ at the limb.
+
+   **Inside the solar disc** the point-mass term grows without bound as
+   the line of sight nears the Sun's centre (1 + q·e → 0). Before
+   2026-10-28 that put a jump of 0.05° into Uranus at its 2029-06-04
+   conjunction, and made fits through such conjunctions fail. Where the body
+   lies beyond the Sun and the line of sight passes within its radius
+   (R = 695,700 km, IAU 2015 nominal) at impact parameter b, the term is
+   now scaled by
+
+   s = 1 − (1 − (b/R)²)⁴
+
+   - **At the limb** s is 1, with its first three derivatives 0, so the
+     place joins the untapered formula smoothly.
+   - **At the centre** s goes as b², so the deflection falls to 0 linearly
+     and the place is continuous through the conjunction.
+   - **Outside the disc** nothing changes, to the bit.
+   - **A convention, not physics:** the body is hidden behind the Sun, so
+     no observation is at stake; the taper only keeps the position, and a
+     fit through it, smooth.
+     - **What physics would give.** A ray through a transparent Sun would
+       be bent by 4GM_cyl(b)/(c²b), M_cyl being the mass inside the
+       cylinder of radius b. The Sun is centrally concentrated, so that
+       stays near the limb value well inside the disc and peaks deeper,
+       where the taper has already fallen.
+     - **How far apart.** Astrolog's review estimated, from a published
+       solar-model profile, that the two part by up to about 3″ inside the
+       disc. That figure is an estimate and was not measured here.
+     - **Why the convention.** Neither can be checked against an
+       observation, and the convention needs no solar model.
+   - **The rate** has no step either: through both limb crossings of that
+     conjunction (Uranus passes 0.002° from the Sun's centre), it moves by
+     at most 3.7e-5°/day from one minute to the next, and stays within
+     0.0526–0.0609°/day. Before, it read −6.6°/day.
+   - **Measured** (`light_deflection_limb_taper`,
+     `c_segments_through_a_solar_conjunction`):
+     - Uranus's 10-minute second differences through that conjunction fell
+       from 229″ to 0.009″.
+     - Monthly fits at 0.001″ over 1950–2050 used to refuse 3 months of
+       Mercury, 1 of Jupiter, 2 of Uranus and 105 of Jupiter's mean node
+       (the Sun crosses it every June). With the taper, none of 13,200
+       is refused, across the Sun, Moon, planets, Pluto and that node.
+   - **Stars** follow the same rule. Before, they skipped deflection
+     outright inside the disc, a step at the limb.
 4. **Aberration**, relativistic, with the observer's barycentric velocity
    V = v/c and β⁻¹ = √(1 − V²):
 
