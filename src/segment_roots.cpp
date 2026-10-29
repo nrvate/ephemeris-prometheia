@@ -206,9 +206,9 @@ public:
            int capacity)
         : f_(f), from_(from), to_(to), tol_(std::min(tol, kSolveDays)), out_(out),
           capacity_(capacity) {
-        a_ = {f.a, f.na, f.ca, f.component};
-        if (f.nb > 0)
-            b_ = {f.b, f.nb, f.cb, f.component};
+        n_ = f.nterms;
+        for (int i = 0; i < n_; ++i)
+            terms_[i] = {f.terms[i].handles, f.terms[i].count, f.terms[i].c, f.component};
         m_ = f.modulus;
         speed_ = f.component == PROMETHEIA_SEGMENTS_LON_SPEED ||
                  f.component == PROMETHEIA_SEGMENTS_LAT_SPEED;
@@ -220,7 +220,9 @@ public:
             }
             return std::fabs(t.c) * w / 3600.0;
         };
-        band_ = tol_of(a_) + (f.nb > 0 ? tol_of(b_) : 0.0);
+        band_ = 0.0;
+        for (int i = 0; i < n_; ++i)
+            band_ += tol_of(terms_[i]);
         band_ = std::max(band_, 1e-15);
         eps_ = 0.01 * band_;
         for (int m = 0; m < 2 * kN; ++m)
@@ -228,30 +230,29 @@ public:
     }
 
     void run() {
-        Seg sa = a_.locate(from_);
-        Seg sb = f_.nb > 0 ? b_.locate(from_) : Seg{};
+        Seg seg[PROMETHEIA_SEGMENTS_MAX_TERMS];
+        for (int i = 0; i < n_; ++i)
+            seg[i] = terms_[i].locate(from_);
         for (;;) {
-            ca_.enter(a_, sa);
-            double p0 = ca_.b0, p1 = ca_.b1;
-            if (f_.nb > 0) {
-                cb_.enter(b_, sb);
-                p0 = std::max(p0, cb_.b0);
-                p1 = std::min(p1, cb_.b1);
+            // The piece: where the current segment of every term overlaps.
+            double p0 = -std::numeric_limits<double>::infinity();
+            double p1 = std::numeric_limits<double>::infinity();
+            for (int i = 0; i < n_; ++i) {
+                cur_[i].enter(terms_[i], seg[i]);
+                p0 = std::max(p0, cur_[i].b0);
+                p1 = std::min(p1, cur_[i].b1);
             }
             cells_ = 0;
             last_ = -std::numeric_limits<double>::infinity();
             cell(p0, p1, 0);
             if (stop_ || p1 >= to_)
                 return;
-            if (ca_.b1 == p1) {
-                if (!a_.has_next(sa))
+            for (int i = 0; i < n_; ++i) {
+                if (cur_[i].b1 != p1)
+                    continue;
+                if (!terms_[i].has_next(seg[i]))
                     return;
-                sa = a_.next(sa);
-            }
-            if (f_.nb > 0 && cb_.b1 == p1) {
-                if (!b_.has_next(sb))
-                    return;
-                sb = b_.next(sb);
+                seg[i] = terms_[i].next(seg[i]);
             }
         }
     }
@@ -263,12 +264,11 @@ public:
 private:
     // f reduced (gw) and its derivative per day (NaN for a speed).
     Value eval(double t) const {
-        const Value va = ca_.value(t);
-        double v = a_.c * va.v, d = a_.c * va.d;
-        if (f_.nb > 0) {
-            const Value vb = cb_.value(t);
-            v += b_.c * vb.v;
-            d += b_.c * vb.d;
+        double v = 0.0, d = 0.0;
+        for (int i = 0; i < n_; ++i) {
+            const Value x = cur_[i].value(t);
+            v += terms_[i].c * x.v;
+            d += terms_[i].c * x.d;
         }
         v -= f_.target;
         if (f_.target_rate != 0.0) {
@@ -520,8 +520,9 @@ private:
     double from_, to_, tol_;
     prometheia_segments_root* out_;
     int capacity_;
-    Term a_, b_;
-    Cursor ca_, cb_;
+    int n_ = 0;
+    Term terms_[PROMETHEIA_SEGMENTS_MAX_TERMS];
+    Cursor cur_[PROMETHEIA_SEGMENTS_MAX_TERMS];
     double m_ = 0.0, band_ = 0.0, eps_ = 0.0;
     bool speed_ = false;
     double cos_[2 * kN]{};

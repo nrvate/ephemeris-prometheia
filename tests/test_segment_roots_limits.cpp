@@ -36,10 +36,10 @@ struct Search {
 
 Search search(const prometheia_segments_function& c,
               const prometheia::segment_roots::Limits& limits, double from, double to) {
+    const prometheia_segments_term term{c.a, c.na, c.ca};
     prometheia::segment_roots::Function f;
-    f.a = c.a;
-    f.na = c.na;
-    f.ca = c.ca;
+    f.terms = &term;
+    f.nterms = 1;
     f.component = c.component;
     f.target = c.target;
     f.limits = limits;

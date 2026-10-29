@@ -10,11 +10,11 @@
 
 namespace prometheia::segment_roots {
 
-// f(t) = ca Xa(t) + cb Xb(t) - (target + target_rate (t - target_jd_tt)),
-// taken modulo modulus when it is positive. Each term is na (nb) handles
-// back to back; nb is 0 for no second term. The caller has checked every
-// field: modulus is resolved (360 for a longitude asked with 0) and is 0 for
-// any other component.
+// f(t) = sum of c_i X_i(t) - (target + target_rate (t - target_jd_tt)),
+// taken modulo modulus when it is positive. Each term is count handles back
+// to back. The caller has checked every field: 1 <= nterms <=
+// PROMETHEIA_SEGMENTS_MAX_TERMS, modulus is resolved (360 for a longitude
+// asked with 0) and is 0 for any other component.
 // Where halving a cell stops (docs/SEGMENTS.md, "Roots", "Limits"). Only
 // tests change them, to reach a limit on purpose.
 struct Limits {
@@ -24,11 +24,8 @@ struct Limits {
 };
 
 struct Function {
-    const prometheia_segments* const* a = nullptr;
-    int na = 0;
-    const prometheia_segments* const* b = nullptr;
-    int nb = 0;
-    double ca = 1.0, cb = 0.0;
+    const prometheia_segments_term* terms = nullptr;
+    int nterms = 0;
     int component = PROMETHEIA_SEGMENTS_LON;
     double target = 0.0, target_rate = 0.0, target_jd_tt = 0.0;
     double modulus = 0.0;

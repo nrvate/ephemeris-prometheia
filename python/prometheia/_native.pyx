@@ -1201,6 +1201,24 @@ cdef class Context:
         seg.s = out
         return seg
 
+    def object_coverage(self, object body, Options options=None):
+        """(first_jd_tt, last_jd_tt): the TT interval in which calc() answers
+        the object with these options, each end to adjacent doubles; the
+        instants a fit may span (docs/C_API.md, "Coverage")."""
+        cdef c.prometheia_engine* e = self.engine()
+        cdef const c.prometheia_options* o = opts_of(options)
+        cdef c.prometheia_object obj
+        cdef list keep = []
+        cdef double first, last
+        cdef c.prometheia_error err
+        cdef c.prometheia_status st
+        object_of(body, &obj, keep)
+        with nogil:
+            st = c.prometheia_object_coverage(e, &obj, o, &first, &last, &err)
+        if st != c.PROMETHEIA_OK:
+            fail(st, &err)
+        return (first, last)
+
     def calc_star(self, star, double jd, Options options=None, str scale="tt"):
         """A fixed star or Messier object by catalog index or name."""
         cdef c.prometheia_engine* e = self.engine()

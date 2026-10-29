@@ -1492,6 +1492,24 @@ prometheia_segments_fit(prometheia_engine* engine, const prometheia_object* obje
                         double jd_tt_start, double jd_tt_end, const prometheia_options* opts,
                         double tolerance_arcsec, prometheia_segments** out, prometheia_error* err);
 
+/*
+ * The TT interval in which prometheia_calc_object answers the object with
+ * these options (NULL: the defaults), each end to adjacent doubles: the
+ * instants a fit may span. It is narrower than the planetary files' span by
+ * the body's light time, and for a catalog body it is also bounded by the
+ * perturber kernel. A fit takes rates (speed on), so ask with the options
+ * the fit will use. The engine is probed at 65 instants across the files'
+ * span and bisected at each edge, about a hundred position calls.
+ * PROMETHEIA_ERROR_COVERAGE when the object is answered nowhere (or with the
+ * engine's own error), or not across one interval (the files leave a gap);
+ * the engine's error for an unknown object. NaN in both on failure.
+ */
+PROMETHEIA_API prometheia_status prometheia_object_coverage(prometheia_engine* engine,
+                                                            const prometheia_object* object,
+                                                            const prometheia_options* opts,
+                                                            double* first_jd_tt, double* last_jd_tt,
+                                                            prometheia_error* err);
+
 /* An instant in the span; outside it, PROMETHEIA_ERROR_COVERAGE. No
  * allocation and no lock. On failure *out is zeroed. */
 PROMETHEIA_API prometheia_status prometheia_segments_eval(const prometheia_segments* segments,
@@ -1617,6 +1635,51 @@ typedef struct prometheia_segments_root {
  */
 PROMETHEIA_API prometheia_status prometheia_segments_roots(
     const prometheia_segments_function* f, double jd_tt_start, double jd_tt_end, double tol_days,
+    prometheia_segments_root* out, int capacity, int* count, double* jd_tt_resume, int* unresolved,
+    prometheia_error* err);
+
+/*
+ * The same search over a sum of up to PROMETHEIA_SEGMENTS_MAX_TERMS terms:
+ *   f(t) = sum of c_i X_i(t) - (target + target_rate (t - target_jd_tt))
+ * prometheia_segments_roots is this with one or two terms. Every rule above
+ * holds per term: each term's handles back to back and covering the
+ * window, every handle fitted in the same coordinates, 360 c_i / M whole
+ * for a longitude, and the band sum |c_i| tol_i, so it widens with every
+ * term.
+ *
+ * - Terms naming the same handles (the same count, the same pointers) are
+ *   one term with their coefficients summed, and a term whose coefficient
+ *   is then 0 is dropped: midpoint(a, b) - a is 0.5 b - 0.5 a. If nothing
+ *   is left, f is identically flat and the call is refused.
+ * - The branches multiply. Modulo 180 a midpoint is both of its points, so
+ *   a midpoint against a body gives the roots of both, and a midpoint
+ *   against a midpoint those of all four pairings. A caller wanting one
+ *   branch evaluates it at each root and keeps the roots it wants.
+ * - PROMETHEIA_SEGMENTS_MAX_TERMS is a limit the call checks, not a layout:
+ *   it may grow without a change of ABI version.
+ *
+ * PROMETHEIA_ERROR_ARGUMENT, besides the cases above, for terms NULL, nterms
+ * outside 1..PROMETHEIA_SEGMENTS_MAX_TERMS, a term with no handles (count
+ * below 1), and every coefficient 0 once terms are combined.
+ */
+#define PROMETHEIA_SEGMENTS_MAX_TERMS 8
+
+typedef struct prometheia_segments_term {
+    const prometheia_segments* const* handles; /* back to back, in time order */
+    int count;                                 /* at least 1 */
+    double c;
+} prometheia_segments_term;
+
+typedef struct prometheia_segments_sum {
+    const prometheia_segments_term* terms;
+    int nterms; /* 1 .. PROMETHEIA_SEGMENTS_MAX_TERMS */
+    int component;
+    double target, target_rate, target_jd_tt;
+    double modulus;
+} prometheia_segments_sum;
+
+PROMETHEIA_API prometheia_status prometheia_segments_roots_sum(
+    const prometheia_segments_sum* f, double jd_tt_start, double jd_tt_end, double tol_days,
     prometheia_segments_root* out, int capacity, int* count, double* jd_tt_resume, int* unresolved,
     prometheia_error* err);
 

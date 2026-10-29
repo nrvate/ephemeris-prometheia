@@ -631,6 +631,83 @@ prometheia_status prometheia_segments_roots(const prometheia_segments_function *
   - `ca` and `cb` both 0, or a field that is not finite;
   - a modulus the rules above refuse.
 
+### Sums of more than two terms
+
+```c
+#define PROMETHEIA_SEGMENTS_MAX_TERMS 8
+typedef struct prometheia_segments_term {
+    const prometheia_segments *const *handles; int count; double c;
+} prometheia_segments_term;
+typedef struct prometheia_segments_sum {
+    const prometheia_segments_term *terms; int nterms;
+    int component;
+    double target, target_rate, target_jd_tt, modulus;
+} prometheia_segments_sum;
+prometheia_status prometheia_segments_roots_sum(const prometheia_segments_sum *f,
+    double jd_tt_start, double jd_tt_end, double tol_days,
+    prometheia_segments_root *out, int capacity, int *count,
+    double *jd_tt_resume, int *unresolved, prometheia_error *err);
+```
+
+f = Σ cᵢ·Xᵢ − (target + target_rate·(t − target_jd_tt)), for 1 to 8 terms.
+astromcp asked for it for a midpoint against a body (3 terms) and a midpoint
+against a midpoint (4). `prometheia_segments_roots` is this call with one or
+two terms. Everything above holds per term:
+- each term's handles back to back, covering the window;
+- every handle fitted in the same coordinates;
+- 360·cᵢ/M whole for a longitude;
+- the band Σ|cᵢ|·tolᵢ, so it widens, and the tangent zone with it, with
+  every term added.
+
+What is new:
+- **Repeated terms combine.** Terms naming the same handles (same count,
+  same pointers) are one term, their coefficients summed. A term whose
+  coefficient is then 0 is dropped, so midpoint(a, b) − a is ½b − ½a. If
+  nothing is left, f is identically flat, and the call is refused before
+  any search.
+- **The branches multiply.** Modulo 180 a midpoint is both of its points.
+  A midpoint against a body therefore gives the roots of both, and a
+  midpoint against a midpoint gives those of all four pairings. A caller
+  wanting one branch evaluates it at each root and keeps what it wants.
+- **The term limit.** `PROMETHEIA_SEGMENTS_MAX_TERMS` is a limit the call
+  checks, not a layout, so it may grow without a new ABI version.
+- **Refusals.** `PROMETHEIA_ERROR_ARGUMENT` also covers `terms` NULL,
+  `nterms` outside 1 to the limit, a term with `count` below 1, and every
+  coefficient 0 once terms are combined.
+
+## Coverage
+
+```c
+prometheia_status prometheia_object_coverage(prometheia_engine *engine,
+    const prometheia_object *object, const prometheia_options *opts,
+    double *first_jd_tt, double *last_jd_tt, prometheia_error *err);
+```
+
+The TT interval in which `prometheia_calc_object` answers the object with
+these options (NULL: the defaults), each end to adjacent doubles: at both ends
+it answers, and one double outside either it refuses. A fit clipped to the
+interval never meets a refusal. Additive; the ABI version stays 6.
+
+- **Why not the files' span.** It is narrower than the planetary files'
+  span (`prometheia_engine_ephemeris_span`, in TDB):
+  - the body is read one light time before the instant;
+  - an orbit point reads its focus;
+  - a catalog body also needs the perturber kernel.
+- **Options.** A fit takes rates, so ask with the options the fit will use.
+- **How.** The engine is asked at 65 instants across the files' span, and
+  each edge is bisected: about a hundred position calls.
+  - For an ephemeris body, an orbit point or a star that takes 1–6 ms.
+  - A catalog body integrates across the whole span, 1.8 s for Ceres over
+    DE440 (measured 2026-10-28).
+  - Cache the answer; it changes only when files are added.
+- **Refusals.**
+  - `PROMETHEIA_ERROR_COVERAGE` when the object is answered nowhere, or not
+    across one interval because the loaded files leave a gap. A gap
+    narrower than the probes' spacing is not seen.
+  - The engine's own error for an unknown object.
+  - `PROMETHEIA_ERROR_ARGUMENT` for a NULL argument.
+  - Both outputs are NaN on any failure.
+
 ## Datasets and threads
 
 One dataset holds the files, loaded once, and any number of engines,

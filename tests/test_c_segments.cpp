@@ -486,6 +486,56 @@ TEST_CASE("c_segments_through_a_solar_conjunction") {
     prometheia_engine_close(e);
 }
 
+TEST_CASE("c_object_coverage") {
+    // The interval calc answers, to adjacent doubles: answered at both ends,
+    // refused one double outside, and a fit clipped to it succeeds at both
+    // ends. (A catalog body integrates across the whole span to find its
+    // edges, 1.8 s for Ceres over DE440, so none is asked here.)
+    prometheia_engine* e = open_engine(false);
+    if (!e) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    const prometheia_options o = defaults();
+    const struct {
+        const char* name;
+        prometheia_object object;
+    } cases[] = {
+        {"Moon", {PROMETHEIA_OBJECT_BODY, 301, nullptr}},
+        {"Pluto", {PROMETHEIA_OBJECT_BODY, 9, nullptr}},
+        {"Jupiter mean node", {PROMETHEIA_OBJECT_ORBIT_POINT, 5, "ascending-node:mean"}},
+        {"HR 5838", {PROMETHEIA_OBJECT_ID, 0, "star:HR 5838"}},
+    };
+    for (const auto& c : cases) {
+        INFO(c.name);
+        double first = 0.0, last = 0.0;
+        prometheia_error err;
+        REQUIRE(prometheia_object_coverage(e, &c.object, &o, &first, &last, &err) == PROMETHEIA_OK);
+        CHECK(last - first > 400000.0); // DE440: 1550 to 2650
+        prometheia_result r;
+        CHECK(prometheia_calc_object(e, &c.object, first, &o, &r, nullptr) == PROMETHEIA_OK);
+        CHECK(prometheia_calc_object(e, &c.object, last, &o, &r, nullptr) == PROMETHEIA_OK);
+        CHECK(prometheia_calc_object(e, &c.object, std::nextafter(first, 0.0), &o, &r, nullptr) ==
+              PROMETHEIA_ERROR_COVERAGE);
+        CHECK(prometheia_calc_object(e, &c.object, std::nextafter(last, 1e300), &o, &r, nullptr) ==
+              PROMETHEIA_ERROR_COVERAGE);
+        for (double from : {first, last - 5.0}) {
+            prometheia_segments* s = nullptr;
+            CHECK_MESSAGE(prometheia_segments_fit(e, &c.object, from, from + 5.0, &o, 0.001, &s,
+                                                  &err) == PROMETHEIA_OK,
+                          err.message);
+            prometheia_segments_close(s);
+        }
+    }
+    double first = 0.0, last = 0.0;
+    const prometheia_object nobody{PROMETHEIA_OBJECT_ID, 0, "sb:no such body"};
+    CHECK(prometheia_object_coverage(e, &nobody, &o, &first, &last, nullptr) != PROMETHEIA_OK);
+    CHECK(std::isnan(first));
+    CHECK(prometheia_object_coverage(e, nullptr, &o, &first, &last, nullptr) ==
+          PROMETHEIA_ERROR_ARGUMENT);
+    prometheia_engine_close(e);
+}
+
 TEST_CASE("c_segments_shared_across_threads") {
     // One handle, six threads evaluating it at once: every answer equals the
     // one thread's. And fits made on contexts of one dataset, on their own

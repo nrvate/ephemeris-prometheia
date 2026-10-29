@@ -334,6 +334,8 @@ with the machine loaded (load average about 2.6).
 | Neptune, the same | 2 | 0 / 0 | 0.049 s | 0.05 | 0.12 ms |
 | Saturn, the same | 2 | 0 / 0 | 0.012 s | 0.03 | 0.12 ms |
 | Moon ingresses, topocentric (72.9° E, 19.1° N), 90 days | 39 | 0 / 0 | 0.043 s | 0.48 | 0.97 ms |
+| Sun/Moon midpoint = Mars (3 terms, M = 180) | 13 | 0 / 0 | 0.024 s | 0.26 | 0.72 ms |
+| Sun/Moon midpoint = Venus/Jupiter midpoint (4 terms, M = 180) | 14 | 0 / 0 | 0.032 s | 0.34 | 0.98 ms |
 | Moon topocentric latitude at 2.5°, 90 days | 9 | 0 / 0 | 0.033 s | 0.35 | 2.5 ms |
 
 - **No root was missed or doubled.** A resumed search with `capacity` 1

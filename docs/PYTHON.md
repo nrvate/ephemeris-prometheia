@@ -156,6 +156,10 @@ the C++ engine's, bit for bit.
     thread may evaluate it, and it outlives its context. Cython code
     `cimport`s the layout from `cprometheia.pxd` and evaluates it without
     the GIL;
+  - `object_coverage(object, options)` returns `(first_jd_tt, last_jd_tt)`:
+    the interval in which `calc` answers the object with those options,
+    each end to adjacent doubles, so a fit clipped to it never meets a
+    refusal ([C_API.md](C_API.md), "Coverage");
   - `segment_roots(a, b=None, *, component="lon", ca=1, cb=None,
     target=0, target_rate=0, target_jd_tt=None, modulus=0, start=None,
     end=None, tol_days=1e-6)` (module level) returns, in time order, every

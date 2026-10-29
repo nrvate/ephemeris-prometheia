@@ -916,3 +916,29 @@ cdef extern from "prometheia/prometheia.h" nogil:
         const prometheia_segments_function* f, double jd_tt_start, double jd_tt_end,
         double tol_days, prometheia_segments_root* out, int capacity, int* count,
         double* jd_tt_resume, int* unresolved, prometheia_error* err) noexcept
+
+    int PROMETHEIA_SEGMENTS_MAX_TERMS
+
+    ctypedef struct prometheia_segments_term:
+        const prometheia_segments* const* handles
+        int count
+        double c
+
+    ctypedef struct prometheia_segments_sum:
+        const prometheia_segments_term* terms
+        int nterms
+        int component
+        double target
+        double target_rate
+        double target_jd_tt
+        double modulus
+
+    prometheia_status prometheia_segments_roots_sum(
+        const prometheia_segments_sum* f, double jd_tt_start, double jd_tt_end,
+        double tol_days, prometheia_segments_root* out, int capacity, int* count,
+        double* jd_tt_resume, int* unresolved, prometheia_error* err) noexcept
+
+    prometheia_status prometheia_object_coverage(
+        prometheia_engine* engine, const prometheia_object* object,
+        const prometheia_options* opts, double* first_jd_tt, double* last_jd_tt,
+        prometheia_error* err) noexcept

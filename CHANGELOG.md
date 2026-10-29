@@ -13,6 +13,16 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Roots of sums of up to eight terms** (`prometheia_segments_roots_sum`;
+  docs/C_API.md, "Sums of more than two terms"), for a midpoint against a
+  body or against a midpoint. `prometheia_segments_roots` is now this call
+  with one or two terms. Terms naming the same handles combine, and a flat
+  sum is refused. Against brute force over 2026, 3- and 4-term midpoint
+  searches had 0 missed and 0 extra roots, in about a millisecond a year.
+- **`prometheia_object_coverage`** (docs/C_API.md, "Coverage"): the exact
+  TT interval in which an object is answered with given options, so a
+  caller can clip its fits to it. Python: `Context.object_coverage`.
+
 - **A dataset's contexts share the folded name index** (docs/REGISTRY.md,
   "Cost"). The registry folded the catalogs' proper names in a pass of its
   own, per context, so every context of a dataset paid about 250 ms on its

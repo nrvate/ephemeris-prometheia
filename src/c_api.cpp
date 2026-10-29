@@ -2445,6 +2445,84 @@ prometheia_status prometheia_segments_fit(prometheia_engine* engine,
     });
 }
 
+prometheia_status prometheia_object_coverage(prometheia_engine* engine,
+                                             const prometheia_object* object,
+                                             const prometheia_options* opts, double* first_jd_tt,
+                                             double* last_jd_tt, prometheia_error* err) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    if (first_jd_tt)
+        *first_jd_tt = nan;
+    if (last_jd_tt)
+        *last_jd_tt = nan;
+    if (!engine)
+        return argument(err, "engine is NULL");
+    if (!object)
+        return argument(err, "object is NULL");
+    if (!first_jd_tt || !last_jd_tt)
+        return argument(err, "first_jd_tt or last_jd_tt is NULL");
+    return guarded(err, [&] {
+        Engine::ObjectRef ref;
+        if (prometheia_status st = to_ref(engine, *object, ref, err); st != PROMETHEIA_OK)
+            return st;
+        CalcOptions o;
+        if (opts) {
+            if (prometheia_status st = translate(*opts, o, err); st != PROMETHEIA_OK)
+                return st;
+        }
+        Engine& e = engine->engine;
+        // Every answer needs the planetary files, so the instants answered lie
+        // within their span; probe across it for one that is answered.
+        const std::vector<Engine::EphemerisSpan> spans = e.ephemeris_spans();
+        if (spans.empty())
+            return report(err, PROMETHEIA_ERROR_COVERAGE, "coverage: no planetary file is loaded");
+        double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+        for (const Engine::EphemerisSpan& sp : spans) {
+            lo = std::min(lo, time::tt_from_tdb(sp.first_jd_tdb));
+            hi = std::max(hi, time::tt_from_tdb(sp.last_jd_tdb));
+        }
+        Error last_error = make_error(ErrorCode::CoverageError, "coverage: never answered");
+        const auto answered = [&](double jd) {
+            auto c = e.calc_object(ref, jd, o);
+            if (!c)
+                last_error = c.error();
+            return c.ok();
+        };
+        constexpr int kProbes = 64;
+        double probe[kProbes + 1];
+        bool ok[kProbes + 1];
+        int first = -1, last = -1;
+        for (int k = 0; k <= kProbes; ++k) {
+            probe[k] = k == kProbes ? hi : lo + (hi - lo) * k / kProbes;
+            ok[k] = answered(probe[k]);
+            if (ok[k]) {
+                if (first < 0)
+                    first = k;
+                last = k;
+            }
+        }
+        if (first < 0)
+            return report(err, last_error);
+        for (int k = first; k <= last; ++k)
+            if (!ok[k])
+                return report(err, PROMETHEIA_ERROR_COVERAGE,
+                              "coverage: the object is not answered across one interval (the "
+                              "loaded files leave a gap)");
+        // Each edge to adjacent doubles, between the last refused probe and
+        // the first answered one (or the files' own edge, if answered).
+        const auto edge = [&](double bad, double good) {
+            while (true) {
+                const double mid = bad + (good - bad) / 2;
+                if (mid == bad || mid == good)
+                    return good;
+                (answered(mid) ? good : bad) = mid;
+            }
+        };
+        *first_jd_tt = first == 0 ? probe[0] : edge(probe[first - 1], probe[first]);
+        *last_jd_tt = last == kProbes ? probe[kProbes] : edge(probe[last + 1], probe[last]);
+        return succeed(err);
+    });
+}
+
 prometheia_status prometheia_segments_eval(const prometheia_segments* segments, double jd_tt,
                                            prometheia_segments_point* out, prometheia_error* err) {
     if (out)
@@ -2498,6 +2576,100 @@ void prometheia_segments_close(prometheia_segments* segments) {
     delete segments;
 }
 
+prometheia_status prometheia_segments_roots_sum(const prometheia_segments_sum* f,
+                                                double jd_tt_start, double jd_tt_end,
+                                                double tol_days, prometheia_segments_root* out,
+                                                int capacity, int* count, double* jd_tt_resume,
+                                                int* unresolved, prometheia_error* err) {
+    if (count)
+        *count = 0;
+    if (unresolved)
+        *unresolved = 0;
+    if (jd_tt_resume)
+        *jd_tt_resume = std::numeric_limits<double>::quiet_NaN();
+    if (!f)
+        return argument(err, "f is NULL");
+    if (!count || !jd_tt_resume)
+        return argument(err, "count or jd_tt_resume is NULL");
+    if (capacity < 0 || (capacity > 0 && !out))
+        return argument(err, "segments roots: capacity is negative, or out is NULL");
+    if (!f->terms || f->nterms < 1 || f->nterms > PROMETHEIA_SEGMENTS_MAX_TERMS)
+        return argument(err, "segments roots: terms is NULL, or nterms is outside "
+                             "1..PROMETHEIA_SEGMENTS_MAX_TERMS");
+    if (f->component < PROMETHEIA_SEGMENTS_LON || f->component > PROMETHEIA_SEGMENTS_LAT_SPEED)
+        return argument(err, "segments roots: unknown component");
+    if (!std::isfinite(jd_tt_start) || !std::isfinite(jd_tt_end) || !(jd_tt_end > jd_tt_start))
+        return argument(err, "segments roots: the window must be finite and end after it starts");
+    if (!(tol_days > 0.0) || !std::isfinite(tol_days))
+        return argument(err, "segments roots: tol_days must be positive and finite");
+    if (!std::isfinite(f->target) || !std::isfinite(f->target_rate) ||
+        (f->target_rate != 0.0 && !std::isfinite(f->target_jd_tt)) || !std::isfinite(f->modulus))
+        return argument(err, "segments roots: a field is not finite");
+    // Terms naming the same handles are one term, their coefficients
+    // summed; a term whose coefficient is then 0 is dropped. A sum with
+    // nothing left is identically flat, and refused before any search.
+    prometheia_segments_term terms[PROMETHEIA_SEGMENTS_MAX_TERMS];
+    int n = 0;
+    for (int i = 0; i < f->nterms; ++i) {
+        const prometheia_segments_term& t = f->terms[i];
+        if (!t.handles || t.count < 1 || !t.handles[0])
+            return argument(err, "segments roots: a term needs at least one handle");
+        if (!std::isfinite(t.c))
+            return argument(err, "segments roots: a field is not finite");
+        int same = -1;
+        for (int j = 0; j < n && same < 0; ++j)
+            if (terms[j].count == t.count &&
+                std::equal(t.handles, t.handles + t.count, terms[j].handles))
+                same = j;
+        if (same >= 0)
+            terms[same].c += t.c;
+        else
+            terms[n++] = t;
+    }
+    n = int(std::remove_if(terms, terms + n,
+                           [](const prometheia_segments_term& t) { return t.c == 0.0; }) -
+            terms);
+    if (n == 0)
+        return argument(err, "segments roots: every coefficient is 0, once terms naming the "
+                             "same handles are combined");
+    double modulus = f->modulus;
+    if (f->component == PROMETHEIA_SEGMENTS_LON) {
+        if (modulus < 0.0)
+            return argument(err, "segments roots: the modulus is negative");
+        if (modulus == 0.0)
+            modulus = 360.0;
+        // A turn of any longitude must move f by whole moduli.
+        for (int i = 0; i < n; ++i) {
+            const double turns = 360.0 * std::fabs(terms[i].c) / modulus;
+            if (std::fabs(turns - std::round(turns)) > 1e-9 * std::max(1.0, turns))
+                return argument(err, "segments roots: 360 c / modulus must be a whole number "
+                                     "for every term");
+        }
+    } else if (modulus != 0.0) {
+        return argument(err, "segments roots: only a longitude takes a modulus");
+    }
+    const prometheia_options& place = terms[0].handles[0]->opts;
+    for (int i = 0; i < n; ++i)
+        if (prometheia_status st =
+                check_term(terms[i].handles, terms[i].count, place, jd_tt_start, jd_tt_end, err);
+            st != PROMETHEIA_OK)
+            return st;
+    segment_roots::Function fn;
+    fn.terms = terms;
+    fn.nterms = n;
+    fn.component = f->component;
+    fn.target = f->target;
+    fn.target_rate = f->target_rate;
+    fn.target_jd_tt = f->target_jd_tt;
+    fn.modulus = modulus;
+    int limits = 0;
+    *count = segment_roots::find(fn, jd_tt_start, jd_tt_end, tol_days, out, capacity, jd_tt_resume,
+                                 &limits);
+    if (unresolved)
+        *unresolved = limits;
+    return succeed(err);
+}
+
 prometheia_status prometheia_segments_roots(const prometheia_segments_function* f,
                                             double jd_tt_start, double jd_tt_end, double tol_days,
                                             prometheia_segments_root* out, int capacity, int* count,
@@ -2511,68 +2683,19 @@ prometheia_status prometheia_segments_roots(const prometheia_segments_function* 
         *jd_tt_resume = std::numeric_limits<double>::quiet_NaN();
     if (!f)
         return argument(err, "f is NULL");
-    if (!count || !jd_tt_resume)
-        return argument(err, "count or jd_tt_resume is NULL");
-    if (capacity < 0 || (capacity > 0 && !out))
-        return argument(err, "segments roots: capacity is negative, or out is NULL");
-    if (!f->a || f->na < 1 || !f->a[0] || (f->nb > 0 && !f->b) || f->nb < 0)
-        return argument(err, "segments roots: a needs at least one handle, and b nb of them");
-    if (f->component < PROMETHEIA_SEGMENTS_LON || f->component > PROMETHEIA_SEGMENTS_LAT_SPEED)
-        return argument(err, "segments roots: unknown component");
-    if (!std::isfinite(jd_tt_start) || !std::isfinite(jd_tt_end) || !(jd_tt_end > jd_tt_start))
-        return argument(err, "segments roots: the window must be finite and end after it starts");
-    if (!(tol_days > 0.0) || !std::isfinite(tol_days))
-        return argument(err, "segments roots: tol_days must be positive and finite");
-    const double cb = f->nb > 0 ? f->cb : 0.0;
-    if (!std::isfinite(f->ca) || !std::isfinite(cb) || !std::isfinite(f->target) ||
-        !std::isfinite(f->target_rate) ||
-        (f->target_rate != 0.0 && !std::isfinite(f->target_jd_tt)) || !std::isfinite(f->modulus))
-        return argument(err, "segments roots: a field is not finite");
-    if (f->ca == 0.0 && cb == 0.0)
-        return argument(err, "segments roots: ca and cb are both 0");
-    double modulus = f->modulus;
-    if (f->component == PROMETHEIA_SEGMENTS_LON) {
-        if (modulus < 0.0)
-            return argument(err, "segments roots: the modulus is negative");
-        if (modulus == 0.0)
-            modulus = 360.0;
-        // A turn of either longitude must move f by whole moduli.
-        for (double c : {f->ca, cb}) {
-            const double turns = 360.0 * std::fabs(c) / modulus;
-            if (std::fabs(turns - std::round(turns)) > 1e-9 * std::max(1.0, turns))
-                return argument(err, "segments roots: 360 ca / modulus and 360 cb / modulus "
-                                     "must be whole numbers");
-        }
-    } else if (modulus != 0.0) {
-        return argument(err, "segments roots: only a longitude takes a modulus");
-    }
-    const prometheia_options& place = f->a[0]->opts;
-    if (prometheia_status st = check_term(f->a, f->na, place, jd_tt_start, jd_tt_end, err);
-        st != PROMETHEIA_OK)
-        return st;
-    if (f->nb > 0) {
-        if (prometheia_status st = check_term(f->b, f->nb, place, jd_tt_start, jd_tt_end, err);
-            st != PROMETHEIA_OK)
-            return st;
-    }
-    segment_roots::Function fn;
-    fn.a = f->a;
-    fn.na = f->na;
-    fn.b = f->b;
-    fn.nb = f->nb;
-    fn.ca = f->ca;
-    fn.cb = cb;
-    fn.component = f->component;
-    fn.target = f->target;
-    fn.target_rate = f->target_rate;
-    fn.target_jd_tt = f->target_jd_tt;
-    fn.modulus = modulus;
-    int limits = 0;
-    *count = segment_roots::find(fn, jd_tt_start, jd_tt_end, tol_days, out, capacity, jd_tt_resume,
-                                 &limits);
-    if (unresolved)
-        *unresolved = limits;
-    return succeed(err);
+    if (f->nb < 0 || (f->nb > 0 && !f->b))
+        return argument(err, "segments roots: b needs nb handles");
+    const prometheia_segments_term terms[2] = {{f->a, f->na, f->ca}, {f->b, f->nb, f->cb}};
+    prometheia_segments_sum sum{};
+    sum.terms = terms;
+    sum.nterms = f->nb > 0 ? 2 : 1;
+    sum.component = f->component;
+    sum.target = f->target;
+    sum.target_rate = f->target_rate;
+    sum.target_jd_tt = f->target_jd_tt;
+    sum.modulus = f->modulus;
+    return prometheia_segments_roots_sum(&sum, jd_tt_start, jd_tt_end, tol_days, out, capacity,
+                                         count, jd_tt_resume, unresolved, err);
 }
 
 } // extern "C"
