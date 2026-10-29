@@ -279,11 +279,19 @@ its ingresses, returns, stations, aspect windows and declination searches.
   - A root exactly at the end of a run belongs to that run, never to the
     next.
 - **Limits.** Every call ends.
-  - A cell is not halved below 4 × `tol_days`, nor more than 40 times, nor
-    past 16,384 cells in one piece.
+  - A cell is not halved below 1e-6 day, nor more than 40 times, nor past
+    16,384 cells in one piece. The narrowest cell is fixed: `tol_days` is
+    only the precision of each root, so a coarse `tol_days` examines f as
+    finely as a fine one. Each root is also solved to at least 1e-6 day, so
+    its slope and tangent flag, read at the root, are the same whatever
+    `tol_days` was asked. The six Mercury station grazes below give the same
+    roots and flags at `tol_days` 0.5 as at 1e-9.
   - A cell at a limit (a pole crossing in an equatorial longitude fit, say)
     keeps its ends. Its roots are counted from them, so a pair inside it
-    that cancels is lost, but no root is invented and the call succeeds.
+    that cancels may be lost, but no root is invented.
+  - The call reports how many such cells met the window (`*unresolved`), so
+    a search that found every root can be told from one that may not
+    have.
 - **Order.** Roots strictly increase. Two levels solved to a coarse
   `tol_days` could share an instant; the later one is then moved to the
   next double. So a resume, which starts at a root and includes it, never

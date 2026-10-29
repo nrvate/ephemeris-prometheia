@@ -2501,9 +2501,12 @@ void prometheia_segments_close(prometheia_segments* segments) {
 prometheia_status prometheia_segments_roots(const prometheia_segments_function* f,
                                             double jd_tt_start, double jd_tt_end, double tol_days,
                                             prometheia_segments_root* out, int capacity, int* count,
-                                            double* jd_tt_resume, prometheia_error* err) {
+                                            double* jd_tt_resume, int* unresolved,
+                                            prometheia_error* err) {
     if (count)
         *count = 0;
+    if (unresolved)
+        *unresolved = 0;
     if (jd_tt_resume)
         *jd_tt_resume = std::numeric_limits<double>::quiet_NaN();
     if (!f)
@@ -2564,7 +2567,11 @@ prometheia_status prometheia_segments_roots(const prometheia_segments_function* 
     fn.target_rate = f->target_rate;
     fn.target_jd_tt = f->target_jd_tt;
     fn.modulus = modulus;
-    *count = segment_roots::find(fn, jd_tt_start, jd_tt_end, tol_days, out, capacity, jd_tt_resume);
+    int limits = 0;
+    *count = segment_roots::find(fn, jd_tt_start, jd_tt_end, tol_days, out, capacity, jd_tt_resume,
+                                 &limits);
+    if (unresolved)
+        *unresolved = limits;
     return succeed(err);
 }
 

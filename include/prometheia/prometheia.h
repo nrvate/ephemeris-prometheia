@@ -1569,7 +1569,8 @@ typedef struct prometheia_segments_root {
     double jd_tt;
     double slope;    /* df/dt: degrees per day; per day squared for a speed */
     double err_days; /* an estimate of the time error: band / |slope|, or for a
-                        tangent root sqrt(2 band / |f''|), plus tol_days */
+                        tangent root sqrt(2 band / |f''|), plus the precision
+                        solved to (tol_days, at most 1e-6) */
     int tangent;
 } prometheia_segments_root;
 
@@ -1585,7 +1586,15 @@ typedef struct prometheia_segments_root {
  * being where one segment of each term overlaps. On each, Chebyshev bounds
  * on f' and f'' cut f into monotone runs; each run's roots are counted from
  * its ends and solved for on f itself. No grid is stepped: tol_days is only
- * the precision of each root.
+ * the precision of each root, and no cell is narrower than 1e-6 day. Roots
+ * are solved to tol_days or 1e-6 day, whichever is finer, so slope,
+ * err_days and tangent never depend on a coarse tol_days.
+ *
+ * Every root is found except where a cell ended at a limit (40 halvings,
+ * 16384 cells in a piece, or the narrowest cell; a pole crossing, say):
+ * there the roots are counted from the cell's ends, and a pair of roots
+ * inside it that cancel may be lost. *unresolved (NULL allowed) is the
+ * number of such cells meeting the window: 0 means every root was found.
  *
  * - A bound between two segments or handles is never a root and never
  *   doubles one: each term is made continuous first, by spreading half the
@@ -1605,10 +1614,10 @@ typedef struct prometheia_segments_root {
  * and cb both 0, a field not finite, or a modulus refused above. Nothing
  * is read but the handles: no engine, no lock, no thread, no allocation.
  */
-PROMETHEIA_API prometheia_status
-prometheia_segments_roots(const prometheia_segments_function* f, double jd_tt_start,
-                          double jd_tt_end, double tol_days, prometheia_segments_root* out,
-                          int capacity, int* count, double* jd_tt_resume, prometheia_error* err);
+PROMETHEIA_API prometheia_status prometheia_segments_roots(
+    const prometheia_segments_function* f, double jd_tt_start, double jd_tt_end, double tol_days,
+    prometheia_segments_root* out, int capacity, int* count, double* jd_tt_resume, int* unresolved,
+    prometheia_error* err);
 
 #ifdef __cplusplus
 }

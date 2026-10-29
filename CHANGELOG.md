@@ -25,6 +25,8 @@ documented, not that it is frozen.
   - **Grazes** within the fits' tolerance are flagged `tangent`, not merged.
   - **Determinism.** Answers do not depend on the window, and a resumed
     search gives the same doubles.
+  - **Unresolved cells are reported.** A cell that ends at a halving limit
+    is counted in `*unresolved`, so "every root" is never claimed silently.
   - **Cost.** It needs no engine, lock, thread or allocation. A year of the
     Moon's ingresses takes under a millisecond. Against bisection on
     `prometheia_calc_object`, the worst error is under half the per-root

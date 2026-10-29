@@ -29,9 +29,10 @@ struct Function {
 // Writes the roots in [from, to), in time order, at most capacity of them
 // (capacity 0: none, only counted), and returns how many were written or
 // counted. *resume is the instant of the first root not written, or NaN
-// when every root was. [from, to] lies inside both terms' spans.
+// when every root was. *unresolved is the number of cells meeting the
+// window that ended at a limit. [from, to] lies inside both terms' spans.
 int find(const Function& f, double from, double to, double tol_days, prometheia_segments_root* out,
-         int capacity, double* resume) noexcept;
+         int capacity, double* resume, int* unresolved) noexcept;
 
 } // namespace prometheia::segment_roots
 

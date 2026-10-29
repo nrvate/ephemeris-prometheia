@@ -515,7 +515,7 @@ typedef struct prometheia_segments_root {
 prometheia_status prometheia_segments_roots(const prometheia_segments_function *f,
     double jd_tt_start, double jd_tt_end, double tol_days,
     prometheia_segments_root *out, int capacity, int *count,
-    double *jd_tt_resume, prometheia_error *err);
+    double *jd_tt_resume, int *unresolved, prometheia_error *err);
 ```
 
 - **The function.** It is
@@ -568,11 +568,19 @@ prometheia_status prometheia_segments_roots(const prometheia_segments_function *
     monotone runs, with at most one extremum between two runs.
   - Each run's roots are counted from f at its two ends, so a run never
     yields more roots than f really crosses. Each root is then solved for
-    on f itself, bracketed, to `tol_days`.
-  - No grid is stepped. `tol_days` is only the precision of each root.
-  - **Every call ends.** A cell is halved at most 40 times and never below
-    4 × `tol_days`. A cell at that limit (a pole crossing, say) is counted
-    from its ends, and the call still succeeds.
+    on f itself, bracketed, to `tol_days` or 1e-6 day, whichever is finer.
+    `slope`, `err_days` and `tangent` are read at the root, so a coarse
+    `tol_days` never changes them.
+  - No grid is stepped. `tol_days` is only the precision of each root; it
+    does not set how finely f is examined.
+  - **Every call ends.** A cell is halved at most 40 times, never below
+    1e-6 day, and a piece holds at most 16,384 cells.
+  - **Every root, or a count of where one may be lost.** A cell that ends
+    at one of those limits (a pole crossing, say) has its roots counted from
+    its two ends. A pair inside it that cancels may then be lost.
+    `*unresolved` (NULL allowed) counts such cells meeting the window, so 0
+    means every root was found. None of the measured searches hit a
+    limit.
   - **Roots strictly increase,** so a resume never writes one twice.
   - Two roots a few minutes apart, either side of a station, are both
     found.
@@ -600,7 +608,8 @@ prometheia_status prometheia_segments_roots(const prometheia_segments_function *
     written. A loop of `capacity` 1 gives the same doubles as one call.
   - **Counting only.** `capacity` 0 writes nothing (`out` may be NULL) and
     counts every root.
-- **Accuracy.** The time error is about band/|slope|, plus `tol_days`.
+- **Accuracy.** The time error is about band/|slope|, plus the precision
+  solved to.
   `err_days` gives that estimate per root, and sqrt(2·band/|f″|) for a
   tangent root. Measured against bisection on `prometheia_calc_object`,
   the worst case was under half of `err_days` (SEGMENTS.md).

@@ -28,7 +28,11 @@ constexpr int kMaxDepth = 40;           // halvings of a piece
 constexpr int kMaxCells = 1 << 14;      // cells per piece before structure is given up
 constexpr int kMaxSolveSteps = 200;     // per root; bisection alone needs ~60
 constexpr int64_t kMaxLevels = 1 << 20; // levels one run may cross
-constexpr double kRounding = 1e-13;     // a series' tail that is only rounding, relative
+constexpr double kMinCellDays = 1e-6;   // the narrowest cell, whatever tol_days asks
+// Roots are solved at least this finely, so that slope, err_days and the
+// tangent flag, read at the root, do not depend on a coarse tol_days.
+constexpr double kSolveDays = 1e-6;
+constexpr double kRounding = 1e-13; // a series' tail that is only rounding, relative
 
 // Clenshaw's recurrence over n coefficients, as prometheia_segments_eval.
 double clenshaw(const double* c, int n, double u) {
@@ -203,7 +207,8 @@ class Search {
 public:
     Search(const Function& f, double from, double to, double tol, prometheia_segments_root* out,
            int capacity)
-        : f_(f), from_(from), to_(to), tol_(tol), out_(out), capacity_(capacity) {
+        : f_(f), from_(from), to_(to), tol_(std::min(tol, kSolveDays)), out_(out),
+          capacity_(capacity) {
         a_ = {f.a, f.na, f.ca, f.component};
         if (f.nb > 0)
             b_ = {f.b, f.nb, f.cb, f.component};
@@ -255,6 +260,7 @@ public:
     }
 
     int count() const { return count_; }
+    int unresolved_cells() const { return unresolved_; }
     double resume() const { return resume_; }
 
 private:
@@ -328,16 +334,20 @@ private:
         }
         ip.c[0] *= 0.5;
         ip.c[kN] *= 0.5;
-        const bool can_split = depth < kMaxDepth && cells_ < kMaxCells && t1 - t0 > 4.0 * tol_;
+        const bool can_split =
+            depth < kMaxDepth && cells_ < kMaxCells && t1 - t0 > 2.0 * kMinCellDays;
         const double tail = std::fabs(ip.c[kN - 1]) + std::fabs(ip.c[kN]);
         // Below this the tail is rounding, however small the band.
         double size = 0.0;
         for (int k = 0; k <= kN; ++k)
             size += std::fabs(ip.c[k]);
-        if (tail > std::max(eps_, kRounding * size) && can_split) {
-            cell(t0, ip.mid, depth + 1);
-            cell(ip.mid, t1, depth + 1);
-            return;
+        if (tail > std::max(eps_, kRounding * size)) {
+            if (can_split) {
+                cell(t0, ip.mid, depth + 1);
+                cell(ip.mid, t1, depth + 1);
+                return;
+            }
+            unresolved(t0, t1); // the interpolant, and so its bounds, are not to be trusted
         }
         derivative(ip.c, ip.d1);
         derivative(ip.d1, ip.d2);
@@ -384,6 +394,7 @@ private:
             cell(ip.mid, t1, depth + 1);
             return;
         }
+        unresolved(t0, t1);
         span(e0, e1, ip); // structure given up: the ends decide
     }
 
@@ -475,6 +486,14 @@ private:
         put({s.t, slope, err + tol_, 1});
     }
 
+    // A cell that ended at a limit: its roots are counted from its ends, so
+    // a cancelling pair inside it may be lost. Counted when it meets the
+    // window.
+    void unresolved(double t0, double t1) {
+        if (t1 > from_ && t0 < to_)
+            ++unresolved_;
+    }
+
     void put(prometheia_segments_root r) {
         // Roots strictly increase: two levels solved to a coarse tol_days
         // could otherwise share an instant. Only this piece's roots count,
@@ -512,6 +531,7 @@ private:
     int cells_ = 0;
     double last_ = 0.0; // the piece's last root
     int count_ = 0;
+    int unresolved_ = 0;
     double resume_ = std::numeric_limits<double>::quiet_NaN();
     bool stop_ = false;
 };
@@ -519,10 +539,11 @@ private:
 } // namespace
 
 int find(const Function& f, double from, double to, double tol_days, prometheia_segments_root* out,
-         int capacity, double* resume) noexcept {
+         int capacity, double* resume, int* unresolved) noexcept {
     Search s(f, from, to, tol_days, out, capacity);
     s.run();
     *resume = s.resume();
+    *unresolved = s.unresolved_cells();
     return s.count();
 }
 

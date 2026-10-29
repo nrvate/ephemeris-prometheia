@@ -915,4 +915,4 @@ cdef extern from "prometheia/prometheia.h" nogil:
     prometheia_status prometheia_segments_roots(
         const prometheia_segments_function* f, double jd_tt_start, double jd_tt_end,
         double tol_days, prometheia_segments_root* out, int capacity, int* count,
-        double* jd_tt_resume, prometheia_error* err) noexcept
+        double* jd_tt_resume, int* unresolved, prometheia_error* err) noexcept
