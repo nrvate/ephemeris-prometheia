@@ -4153,26 +4153,28 @@ Result<Engine::EventResult> Engine::rise_set_ut(const ObjectRef& object, Event e
         -dip -
         (ro.refraction ? frames::refraction_from_apparent_deg(-dip, ro.atmosphere, dip) : 0.0);
     const bool transit = event == Event::UpperTransit || event == Event::LowerTransit;
-    const double h_target = event == Event::LowerTransit ? 180.0 : 0.0;
-    // The function whose upward (rise, transits) or downward (set) zero is
-    // the event: the limb's true altitude less h0, or the hour angle less
-    // the target, wrapped to (-180, 180].
+    // One position answers both questions at an instant: the local
+    // apparent hour angle, in [0, 360), and g, the limb's true altitude less
+    // h0, whose upward (rise) or downward (set) zero is the event.
     std::optional<Error> failure;
-    auto g = [&](double jd) -> double {
+    struct Sample {
+        double ha = 0.0, g = 0.0;
+    };
+    auto at = [&](double jd) -> Sample {
         auto p = position(jd);
         if (!p) {
             failure = p.error();
-            return 0.0;
+            return {};
         }
         auto st = sidereal_time_ut(jd, true, ro.precession);
         if (!st) {
             failure = st.error();
-            return 0.0;
+            return {};
         }
         const double ra = p.value().pos.lon_deg, dec = p.value().pos.lat_deg;
-        const double ha = std::fmod(st.value() + site.lon_rad * kRad2Deg - ra, 360.0);
-        if (transit)
-            return std::remainder(ha - h_target, 360.0);
+        double ha = std::fmod(st.value() + site.lon_rad * kRad2Deg - ra, 360.0);
+        if (ha < 0.0)
+            ha += 360.0;
         double az = 0.0, alt = 0.0;
         frames::equatorial_to_horizontal(ha / kRad2Deg, dec / kRad2Deg, site.lat_rad, az, alt);
         double sd = 0.0;
@@ -4180,158 +4182,235 @@ Result<Engine::EventResult> Engine::rise_set_ut(const ObjectRef& object, Event e
             const double d_km = p.value().pos.dist_au * kAuKm;
             sd = d_km > radius ? std::asin(radius / d_km) * kRad2Deg : 90.0;
         }
-        return alt * kRad2Deg + ro.limb * sd - h0;
+        return {ha, alt * kRad2Deg + ro.limb * sd - h0};
     };
-    // Transits first: the hour angle advances monotonically, so a crossing
-    // of 0 or 180 deg is found at any step and none is missed. Between a
-    // lower and an upper transit the altitude climbs from its minimum to
-    // its maximum, each found near its transit (the declination drifts
-    // between them, most for the Moon), so a rise is there exactly when the
-    // minimum is below h0 and the maximum above, however briefly: a Sun
-    // that clears the horizon for a minute is found (the Astrolog side's
-    // review, 2026-10-27). Always above or below come from the extrema.
+    // The zero of f between a and b, where f(a) and f(b) lie on opposite
+    // sides of it (`past` says which side a value is on: b's), to a bracket
+    // under tol: Illinois' regula falsi, with a bisection whenever a step
+    // fails to halve the bracket. `last` is the sample of the last point
+    // tried, which lies within tol of the zero.
+    auto solve = [&](auto&& f, auto&& past, double a, double fa, double b, double fb, double tol,
+                     Sample* last) -> double {
+        int side = 0;
+        double width = std::fabs(b - a);
+        bool bisect = false;
+        for (int k = 0; k < 200 && std::fabs(b - a) > tol; ++k) {
+            double c = bisect ? 0.5 * (a + b) : (a * fb - b * fa) / (fb - fa);
+            const double inner = 0.25 * tol, lo = std::min(a, b) + inner,
+                         hi = std::max(a, b) - inner;
+            if (!(c >= lo))
+                c = lo;
+            if (!(c <= hi))
+                c = hi;
+            Sample s;
+            const double fc = f(c, s);
+            if (failure)
+                return 0.0;
+            if (last)
+                *last = s;
+            if (past(fc)) {
+                b = c;
+                fb = fc;
+                if (side == -1)
+                    fa *= 0.5;
+                side = -1;
+            } else {
+                a = c;
+                fa = fc;
+                if (side == 1)
+                    fb *= 0.5;
+                side = 1;
+            }
+            const double w = std::fabs(b - a);
+            bisect = w > 0.5 * width;
+            width = w;
+        }
+        return 0.5 * (a + b);
+    };
+    // The first transit strictly after t (before it, dir < 0): the hour
+    // angle's next crossing of 0 or 180 deg. It advances monotonically,
+    // about 361 deg a day (the Moon's 346), so the crossing is predicted from
+    // that rate, stepped to by half hours if the prediction falls short, and
+    // solved for to tol.
+    struct Transit {
+        double jd = 0.0;
+        bool upper = false;
+        Sample near; // at a point within tol of jd
+    };
+    // Transits are half a day apart; stepping this far past one before
+    // asking for the next keeps a root solved a hair short of its crossing
+    // from being found again.
+    constexpr double kPastTransit = 0.01;
+    auto next_transit = [&](double t, double dir, double tol) -> Transit {
+        const Sample s0 = at(t);
+        if (failure)
+            return {};
+        const double target = dir > 0.0 ? (std::floor(s0.ha / 180.0) + 1.0) * 180.0
+                                        : (std::ceil(s0.ha / 180.0) - 1.0) * 180.0;
+        const double target_mod = std::fmod(target + 360.0, 360.0);
+        // How far the hour angle is past the target, in (-180, 180].
+        auto f = [&](double x, Sample& s) {
+            s = at(x);
+            return std::remainder(s.ha - target_mod, 360.0);
+        };
+        const auto past = [&](double v) { return dir > 0.0 ? v >= 0.0 : v < 0.0; };
+        const double fa = s0.ha - target; // [-180, 0) ahead, (0, 180] behind
+        double b = t + dir * (std::fabs(fa) / 360.9856 * 1.05 + 1e-6);
+        Sample sb;
+        double fb = f(b, sb);
+        for (int k = 0; k < 96 && !failure && !past(fb); ++k) {
+            b += dir / 48.0;
+            fb = f(b, sb);
+        }
+        if (failure)
+            return {};
+        Transit tr;
+        tr.upper = target_mod == 0.0;
+        tr.near = sb;
+        tr.jd = solve(f, past, t, fa, b, fb, tol, &tr.near);
+        return tr;
+    };
     const double dir = ro.backward ? -1.0 : 1.0;
     const double lo = ro.backward ? jd_ut1_start - ro.window_days : jd_ut1_start;
     const double hi = ro.backward ? jd_ut1_start : jd_ut1_start + ro.window_days;
-    auto hour_angle = [&](double jd) -> double { // [0, 360)
-        auto p = position(jd);
-        if (!p) {
-            failure = p.error();
-            return 0.0;
-        }
-        auto st = sidereal_time_ut(jd, true, ro.precession);
-        if (!st) {
-            failure = st.error();
-            return 0.0;
-        }
-        double ha = std::fmod(st.value() + site.lon_rad * kRad2Deg - p.value().pos.lon_deg, 360.0);
-        return ha < 0.0 ? ha + 360.0 : ha;
-    };
-    // Every transit (upper: 0, lower: 180) in [lo - 1, hi + 1], in order, by
-    // hourly steps of the unwrapped hour angle and bisection.
-    struct Transit {
-        double jd;
-        bool upper;
-    };
-    std::vector<Transit> transits;
-    {
-        const double step = 1.0 / 24.0;
-        double t0 = lo - 1.0, h0u = hour_angle(t0);
-        if (failure)
-            return *failure;
-        for (double t1 = t0 + step; t0 < hi + 1.0; t1 += step) {
-            const double h1 = hour_angle(t1);
-            if (failure)
-                return *failure;
-            double rise = std::fmod(h1 - h0u + 360.0, 360.0); // advance this step
-            const double h1u = h0u + rise;
-            for (double target : {180.0, 360.0, 540.0}) {
-                if (h0u < target && h1u >= target) {
-                    double a = t0, b = t1;
-                    const double base = h0u;
-                    for (int k = 0; k < 60 && b - a > 1e-9; ++k) {
-                        const double m = 0.5 * (a + b);
-                        const double hm = hour_angle(m);
-                        if (failure)
-                            return *failure;
-                        const double hmu = base + std::fmod(hm - base + 360.0, 360.0);
-                        (hmu >= target ? b : a) = m;
-                    }
-                    transits.push_back({0.5 * (a + b), std::fmod(target, 360.0) == 0.0});
-                }
-            }
-            t0 = t1;
-            h0u = std::fmod(h1u, 360.0);
-        }
-    }
     auto in_window = [&](double t) {
         return ro.backward ? (t < jd_ut1_start && t >= lo) : (t > jd_ut1_start && t <= hi);
     };
     if (transit) {
+        // Transits in the search's direction from the start, until one of
+        // the kind asked for, to under 0.0001 s.
         const bool want_upper = event == Event::UpperTransit;
-        const Transit* best = nullptr;
-        for (const Transit& tr : transits)
-            if (tr.upper == want_upper && in_window(tr.jd) &&
-                (!best || dir * (tr.jd - best->jd) < 0.0))
-                best = &tr;
-        if (best)
-            return EventResult{best->jd, Outcome::Found};
+        double t = jd_ut1_start;
+        for (int k = 0; k < 4; ++k) {
+            const Transit tr = next_transit(t, dir, 1e-9);
+            if (failure)
+                return *failure;
+            if (!in_window(tr.jd))
+                break;
+            if (tr.upper == want_upper)
+                return EventResult{tr.jd, Outcome::Found};
+            t = tr.jd + dir * kPastTransit;
+        }
         return EventResult{std::nan(""), Outcome::NotInWindow};
     }
-    // The altitude extremum near each transit: golden-section search over
-    // two hours either side, a maximum at an upper transit, a minimum at a
-    // lower one.
+    // The altitude's extremum near a transit: golden-section search over two
+    // hours either side, a maximum at an upper transit, a minimum at a lower
+    // one. The declination drifts between transits, the Moon's most.
     struct Extremum {
         double jd, g;
-        bool upper;
     };
-    std::vector<Extremum> ext;
-    for (const Transit& tr : transits) {
+    auto extremum = [&](const Transit& tr) -> Extremum {
         const double sign = tr.upper ? 1.0 : -1.0;
+        auto gs = [&](double x) { return sign * at(x).g; };
         double a = tr.jd - 2.0 / 24.0, b = tr.jd + 2.0 / 24.0;
         const double r = 0.6180339887498949;
         double c = b - r * (b - a), d = a + r * (b - a);
-        double gc = sign * g(c), gd = sign * g(d);
+        double gc = gs(c), gd = gs(d);
         for (int k = 0; k < 40 && b - a > 1e-7; ++k) {
             if (gc > gd) {
                 b = d;
                 d = c;
                 gd = gc;
                 c = b - r * (b - a);
-                gc = sign * g(c);
+                gc = gs(c);
             } else {
                 a = c;
                 c = d;
                 gc = gd;
                 d = a + r * (b - a);
-                gd = sign * g(d);
+                gd = gs(d);
             }
         }
-        if (failure)
-            return *failure;
         const double t = 0.5 * (a + b);
-        ext.push_back({t, g(t), tr.upper});
+        return {t, at(t).g};
+    };
+    // A rise lies between a lower transit and the next upper one, where g
+    // climbs from its minimum to its maximum; a set between an upper and the
+    // next lower. Each is there exactly when the minimum is at most 0 and the
+    // maximum above it, however briefly: a Sun that clears the horizon for a
+    // minute is found (the Astrolog side's review, 2026-10-27). The sample
+    // near a transit settles that without the extremum whenever it can: g
+    // there at most 0 near a lower transit puts the minimum at most 0, and
+    // above 0 near an upper one puts the maximum above, and the sample then
+    // bounds the zero as the extremum would. Otherwise the extremum is
+    // found. So the search walks the transits from the start, pair by pair,
+    // and stops at the first event.
+    const bool upward = event == Event::Rise;
+    // A bracket end at a transit: the instant and g there, and whether g is
+    // on the side the event leaves (minimum at most 0 for a rise's lower
+    // transit, maximum above 0 for its upper one; the reverse for a set).
+    struct End {
+        double jd, g;
+        bool ok;
+    };
+    auto end_at = [&](const Transit& tr) -> End {
+        // Below for a rise's start (a lower transit), above for its end.
+        const bool want_above = tr.upper;
+        const auto good = [&](double g) { return want_above ? g > 0.0 : g <= 0.0; };
+        if (good(tr.near.g))
+            return {tr.jd, tr.near.g, true};
+        const Extremum x = extremum(tr);
+        return {x.jd, x.g, good(x.g)};
+    };
+    auto g_of = [&](double x, Sample& s) {
+        s = at(x);
+        return s.g;
+    };
+    const auto past_zero = [&](double v) { return upward ? v > 0.0 : v <= 0.0; };
+    // Rough transits do to walk by; the event itself is solved to under
+    // 0.0001 s, like a transit asked for. The walk starts two transits
+    // behind the start: near a graze the extremum can lie past its
+    // transit, and the event between them past the start.
+    constexpr double kWalkTol = 1e-5;
+    Transit x = next_transit(jd_ut1_start, -dir, kWalkTol);
+    if (!failure)
+        x = next_transit(x.jd - dir * kPastTransit, -dir, kWalkTol);
+    if (failure)
+        return *failure;
+    for (int k = 0; k < 2 * 7400; ++k) {
+        const Transit y = next_transit(x.jd + dir * kPastTransit, dir, kWalkTol);
         if (failure)
             return *failure;
+        const Transit& early = dir > 0.0 ? x : y;
+        const Transit& late = dir > 0.0 ? y : x;
+        if (dir > 0.0 ? early.jd > hi + 0.5 : late.jd < lo - 0.5)
+            break;
+        // A rise runs from a lower transit to an upper; a set the reverse.
+        if (early.upper != upward && late.upper == upward) {
+            const End a = end_at(early), b = end_at(late);
+            if (failure)
+                return *failure;
+            if (a.ok && b.ok) {
+                const double t = solve(g_of, past_zero, a.jd, a.g, b.jd, b.g, 1e-9, nullptr);
+                if (failure)
+                    return *failure;
+                if (in_window(t))
+                    return EventResult{t, Outcome::Found};
+            }
+        }
+        x = y;
     }
-    // A rise lies between a minimum and the next maximum, a set between a
-    // maximum and the next minimum, where g changes sign.
-    const bool upward = event == Event::Rise;
-    std::optional<double> best;
+    // None in the window. Above or below throughout is read from the
+    // window's own extrema and its two ends, never from a neighbouring
+    // day's.
     bool any_above = false, any_below = false;
-    // Above or below throughout is read from the window's own extrema and
-    // its two ends, never from a neighbouring day's.
     for (double t : {lo, hi}) {
-        const double gt = g(t);
+        const double gt = at(t).g;
         if (failure)
             return *failure;
         (gt > 0.0 ? any_above : any_below) = true;
     }
-    for (const Extremum& x : ext)
-        if (x.jd >= lo && x.jd <= hi)
-            (x.g > 0.0 ? any_above : any_below) = true;
-    for (size_t k = 0; k + 1 < ext.size(); ++k) {
-        const Extremum &e0 = ext[k], &e1 = ext[k + 1];
-        if (e0.jd > hi || e1.jd < lo)
-            continue;
-        if (e0.upper == e1.upper || e1.upper != upward)
-            continue; // a rise runs from a lower to an upper extremum
-        if (upward ? !(e0.g <= 0.0 && e1.g > 0.0) : !(e0.g > 0.0 && e1.g <= 0.0))
-            continue;
-        double a = e0.jd, b = e1.jd;
-        for (int i = 0; i < 60 && b - a > 1e-9; ++i) { // under 0.0001 s
-            const double m = 0.5 * (a + b);
-            const double gm = g(m);
-            if (failure)
-                return *failure;
-            ((upward ? gm > 0.0 : gm <= 0.0) ? b : a) = m;
-        }
-        const double t = 0.5 * (a + b);
-        if (in_window(t) && (!best || dir * (t - *best) < 0.0))
-            best = t;
+    Transit tr = next_transit(lo - 1.0, 1.0, 1e-9);
+    for (int k = 0; k < 2 * 7400 && !failure && tr.jd <= hi + 1.0; ++k) {
+        const Extremum xm = extremum(tr);
+        if (failure)
+            return *failure;
+        if (xm.jd >= lo && xm.jd <= hi)
+            (xm.g > 0.0 ? any_above : any_below) = true;
+        tr = next_transit(tr.jd + kPastTransit, 1.0, 1e-9);
     }
-    if (best)
-        return EventResult{*best, Outcome::Found};
+    if (failure)
+        return *failure;
     return EventResult{std::nan(""), any_above && !any_below   ? Outcome::AlwaysAbove
                                      : any_below && !any_above ? Outcome::AlwaysBelow
                                                                : Outcome::NotInWindow};

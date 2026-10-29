@@ -1769,6 +1769,20 @@ TEST_CASE("de440_rise_set_finds_a_sun_up_for_minutes") {
     auto before = e.rise_set_ut(body_ref(10), Ev::Rise, jan15 - 1.0, site, day);
     REQUIRE(before.ok());
     CHECK(before.value().outcome == Engine::Outcome::AlwaysBelow);
+
+    // The declination climbs, so the highest point, and the minute up with
+    // it, come after the upper transit. A search that starts between the
+    // transit and the rise must still find that rise: the search walks from
+    // two transits back, since one back would start past it.
+    auto noon = e.rise_set_ut(body_ref(10), Ev::UpperTransit, jan15, site, day);
+    REQUIRE(noon.ok());
+    REQUIRE(noon.value().outcome == Engine::Outcome::Found);
+    const double t_noon = noon.value().jd_ut1, t_rise = rise.value().jd_ut1;
+    REQUIRE(t_rise > t_noon);
+    auto again = e.rise_set_ut(body_ref(10), Ev::Rise, 0.5 * (t_noon + t_rise), site, day);
+    REQUIRE(again.ok());
+    REQUIRE(again.value().outcome == Engine::Outcome::Found);
+    CHECK(std::fabs(again.value().jd_ut1 - t_rise) < 1e-8);
 }
 
 TEST_CASE("raman_zodiac_through_the_engine") {

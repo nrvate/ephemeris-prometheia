@@ -507,18 +507,31 @@ it), within a window of days.
     the planets. Mars to Pluto are answered as system barycentres, and the
     disc is the planet's. A star, catalog body or hypothetical has no disc.
 - **Transits** are where the hour angle is 0° (upper) or 180° (lower).
-- **The search.**
-  - Transits come first. The hour angle advances monotonically, so its
-    crossings are found at hourly steps and bisected, and none is missed.
-  - The altitude's extremum near each transit is then found by
-    golden-section search over two hours either side. The declination
-    drifts between transits, the Moon's most.
-  - A rise lies between a minimum and the next maximum, and a set between a
-    maximum and the next minimum, where the altitude crosses h0. Each is
-    bisected to under 0.0001 s.
-  - So a Sun that clears the horizon for seconds is found. An earlier
-    design scanned altitude at 10-minute steps, and the Astrolog side showed
-    in review that it would step over such a day (2026-10-27).
+- **The search** walks the transits from the start and stops at the first
+  event.
+  - **Transits.** The hour angle advances monotonically, about 361° a day
+    (the Moon's 346°). Each next crossing of 0° or 180° is predicted from
+    that rate, stepped to by half hours if the prediction falls short, and
+    solved for. None is missed.
+  - **Where an event can be.** A rise lies between a lower transit and the
+    next upper one, where the altitude climbs from its minimum to its
+    maximum. A set lies between an upper transit and the next lower one.
+    Each is there exactly when the minimum is at or below h0 and the
+    maximum above it.
+  - **The extremum, when it matters.** The altitude at a transit settles
+    most cases without it. Below h0 at a lower transit, the minimum is
+    below too; above h0 at an upper transit, so is the maximum. Otherwise
+    the extremum is found by golden-section search over two hours either
+    side, since the declination drifts between transits, the Moon's most.
+    That happens only near a polar day or night.
+  - **The event** is solved for by Illinois' regula falsi in that
+    bracket, to under 0.0001 s, like a transit asked for.
+  - **Grazes.** A Sun that clears the horizon for seconds is found. An
+    earlier design scanned altitude at 10-minute steps, and the Astrolog
+    side showed in review that it would step over such a day (2026-10-27).
+  - **Where the walk starts.** It begins two transits behind the start,
+    because near a graze an extremum can lie past its transit, and the event
+    between them past the start.
   - `de440_rise_set_finds_a_sun_up_for_minutes` finds the latitude where
     the Sun just reaches the horizon on 2026-01-15 (69.757°N at 19°E). A
     hair south of it the Sun is up for 1.8 s, and the day before it is

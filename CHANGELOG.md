@@ -13,6 +13,26 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Rise and set, 12 to 20 times faster** (docs/ENGINE.md, "Rise, set and
+  transit"). astromcp measured `rise_set` at 25–50× libswe's `rise_trans`.
+  It took about 600 positions an event: an hourly scan of the hour angle
+  over four days, every transit bisected, and every altitude extremum
+  golden-sectioned.
+  - **Now** the search walks the transits from the start and stops at the
+    first event. Each transit is predicted from the hour angle's rate. An
+    extremum is found only when the altitude at its transit leaves the
+    answer open, near a polar day or night. The event is solved by
+    Illinois' regula falsi.
+  - **Measured:** the Sun at New York, 200 days, went from 1.34–1.47 to
+    0.11–0.14 ms a rise, and from 1.38–1.58 to 0.07 ms a set. libswe takes
+    0.055 and 0.026.
+  - **Unchanged answers.** Old and new ran 17,280 cases: six objects, ten
+    latitudes to 89°N, all four events, both directions and three windows.
+    Every outcome was the same, and every time within 40 µs, under the old
+    search's own 86 µs.
+  - **Test.** `de440_rise_set_finds_a_sun_up_for_minutes` now also starts a
+    search between the upper transit and a graze rise just after it.
+
 - **Roots of sums of up to eight terms** (`prometheia_segments_roots_sum`;
   docs/C_API.md, "Sums of more than two terms"), for a midpoint against a
   body or against a midpoint. `prometheia_segments_roots` is now this call
