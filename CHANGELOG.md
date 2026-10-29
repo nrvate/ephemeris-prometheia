@@ -33,6 +33,16 @@ documented, not that it is frozen.
     estimate `err_days`.
   - **ABI.** Additive; the ABI version is unchanged. The fit's handle now
     keeps its options, to refuse terms fitted in different coordinates.
+  - **Python:** `segment_roots(a, b=None, …)`, where a term is a `Segments`
+    or a list of them back to back. It returns a `SegmentRoots` list of
+    `SegmentRoot` (`jd_tt`, `slope`, `err_days`, `tangent`), whose
+    `unresolved` is also raised as a `RuntimeWarning` when above 0. It
+    resumes the C call until done, without the GIL (docs/PYTHON.md).
+  - **An independent oracle** (`tests/test_c_segment_roots.cpp`), written
+    from the contract alone, checks eleven searches against bisection on
+    `prometheia_calc_object`. It found 0 missed and 0 extra roots, and a
+    worst error of 0.457 × `err_days`. Each of eleven injected faults made
+    it fail (docs/SEGMENTS.md, "Roots").
 
 - **NGC 869 and 884, the Double Cluster, in the star catalog.** Found by
   designation ("NGC 869", `star:NGC 869`), with the source NGC 2000.0

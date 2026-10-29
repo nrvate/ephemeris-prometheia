@@ -351,5 +351,45 @@ with the machine loaded (load average about 2.6).
     station;
   - three bands beyond: nothing;
   - reached by three bands: two ordinary crossings, 9 to 14 minutes apart.
+- **An independent check**, `tests/test_c_segment_roots.cpp`, was written
+  from the contract above without reading the search's code. Its oracle
+  builds the same f from `prometheia_calc_object`. It locates every extremum
+  between two grid points, so a close pair is not missed, and bisects each
+  sign change to 1e-9 day.
+  - **Agreement.** Eleven searches ran at `tol_days` 1e-8:
+    - the Moon's ingresses on one handle, on twelve month handles and on
+      the 1″ fit;
+    - the quarters and the midpoint;
+    - the declination at 0 and at ± the moving obliquity;
+    - the Mercury and Mars stations;
+    - the Sun against a target moving at 1°/day.
+
+    Every one had 0 missed and 0 extra roots.
+    `err_days` was band/|slope| + `tol_days` to 1e-9 relative, and
+    `*unresolved` was 0.
+  - **Error.** The worst time difference was 0.457 of the root's `err_days`
+    (Moon ingresses, 12 month handles), with medians of 0.02–0.08.
+  - **Contract edges.** Counting with `capacity` 0 gives the same total as
+    one call. A root at `jd_tt_end` belongs to the next window. Four
+    threads on the same handles get the same doubles.
+  - **Bounds.** On the 1″ fit, a longitude target at either end of the step
+    at a bound, as well as halfway, gives one root within 1e-4 day of the
+    bound. The step's ends are asked of the longitude only: the latitude
+    and speed may turn within the window (the speed near apogee), so a
+    target at the step's end is not passed near the bound. That is correct
+    for a function made continuous through the middle of the step.
+  - **Faults injected.** Eleven faults were put into the search, one at a
+    time, and the check failed on each:
+    - no continuity correction;
+    - the tangent test 100 times too wide;
+    - no root at an extremum that touches;
+    - `tol_days` left out of `err_days`;
+    - a touching root's `err_days` doubled;
+    - the resume point 1e-6 day late;
+    - a closed window;
+    - the slope's sign flipped;
+    - the band halved;
+    - solving and the narrowest cell set by `tol_days`;
+    - `*unresolved` one too high.
 - **Time** is a millisecond a year or less. It is spent mostly evaluating
   the handles at 17 points per cell; no engine time is involved.

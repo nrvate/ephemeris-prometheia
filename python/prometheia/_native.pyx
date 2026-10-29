@@ -8,6 +8,7 @@ used from the thread that made it, never from two at once. Calls release
 the GIL while the engine works.
 """
 import threading
+import warnings as _warnings
 
 from cpython.pythread cimport PyThread_get_thread_ident
 from cpython.exc cimport PyErr_SetObject, PyErr_WriteUnraisable
@@ -967,6 +968,153 @@ cdef class Segments:
         return ("Segments(start=%r, end=%r, count=%r, err_arcsec=%r)"
                 % (self.start, self.end, self.count, self.err_arcsec))
 
+
+
+SEGMENT_COMPONENTS = {"lon": c.PROMETHEIA_SEGMENTS_LON, "lat": c.PROMETHEIA_SEGMENTS_LAT,
+                      "lon_speed": c.PROMETHEIA_SEGMENTS_LON_SPEED,
+                      "lat_speed": c.PROMETHEIA_SEGMENTS_LAT_SPEED}
+
+
+cdef class SegmentRoot:
+    """One root from segment_roots: the TT instant, df/dt there (degrees per
+    day, or per day squared for a speed), the expected time error in days,
+    and whether it is tangent: a crossing within the band of turning back,
+    or an extremum within the band of 0 that does not cross (docs/C_API.md,
+    "Roots on segments")."""
+    cdef readonly double jd_tt, slope, err_days
+    cdef readonly bint tangent
+
+    def __repr__(self):
+        return ("SegmentRoot(jd_tt=%r, slope=%r, err_days=%r, tangent=%r)"
+                % (self.jd_tt, self.slope, self.err_days, self.tangent))
+
+
+class SegmentRoots(list):
+    """segment_roots' answer: its SegmentRoots in time order, and
+    `unresolved`, the cells the search left at a halving limit, summed over
+    its C calls. Inside such a cell a pair of roots that cancel may be lost;
+    0 means every root was found (docs/C_API.md, "Roots on segments")."""
+    unresolved = 0
+
+
+cdef list term_of(object handles, str which):
+    """A term's handles, back to back: one Segments or a sequence of them."""
+    if isinstance(handles, Segments):
+        return [handles]
+    try:
+        out = list(handles)
+    except TypeError:
+        out = []
+    if not out or not all(isinstance(h, Segments) for h in out):
+        raise Error("%s is a Segments or a non-empty sequence of them" % which,
+                    code="argument")
+    return out
+
+
+cdef const c.prometheia_segments** handles_of(list term) except NULL:
+    cdef const c.prometheia_segments** out = <const c.prometheia_segments**>PyMem_Malloc(
+        len(term) * sizeof(c.prometheia_segments*))
+    if out == NULL:
+        raise MemoryError()
+    cdef Segments h
+    for i, h in enumerate(term):
+        if h.s == NULL:
+            PyMem_Free(out)
+            raise Error("these segments are closed", code="argument")
+        out[i] = h.s
+    return out
+
+
+def segment_roots(a, b=None, *, str component="lon", double ca=1.0, cb=None,
+                  double target=0.0, double target_rate=0.0, target_jd_tt=None,
+                  double modulus=0.0, start=None, end=None, double tol_days=1e-6,
+                  int capacity=256):
+    """Every TT instant in [start, end) where
+    f = ca a + cb b - (target + target_rate (t - target_jd_tt)) passes 0,
+    for one component of the fits (SEGMENT_COMPONENTS), as SegmentRoots in
+    time order, in a SegmentRoots list (docs/C_API.md, "Roots on segments").
+    A term is a Segments or a
+    list of them back to back, all fitted with the same options. cb is -1
+    with b (a difference: phases, aspects) and 0 without. For "lon", f is
+    taken modulo `modulus` (0: 360), and a wrap is never a root. start and
+    end default to the span both terms cover; a moving target needs
+    target_jd_tt. The C call returns at most `capacity` roots and is resumed
+    until done, without the GIL; the list is the same for any capacity. When
+    a cell was left unresolved, the list says how many and a RuntimeWarning
+    is raised."""
+    if capacity < 1:  # the C call's capacity 0 counts; a list needs the roots
+        raise Error("capacity is at least 1", code="argument")
+    cdef list ta = term_of(a, "a")
+    cdef list tb = [] if b is None else term_of(b, "b")
+    if b is None and cb is not None and cb != 0:
+        raise Error("cb without b", code="argument")
+    cdef c.prometheia_segments_function f
+    memset(&f, 0, sizeof(f))
+    f.ca = ca
+    f.cb = 0.0 if b is None else (-1.0 if cb is None else cb)
+    f.component = word(SEGMENT_COMPONENTS, component, "component")
+    f.target = target
+    f.target_rate = target_rate
+    if target_jd_tt is None:
+        if target_rate != 0.0:
+            raise Error("a moving target needs target_jd_tt", code="argument")
+    else:
+        f.target_jd_tt = target_jd_tt
+    f.modulus = modulus
+    cdef double s = ta[0].start if start is None else start
+    cdef double e = ta[len(ta) - 1].end if end is None else end
+    if tb:
+        if start is None:
+            s = max(s, tb[0].start)
+        if end is None:
+            e = min(e, tb[len(tb) - 1].end)
+    cdef const c.prometheia_segments** ha = NULL
+    cdef const c.prometheia_segments** hb = NULL
+    cdef c.prometheia_segments_root* buf = NULL
+    cdef int count, i, unresolved
+    cdef double resume
+    cdef c.prometheia_error err
+    cdef c.prometheia_status st
+    cdef SegmentRoot r
+    out = SegmentRoots()
+    try:
+        ha = handles_of(ta)
+        f.a = ha
+        f.na = len(ta)
+        if tb:
+            hb = handles_of(tb)
+            f.b = hb
+            f.nb = len(tb)
+        buf = <c.prometheia_segments_root*>PyMem_Malloc(
+            capacity * sizeof(c.prometheia_segments_root))
+        if buf == NULL:
+            raise MemoryError()
+        while True:
+            with nogil:
+                st = c.prometheia_segments_roots(&f, s, e, tol_days, buf, capacity, &count,
+                                                 &resume, &unresolved, &err)
+            if st != c.PROMETHEIA_OK:
+                fail(st, &err)
+            out.unresolved += unresolved
+            for i in range(count):
+                r = SegmentRoot.__new__(SegmentRoot)
+                r.jd_tt, r.slope, r.err_days = buf[i].jd_tt, buf[i].slope, buf[i].err_days
+                r.tangent = buf[i].tangent != 0
+                out.append(r)
+            if resume != resume:
+                if out.unresolved:
+                    _warnings.warn("segment_roots left %d cell(s) unresolved: a pair of roots "
+                                  "that cancel may be missing" % out.unresolved,
+                                  RuntimeWarning, stacklevel=2)
+                return out
+            if not resume > s:
+                raise Error("segment_roots resumed at %r, not after %r" % (resume, s),
+                            code="internal")
+            s = resume
+    finally:
+        PyMem_Free(buf)
+        PyMem_Free(hb)
+        PyMem_Free(ha)
 
 cdef class Context:
     """One engine over a Dataset's files, for the thread that made it."""

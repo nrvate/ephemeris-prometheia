@@ -156,6 +156,21 @@ the C++ engine's, bit for bit.
     thread may evaluate it, and it outlives its context. Cython code
     `cimport`s the layout from `cprometheia.pxd` and evaluates it without
     the GIL;
+  - `segment_roots(a, b=None, *, component="lon", ca=1, cb=None,
+    target=0, target_rate=0, target_jd_tt=None, modulus=0, start=None,
+    end=None, tol_days=1e-6)` (module level) returns, in time order, every
+    TT instant in [start, end) where `ca a + cb b - (target + target_rate
+    (t - target_jd_tt))` passes 0, as `SegmentRoot`s (`jd_tt`, `slope`,
+    `err_days`, `tangent`) ([C_API.md](C_API.md), "Roots on segments"). A term
+    is a `Segments` or a list of them back to back, all fitted with the same
+    options; `component` is a name in `SEGMENT_COMPONENTS`. `cb` is -1 with
+    `b` (a difference: phases, aspects) and 0 without; for `"lon"`, `f` is
+    taken modulo `modulus` (0 means 360). The window defaults to what both
+    terms cover; a moving target needs `target_jd_tt`. The C call runs
+    without the GIL and is resumed until done, so the list is whole. The list
+    is a `SegmentRoots`: its `unresolved` counts the cells the search left at
+    a halving limit, where a pair of roots that cancel may be lost, and a
+    `RuntimeWarning` says so when it is above 0;
   - `houses(system, jd, lon, lat, options)`;
   - `sidereal_time(jd_ut1, "mean"|"apparent")` and
     `obliquity(jd_tt, "mean"|"true")`;
@@ -310,6 +325,10 @@ validation: [HELIACAL.md](HELIACAL.md).
     `calc` for five objects at two tolerances, the refusals, and one handle
     evaluated by four threads after its context closed. Fault-injected: the
     conversion constant one ulp off fails the bit-for-bit case.
+    Then `segment_roots` against `Segments.eval` and `calc` (ingresses
+    within `err_days`), the same list for capacities 1, 2 and 7, twelve
+    month handles against one, the defaults, the refusals, and four threads
+    at once.
   - The live tests skip when the binaries or DE440 are absent.
 
 ## Phases

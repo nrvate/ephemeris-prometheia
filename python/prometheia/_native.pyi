@@ -327,6 +327,27 @@ class Segments:
     def __enter__(self) -> "Segments": ...
     def __exit__(self, *exc: object) -> None: ...
 
+SEGMENT_COMPONENTS: dict[str, int]
+
+class SegmentRoot:
+    """A root of segment_roots (docs/C_API.md, "Roots on segments")."""
+    jd_tt: float
+    slope: float
+    err_days: float
+    tangent: bool
+
+class SegmentRoots(list[SegmentRoot]):
+    """segment_roots' answer; unresolved 0 means every root was found."""
+    unresolved: int
+
+def segment_roots(a: Union[Segments, Sequence[Segments]],
+                  b: Union[Segments, Sequence[Segments], None] = None, *, component: str = "lon",
+                  ca: float = 1.0, cb: Optional[float] = None, target: float = 0.0,
+                  target_rate: float = 0.0, target_jd_tt: Optional[float] = None,
+                  modulus: float = 0.0, start: Optional[float] = None,
+                  end: Optional[float] = None, tol_days: float = 1e-6,
+                  capacity: int = 256) -> SegmentRoots: ...
+
 class Context:
     """One engine over a Dataset's files, for the thread that made it."""
     dataset: "Dataset"
