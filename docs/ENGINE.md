@@ -206,7 +206,15 @@ For a TT epoch *t*:
        (the Sun crosses it every June). With the taper, none of 13,200
        is refused, across the Sun, Moon, planets, Pluto and that node.
    - **Stars** follow the same rule. Before, they skipped deflection
-     outright inside the disc, a step at the limb.
+     outright inside the disc, a step at the limb. The catalog has 54
+     stars within 0.27° of the ecliptic (Astrolog counted them). Two of
+     them were checked minute by minute through their 2026 solar
+     conjunctions:
+     - HR 5838, which passes 0.024° from the Sun's centre;
+     - HR 7182, which passes 0.015°.
+
+     Their longitude's second differences fell from up to 0.10″ to
+     0.0001″, and the rate's steps from up to 0.04°/day to 5e-5°/day.
 4. **Aberration**, relativistic, with the observer's barycentric velocity
    V = v/c and β⁻¹ = √(1 − V²):
 

@@ -382,6 +382,7 @@ TEST_CASE("c_segments_within_tolerance") {
 }
 
 TEST_CASE("c_segments_through_a_solar_conjunction") {
+    // Bodies and stars behind the Sun.
     // A body behind the Sun: the point-mass deflection grows without bound
     // toward the disc's centre, so before the limb taper (docs/ENGINE.md,
     // "Gravitational deflection") these fits were refused, at 74" and
@@ -451,6 +452,37 @@ TEST_CASE("c_segments_through_a_solar_conjunction") {
     }
     INFO("worst one-minute step in the rate ", worst_step, " deg/day");
     CHECK(worst_step < 1e-4);
+
+    // Stars take the same taper; they used to skip deflection inside the
+    // disc, and to grow toward the centre before that skip. Two catalog
+    // stars on the ecliptic through their 2026 solar conjunctions (Astrolog
+    // found them: 0.024 and 0.015 degrees from the Sun's centre), minute by
+    // minute. Before: second differences up to 0.10" and rate steps up to
+    // 0.04 degrees a day; now 0.0001" and 5e-5.
+    const struct {
+        const char* id;
+        double centre;
+    } stars[] = {{"star:HR 5838", 2461365.0}, {"star:HR 7182", 2461045.5}};
+    for (const auto& st : stars) {
+        const prometheia_object star{PROMETHEIA_OBJECT_ID, 0, st.id};
+        double l[3] = {}, second = 0.0, rate_prev = std::nan(""), rate_step = 0.0;
+        for (int i = -1440; i <= 1440; ++i) {
+            prometheia_result r;
+            REQUIRE(prometheia_calc_object(e, &star, st.centre + i / 1440.0, &o, &r, nullptr) ==
+                    PROMETHEIA_OK);
+            l[0] = l[1];
+            l[1] = l[2];
+            l[2] = r.lon_deg;
+            if (i >= -1438)
+                second = std::max(second, std::fabs(l[2] - 2.0 * l[1] + l[0]) * 3600.0);
+            if (!std::isnan(rate_prev))
+                rate_step = std::max(rate_step, std::fabs(r.lon_speed - rate_prev));
+            rate_prev = r.lon_speed;
+        }
+        INFO(st.id, ": second difference ", second, "\", rate step ", rate_step, " deg/day");
+        CHECK(second < 0.001);
+        CHECK(rate_step < 1e-4);
+    }
     prometheia_engine_close(e);
 }
 
