@@ -699,8 +699,12 @@ Engine e = Engine::open_context(corpus).value(); // one per thread
 
 - **Shared, read-only:** the files, which the readers read at explicit
   offsets into the engine's own cursors (A-12, A-13), and everything else
-  the Corpus holds. A catalog's name index and the count of distinct bodies
-  are built on first use, under the Corpus's lock.
+  the Corpus holds. A catalog's name indexes and the count of distinct
+  bodies are built on first use, under the Corpus's lock, once for every
+  engine. The indexes are the hashed names `lookup()` reads and the folded
+  proper names the registry reads. They are built in one pass over the
+  catalog's names: about 0.5 s and 41 MB for the full catalogue of 1.58M
+  bodies (2026-10-28).
 - **Shared, built once (A-15):** the perturber tables a catalog body is
   integrated through, one block per year of the fixed grid, and the Moon's
   apsis passages behind the interpolated apsides, one block per 50 days.
@@ -732,6 +736,11 @@ own):
 | after a catalog body too | 650 KB | 263 KB |
 | after the same body 11 years on | 2,848 KB | 354 KB |
 
+The table leaves out what an engine shares. The full catalogue's name
+indexes, for one, take 41 MB once, however many engines read them: 40 MB of
+hashed names and 1.2 MB of folded proper names. Before 2026-10-28 each
+engine's registry kept its own folded names.
+
 Most of the 241 KB is the nutation interpolator's node cache (4096 x 56
 bytes), which is allocated on first use: until 2026-10-28 every engine paid
 it at open. What a catalog body adds now is its own trajectory; the
@@ -746,10 +755,15 @@ the same questions asked in reverse order. With one read scratch shared
 between the engines (fault-injected), the test fails on every run. It runs
 in 0.8 s, and in the gate. `test_c_dataset` does the same through the C
 API (C_API.md, "Datasets and threads"). `tools/tsan.sh` builds
-`build-tsan/` and runs the file readers' tests and both of these under
-ThreadSanitizer; it was clean on 2026-10-28, after the shared tables, and
-reported a data race when the block map was read without its lock
-(fault-injected). It is outside the gate.
+`build-tsan/` and runs the file readers' tests, both of these and
+`test_registry` under ThreadSanitizer. It is outside the gate.
+- **Clean on 2026-10-28,** after the shared tables. With the block map read
+  without its lock (fault-injected), it reported a data race.
+- **`test_registry`'s `registry_contexts_share_names`** runs four contexts'
+  first lookups at once, on threads. They race to build the shared name
+  indexes, and every answer must match an engine of its own. It ran clean
+  on 2026-10-28. With the name indexes' lock taken out (fault-injected),
+  it reported a data race in `name_index`.
 
 **Single-thread cost:** `prometheia-engine-bench`, planets apparent, five
 alternating runs on one pinned core, median 3.83 us per call before the
@@ -794,8 +808,16 @@ CPU before that (2026-09-19).
 
 `add_catalog` of the full catalogue (137 MB) takes 235 ms: it decompresses
 and CRC-checks every chunk, so a corrupt file fails there. The first lookup
-by name then builds the name index, about 420 ms, most of it decompressing
-the catalogue again. A small body's first integration costs about 0.2–0.4 ms
+by name then builds both name indexes in one pass, about 520 ms
+(2026-10-28, with a load average of about 10). Of that, 325–370 ms is the
+pass, mostly decompressing the catalogue again, and 180–195 ms is sorting
+its 2.5M name hashes.
+- **Faster sorts, both measured.** Placing the hashes in buckets by their
+  top 16 bits sorted them in 105 ms instead of std::sort's 215 ms. It needs
+  a second 40 MB buffer while the index is built, and a server or an
+  embedder feels memory more than a one-off 110 ms, so std::sort stays.
+- **In-place buckets** saved nothing: 280–320 ms, its swaps missing the
+  cache. A small body's first integration costs about 0.2–0.4 ms
 for each year between its elements' epoch and the instant: forty numbered
 asteroids integrated to 1600 took 3.8 s together, about 95 ms each.
 

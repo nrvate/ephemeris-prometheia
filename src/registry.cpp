@@ -402,10 +402,6 @@ struct Registry::Impl {
     };
     bool summary_built = false;
     std::vector<Summary> summary;
-    // The folded proper names of the named bodies, sorted: lookup's index
-    // for names typed with accents or punctuation, and for prefixes.
-    bool names_built = false;
-    std::vector<std::pair<std::string, uint64_t>> folded_names;
 
     // resolve()'s answers: a scan resolves the same few ids every step,
     // and a catalog id costs a record decode (~0.2 ms) to resolve afresh.
@@ -415,31 +411,11 @@ struct Registry::Impl {
     void invalidate_if_stale() {
         const size_t n = engine.catalogs().size();
         if (n != built_for) {
-            summary_built = names_built = false;
+            summary_built = false;
             summary.clear();
-            folded_names.clear();
             resolved.clear();
             built_for = n;
         }
-    }
-
-    Result<void> ensure_names() {
-        invalidate_if_stale();
-        if (names_built)
-            return {};
-        std::vector<std::pair<std::string, uint64_t>> v;
-        auto each =
-            engine.for_each_catalog_name([&](size_t, uint64_t spkid, const catalog::Names& n) {
-                if (!n.name.empty())
-                    v.emplace_back(fold(n.name), spkid);
-            });
-        if (!each)
-            return each.error();
-        std::sort(v.begin(), v.end());
-        v.erase(std::unique(v.begin(), v.end()), v.end());
-        folded_names = std::move(v);
-        names_built = true;
-        return {};
     }
 
     Result<void> ensure_summary() {
@@ -870,14 +846,36 @@ Result<std::vector<Match>> Registry::lookup(std::string_view query, bool prefix,
                 return r.error();
             break;
         }
-        if (auto r = impl_->ensure_names(); !r)
-            return r.error();
-        const auto& names = impl_->folded_names;
-        auto it = std::lower_bound(names.begin(), names.end(), std::make_pair(fq, uint64_t(0)));
-        for (; it != names.end() && out.size() < 4 * max_matches; ++it) {
-            const bool exact = it->first == fq;
-            if (!exact && !(want_prefix && it->first.compare(0, fq.size(), fq) == 0))
+        // Each catalog's folded names (the engine's, shared by every engine
+        // on a corpus), merged in order: a body in two catalogs is one
+        // candidate.
+        using Folded = std::pair<std::string, uint64_t>;
+        const auto hit = [&](const Folded& e) {
+            return e.first == fq || (want_prefix && e.first.compare(0, fq.size(), fq) == 0);
+        };
+        std::vector<std::pair<const Folded*, const Folded*>> runs;
+        for (size_t i = 0; i < impl_->engine.catalogs().size(); ++i) {
+            auto names = impl_->engine.catalog_folded_names(i);
+            if (!names)
+                return names.error();
+            const std::vector<Folded>& v = *names.value();
+            const auto lo = std::lower_bound(v.begin(), v.end(), Folded(fq, 0));
+            runs.emplace_back(v.data() + (lo - v.begin()), v.data() + v.size());
+        }
+        const Folded* last = nullptr;
+        while (out.size() < 4 * max_matches) {
+            // Each run is sorted, so it ends at its first entry that misses.
+            std::pair<const Folded*, const Folded*>* next = nullptr;
+            for (auto& run : runs)
+                if (run.first != run.second && hit(*run.first) &&
+                    (!next || *run.first < *next->first))
+                    next = &run;
+            if (!next)
                 break;
+            const Folded* it = next->first++;
+            if (last && *last == *it)
+                continue;
+            last = it;
             // Confirmed against the body's newest record: an overlay may
             // have renamed it.
             auto cb = impl_->engine.catalog_body(int(it->second));
@@ -885,9 +883,9 @@ Result<std::vector<Match>> Registry::lookup(std::string_view query, bool prefix,
                 return cb.error();
             if (fold(cb.value().names.name) != it->first)
                 continue;
-            if (auto r =
-                    add_body(int(it->second), exact ? MatchQuality::Exact : MatchQuality::Prefix,
-                             cb.value().names.name);
+            if (auto r = add_body(int(it->second),
+                                  it->first == fq ? MatchQuality::Exact : MatchQuality::Prefix,
+                                  cb.value().names.name);
                 !r)
                 return r.error();
         }

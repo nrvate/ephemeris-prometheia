@@ -13,6 +13,20 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **A dataset's contexts share the folded name index** (docs/REGISTRY.md,
+  "Cost"). The registry folded the catalogs' proper names in a pass of its
+  own, per context, so every context of a dataset paid about 250 ms on its
+  first lookup.
+  - **Now:** the folded names are the corpus's, built once, in the same pass
+    as the hashed name index.
+  - **Measured** on the 1.58M-body catalog: the first context's first
+    lookup went from 790–920 ms to 521–527 ms, the later contexts' from
+    243–282 ms to 0.6 ms, and an engine of its own from 752–785 ms to
+    482–573 ms.
+  - **API:** `Engine::catalog_folded_names(i)`, added. Lookups through
+    every context of a dataset answer exactly as an engine of its own does
+    (`registry_contexts_share_names`).
+
 - **Deflection is tapered inside the solar disc** (docs/ENGINE.md,
   "Gravitational deflection").
   - **The defect.** For a body behind the Sun, the point-mass term grew

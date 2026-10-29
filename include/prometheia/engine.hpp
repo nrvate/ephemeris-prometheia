@@ -45,6 +45,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "prometheia/catalog.hpp"
@@ -663,6 +664,13 @@ public:
             fn) const;
     Result<void> for_each_catalog_name(
         const std::function<void(size_t catalog, uint64_t spkid, const catalog::Names&)>& fn) const;
+    // Catalog i's proper names folded by registry::fold, with their SPK-IDs,
+    // sorted and unique: the registry's index for names typed with accents
+    // or punctuation, and for prefixes. Built on first use with lookup()'s
+    // index, once for every engine on a corpus; valid until add_catalog()
+    // on that corpus.
+    Result<const std::vector<std::pair<std::string, uint64_t>>*>
+    catalog_folded_names(size_t catalog) const;
 
     // The sidereal mean motion (deg/day) of an ephemeris body about its
     // centre, from the mean elements the engine fits to DE440 (docs/ENGINE.md,

@@ -17,7 +17,7 @@ jobs=2
 if [[ "${1:-}" == "-j" ]]; then
     jobs=$2
 fi
-targets=(test_io test_de test_spk test_catalog test_engine_threads test_c_dataset)
+targets=(test_io test_de test_spk test_catalog test_engine_threads test_c_dataset test_registry)
 
 cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_C_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \

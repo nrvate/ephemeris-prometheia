@@ -133,20 +133,37 @@ limit passes no star, and a V limit passes no asteroid.
 ## Cost
 
 Measured on the full catalog `sbdb-20261027.epm` (1,580,028 bodies) with
-DE440 (2026-10-27):
+DE440 (2026-10-27; the name indexes 2026-10-28):
 
 | | Time | Memory |
 |---|---|---|
-| The engine's name index, on the first lookup (shared with `Engine::lookup`) | 0.49 s | +48 MB |
-| The registry's folded names, on the first lookup | 0.26 s | small (the named bodies only) |
+| The name indexes, on the first lookup: the hashed names `Engine::lookup` reads and the folded proper names, in one pass | 0.48–0.57 s | +41 MB (1.2 MB of it the 28,919 folded names) |
+| The first lookup on another engine of the same frozen corpus (`Engine::open_context`) | 0.6 ms | nothing: the corpus's indexes serve it |
 | A lookup after that | 5 µs–1 ms | |
 | The listing summary, on the first page that reaches catalog bodies | 0.40 s | +36 MB at the peak, 25 MB kept |
 | A listing page after that (named centaurs) | 3 ms | |
 | `info` on a catalog body | 0.17 ms | |
 | `calc` by id string, after its first resolution | 4 µs (3 µs by SPK-ID) | |
 
-The registry keeps its indexes, and the ids it has resolved, until a catalog
-is added. A scan that computes the same objects every step should resolve
+**The name indexes are the corpus's.** Both are built once, under its lock,
+for every engine on it. Until 2026-10-28 each registry folded the names
+again, in a second pass over the catalog, so every context of a dataset paid
+it on its first lookup. Measured on that day: the first lookup of
+"2026ED138", three runs each, with a load average of about 10 on an
+i7-8700K:
+- **The dataset's first context:** 790–920 ms, now 521–527 ms.
+- **Its second and third:** 243–282 ms, now 0.6 ms.
+- **An engine of its own:** 752–785 ms, now 482–573 ms.
+
+**The answers are unchanged.** Old and new code were run on 7,093 queries
+against the full catalog, with `sample-100.epm` and `covariance-7.epm`
+added over it. The queries were every 13th proper name, as typed and with
+"á" for "a", its 2- and 3-letter prefixes, and its designation without
+spaces, plus a few of astromcp's names. The two gave byte-identical
+answers.
+
+The registry keeps its listing summary, and the ids it has resolved, until a
+catalog is added. A scan that computes the same objects every step should resolve
 once and pass `ref` (in Python, `ObjectInfo.object`), although the id string
 costs almost nothing once it is resolved.
 

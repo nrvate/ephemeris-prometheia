@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <set>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -282,6 +283,125 @@ TEST_CASE("registry_list") {
     Filter bad;
     bad.orbit_class = "XYZ";
     CHECK(r.list(bad, 0, 10).error().code == ErrorCode::ArgumentError);
+}
+
+namespace {
+
+// Lookup's queries for the catalogs' own names: each name, an accented
+// spelling of it, its two- and three-letter prefixes, and each designation
+// and old designation as given and with its spaces taken out.
+std::vector<std::pair<std::string, bool>> catalog_queries(const Engine& e) {
+    std::set<std::pair<std::string, bool>> q;
+    auto each = e.for_each_catalog_name([&](size_t, uint64_t, const catalog::Names& n) {
+        for (std::string_view s : {n.pdes, n.name, n.prov_des}) {
+            if (s.empty())
+                continue;
+            std::string spaced(s), unspaced;
+            for (char c : spaced)
+                if (c != ' ')
+                    unspaced += c;
+            q.emplace(spaced, false);
+            q.emplace(unspaced, false);
+        }
+        if (n.name.empty())
+            return;
+        const std::string name(n.name);
+        std::string accented;
+        for (char c : name)
+            accented += c == 'e' ? std::string("\xC3\xA9") : std::string(1, c); // e -> é
+        q.emplace(accented, false);
+        q.emplace(name.substr(0, 2), true);
+        q.emplace(name.substr(0, 3), true);
+    });
+    REQUIRE(each.ok());
+    return {q.begin(), q.end()};
+}
+
+std::string describe(const Result<std::vector<Match>>& m) {
+    if (!m)
+        return "error: " + m.error().message;
+    std::string out;
+    for (const Match& x : m.value())
+        out += x.id + "/" + std::to_string(int(x.kind)) + "/" +
+               std::string(quality_name(x.quality)) + "/" + x.name + "/" + x.matched + "; ";
+    return out;
+}
+
+} // namespace
+
+// The folded name index lives in the corpus (A-15's sharing, 2026-10-28):
+// engines on one frozen corpus read the same index, built once, and answer
+// lookup exactly as an engine of its own does, from threads at once.
+TEST_CASE("registry_contexts_share_names") {
+    synth::TempFile tf("registry-contexts");
+    synth::write_linear_spk(tf.path);
+    const std::string sample = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/sample-100.epm";
+    const std::string overlay = std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/covariance-7.epm";
+
+    // The answers of an engine of its own, the catalogs added in turn: a
+    // catalog added after a lookup is searched by the next one.
+    auto own = Engine::open(tf.path.string());
+    REQUIRE(own.ok());
+    REQUIRE(own.value().add_catalog(sample).ok());
+    Registry own_r(own.value());
+    REQUIRE(own_r.lookup("Ceres").ok());
+    REQUIRE(own.value().add_catalog(overlay).ok());
+    const auto queries = catalog_queries(own.value());
+    REQUIRE(queries.size() > 300);
+    std::vector<std::string> want;
+    size_t found = 0;
+    for (const auto& [q, prefix] : queries) {
+        auto m = own_r.lookup(q, prefix);
+        found += m && !m.value().empty();
+        want.push_back(describe(m));
+    }
+    CHECK(found == queries.size()); // every name, prefix and designation answers
+
+    auto opened = Corpus::open(tf.path.string());
+    REQUIRE(opened.ok());
+    std::shared_ptr<Corpus> corpus = opened.value();
+    REQUIRE(corpus->add_catalog(sample).ok());
+    REQUIRE(corpus->add_catalog(overlay).ok());
+    corpus->freeze();
+
+    // Four contexts, each on its own thread, the first lookup of all four at
+    // once (the index is built under the corpus's lock).
+    std::vector<Engine> contexts;
+    for (int t = 0; t < 4; ++t) {
+        auto c = Engine::open_context(corpus);
+        REQUIRE(c.ok());
+        contexts.push_back(std::move(c).value());
+    }
+    std::vector<std::vector<std::string>> got(4);
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t)
+        threads.emplace_back([&, t] {
+            Registry r(contexts[size_t(t)]);
+            for (size_t k = 0; k < queries.size(); ++k) {
+                // Each thread asks in its own order.
+                const auto& [q, prefix] = queries[(k * size_t(2 * t + 1)) % queries.size()];
+                got[size_t(t)].push_back(describe(r.lookup(q, prefix)));
+            }
+        });
+    for (auto& th : threads)
+        th.join();
+    for (int t = 0; t < 4; ++t) {
+        int differ = 0;
+        for (size_t k = 0; k < queries.size(); ++k) {
+            const size_t i = (k * size_t(2 * t + 1)) % queries.size();
+            differ += got[size_t(t)][k] != want[i];
+        }
+        CHECK_MESSAGE(differ == 0, "context " << t);
+    }
+    // One index for every context, not one each.
+    for (size_t c = 0; c < 2; ++c) {
+        auto a = contexts[0].catalog_folded_names(c), b = contexts[3].catalog_folded_names(c);
+        REQUIRE(a.ok());
+        REQUIRE(b.ok());
+        CHECK(a.value() == b.value());
+        CHECK(!a.value()->empty());
+    }
+    CHECK(!contexts[0].catalog_folded_names(2).ok());
 }
 
 namespace {

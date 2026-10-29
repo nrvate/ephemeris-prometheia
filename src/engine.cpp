@@ -37,6 +37,7 @@
 #include "prometheia/kepler.hpp"
 #include "prometheia/memo.hpp"
 #include "prometheia/phenomena.hpp"
+#include "prometheia/registry.hpp" // registry::fold, for the folded name index
 #include "prometheia/spk.hpp"
 
 namespace prometheia {
@@ -1330,6 +1331,16 @@ uint64_t fnv1a(std::string_view lower) {
     return h;
 }
 
+// fnv1a(fold_lower(s)), without the copy.
+uint64_t fnv1a_lower(std::string_view s) {
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : s) {
+        h ^= c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
 } // namespace
 
 // What a Corpus holds. Written only by Corpus::open and add_*, before the
@@ -1372,15 +1383,22 @@ struct Corpus::Data {
 
     std::atomic<bool> frozen{false};
 
-    // Per catalog (parallel to `catalogs`), built on the first lookup():
-    // sorted (FNV-1a hash of the lowercased designation or name, SPK-ID)
-    // pairs. A hash hit is confirmed against the record's own names, so
-    // collisions cannot answer a wrong body. ~16 bytes per name instead of a
-    // string map (1.57M bodies: ~50 MB and ~0.5 s, was ~250 MB and ~1.4 s).
+    // Per catalog (parallel to `catalogs`), built together on the first
+    // lookup of either, in one pass over the catalog's names:
+    // - `entries`, sorted (FNV-1a hash of the lowercased designation or
+    //   name, SPK-ID) pairs. A hash hit is confirmed against the record's own
+    //   names, so collisions cannot answer a wrong body. ~16 bytes per name
+    //   instead of a string map (1.57M bodies: ~50 MB and ~0.5 s, was ~250
+    //   MB and ~1.4 s).
+    // - `folded`, the proper names folded by registry::fold, with their
+    //   SPK-IDs, sorted and unique: the registry's index for names typed
+    //   with accents or punctuation, and for prefixes. Kept here, not per
+    //   Registry, so the engines on a frozen corpus build it once.
     // A deque: an index stays put while a later catalog's is appended.
     struct NameIndex {
         std::atomic<bool> built{false};
         std::vector<std::pair<uint64_t, uint64_t>> entries;
+        std::vector<std::pair<std::string, uint64_t>> folded;
     };
     std::deque<NameIndex> name_indexes;
     std::optional<uint64_t> distinct_bodies; // catalog_bodies(), until add_catalog()
@@ -1456,30 +1474,37 @@ struct Corpus::Data {
             source->description + " + EPM1 catalog(s) [" + counts + " bodies]" + perturber_note;
     }
 
-    // Catalog i's name index, built on first use: any thread may ask.
-    Result<const std::vector<std::pair<uint64_t, uint64_t>>*> name_index(size_t i) {
+    // Catalog i's name indexes, built on first use: any thread may ask.
+    Result<const NameIndex*> name_index(size_t i) {
         NameIndex& idx = name_indexes[i];
         if (!idx.built.load(std::memory_order_acquire)) {
             std::lock_guard<std::mutex> hold(lazy);
             if (!idx.built.load(std::memory_order_relaxed)) {
                 std::vector<std::pair<uint64_t, uint64_t>> entries;
+                std::vector<std::pair<std::string, uint64_t>> folded;
                 entries.reserve(size_t(catalogs[i]->record_count()) + 1024);
                 auto fe = catalogs[i]->for_each_name([&](uint64_t spkid, const catalog::Names& n) {
                     if (!n.pdes.empty())
-                        entries.emplace_back(fnv1a(fold_lower(n.pdes)), spkid);
-                    if (!n.name.empty())
-                        entries.emplace_back(fnv1a(fold_lower(n.name)), spkid);
+                        entries.emplace_back(fnv1a_lower(n.pdes), spkid);
+                    if (!n.name.empty()) {
+                        entries.emplace_back(fnv1a_lower(n.name), spkid);
+                        folded.emplace_back(registry::fold(n.name), spkid);
+                    }
                     if (!n.prov_des.empty()) // a numbered body's old designation (1.2)
-                        entries.emplace_back(fnv1a(fold_lower(n.prov_des)), spkid);
+                        entries.emplace_back(fnv1a_lower(n.prov_des), spkid);
                 });
                 if (!fe)
                     return fe.error();
                 std::sort(entries.begin(), entries.end());
+                std::sort(folded.begin(), folded.end());
+                folded.erase(std::unique(folded.begin(), folded.end()), folded.end());
+                folded.shrink_to_fit();
                 idx.entries = std::move(entries);
+                idx.folded = std::move(folded);
                 idx.built.store(true, std::memory_order_release);
             }
         }
-        return &idx.entries;
+        return &idx;
     }
 };
 
@@ -3672,7 +3697,7 @@ Result<int> Engine::lookup(std::string_view name) const {
         auto index = impl_->corpus.name_index(i);
         if (!index)
             return index.error();
-        const auto& entries = *index.value();
+        const auto& entries = index.value()->entries;
         auto lo = std::lower_bound(entries.begin(), entries.end(), std::make_pair(h, uint64_t(0)));
         uint64_t best = 0;
         for (auto it = lo; it != entries.end() && it->first == h; ++it) {
@@ -4404,6 +4429,18 @@ Result<void> Engine::for_each_catalog_record(
             return each.error();
     }
     return {};
+}
+
+Result<const std::vector<std::pair<std::string, uint64_t>>*>
+Engine::catalog_folded_names(size_t catalog) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (catalog >= impl_->catalogs.size())
+        return make_error(ErrorCode::ArgumentError, "no such catalog");
+    auto index = impl_->corpus.name_index(catalog);
+    if (!index)
+        return index.error();
+    return &index.value()->folded;
 }
 
 Result<void> Engine::for_each_catalog_name(
