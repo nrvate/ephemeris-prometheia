@@ -139,6 +139,7 @@ DE440 (2026-10-27; the name indexes 2026-10-28):
 |---|---|---|
 | The name indexes, on the first lookup: the hashed names `Engine::lookup` reads and the folded proper names, in one pass | 0.48–0.57 s | +41 MB (1.2 MB of it the 28,919 folded names) |
 | The first lookup on another engine of the same frozen corpus (`Engine::open_context`) | 0.6 ms | nothing: the corpus's indexes serve it |
+| A numbered body (`sb:2060`, `Engine::lookup("2060")`), with the indexes not built | 3.7 ms | nothing: a number goes straight to SPK-ID 20000000 + n, and needs no index |
 | A lookup after that | 5 µs–1 ms | |
 | The listing summary, on the first page that reaches catalog bodies | 0.40 s | +36 MB at the peak, 25 MB kept |
 | A listing page after that (named centaurs) | 3 ms | |

@@ -13,6 +13,21 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **A dataset's contexts share small-body windows and records** (docs/ENGINE.md,
+  "Threads"). Each context integrated every catalog body again, a year of
+  trajectory per year between the instant and the elements' epoch, and decoded
+  its record again. Both now sit in the corpus, so what one context did is done
+  for the rest, and the answers are the same doubles.
+  - **Measured:** a new context's first use of 11 catalog bodies, for windows
+    already integrated: at J2000 108 ms to 0.5 ms, at 1950 331 ms to 1.5 ms.
+  - **Bounded:** the windows at 256 MB, the records at 65,536.
+- **A numbered body needs no name index.** `Engine::lookup` and
+  `prometheia_engine_lookup` go straight to SPK-ID 20000000 + n for an
+  all-digit name, so the first numbered body in a process costs 3.7 ms where
+  it cost about 580 ms. A designation still builds the index, once. 167,476
+  lookups on six catalog setups, Astrolog's shipped catalog among them, were
+  identical to the previous commit, status and message included.
+
 - **A root search may add a geocentric node or apsis to terms from one
   site** (docs/C_API.md, "Roots on segments"). A node or apsis is a direction
   with no distance of its own, so it takes no parallax and is fitted

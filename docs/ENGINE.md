@@ -729,9 +729,28 @@ Engine e = Engine::open_context(corpus).value(); // one per thread
   answers, are what they were with tables of its own: 3,728 catalog-body
   and apsis answers, marching backward, forward and at random, were
   identical bit for bit before and after the change (2026-10-28).
+- **Shared, kept as they are made (2026-11-01):** the small-body windows,
+  a year of a body's trajectory each, its sigma tracks included, and the
+  decoded catalog records they start from.
+  - **Why they can be.** A window is a function of the body and the
+    corpus, so one integrated by any engine is the same doubles for all.
+  - **Finding one.** An engine looks for a window before integrating it,
+    and keeps what it integrates. It copies a window it finds into its own
+    run, so a position inside its coverage comes nowhere near the store.
+  - **No waiting.** The lock covers the map alone, and nothing is
+    integrated under it. Two engines that reach a new window at once both
+    integrate it, and the first kept stands.
+  - **Failures.** A window that ran on a failed perturber read is never
+    kept. The states it saw were zeros, and the request that met it is
+    refused (`engine_perturber_failure_refuses_one_request_and_does_not_stick`).
+  - **Limits.** Past 256 MB the windows are dropped whole, and past 65,536
+    the records are; anything dropped is integrated or decoded again, to
+    the same doubles. A year of one body is 7 KB, so 11 bodies across all
+    of DE440 would take 85 MB.
+  - **Dropped** when any file is added, the records only when a catalog is.
 - **Per engine:** the read cursors, the frame, observer and Sun memos, the
-  nutation and TDB interpolators, and the integrated small-body
-  trajectories and their sigma tracks.
+  nutation and TDB interpolators, and each engine's own run of the
+  small-body windows it has reached, with its sigma tracks.
 - **`Engine::open`** builds a private Corpus as before. Its `add_*` calls
   add to that Corpus and drop the engine's caches. An engine from
   `open_context` refuses `add_*` (ArgumentError), as does the frozen Corpus;
@@ -760,7 +779,41 @@ it at open. What a catalog body adds now is its own trajectory; the
 perturber tables it was integrated through (about 200 KB per year of
 coverage with SB441's sixteen masses) are the corpus's.
 
-**Checked:** `test_engine_threads` opens six engines on one frozen corpus and
+**A new engine's first use of a catalog body** (measured 2026-11-01, DE440,
+the 1.58M-body catalog and the DE440-span kernel, the median over fresh
+contexts of 11 bodies asked once each, by registry id, sigma off, load
+average about 13). An engine reaches an instant by the years between it and
+the body's element epoch, so "before" grew with that distance. "After" is
+for windows another engine has already integrated:
+
+| instant | before | after |
+|---|---:|---:|
+| 2026 | 10.6 ms | 0.2 ms |
+| 2050 | 90 ms | 1.1 ms |
+| J2000 | 108 ms | 0.5 ms |
+| 1950 | 331 ms | 1.5 ms |
+
+- **The first engine** to reach a window still integrates it, about 0.4 ms
+  a year for a body. Engines racing to the same new window each do.
+- **An engine with nothing to share** pays nothing measurable: 3,000 bodies
+  first used on one engine took 1.61–1.96 s against 1.83–1.90 s, best of
+  five, at that load.
+- **Answers are unchanged.** 4,800 answers, across 10 bodies of that
+  catalog, a sample and the covariance catalog, with and without the
+  kernel, were identical bit for bit to the previous commit, through three
+  contexts in turn with the windows shared. 2,400 of them carried sigma
+  values, and 108 were refusals.
+
+**Checked:** `engine_contexts_share_small_body_windows` holds a second context
+to integrating nothing and to the first's answers, in reverse order and after
+`release_small_bodies`, and six threads on new years to a lone engine's
+answers, sigma tracks included. Left out of the key, the sigma tracks fail it
+at once. `engine_files_drop_the_kept_windows` holds the three `add_*` calls to
+dropping them.
+`tools/tsan.sh` was clean on 2026-11-01, and with the windows' map read
+without its lock (fault-injected) it reported a data race.
+
+`test_engine_threads` opens six engines on one frozen corpus and
 asks 1200 seeded questions at once across six threads: planets, catalog
 bodies, sigma, orbit points with the natural apsides, stars, houses and name
 lookups. Every answer must be bit for bit the one a single engine gives to

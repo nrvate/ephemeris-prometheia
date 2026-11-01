@@ -6,7 +6,10 @@
 // by marching window-by-window from the seed (forward or backward), so
 // repeated queries amortize to one integration pass over the arc actually
 // visited. Deliberately single-threaded — the engine (M4) owns per-context
-// memo instances, mirroring the no-shared-mutable-state rule.
+// memo instances, mirroring the no-shared-mutable-state rule. What contexts
+// share is the windows themselves, through a WindowShare: a window is a
+// function of the body and the windows before it, so one integrated by any
+// memo is the same doubles for all of them.
 #ifndef PROMETHEIA_MEMO_HPP
 #define PROMETHEIA_MEMO_HPP
 
@@ -15,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -23,6 +27,18 @@
 #include <prometheia/trajectory.hpp>
 
 namespace prometheia {
+
+// Where a memo finds the windows another memo integrated, and leaves its
+// own. A window is named by a track (key), its direction and its count from
+// the seed, and its samples are those a memo appends to that run. Any thread
+// may call these at once; a miss is the memo integrating, as without a share.
+class WindowShare {
+public:
+    using Window = std::vector<TrajSample>;
+    virtual ~WindowShare() = default;
+    virtual std::shared_ptr<const Window> find(uint64_t key, bool forward, size_t index) = 0;
+    virtual void keep(uint64_t key, bool forward, size_t index, Window samples) = 0;
+};
 
 // Force-generic: the engine instantiates it with BarycentricForce; the
 // default keeps the M2-era HeliocentricForce call sites unchanged.
@@ -42,6 +58,13 @@ public:
     WindowMemo(Force* force, IntegrateOptions opts, Config cfg)
         : force_(force), opts_(std::move(opts)), cfg_(cfg) {}
 
+    // Windows are looked for in `share` under `key` before integrating, and
+    // left there after. The key must name one seed, force and set of limits.
+    void set_share(WindowShare* share, uint64_t key) {
+        share_ = share;
+        share_key_ = key;
+    }
+
     // The reference state the memo propagates from. Resets all coverage.
     void set_seed(const State& s, double t) {
         seed_ = s;
@@ -49,6 +72,7 @@ public:
         lo_ = hi_ = t;
         fwd_.clear();
         bwd_.clear();
+        fwd_windows_ = bwd_windows_ = 0;
         fwd_.push_back(make_sample(t, s));
         bwd_.push_back(make_sample(t, s));
     }
@@ -91,7 +115,8 @@ public:
         uint64_t evals = 0;
         uint64_t cache_hits = 0;
         uint64_t cache_misses = 0;
-        uint64_t windows_built = 0;
+        uint64_t windows_built = 0;  // integrated by this memo
+        uint64_t windows_shared = 0; // taken from the share
         uint64_t accel_evals = 0;
     };
 
@@ -182,6 +207,17 @@ private:
     // Integrates one window from `from` to `to` (either direction), replacing
     // the sample list with a uniformly densified version over [from, to].
     bool integrate_window(double from, double to, bool forward) {
+        std::vector<TrajSample>& run = forward ? fwd_ : bwd_;
+        size_t& windows = forward ? fwd_windows_ : bwd_windows_;
+        if (share_) {
+            if (auto w = share_->find(share_key_, forward, windows)) {
+                run.insert(run.end(), w->begin(), w->end());
+                (forward ? hi_ : lo_) = to;
+                ++windows;
+                ++stats_.windows_shared;
+                return true;
+            }
+        }
         const int nseg = std::max(cfg_.min_samples, 1);
         double y[6];
         State s = eval_from_samples(forward ? hi_ : lo_);
@@ -235,9 +271,12 @@ private:
 
         // fresh[0] duplicates the run's last sample; the rest continue it
         // (ascending forward, descending backward).
-        std::vector<TrajSample>& run = forward ? fwd_ : bwd_;
         run.insert(run.end(), fresh.begin() + 1, fresh.end());
+        if (share_)
+            share_->keep(share_key_, forward, windows,
+                         WindowShare::Window(fresh.begin() + 1, fresh.end()));
         (forward ? hi_ : lo_) = to;
+        ++windows;
         ++stats_.windows_built;
         stats_.accel_evals += istats.accel_evals;
         return true;
@@ -266,6 +305,9 @@ private:
     double limit_lo_ = -std::numeric_limits<double>::infinity();
     double limit_hi_ = std::numeric_limits<double>::infinity();
     std::vector<TrajSample> fwd_, bwd_;
+    size_t fwd_windows_ = 0, bwd_windows_ = 0; // windows in each run
+    WindowShare* share_ = nullptr;
+    uint64_t share_key_ = 0;
     Stats stats_;
 };
 

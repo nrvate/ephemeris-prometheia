@@ -397,8 +397,13 @@ public:
     // rebuild on the next query that needs them). Integrated trajectories are
     // kept for the engine's lifetime otherwise — a few kilobytes per body per
     // year of coverage — so a long-running process or a whole-catalog sweep
-    // calls this to bound memory. The perturber tables are kept.
+    // calls this to bound memory. The perturber tables are kept, and so are
+    // the windows the corpus keeps for all its engines, which are bounded.
     void release_small_bodies();
+    // Small-body windows this engine integrated itself, ever, and those the
+    // corpus keeps for all its engines (docs/ENGINE.md, "Threads").
+    uint64_t small_body_windows_integrated() const;
+    size_t small_body_windows_kept() const;
 
     // Resolves a small body by its primary designation or proper name —
     // "1", "Ceres", "ceres" — to its SPK-ID, the integer calc() takes.

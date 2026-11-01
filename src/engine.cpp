@@ -1355,6 +1355,130 @@ struct ApsisPassage {
 };
 using ApsisBlock = std::array<std::vector<ApsisPassage>, 2>; // [0] perigees, [1] apogees
 
+// The small-body windows every engine on a corpus has integrated, each kept
+// once (docs/ENGINE.md, "Threads"). A window is a function of the body and
+// the corpus, so an engine that finds one here is spared the integration and
+// gets the same doubles; two that race both integrate, and the first kept
+// stands. The lock covers the map alone: nothing is integrated under it, and
+// a position inside a body's coverage never comes here.
+//
+// Windows otherwise accumulate for the life of the corpus, so past the limit
+// the map is dropped whole, as record_cache is; what is dropped is integrated
+// again if asked for. A year of one body is 7 KB.
+class WindowStore {
+public:
+    std::shared_ptr<const WindowShare::Window> find(uint64_t key, bool forward, size_t index) {
+        std::lock_guard<std::mutex> hold(lock_);
+        const auto it = windows_.find(pack(key, forward, index));
+        return it == windows_.end() ? nullptr : it->second;
+    }
+
+    void keep(uint64_t key, bool forward, size_t index, WindowShare::Window samples) {
+        const size_t bytes = samples.size() * sizeof(TrajSample);
+        auto w = std::make_shared<const WindowShare::Window>(std::move(samples));
+        Map dropped; // freed after the lock is let go
+        std::lock_guard<std::mutex> hold(lock_);
+        if (bytes_ + bytes > kMaxBytes) {
+            dropped.swap(windows_);
+            bytes_ = 0;
+        }
+        if (windows_.emplace(pack(key, forward, index), std::move(w)).second)
+            bytes_ += bytes;
+    }
+
+    void clear() {
+        Map dropped;
+        std::lock_guard<std::mutex> hold(lock_);
+        dropped.swap(windows_);
+        bytes_ = 0;
+    }
+
+    size_t size() {
+        std::lock_guard<std::mutex> hold(lock_);
+        return windows_.size();
+    }
+
+private:
+    using Map = std::unordered_map<uint64_t, std::shared_ptr<const WindowShare::Window>>;
+    static constexpr size_t kMaxBytes = size_t(256) << 20;
+
+    // A key is 37 bits (an SPK-ID, and five for its track); 2^20 windows
+    // would be a million years.
+    static uint64_t pack(uint64_t key, bool forward, size_t index) {
+        return key << 21 | uint64_t(index) << 1 | uint64_t(forward);
+    }
+
+    std::mutex lock_;
+    Map windows_;
+    size_t bytes_ = 0;
+};
+
+// The catalog records engines have decoded, each decoded once. Finding a
+// record walks its chunk from the start, after decompressing it, which is
+// most of what a body costs an engine that finds its windows kept. The newest
+// catalog's record stands for a body; adding a catalog drops the lot.
+class RecordStore {
+public:
+    using Entry = std::pair<catalog::Record, size_t>; // and its catalog
+
+    std::optional<Entry> find(uint64_t id) {
+        std::lock_guard<std::mutex> hold(lock_);
+        const auto it = records_.find(id);
+        if (it == records_.end())
+            return std::nullopt;
+        return it->second;
+    }
+
+    void keep(uint64_t id, const Entry& entry) {
+        std::lock_guard<std::mutex> hold(lock_);
+        if (records_.size() >= kMaxRecords)
+            records_.clear();
+        records_.emplace(id, entry);
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> hold(lock_);
+        records_.clear();
+    }
+
+private:
+    static constexpr size_t kMaxRecords = size_t(1) << 16;
+    std::mutex lock_;
+    std::unordered_map<uint64_t, Entry> records_;
+};
+
+// An engine's way into its corpus's windows. A window that ran on a failed
+// perturber read is never kept: the states it saw were zeros, and the engine
+// refuses the request that met it.
+class EngineWindows final : public WindowShare {
+public:
+    EngineWindows(WindowStore& store, const PerturberSet& perturbers)
+        : store_(store), perturbers_(perturbers) {}
+
+    std::shared_ptr<const Window> find(uint64_t key, bool forward, size_t index) override {
+        return store_.find(key, forward, index);
+    }
+
+    void keep(uint64_t key, bool forward, size_t index, Window samples) override {
+        ++integrated_;
+        if (perturbers_.ok())
+            store_.keep(key, forward, index, std::move(samples));
+    }
+
+    uint64_t integrated() const { return integrated_; }
+
+private:
+    WindowStore& store_;
+    const PerturberSet& perturbers_;
+    uint64_t integrated_ = 0;
+};
+
+// The track a memo's windows are kept under: 0 a body's own, the rest the
+// perturbed tracks behind sigma_arcsec.
+uint64_t window_key(int id, int track) {
+    return uint64_t(id) << 5 | uint64_t(track);
+}
+
 struct Corpus::Data {
     std::unique_ptr<Source> source; // always a ChainSource (chain, below)
     ChainSource* chain = nullptr;
@@ -1407,6 +1531,12 @@ struct Corpus::Data {
     // The tables a catalog body is integrated through, sampled once for
     // every engine on the corpus.
     PerturberBlocks perturber_blocks;
+
+    // The small-body windows integrated so far, for every engine on the
+    // corpus, dropped when any file is added, and the records they start
+    // from, dropped when a catalog is.
+    WindowStore small_body_windows;
+    RecordStore small_body_records;
 
     // The Moon's apsis passages by block (Engine::Impl::ensure_apsides),
     // each block scanned once for every engine; dropped when an ephemeris is
@@ -1562,8 +1692,10 @@ struct Engine::Impl {
 
     // Small-body overlay: the corpus's catalogs, newest wins. Positions are
     // integrated on demand from the catalog's osculating elements with
-    // the barycentric force model and memoized per body, per engine.
+    // the barycentric force model and memoized per body, per engine, from
+    // windows the corpus keeps for all of them.
     PerturberSet perturbers;
+    EngineWindows windows{corpus.small_body_windows, perturbers};
     std::unordered_map<uint64_t, SmallBody> small_bodies;
     // Decoding a catalog record walks its chunk from the start, so a body
     // asked for repeatedly — which is every body in a chart — would pay that
@@ -1783,13 +1915,22 @@ struct Engine::Impl {
     Result<std::optional<std::pair<catalog::Record, size_t>>> find_record_at(int id) {
         if (auto hit = record_cache.find(uint64_t(id)); hit != record_cache.end())
             return std::optional<std::pair<catalog::Record, size_t>>(hit->second);
+        const auto remember = [&](const std::pair<catalog::Record, size_t>& entry) {
+            if (record_cache.size() >= kRecordCacheMax)
+                record_cache.clear();
+            record_cache[uint64_t(id)] = entry;
+        };
+        if (auto kept = corpus.small_body_records.find(uint64_t(id))) {
+            remember(*kept);
+            return std::optional<std::pair<catalog::Record, size_t>>(*kept);
+        }
         for (size_t i = catalogs.size(); i-- > 0;) {
             auto rr = catalogs[i]->lookup(uint64_t(id), scratch.chunk(i));
             if (rr.ok()) {
-                if (record_cache.size() >= kRecordCacheMax)
-                    record_cache.clear();
-                record_cache[uint64_t(id)] = {rr.value(), i};
-                return std::optional<std::pair<catalog::Record, size_t>>({rr.value(), i});
+                const std::pair<catalog::Record, size_t> entry{rr.value(), i};
+                remember(entry);
+                corpus.small_body_records.keep(uint64_t(id), entry);
+                return std::optional<std::pair<catalog::Record, size_t>>(entry);
             }
             if (rr.error().code != ErrorCode::NotFound)
                 return rr.error();
@@ -1914,6 +2055,7 @@ struct Engine::Impl {
         SmallBody b;
         b.force = force_for(int(rec.spkid));
         b.memo = std::make_unique<WindowMemo<BarycentricForce>>(b.force.get(), IntegrateOptions{});
+        b.memo->set_share(&windows, window_key(int(rec.spkid), 0));
         b.memo->set_seed(seed.value(), rec.epoch_jtdb);
         const auto [lo, hi] = perturbers.span();
         b.memo->set_limits(lo, hi);
@@ -2004,6 +2146,7 @@ struct Engine::Impl {
                     return seed.error();
                 auto memo = std::make_unique<WindowMemo<BarycentricForce>>(track_force.get(),
                                                                            IntegrateOptions{});
+                memo->set_share(&windows, window_key(int(rec.spkid), 1 + 2 * k + (sign < 0)));
                 memo->set_seed(seed.value(), t0);
                 const auto [lo, hi] = perturbers.span();
                 memo->set_limits(lo, hi);
@@ -3505,6 +3648,7 @@ Result<void> Corpus::add_ephemeris(const std::string& path) {
     // A passage scan may have stopped at the old span's edge, and its block
     // would keep refusing an instant the new file covers.
     d_->apsis_blocks.clear();
+    d_->small_body_windows.clear();
     return {};
 }
 
@@ -3527,6 +3671,8 @@ Result<void> Corpus::add_catalog(const std::string& path) {
     d_->distinct_bodies.reset();
     d_->name_indexes.emplace_back();
     d_->refresh_overlay_source();
+    d_->small_body_windows.clear(); // a newer catalog may revise any body's elements
+    d_->small_body_records.clear();
     return {};
 }
 
@@ -3553,6 +3699,7 @@ Result<void> Corpus::add_perturbers(const std::string& path) {
     d_->asteroids = std::move(src);
     d_->asteroid_masses = std::move(massive);
     d_->perturber_blocks.attach_asteroids(d_->asteroids.get(), d_->asteroid_masses);
+    d_->small_body_windows.clear(); // integrated without these masses
     d_->refresh_overlay_source();
     return {};
 }
@@ -3690,6 +3837,24 @@ Result<int> Engine::lookup(std::string_view name) const {
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");
     const std::string key = Impl::lowercase(name);
+    // A number names its body by itself, so a numbered body needs no name
+    // index, which costs half a second to build over a full catalog. Every
+    // numbered body of SBDB sits at this SPK-ID, and no name or provisional
+    // designation is all digits (1.58M bodies, 2026-11-01). A body elsewhere
+    // is found through the index, as a designation is.
+    if (key.size() <= 7 &&
+        std::all_of(key.begin(), key.end(), [](char c) { return c >= '0' && c <= '9'; }) &&
+        !key.empty()) {
+        const int spkid = int(kSpkidNumberedBase + std::stol(key));
+        auto r = impl_->find_record_at(spkid);
+        if (!r.ok())
+            return r.error();
+        if (r.value()) {
+            const auto& [rec, i] = *r.value();
+            if (catalog::record_names(impl_->catalogs[i]->name_pool(), rec).pdes == key)
+                return spkid;
+        }
+    }
     const uint64_t h = Impl::name_hash(key);
     // Newest catalog first; within one catalog the highest SPK-ID carrying
     // the name wins (as a later record would have overwritten it).
@@ -4479,6 +4644,14 @@ Result<uint64_t> Engine::catalog_bodies() const {
     std::sort(ids.begin(), ids.end());
     d.distinct_bodies = uint64_t(std::unique(ids.begin(), ids.end()) - ids.begin());
     return *d.distinct_bodies;
+}
+
+uint64_t Engine::small_body_windows_integrated() const {
+    return impl_ ? impl_->windows.integrated() : 0;
+}
+
+size_t Engine::small_body_windows_kept() const {
+    return impl_ ? impl_->corpus.small_body_windows.size() : 0;
 }
 
 Result<std::pair<double, double>> Engine::catalog_state_span(int spkid) {
