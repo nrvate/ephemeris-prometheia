@@ -1,4 +1,4 @@
-# Handoff — where the work stands (2026-10-28)
+# Handoff — where the work stands (2026-11-01)
 
 A point-in-time snapshot for anyone picking the repository up. Durable
 working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
@@ -6,7 +6,57 @@ working rules live in [CLAUDE.md](../CLAUDE.md); the decision history in
 cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 [CHANGELOG.md](../CHANGELOG.md).
 
-## Resume here (state at 2026-10-28)
+## Resume here (state at 2026-11-01)
+
+**astromcp's port plan, Part A, is complete, and astromcp is building on
+it.** Requests now come from its live searches, not the plan. The peer
+sessions change; `ListAgents` names them. Astrolog's session hears about every
+change to the C ABI, the wire or `.epm` before it lands, and it pins and
+checks what it calls. Check `astrolog-dependency-surface` before saying a
+change touches Astrolog: it does not call the roots, coverage or rise and set
+functions.
+
+**Landed since Part A, 2026-10-28:**
+- Root finding on segments: `prometheia_segments_roots` (`e406777`, with
+  `b710d62` and `f6348da`) and sums of up to eight terms (`e5bb89d`). Method
+  and measurements in SEGMENTS.md, "Roots"; an independent oracle in
+  `tests/test_c_segment_roots.cpp` (`bcecb23`, `302397e`).
+- Deflection tapered inside the solar disc (`fdf9990`, `f5c6609`). It was a
+  false retrograde station in Astrolog's charts, and refused fits. The taper
+  is a smoothing convention, and ENGINE.md says so.
+- `prometheia_object_coverage` and `_end` (`e5bb89d`, `079d038`, `6a8ea1e`).
+- The folded name index is the corpus's (`13e039e`).
+- Rise and set 12–20 times faster (`2c2c43e`).
+
+**Landed on 2026-11-01:**
+- A geocentric node or apsis may join terms from one site in a root search
+  (`00658a2`, narrowed by `df22cca`: the first version let a geocentric body
+  through, and Astrolog's review caught it).
+- Contexts share small-body windows and decoded records, and a numbered body
+  needs no name index (`64174bb`; ENGINE.md, "Threads"). A new context's first
+  11 bodies at J2000 went from 108 ms to 0.5 ms.
+- Fits reach the ends of coverage (`82bb4c9`). About 29% of span lengths had
+  been refused there, from one double of rounding.
+
+**Decided, not done:** astromcp's item 3. The 200 ms of `add_catalog` is the
+eager integrity check, kept so a corrupt file fails at load. A second
+Dataset's cost needs a shared library, which the build does not have.
+
+**Open:**
+- MSVC has not seen `segment_roots.cpp` or the C4996 claim from `f86ba29`.
+  Both wait for Astrolog's next Windows dry run.
+- Heliacal: only sighting records can settle the offset from swetest.
+  Schaefer 1987 (JHA, 556 sightings) has not been read (HELIACAL.md).
+
+**Measuring here:** `tools/tsan.sh` needs `setarch -R` to start, so a TSan
+binary run by hand dies silently without it. A test that passes without its
+fix guards nothing: rounding cases depend on the exact doubles, so pin spans
+that really failed.
+
+**Limits** (maintainer): at most 3 sub-agents and 2 CPU-bound jobs at
+once. The machine is shared with the astromcp and Astrolog sessions.
+
+## State at 2026-10-28
 
 **astromcp's port plan, Part A, is complete** (A-16 landed `a435099`,
 2026-10-28). What remains of the port is astromcp's Part B. The plan is
