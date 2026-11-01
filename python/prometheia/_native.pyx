@@ -1035,7 +1035,9 @@ def segment_roots(a, b=None, *, str component="lon", double ca=1.0, cb=None,
     for one component of the fits (SEGMENT_COMPONENTS), as SegmentRoots in
     time order, in a SegmentRoots list (docs/C_API.md, "Roots on segments").
     A term is a Segments or a
-    list of them back to back, all fitted with the same options. cb is -1
+    list of them back to back, all fitted with the same options; terms may
+    differ in their corrections, and in being geocentric or from one site
+    (docs/C_API.md, "Roots on segments"). cb is -1
     with b (a difference: phases, aspects) and 0 without. For "lon", f is
     taken modulo `modulus` (0: 360), and a wrap is never a root. start and
     end default to the span both terms cover; a moving target needs

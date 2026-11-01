@@ -531,8 +531,21 @@ prometheia_status prometheia_segments_roots(const prometheia_segments_function *
   - **The terms.** `nb` is 0 for a function of one object.
   - **Handles and coordinates.** The two terms may come from different
     fits, with bounds that never coincide. Every handle must have been
-    fitted in the same centre, frame, coords and zodiac. The corrections
-    (light time, deflection, aberration) may differ.
+    fitted in the same frame, coords and zodiac. The corrections (light
+    time, deflection, aberration) may differ.
+  - **Observers.** Every handle must also be from one observer, with one
+    exception between terms: geocentric terms may be added to topocentric
+    terms of one site.
+    - **Why.** A node or an apsis is a direction with no distance of its
+      own, so it takes no parallax and is fitted geocentrically beside
+      bodies fitted from a site. A topocentric declination parallel between
+      Saturn and the true node is such a sum. The sum is plain arithmetic
+      on angles, so nothing in the search depends on the centre, and what
+      the sum means is the caller's.
+    - **Still refused:** two different sites in one sum, any other mix of
+      centres (heliocentric with geocentric, say), and a mix inside one
+      term. A term's handles are joined as one continuous function, and a
+      parallax step at a join is not a fit's step to smooth over.
 - **Handles back to back.** A term may be several handles of one object,
   each ending exactly where the next starts. A gap or an overlap is
   refused. astromcp, for example, fits

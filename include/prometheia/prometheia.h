@@ -1576,8 +1576,12 @@ PROMETHEIA_API void prometheia_segments_close(prometheia_segments* segments);
  * PROMETHEIA_ERROR_ARGUMENT), and is one continuous
  * function across those joins as across its segment bounds. nb is 0 for no
  * second term (b and cb are then not read). The two terms may come from
- * different fits, but every handle must have been fitted in the same
- * centre, frame, coords and zodiac (the corrections may differ).
+ * different fits, but every handle must have been fitted in the same frame,
+ * coords and zodiac (the corrections may differ) and from one observer.
+ * The exception is between terms: a geocentric term may be added to
+ * topocentric terms of one site, for a node or apsis is a direction with no
+ * distance of its own, and takes no parallax. All of one term's handles are
+ * from the same observer.
  *
  * A longitude is taken modulo M = modulus (0: 360) in (-M/2, M/2]: its
  * roots are where that passes 0, never where it wraps. 360 ca / M and

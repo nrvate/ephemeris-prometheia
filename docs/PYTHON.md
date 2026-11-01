@@ -169,7 +169,7 @@ the C++ engine's, bit for bit.
     (t - target_jd_tt))` passes 0, as `SegmentRoot`s (`jd_tt`, `slope`,
     `err_days`, `tangent`) ([C_API.md](C_API.md), "Roots on segments"). A term
     is a `Segments` or a list of them back to back, all fitted with the same
-    options; `component` is a name in `SEGMENT_COMPONENTS`. `cb` is -1 with
+    options, and terms differ only as that section allows; `component` is a name in `SEGMENT_COMPONENTS`. `cb` is -1 with
     `b` (a difference: phases, aspects) and 0 without; for `"lon"`, `f` is
     taken modulo `modulus` (0 means 360). The window defaults to what both
     terms cover; a moving target needs `target_jd_tt`. The C call runs

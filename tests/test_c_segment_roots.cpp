@@ -1271,6 +1271,148 @@ TEST_CASE("c_segment_roots_sum_terms") {
     prometheia_engine_close(e);
 }
 
+TEST_CASE("c_segment_roots_geocentric_direction_with_a_topocentric_body") {
+    // A topocentric declination parallel between the Moon and its osculating
+    // node: a direction takes no parallax, so it is fitted geocentrically
+    // beside a body fitted from a site (astromcp). Against bisection on
+    // calc, each term placed as its own fit is, and the mixes that stay
+    // refused.
+    prometheia_engine* e = open_engine();
+    if (!e) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    prometheia_options geo;
+    prometheia_options_init(&geo);
+    geo.coords = PROMETHEIA_COORDS_EQUATORIAL;
+    geo.sigma = 0;
+    prometheia_options topo = geo;
+    topo.center = PROMETHEIA_CENTER_TOPOCENTRIC;
+    topo.site_lon_deg = 72.9;
+    topo.site_lat_deg = 19.1;
+    prometheia_options elsewhere = topo;
+    elsewhere.site_lon_deg = -74.0;
+    prometheia_options helio = geo;
+    helio.center = PROMETHEIA_CENTER_HELIOCENTRIC;
+    prometheia_options ecliptic = geo;
+    ecliptic.coords = PROMETHEIA_COORDS_ECLIPTIC;
+
+    const prometheia_object moon{PROMETHEIA_OBJECT_BODY, PROMETHEIA_MOON, nullptr};
+    const prometheia_object mars{PROMETHEIA_OBJECT_BODY, 4, nullptr};
+    const prometheia_object node{PROMETHEIA_OBJECT_ORBIT_POINT, PROMETHEIA_MOON,
+                                 "ascending-node:osculating"};
+    const double from = kJ2026, to = kJ2026 + 60.0;
+    const auto fit = [&](const prometheia_object& o, const prometheia_options& opts, double a,
+                         double b) {
+        prometheia_segments* s = nullptr;
+        prometheia_error err;
+        REQUIRE_MESSAGE(prometheia_segments_fit(e, &o, a, b, &opts, 0.001, &s, &err) ==
+                            PROMETHEIA_OK,
+                        err.message);
+        return s;
+    };
+    prometheia_segments* body = fit(moon, topo, from, to);
+    prometheia_segments* point = fit(node, geo, from, to);
+    const prometheia_segments* hb[1] = {body};
+    const prometheia_segments* hp[1] = {point};
+
+    const auto search = [&](const prometheia_segments_term* terms, int n,
+                            std::vector<prometheia_segments_root>& out, prometheia_error* err) {
+        prometheia_segments_sum f{};
+        f.terms = terms;
+        f.nterms = n;
+        f.component = PROMETHEIA_SEGMENTS_LAT;
+        out.resize(64);
+        int count = 0, unresolved = -1;
+        double resume = 0.0;
+        const prometheia_status st = prometheia_segments_roots_sum(
+            &f, from, to, kTolDays, out.data(), int(out.size()), &count, &resume, &unresolved, err);
+        out.resize(size_t(count));
+        if (st == PROMETHEIA_OK) {
+            CHECK(std::isnan(resume));
+            CHECK(unresolved == 0);
+        }
+        return st;
+    };
+
+    // Both orders of the terms: the site is found wherever it is.
+    const prometheia_segments_term body_first[2] = {{hb, 1, 1.0}, {hp, 1, -1.0}};
+    const prometheia_segments_term point_first[2] = {{hp, 1, -1.0}, {hb, 1, 1.0}};
+    std::vector<prometheia_segments_root> roots, swapped;
+    prometheia_error err;
+    REQUIRE_MESSAGE(search(body_first, 2, roots, &err) == PROMETHEIA_OK, err.message);
+    REQUIRE_MESSAGE(search(point_first, 2, swapped, &err) == PROMETHEIA_OK, err.message);
+    REQUIRE(roots.size() == swapped.size());
+    for (size_t i = 0; i < roots.size(); ++i)
+        CHECK(same(roots[i], swapped[i]));
+
+    // The oracle: the same difference from calc, each term as it was fitted.
+    const auto diff = [&](double t) {
+        prometheia_result a, b;
+        REQUIRE(prometheia_calc_object(e, &moon, t, &topo, &a, nullptr) == PROMETHEIA_OK);
+        REQUIRE(prometheia_calc_object(e, &node, t, &geo, &b, nullptr) == PROMETHEIA_OK);
+        return a.lat_deg - b.lat_deg;
+    };
+    std::vector<double> truth;
+    double ta = from, fa = diff(ta);
+    for (double tb = from + 0.02; ta < to; tb += 0.02) {
+        tb = std::min(tb, to);
+        const double fb = diff(tb);
+        if ((fa < 0.0) != (fb < 0.0)) {
+            double lo = ta, hi = tb, flo = fa;
+            while (hi - lo > kOracleDays) {
+                const double mid = 0.5 * (lo + hi), fm = diff(mid);
+                if ((fm < 0.0) == (flo < 0.0)) {
+                    lo = mid;
+                    flo = fm;
+                } else {
+                    hi = mid;
+                }
+            }
+            truth.push_back(0.5 * (lo + hi));
+        }
+        ta = tb;
+        fa = fb;
+    }
+    REQUIRE(truth.size() >= 4); // about one a week: the Moon's twice-monthly swing
+    REQUIRE(roots.size() == truth.size());
+    for (size_t i = 0; i < roots.size(); ++i) {
+        INFO("root ", i, " at ", roots[i].jd_tt);
+        CHECK(std::fabs(roots[i].jd_tt - truth[i]) <= roots[i].err_days);
+    }
+
+    // Still refused: two sites, including by way of a geocentric term
+    // between them, and any other mix of centres.
+    prometheia_segments* there = fit(moon, elsewhere, from, to);
+    prometheia_segments* sunward = fit(mars, helio, from, to);
+    prometheia_segments* other_coords = fit(moon, ecliptic, from, to);
+    const prometheia_segments* ht[1] = {there};
+    const prometheia_segments* hs[1] = {sunward};
+    const prometheia_segments* hc[1] = {other_coords};
+    std::vector<prometheia_segments_root> none;
+    const prometheia_segments_term two_sites[2] = {{hb, 1, 1.0}, {ht, 1, -1.0}};
+    const prometheia_segments_term by_way_of_geo[3] = {{hp, 1, 1.0}, {hb, 1, 0.5}, {ht, 1, -0.5}};
+    const prometheia_segments_term helio_geo[2] = {{hs, 1, 1.0}, {hp, 1, -1.0}};
+    const prometheia_segments_term helio_topo[2] = {{hb, 1, 1.0}, {hs, 1, -1.0}};
+    const prometheia_segments_term coords[2] = {{hb, 1, 1.0}, {hc, 1, -1.0}};
+    CHECK(search(two_sites, 2, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(search(by_way_of_geo, 3, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(search(helio_geo, 2, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(search(helio_topo, 2, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(search(coords, 2, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
+
+    // Nor inside one term: a parallax step at a join is no fit's to smooth.
+    prometheia_segments* first = fit(moon, topo, from, from + 30.0);
+    prometheia_segments* second = fit(moon, geo, from + 30.0, to);
+    const prometheia_segments* mixed[2] = {first, second};
+    const prometheia_segments_term one_term[1] = {{mixed, 2, 1.0}};
+    CHECK(search(one_term, 1, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
+
+    for (prometheia_segments* s : {body, point, there, sunward, other_coords, first, second})
+        prometheia_segments_close(s);
+    prometheia_engine_close(e);
+}
+
 TEST_CASE("c_segment_roots_report" * doctest::skip()) {
     prometheia_engine* e = open_engine();
     if (!e) {

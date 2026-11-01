@@ -2194,18 +2194,24 @@ constexpr double kSegmentMinDistanceAu = 1e-9;
 // How far inside a cut a piece's fit stops (docs/C_API.md, "Steps").
 constexpr double kSegmentCutGap = 1e-8;
 
-// Whether two fits' coordinates are the same: the centre, frame, coords and
-// zodiac they were fitted in. The corrections (light time, deflection,
-// aberration) are the caller's choice and may differ.
-bool same_place(const prometheia_options& a, const prometheia_options& b) {
-    if (a.center != b.center || a.frame != b.frame || a.coords != b.coords ||
-        a.sidereal != b.sidereal || a.precession != b.precession)
+// Whether two fits' coordinates are the same: the frame, coords and zodiac
+// they were fitted in. The corrections (light time, deflection, aberration)
+// are the caller's choice and may differ.
+bool same_frame(const prometheia_options& a, const prometheia_options& b) {
+    if (a.frame != b.frame || a.coords != b.coords || a.sidereal != b.sidereal ||
+        a.precession != b.precession)
         return false;
     if (a.sidereal != PROMETHEIA_SIDEREAL_TROPICAL && a.sidereal_plane != b.sidereal_plane)
         return false;
     if (a.sidereal == PROMETHEIA_SIDEREAL_USER &&
         (a.sidereal_epoch_jd != b.sidereal_epoch_jd ||
          a.sidereal_ayanamsa_deg != b.sidereal_ayanamsa_deg))
+        return false;
+    return true;
+}
+
+bool same_observer(const prometheia_options& a, const prometheia_options& b) {
+    if (a.center != b.center)
         return false;
     if (a.center == PROMETHEIA_CENTER_TOPOCENTRIC &&
         (a.site_lon_deg != b.site_lon_deg || a.site_lat_deg != b.site_lat_deg ||
@@ -2216,16 +2222,37 @@ bool same_place(const prometheia_options& a, const prometheia_options& b) {
     return true;
 }
 
-// One term of a root search: handles back to back, inside the window.
+// Whether two terms of a sum may be added: the same coordinates, seen from
+// one observer, or from the Earth's centre and one site on it. That last is
+// no accident to refuse: a node or apsis is a direction with no distance of
+// its own, so it takes no parallax and is fitted geocentrically beside
+// bodies fitted from a site (docs/C_API.md, "Roots on segments").
+bool terms_agree(const prometheia_options& a, const prometheia_options& b) {
+    if (!same_frame(a, b))
+        return false;
+    if (same_observer(a, b))
+        return true;
+    return (a.center == PROMETHEIA_CENTER_GEOCENTRIC &&
+            b.center == PROMETHEIA_CENTER_TOPOCENTRIC) ||
+           (a.center == PROMETHEIA_CENTER_TOPOCENTRIC && b.center == PROMETHEIA_CENTER_GEOCENTRIC);
+}
+
+// One term of a root search: handles back to back, inside the window, all
+// from one observer, for a parallax step at a join is no fit's step to
+// smooth over; and the term as a whole fit to add to `place`.
 prometheia_status check_term(const prometheia_segments* const* hs, int n,
                              const prometheia_options& place, double from, double to,
                              prometheia_error* err) {
     for (int h = 0; h < n; ++h) {
         if (!hs[h])
             return argument(err, "segments roots: a handle is NULL");
-        if (!same_place(hs[h]->opts, place))
-            return argument(err, "segments roots: the handles were fitted in different "
-                                 "coordinates (centre, frame, coords or zodiac)");
+        if (!same_frame(hs[h]->opts, hs[0]->opts) || !same_observer(hs[h]->opts, hs[0]->opts))
+            return argument(err, "segments roots: a term's handles were fitted in different "
+                                 "coordinates or from different observers");
+        if (!terms_agree(hs[h]->opts, place))
+            return argument(err, "segments roots: the terms were fitted in different frames, "
+                                 "coords or zodiacs, or from different observers (only the "
+                                 "Earth's centre and one site may mix)");
         if (h > 0 && hs[h - 1]->layout.jd_tt_end != hs[h]->layout.jd_tt_start)
             return argument(err, "segments roots: a term's handles must be back to back, "
                                  "each ending where the next starts");
@@ -2735,7 +2762,16 @@ prometheia_status prometheia_segments_roots_sum(const prometheia_segments_sum* f
     } else if (modulus != 0.0) {
         return argument(err, "segments roots: only a longitude takes a modulus");
     }
-    const prometheia_options& place = terms[0].handles[0]->opts;
+    // A site, if any term has one: every other term is held to it, so that
+    // two terms from different sites cannot both pass by way of a geocentric
+    // term between them.
+    const prometheia_options* site = &terms[0].handles[0]->opts;
+    for (int i = 0; i < n; ++i)
+        if (terms[i].handles[0]->opts.center == PROMETHEIA_CENTER_TOPOCENTRIC) {
+            site = &terms[i].handles[0]->opts;
+            break;
+        }
+    const prometheia_options& place = *site;
     for (int i = 0; i < n; ++i)
         if (prometheia_status st =
                 check_term(terms[i].handles, terms[i].count, place, jd_tt_start, jd_tt_end, err);
