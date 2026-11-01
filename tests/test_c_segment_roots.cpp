@@ -1299,6 +1299,7 @@ TEST_CASE("c_segment_roots_geocentric_direction_with_a_topocentric_body") {
 
     const prometheia_object moon{PROMETHEIA_OBJECT_BODY, PROMETHEIA_MOON, nullptr};
     const prometheia_object mars{PROMETHEIA_OBJECT_BODY, 4, nullptr};
+    const prometheia_object sun{PROMETHEIA_OBJECT_BODY, 10, nullptr};
     const prometheia_object node{PROMETHEIA_OBJECT_ORBIT_POINT, PROMETHEIA_MOON,
                                  "ascending-node:osculating"};
     const double from = kJ2026, to = kJ2026 + 60.0;
@@ -1395,6 +1396,27 @@ TEST_CASE("c_segment_roots_geocentric_direction_with_a_topocentric_body") {
     const prometheia_segments_term helio_geo[2] = {{hs, 1, 1.0}, {hp, 1, -1.0}};
     const prometheia_segments_term helio_topo[2] = {{hb, 1, 1.0}, {hs, 1, -1.0}};
     const prometheia_segments_term coords[2] = {{hb, 1, 1.0}, {hc, 1, -1.0}};
+    // A geocentric body beside a site, in either order: the Moon's parallax
+    // reaches a degree, and only the object tells this from a node
+    // (Astrolog's review).
+    prometheia_segments* geo_moon = fit(moon, geo, from, to);
+    prometheia_segments* topo_sun = fit(sun, topo, from, to);
+    const prometheia_segments* hg[1] = {geo_moon};
+    const prometheia_segments* hm[1] = {topo_sun};
+    const prometheia_segments_term body_beside_site[2] = {{hg, 1, 1.0}, {hm, 1, -1.0}};
+    const prometheia_segments_term site_beside_body[2] = {{hm, 1, 1.0}, {hg, 1, -1.0}};
+    prometheia_error why;
+    CHECK(search(body_beside_site, 2, none, &why) == PROMETHEIA_ERROR_ARGUMENT);
+    CHECK(std::strstr(why.message, "observers"));
+    CHECK(search(site_beside_body, 2, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
+    // A node from a site is one observer, and takes the ordinary path.
+    prometheia_segments* topo_node = fit(node, topo, from, to);
+    const prometheia_segments* hn[1] = {topo_node};
+    const prometheia_segments_term node_from_the_site[2] = {{hb, 1, 1.0}, {hn, 1, -1.0}};
+    CHECK(search(node_from_the_site, 2, none, nullptr) == PROMETHEIA_OK);
+    // Geocentric node and geocentric body: one observer, no site involved.
+    const prometheia_segments_term both_geocentric[2] = {{hg, 1, 1.0}, {hp, 1, -1.0}};
+    CHECK(search(both_geocentric, 2, none, nullptr) == PROMETHEIA_OK);
     CHECK(search(two_sites, 2, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(search(by_way_of_geo, 3, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
     CHECK(search(helio_geo, 2, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
@@ -1408,7 +1430,8 @@ TEST_CASE("c_segment_roots_geocentric_direction_with_a_topocentric_body") {
     const prometheia_segments_term one_term[1] = {{mixed, 2, 1.0}};
     CHECK(search(one_term, 1, none, nullptr) == PROMETHEIA_ERROR_ARGUMENT);
 
-    for (prometheia_segments* s : {body, point, there, sunward, other_coords, first, second})
+    for (prometheia_segments* s :
+         {body, point, there, sunward, other_coords, first, second, geo_moon, topo_sun, topo_node})
         prometheia_segments_close(s);
     prometheia_engine_close(e);
 }

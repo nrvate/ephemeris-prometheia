@@ -2181,6 +2181,7 @@ struct prometheia_segments {
     std::vector<double> bounds, mid, half, coef, dcoef;
     std::vector<int> degree;
     prometheia_options opts{}; // as fitted: where the coordinates are
+    bool direction = false;    // a node or apsis: no distance of its own, so no parallax
 };
 
 namespace {
@@ -2222,24 +2223,19 @@ bool same_observer(const prometheia_options& a, const prometheia_options& b) {
     return true;
 }
 
-// Whether two terms of a sum may be added: the same coordinates, seen from
-// one observer, or from the Earth's centre and one site on it. That last is
-// no accident to refuse: a node or apsis is a direction with no distance of
-// its own, so it takes no parallax and is fitted geocentrically beside
-// bodies fitted from a site (docs/C_API.md, "Roots on segments").
-bool terms_agree(const prometheia_options& a, const prometheia_options& b) {
-    if (!same_frame(a, b))
-        return false;
-    if (same_observer(a, b))
-        return true;
-    return (a.center == PROMETHEIA_CENTER_GEOCENTRIC &&
-            b.center == PROMETHEIA_CENTER_TOPOCENTRIC) ||
-           (a.center == PROMETHEIA_CENTER_TOPOCENTRIC && b.center == PROMETHEIA_CENTER_GEOCENTRIC);
+// Whether a handle may be added to a term from `site`, a topocentric fit: a
+// node or apsis is a direction with no distance of its own, so it takes no
+// parallax and is rightly geocentric there. A body is not: the Moon's
+// parallax reaches a degree, and one option forgotten on one fit would move
+// the roots that far, in silence (docs/C_API.md, "Roots on segments").
+bool direction_beside(const prometheia_segments& h, const prometheia_options& site) {
+    return h.direction && h.opts.center == PROMETHEIA_CENTER_GEOCENTRIC &&
+           site.center == PROMETHEIA_CENTER_TOPOCENTRIC;
 }
 
 // One term of a root search: handles back to back, inside the window, all
 // from one observer, for a parallax step at a join is no fit's step to
-// smooth over; and the term as a whole fit to add to `place`.
+// smooth over; and each fit to add to `place`.
 prometheia_status check_term(const prometheia_segments* const* hs, int n,
                              const prometheia_options& place, double from, double to,
                              prometheia_error* err) {
@@ -2249,10 +2245,13 @@ prometheia_status check_term(const prometheia_segments* const* hs, int n,
         if (!same_frame(hs[h]->opts, hs[0]->opts) || !same_observer(hs[h]->opts, hs[0]->opts))
             return argument(err, "segments roots: a term's handles were fitted in different "
                                  "coordinates or from different observers");
-        if (!terms_agree(hs[h]->opts, place))
+        if (!same_frame(hs[h]->opts, place))
             return argument(err, "segments roots: the terms were fitted in different frames, "
-                                 "coords or zodiacs, or from different observers (only the "
-                                 "Earth's centre and one site may mix)");
+                                 "coords or zodiacs");
+        if (!same_observer(hs[h]->opts, place) && !direction_beside(*hs[h], place))
+            return argument(err, "segments roots: the terms were fitted from different "
+                                 "observers (only a geocentric node or apsis may join terms "
+                                 "from one site)");
         if (h > 0 && hs[h - 1]->layout.jd_tt_end != hs[h]->layout.jd_tt_start)
             return argument(err, "segments roots: a term's handles must be back to back, "
                                  "each ending where the next starts");
@@ -2549,6 +2548,7 @@ prometheia_status prometheia_segments_fit(prometheia_engine* engine,
             h->opts = *opts;
         else
             prometheia_options_init(&h->opts);
+        h->direction = ref.kind == Engine::ObjectRef::Kind::OrbitPoint;
         *out = h.release();
         return succeed(err);
     });

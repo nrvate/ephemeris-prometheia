@@ -1578,10 +1578,10 @@ PROMETHEIA_API void prometheia_segments_close(prometheia_segments* segments);
  * second term (b and cb are then not read). The two terms may come from
  * different fits, but every handle must have been fitted in the same frame,
  * coords and zodiac (the corrections may differ) and from one observer.
- * The exception is between terms: a geocentric term may be added to
- * topocentric terms of one site, for a node or apsis is a direction with no
- * distance of its own, and takes no parallax. All of one term's handles are
- * from the same observer.
+ * The one exception is a node or apsis (PROMETHEIA_OBJECT_ORBIT_POINT): a
+ * direction with no distance of its own, it takes no parallax, so a
+ * geocentric fit of one may be added to terms from one site. A geocentric
+ * body may not. All of one term's handles are from the same observer.
  *
  * A longitude is taken modulo M = modulus (0: 360) in (-M/2, M/2]: its
  * roots are where that passes 0, never where it wraps. 360 ca / M and

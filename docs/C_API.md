@@ -534,18 +534,22 @@ prometheia_status prometheia_segments_roots(const prometheia_segments_function *
     fitted in the same frame, coords and zodiac. The corrections (light
     time, deflection, aberration) may differ.
   - **Observers.** Every handle must also be from one observer, with one
-    exception between terms: geocentric terms may be added to topocentric
-    terms of one site.
-    - **Why.** A node or an apsis is a direction with no distance of its
-      own, so it takes no parallax and is fitted geocentrically beside
-      bodies fitted from a site. A topocentric declination parallel between
-      Saturn and the true node is such a sum. The sum is plain arithmetic
-      on angles, so nothing in the search depends on the centre, and what
-      the sum means is the caller's.
-    - **Still refused:** two different sites in one sum, any other mix of
-      centres (heliocentric with geocentric, say), and a mix inside one
-      term. A term's handles are joined as one continuous function, and a
-      parallax step at a join is not a fit's step to smooth over.
+    exception: a geocentric fit of a node or an apsis
+    (`PROMETHEIA_OBJECT_ORBIT_POINT`) may be added to terms from one site.
+    - **Why that one.** A node or an apsis is a direction with no distance
+      of its own, so it takes no parallax, and is fitted geocentrically
+      beside bodies fitted from a site. A topocentric declination parallel
+      between Saturn and the true node is such a sum. The handle records
+      what was fitted, so the rule checks the reason and not just the
+      centres.
+    - **Why not the rest.** The refusal is here to catch an option forgotten
+      on one fit. A geocentric Moon beside a topocentric Sun is refused: the
+      Moon's parallax reaches about 1°, and the roots would move by that
+      much with no error. So are two different sites in one sum, and any
+      other mix of centres.
+    - **Inside one term** no mix is allowed, a node included. A term's
+      handles are joined as one continuous function, and a step in the
+      observer at a join is not a fit's step to smooth over.
 - **Handles back to back.** A term may be several handles of one object,
   each ending exactly where the next starts. A gap or an overlap is
   refused. astromcp, for example, fits

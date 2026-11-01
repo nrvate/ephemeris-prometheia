@@ -13,13 +13,13 @@ documented, not that it is frozen.
 
 ## Unreleased
 
-- **A root search may add a geocentric term to topocentric ones**
-  (docs/C_API.md, "Roots on segments"). A node or apsis is a direction with
-  no distance of its own, so it takes no parallax and is fitted geocentrically
-  beside bodies fitted from a site, and every such sum was refused: a
-  topocentric declination parallel with the true node, say (astromcp's
-  report). Terms may now mix the Earth's centre with one site. Two sites, any
-  other mix of centres, and a mix inside one term are still refused.
+- **A root search may add a geocentric node or apsis to terms from one
+  site** (docs/C_API.md, "Roots on segments"). A node or apsis is a direction
+  with no distance of its own, so it takes no parallax and is fitted
+  geocentrically beside bodies fitted from a site, and every such sum was
+  refused: a topocentric declination parallel with the true node, say
+  (astromcp's report). A geocentric body beside a site is still refused, as
+  are two sites, any other mix of centres, and any mix inside one term.
 
 - **Rise and set, 12 to 20 times faster** (docs/ENGINE.md, "Rise, set and
   transit"). astromcp measured `rise_set` at 25–50× libswe's `rise_trans`.
