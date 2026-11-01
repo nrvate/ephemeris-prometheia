@@ -10,6 +10,8 @@ namespace {
 
 constexpr double kNewtonTol = 1e-14; // relative; a handful of iterations
 constexpr int kNewtonMaxIter = 64;
+constexpr double kKeplerResidual = 1e-13; // radians of mean anomaly, solved
+constexpr double kPi = 3.1415926535897932384626433832795;
 
 double wrap_pi(double x) {
     const double two_pi = 6.283185307179586476925286766559;
@@ -25,7 +27,7 @@ double wrap_pi(double x) {
 double solve_elliptic_e(double e, double M) {
     M = wrap_pi(M);
     // Starter: Danby's recommendation — linear for small e, better for high e.
-    double E = e < 0.8 ? M : 3.1415926535897932384626433832795;
+    double E = e < 0.8 ? M : kPi;
     for (int i = 0; i < kNewtonMaxIter; ++i) {
         const double f = E - e * std::sin(E) - M;
         const double fp = 1.0 - e * std::cos(E);
@@ -34,7 +36,19 @@ double solve_elliptic_e(double e, double M) {
         if (std::fabs(dE) <= kNewtonTol * (1.0 + std::fabs(E)))
             break;
     }
-    return E;
+    // From +pi, Newton converges for M > 0. For M < 0 at high e it can wander
+    // and stop anywhere: 11% of mean anomalies at e = 0.999, half an orbit off,
+    // with no error, until 2026-11-01. The root is unique and E - e sin E
+    // rises through it, so bisection cannot miss.
+    if (std::fabs(E - e * std::sin(E) - M) <= kKeplerResidual)
+        return E;
+    double lo = -kPi, hi = kPi;
+    while (true) {
+        const double mid = 0.5 * (lo + hi);
+        if (mid <= lo || mid >= hi)
+            return mid;
+        (mid - e * std::sin(mid) - M < 0.0 ? lo : hi) = mid;
+    }
 }
 
 // Solve M = e sinh H - H for H (e > 1). M scaled by the same sign as a.

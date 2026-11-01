@@ -100,3 +100,25 @@ TEST_CASE("kepler_rejects_bad_elements") {
     CHECK(!r.ok());
     CHECK(r.error().code == ErrorCode::ArgumentError);
 }
+
+TEST_CASE("kepler_equation_is_solved_at_every_mean_anomaly") {
+    // From E = pi, Newton can wander for M just below 0 at high e, and it
+    // stopped wherever its iterations ran out: half an orbit off with no
+    // error, 11% of mean anomalies at e = 0.999, and one real asteroid (858130,
+    // e 0.91). The state a set of elements gives must carry its M back.
+    const double mu = 2.959122082855911e-4;
+    const double two_pi = 6.283185307179586;
+    for (double e : {0.1, 0.5, 0.79, 0.8, 0.83, 0.9, 0.95, 0.99, 0.999, 0.9999}) {
+        double worst = 0.0;
+        for (int i = 0; i < 40000; ++i) {
+            const double M = -9.5 + 19.0 * (i + 0.37) / 40000.0;
+            auto s = elements_to_state(mu, Elements{1.078, e, 0.4, 1.5, 0.5, M});
+            REQUIRE(s.ok());
+            auto back = state_to_elements(mu, s.value());
+            REQUIRE(back.ok());
+            worst = std::max(worst, std::fabs(std::remainder(back.value().mean_anom - M, two_pi)));
+        }
+        INFO("e ", e, ": worst ", worst, " rad");
+        CHECK(worst < 1e-4); // near M = +-pi the round trip itself loses digits
+    }
+}
