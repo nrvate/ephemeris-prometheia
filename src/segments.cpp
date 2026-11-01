@@ -189,8 +189,12 @@ int needed_degree(const Segment& s, double target_arcsec, int min_degree, int ma
     return max_degree + std::max(1, steps);
 }
 
-// Measures the residuals of a fitted segment against the sampler.
-Result<void> measure(Segment& s, const Sampler& sampler, int check_multiple, size_t& calls) {
+// Measures the residuals of a fitted segment against the sampler. The ends
+// are the interval's own instants: mid +- half can round a double past them,
+// and an interval that ends where the sampler's coverage does would be refused
+// (29% of span lengths, 2026-11-01).
+Result<void> measure(Segment& s, const Sampler& sampler, double from, double to, int check_multiple,
+                     size_t& calls) {
     const size_t n = s.x.size();
     const double mid = s.mid_jd_tt, half = s.half_span_days;
     s.err_arcsec = 0.0;
@@ -208,7 +212,7 @@ Result<void> measure(Segment& s, const Sampler& sampler, int check_multiple, siz
         const double t = i == interior       ? -1.0
                          : i == interior + 1 ? 1.0
                                              : -1.0 + 2.0 * (double(i) + 0.5) / double(interior);
-        const double jd = mid + t * half;
+        const double jd = i == interior ? from : i == interior + 1 ? to : mid + t * half;
         double p[3], v[3];
         auto r = sampler(jd, p, v);
         ++calls;
@@ -298,7 +302,9 @@ Result<FitReport> fit(const Sampler& sampler, double jd_from, double jd_to,
                                             options.max_degree);
             use = std::clamp(std::max(again, best.degree), options.min_degree, options.max_degree);
         }
-        if (auto m = measure(best, sampler, options.check_multiple, report.sampler_calls); !m) {
+        if (auto m = measure(best, sampler, in.from, in.to, options.check_multiple,
+                             report.sampler_calls);
+            !m) {
             return m.error();
         }
         // The estimate chose the degree; the measurement decides. Where it
@@ -310,7 +316,9 @@ Result<FitReport> fit(const Sampler& sampler, double jd_from, double jd_to,
                 return more.error();
             }
             best = std::move(more).value();
-            if (auto m = measure(best, sampler, options.check_multiple, report.sampler_calls); !m) {
+            if (auto m = measure(best, sampler, in.from, in.to, options.check_multiple,
+                                 report.sampler_calls);
+                !m) {
                 return m.error();
             }
         }
@@ -400,8 +408,8 @@ Result<ScalarSegment> fit_scalar_coeffs(const ScalarSampler& sampler, double mid
 // Measured on interior points offset from the nodes and both endpoints: the
 // same rule as the vector fit's measure(), for a series whose error is not an
 // angle but a difference of values.
-Result<void> measure_scalar(ScalarSegment& s, const ScalarSampler& sampler, int check_multiple,
-                            size_t& calls) {
+Result<void> measure_scalar(ScalarSegment& s, const ScalarSampler& sampler, double from, double to,
+                            int check_multiple, size_t& calls) {
     const size_t n = s.c.size();
     const double mid = s.mid_jd_tt, half = s.half_span_days;
     s.err_value = 0.0;
@@ -411,7 +419,7 @@ Result<void> measure_scalar(ScalarSegment& s, const ScalarSampler& sampler, int 
                          : i == interior + 1 ? 1.0
                                              : -1.0 + 2.0 * (double(i) + 0.5) / double(interior);
         double x = 0.0;
-        auto r = sampler(mid + t * half, x);
+        auto r = sampler(i == interior ? from : i == interior + 1 ? to : mid + t * half, x);
         ++calls;
         if (!r) {
             return r.error();
@@ -465,7 +473,8 @@ Result<ScalarFitReport> fit_scalar(const ScalarSampler& sampler, double jd_from,
             }
             best = std::move(refit).value();
         }
-        if (auto m = measure_scalar(best, sampler, options.check_multiple, report.sampler_calls);
+        if (auto m = measure_scalar(best, sampler, in.from, in.to, options.check_multiple,
+                                    report.sampler_calls);
             !m) {
             return m.error();
         }
@@ -476,8 +485,8 @@ Result<ScalarFitReport> fit_scalar(const ScalarSampler& sampler, double jd_from,
                 return more.error();
             }
             best = std::move(more).value();
-            if (auto m =
-                    measure_scalar(best, sampler, options.check_multiple, report.sampler_calls);
+            if (auto m = measure_scalar(best, sampler, in.from, in.to, options.check_multiple,
+                                        report.sampler_calls);
                 !m) {
                 return m.error();
             }

@@ -13,6 +13,13 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **A fit reaches the ends of coverage.** `prometheia_segments_fit` computed
+  the ends of its check set as mid ± half, which can round a double past
+  them, so about 29% of span lengths were refused at either end of an object's
+  coverage, any object (astromcp's report, for Chiron). The ends are now the
+  interval's own instants, which is what `prometheia_object_coverage` promises.
+  Coefficients are unchanged; a declared residual can differ in its last bits.
+
 - **A dataset's contexts share small-body windows and records** (docs/ENGINE.md,
   "Threads"). Each context integrated every catalog body again, a year of
   trajectory per year between the instant and the elements' epoch, and decoded

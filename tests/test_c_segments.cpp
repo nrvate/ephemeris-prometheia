@@ -540,6 +540,38 @@ TEST_CASE("c_object_coverage") {
     prometheia_engine_close(e);
 }
 
+TEST_CASE("c_segments_right_up_to_coverage") {
+    // A fit's check set takes both ends, which mid +- half can round a double
+    // past: 29% of span lengths were refused at either end of coverage, any
+    // object, until 2026-11-01 (astromcp's report). Rounding lives in the low
+    // bits, so these are lengths that were refused from DE440's ends.
+    prometheia_engine* e = open_engine(false);
+    if (!e) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    const prometheia_options o = defaults();
+    const prometheia_object moon{PROMETHEIA_OBJECT_BODY, 301, nullptr};
+    double first = 0.0, last = 0.0;
+    prometheia_error err;
+    REQUIRE(prometheia_object_coverage(e, &moon, &o, &first, &last, &err) == PROMETHEIA_OK);
+    for (int k = 54; k < 100; k += 2) {
+        const double span = 0.5 + k * 0.0773;
+        INFO("span ", span);
+        prometheia_segments* s = nullptr;
+        CHECK_MESSAGE(prometheia_segments_fit(e, &moon, first, first + span, &o, 0.001, &s, &err) ==
+                          PROMETHEIA_OK,
+                      err.message);
+        prometheia_segments_close(s);
+        s = nullptr;
+        CHECK_MESSAGE(prometheia_segments_fit(e, &moon, last - span, last, &o, 0.001, &s, &err) ==
+                          PROMETHEIA_OK,
+                      err.message);
+        prometheia_segments_close(s);
+    }
+    prometheia_engine_close(e);
+}
+
 TEST_CASE("c_object_coverage_end_of_a_catalog_body") {
     // A catalog body read one light time before the instant ends where the
     // observer does when its own state reaches further: the Sun's end,
