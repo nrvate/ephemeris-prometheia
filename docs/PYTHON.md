@@ -131,7 +131,9 @@ the C++ engine's, bit for bit.
       namespace;
     - `object_info(id)` gives an `ObjectInfo`, with the kind, orbit class,
       name and its standing, number, designations, H, V, mean motion and
-      period, source, and `object` (the form `calc` and `rise_set` take);
+      period, source, and `object` (the form `calc` and `rise_set` take).
+      From a catalog body's SPK-ID, ask for `naif:<SPK-ID>`: its `id` is the
+      canonical one;
     - `object_list(*, kind=, orbit_class=, named_only=, numbered_only=,
       h_max=, vmag_max=, cursor=, limit=500)` gives `(ids, next_cursor)`,
       and `next_cursor` is `None` after the last page. `KINDS` names the

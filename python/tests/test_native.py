@@ -518,6 +518,9 @@ class Engine(unittest.TestCase):
         self.assertEqual(ctx.object_lookup("Nosuchbody"), [])
         # Info, and calc by id, by the object info gives, and by the old forms.
         ceres = ctx.object_info("sb:1")
+        by_number = ctx.object_info("naif:20000001")
+        self.assertEqual(by_number.id, "sb:1")
+        self.assertEqual(by_number.object, ceres.object)
         self.assertEqual((ceres.kind, ceres.name, ceres.number, ceres.standing),
                          ("asteroid", "Ceres", 1, "iau"))
         self.assertIsNone(ceres.vmag)

@@ -6,7 +6,8 @@
 // give them), hypothetical bodies, stars and deep-sky objects. Each object
 // has a stable string id that round-trips through parse_id() and info().
 //
-//   naif:<NAIF id>                        "naif:10", "naif:301", "naif:5"
+//   naif:<NAIF id>                        "naif:10", "naif:301", "naif:5",
+//                                         or a catalog body's SPK-ID
 //   sb:<primary designation>              "sb:136199", "sb:2017 OF201", "sb:1P"
 //   orbit:<body id>:<point>:<method>      "orbit:naif:301:ascending-node:mean"
 //   hyp:<token>                           "hyp:cupido"

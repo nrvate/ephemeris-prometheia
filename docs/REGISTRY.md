@@ -13,7 +13,7 @@ API is `prometheia_object_*` ([C_API.md](C_API.md)), and Python has
 
 | Form | Example | Names |
 |---|---|---|
-| `naif:<id>` | `naif:10`, `naif:301`, `naif:5` | the Sun, the Moon, the planets (Mars to Pluto: their system barycentres), the Earth, the Earth–Moon barycentre (3) |
+| `naif:<id>` | `naif:10`, `naif:301`, `naif:5` | the Sun, the Moon, the planets (Mars to Pluto: their system barycentres), the Earth, the Earth–Moon barycentre (3); also a catalog body, by its SPK-ID (`naif:54667839`) |
 | `sb:<designation>` | `sb:136199`, `sb:2017 OF201`, `sb:1P` | a catalog body by SBDB's primary designation |
 | `orbit:<body id>:<point>:<method>` | `orbit:naif:301:ascending-node:mean` | a node or apsis; the point is `ascending-node`, `descending-node`, `perihelion` or `aphelion` (`perigee` and `apogee` are read as these), and the method is `mean`, `osculating` or `interpolated` |
 | `hyp:<token>` | `hyp:cupido` | a hypothetical body |
@@ -33,6 +33,15 @@ API is `prometheia_object_*` ([C_API.md](C_API.md)), and Python has
 `star:Regulus` or `orbit:naif:301:apogee:mean`. Its `id` is always the
 canonical one. Every star's id resolves back to that star (tested over the
 whole catalog).
+
+**From an SPK-ID.** A catalog body's NAIF id is its SPK-ID, so `naif:` is the
+way back from the number: `naif:54667839` gives what `sb:2026 ED138` gives,
+with that id, and `naif:20136199` gives `sb:136199`. It reads the record
+directly and builds no name index. `orbit:naif:54667839:…` works the same way.
+An id no ephemeris body answers and no catalog carries is refused as
+`naif:<id> is not an object here`. An SPK-ID is not a stable id: use the
+canonical one to keep. Every record's designation leads back to that record
+(1,580,028 bodies, 2026-11-02), so the canonical id always names the same body.
 
 ## Lookup
 
@@ -140,6 +149,7 @@ DE440 (2026-10-27; the name indexes 2026-10-28):
 | The name indexes, on the first lookup: the hashed names `Engine::lookup` reads and the folded proper names, in one pass | 0.48–0.57 s | +41 MB (1.2 MB of it the 28,919 folded names) |
 | The first lookup on another engine of the same frozen corpus (`Engine::open_context`) | 0.6 ms | nothing: the corpus's indexes serve it |
 | A numbered body (`sb:2060`, `Engine::lookup("2060")`), with the indexes not built | 3.7 ms | nothing: a number goes straight to SPK-ID 20000000 + n, and needs no index |
+| A catalog body by SPK-ID (`naif:54667839`), with the indexes not built | 0.5–0.7 ms, 0.7 ms on average over 2,000 scattered bodies (measured 2026-11-02) | nothing: it reads the record directly |
 | A lookup after that | 5 µs–1 ms | |
 | The listing summary, on the first page that reaches catalog bodies | 0.40 s | +36 MB at the peak, 25 MB kept |
 | A listing page after that (named centaurs) | 3 ms | |

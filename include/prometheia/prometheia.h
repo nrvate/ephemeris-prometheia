@@ -1021,6 +1021,9 @@ typedef struct prometheia_object_filter {
 } prometheia_object_filter;
 PROMETHEIA_API void prometheia_object_filter_init(prometheia_object_filter* filter);
 
+/* What the object with this registry id is. info->id is its canonical id,
+ * whichever spelling asked: a catalog body's SPK-ID is its naif: id, so
+ * "naif:54667839" gives "sb:2026 ED138" (docs/REGISTRY.md). */
 PROMETHEIA_API prometheia_status prometheia_object_info(prometheia_engine* engine, const char* id,
                                                         prometheia_object_entry* info,
                                                         prometheia_error* err);

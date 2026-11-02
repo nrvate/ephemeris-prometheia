@@ -236,6 +236,67 @@ TEST_CASE("registry_refs_compute_what_they_name") {
     same("star:HR 3982", e.calc_star(stars::find("Regulus").value(), jd));
 }
 
+// The way back from a number: every record of two catalogs, by its SPK-ID.
+TEST_CASE("registry_naif_id_of_a_catalog_body") {
+    synth::TempFile tf("registry-naif");
+    Engine e = open_with_sample(tf);
+    REQUIRE(
+        e.add_catalog(std::string(PROMETHEIA_SOURCE_DIR) + "/tests/data/covariance-7.epm").ok());
+    Registry r(e);
+    size_t bodies = 0, unnumbered = 0;
+    const std::string orbit = ":perihelion:osculating";
+    REQUIRE(
+        e.for_each_catalog_record([&](size_t, const catalog::Record& rec, const catalog::Names& n) {
+             const std::string naif = "naif:" + std::to_string(rec.spkid);
+             const std::string canonical = "sb:" + std::string(n.pdes);
+             ++bodies;
+             unnumbered += rec.spkid >= 30000000;
+             INFO(naif);
+             auto by_number = r.info(naif);
+             auto by_name = r.info(canonical);
+             REQUIRE(by_number.ok());
+             REQUIRE(by_name.ok());
+             CHECK(by_number.value().id == canonical);
+             CHECK(by_number.value().name == by_name.value().name);
+             CHECK(by_number.value().kind == by_name.value().kind);
+             CHECK(by_number.value().ref.id == long(rec.spkid));
+             CHECK(by_name.value().ref.id == long(rec.spkid));
+             auto ref = r.resolve(naif);
+             REQUIRE(ref.ok());
+             CHECK(ref.value().id == long(rec.spkid));
+             auto point = r.info("orbit:" + naif + orbit);
+             REQUIRE(point.ok());
+             CHECK(point.value().id == "orbit:" + canonical + orbit);
+             CHECK(point.value().ref.id == long(rec.spkid));
+             CHECK(r.resolve("orbit:" + naif + orbit).value().id == long(rec.spkid));
+         }).ok());
+    CHECK(bodies >= 100);
+
+    // An ephemeris body answers first, and stays what it was.
+    CHECK(r.info("naif:10").value().id == "naif:10");
+    CHECK(r.info("naif:301").value().id == "naif:301");
+
+    // Not an object: none of these reach a body, the last by wrapping to
+    // Ceres's 20000001 in an int.
+    for (const char* id :
+         {"naif:999", "naif:0", "naif:-20000001", "naif:54667839", "naif:4314967297"}) {
+        INFO(id);
+        for (const Result<Info>& got : {r.info(id), r.info("orbit:" + std::string(id) + orbit)}) {
+            REQUIRE(!got.ok());
+            CHECK(got.error().code == ErrorCode::NotFound);
+            CHECK(got.error().message == std::string(id) + " is not an object here");
+        }
+        const auto ref = r.resolve(id);
+        REQUIRE(!ref.ok());
+        CHECK(ref.error().code == ErrorCode::NotFound);
+        CHECK(ref.error().message == std::string(id) + " is not an object here");
+    }
+
+    // The number by itself, and sb: with a number that is no designation.
+    CHECK(!r.info("20000001").ok());
+    CHECK(!r.info("sb:20000001").ok());
+}
+
 TEST_CASE("registry_list") {
     synth::TempFile tf("registry-list");
     Engine e = open_with_sample(tf);
@@ -440,6 +501,11 @@ TEST_CASE("registry_full_catalog_names" * doctest::skip()) {
     CHECK(sedna_info.value().provisional_designation == "2003 VB12");
     CHECK(sedna_info.value().orbit_class == "TNO");
     CHECK(r.info("sb:2003 VB12").value().id == "sb:90377");
+    // From the number: unnumbered, numbered, a comet.
+    CHECK(r.info("naif:54667839").value().id == "sb:2026 ED138");
+    CHECK(r.info("naif:20136199").value().id == "sb:136199");
+    CHECK(r.info("naif:20136199").value().name == "Eris");
+    CHECK(r.info("naif:1000012").value().kind == Kind::Comet);
     // The named centaurs, by listing.
     Filter cen;
     cen.orbit_class = "CEN";

@@ -13,6 +13,12 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **A catalog body answers to its SPK-ID** (docs/REGISTRY.md, "From an
+  SPK-ID"). `object_info("naif:54667839")` gives the body with its canonical id,
+  `sb:2026 ED138`, and `naif:20136199` gives `sb:136199`, read directly with no
+  name index; `orbit:naif:<SPK-ID>:…` works too. An SPK-ID no catalog carries is
+  refused as any other unknown `naif:` id. Until now the number could be used to
+  compute a body but not to find out what it was.
 - **What "the same root from any window" promises** (docs/C_API.md, "Roots on
   segments"; docs/SEGMENTS.md, "Windows"). The promise holds for the same
   handles, target and `tol_days`: 1,456,398 roots from 47,870 windows were bit

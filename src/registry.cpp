@@ -507,6 +507,21 @@ struct Registry::Impl {
         return out;
     }
 
+    // A catalog body's NAIF id is its SPK-ID, found directly: no name index.
+    // An id no catalog carries gets the refusal of any other naif: id.
+    Result<Engine::CatalogBody> catalog_body_at(long naif) {
+        const auto refused = [&] {
+            return make_error(ErrorCode::NotFound,
+                              "naif:" + std::to_string(naif) + " is not an object here");
+        };
+        if (naif <= 0 || naif > std::numeric_limits<int>::max())
+            return refused();
+        auto cb = engine.catalog_body(int(naif));
+        if (!cb && cb.error().code == ErrorCode::NotFound)
+            return refused();
+        return cb;
+    }
+
     Result<Info> catalog_info(const Id& id) {
         auto spk = engine.lookup(id.designation);
         if (!spk)
@@ -514,7 +529,10 @@ struct Registry::Impl {
         auto got = engine.catalog_body(spk.value());
         if (!got)
             return got.error();
-        const Engine::CatalogBody& cb = got.value();
+        return catalog_entry(got.value(), spk.value());
+    }
+
+    Info catalog_entry(const Engine::CatalogBody& cb, int spkid) {
         const catalog::Record& r = cb.record;
         const bool comet = r.body_class == catalog::BodyClass::Comet;
         Info out;
@@ -548,7 +566,7 @@ struct Registry::Impl {
         if (cb.catalog < cats.size())
             out.source = std::filesystem::path(cats[cb.catalog].path).filename().string();
         out.ref.kind = Engine::ObjectRef::Kind::Body;
-        out.ref.id = spk.value();
+        out.ref.id = spkid;
         return out;
     }
 
@@ -661,12 +679,26 @@ struct Registry::Impl {
 
     Result<Info> info(const Id& id) {
         switch (id.space) {
-        case Id::Space::Naif:
-            return body_info(id);
+        case Id::Space::Naif: {
+            if (ephemeris_body(id.naif))
+                return body_info(id);
+            auto cb = catalog_body_at(id.naif);
+            if (!cb)
+                return cb.error();
+            return catalog_entry(cb.value(), int(id.naif));
+        }
         case Id::Space::SmallBody:
             return catalog_info(id);
-        case Id::Space::OrbitPoint:
-            return orbit_point_info(id);
+        case Id::Space::OrbitPoint: {
+            if (!id.designation.empty() || ephemeris_body(id.naif))
+                return orbit_point_info(id);
+            auto cb = catalog_body_at(id.naif);
+            if (!cb)
+                return cb.error();
+            Id named = id;
+            named.designation = cb.value().names.designation;
+            return orbit_point_info(named);
+        }
         case Id::Space::Hypothetical:
             return hypothetical_info(id);
         case Id::Space::Star:
@@ -709,9 +741,11 @@ Result<Engine::ObjectRef> Registry::resolve_uncached(std::string_view id) {
     case Id::Space::Naif:
     case Id::Space::OrbitPoint:
         if (p.designation.empty()) {
-            if (!ephemeris_body(p.naif))
-                return make_error(ErrorCode::NotFound,
-                                  "naif:" + std::to_string(p.naif) + " is not an object here");
+            if (!ephemeris_body(p.naif)) {
+                auto cb = impl_->catalog_body_at(p.naif);
+                if (!cb)
+                    return cb.error();
+            }
             ref.id = p.naif;
         } else {
             auto spk = impl_->engine.lookup(p.designation);

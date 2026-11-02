@@ -274,7 +274,10 @@ prometheia_calc_object(eph, &obj, jd_tt, &opts, &r, &err);
   the query is ambiguous, and nothing is chosen. `PROMETHEIA_LOOKUP_PREFIX`
   adds prefix matches.
 - `prometheia_object_info` fills a `prometheia_object_entry`. Absent numbers
-  are NaN, absent strings are empty, and strings are truncated to fit.
+  are NaN, absent strings are empty, and strings are truncated to fit. A
+  catalog body's SPK-ID is its `naif:` id, so `naif:54667839` gives that body
+  with its canonical id, `sb:2026 ED138` ([REGISTRY.md](REGISTRY.md), "From
+  an SPK-ID").
 - `prometheia_object_list` pages through the objects that pass a
   `prometheia_object_filter` (start from `prometheia_object_filter_init`).
   `*cursor` starts at 0, and is 0 again after the last page.

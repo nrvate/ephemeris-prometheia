@@ -1774,7 +1774,9 @@ cdef class Context:
         return out
 
     def object_info(self, str id):
-        """What an object is (ObjectInfo), by its registry id."""
+        """What an object is (ObjectInfo), by its registry id: any spelling
+        that resolves, a catalog body's SPK-ID as naif:<SPK-ID> among them.
+        Its id is the canonical one."""
         cdef c.prometheia_engine* e = self.engine()
         cdef bytes b = id.encode("utf-8")
         cdef c.prometheia_object_entry i
