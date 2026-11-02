@@ -13,6 +13,25 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Kepler's equation is solved at every mean anomaly** (docs/VALIDATION.md,
+  "The Kepler solver"). At high eccentricity the solver could silently return a
+  state half an orbit off: 0.3% of mean anomalies at e = 0.83, 11% at e = 0.999.
+  One real body of 1.58M was hit, 858130, up to 74° out. Elements given to
+  `prometheia_calc_elements` were exposed near M = ±π for e ≥ 0.8. Every answer
+  that was right is unchanged.
+- **Catalog bodies are sampled where a cubic cannot hold them** (docs/ENGINE.md,
+  "Small bodies"; docs/VALIDATION.md, "Between the stored samples"). A deep
+  perihelion or close encounter happened inside one of the 128 segments a year,
+  and the position there was wrong: against Horizons, Apophis through its 2029
+  flyby by up to 78,368 km and Icarus at a perihelion by up to 30,071 km (221″),
+  now 15 km and 1.4 km. No answer outside such a segment moves. In Astrolog's
+  13,808 bodies over 1900–2100, 181 are affected, at a median 0.009″, with
+  Icarus at 29″. Their first use is 5–9 times slower. What the check leaves is
+  measured at 2.3 km (0.013″) at worst.
+- **Fits reach through a close encounter.** The shortest segment went from
+  0.1 to 0.025 day, so Apophis's flyby month fits at 0.001″ (astromcp's report).
+  It had been refused at 0.026″. A fit that succeeded before is unmoved.
+
 - **A fit reaches the ends of coverage.** `prometheia_segments_fit` computed
   the ends of its check set as mid ± half, which can round a double past
   them, so about 29% of span lengths were refused at either end of an object's

@@ -404,6 +404,9 @@ public:
     // corpus keeps for all its engines (docs/ENGINE.md, "Threads").
     uint64_t small_body_windows_integrated() const;
     size_t small_body_windows_kept() const;
+    // Segments of a body's own track this engine integrated that a cubic could
+    // not hold, so that it sampled them more finely (docs/ENGINE.md).
+    uint64_t small_body_segments_refined(int spkid) const;
 
     // Resolves a small body by its primary designation or proper name —
     // "1", "Ceres", "ceres" — to its SPK-ID, the integer calc() takes.

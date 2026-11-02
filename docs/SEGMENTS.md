@@ -39,7 +39,11 @@ Each interval is interpolated at the Chebyshev nodes of the first kind, which
 costs exactly `degree + 1` sampler calls and is near-minimax. Where the target
 cannot be met at `max_degree`, the interval is halved and each half fitted in
 turn. Splitting stops at `min_half_span_days`, and a span needing more than
-`max_segments` is an error rather than a silent truncation.
+`max_segments` is an error rather than a silent truncation. Through the C API
+the floor is half a span of 0.0125 day. A close encounter turns the direction
+in about an hour: a floor of 0.05 day stopped at 0.01″ through Apophis's 2029
+flyby, where the month now fits at 0.001″ in 15 segments. Only a fit that
+misses its target splits, so this moves no fit that already succeeded.
 
 The degree is not found by trying every degree in turn: that would fit and
 check each interval four or five times over. A Chebyshev series of a smooth

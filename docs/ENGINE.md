@@ -556,6 +556,29 @@ it), within a window of days.
 
 ## Small bodies: the catalog overlay
 
+**Samples go where the trajectory needs them (2026-11-01).** A window holds
+128 cubic Hermite segments a year, which holds a main-belt orbit to about 15 m.
+It cannot hold a deep perihelion or a close encounter, which happen inside one
+segment: Apophis's 2029 flyby came out 78,000 km wrong and Icarus 30,000 km at
+an ordinary perihelion (VALIDATION.md, "Between the stored samples").
+- **Finding them costs nothing.** The acceleration at each sample is already
+  computed. For a span h with fourth derivative k, the cubic's second derivative
+  at each end misses the acceleration by k h²/12, and its position by k h⁴/384,
+  so one gives the other.
+- **Only what needs it moves.** A segment over the trigger, 1e-8 AU (1.5 km),
+  is integrated again as one chain of finer samples, down to 1e-12 AU, halved
+  at most 12 times. Its end state stays the one the coarse pass reached, so
+  every later window, and every answer outside that segment, is unchanged to
+  the bit. A 1e-9 AU trigger flagged ten times as many bodies and changed
+  neither case above.
+- **One chain, not independent pieces.** Sub-intervals that each started from a
+  coarser state met at their ends within the integrator's tolerance, about
+  15 cm, and at 50,000 km that is a milliarcsecond of wiggle.
+- **Cost:** a flagged body's first use is 5–9 times slower (Icarus's 20 years,
+  70 to 364 ms, measured 2026-11-01). Other bodies pay nothing measurable. The
+  windows are shared, so this is once per dataset.
+
+
 `add_catalog(path)` stacks EPM1 containers ([FORMAT.md](FORMAT.md));
 `calc` resolves a body the planetary ephemeris does not know (by
 SPK-ID, the catalog's key) through on-demand integration. Several

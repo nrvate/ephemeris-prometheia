@@ -438,7 +438,7 @@ void prometheia_segments_close(prometheia_segments *segments);
     - a tolerance that is not positive and finite;
     - an object within 1e-9 AU of the observer, which has no direction (the
       heliocentric Sun, say);
-    - a tolerance out of reach. That is a segment of 0.1 day at degree 16
+    - a tolerance out of reach. That is a segment of 0.025 day at degree 16
       still missing 0.8 × the tolerance, or a span needing more than 4096
       segments. A handle is therefore at most 4096 × 844 bytes, 3.46 MB.
   - **The engine's own errors** come back unchanged. Every instant the fit

@@ -38,6 +38,15 @@ functions.
 - Fits reach the ends of coverage (`82bb4c9`). About 29% of span lengths had
   been refused there, from one double of rounding.
 
+- Kepler's equation at every mean anomaly (`7c31f39`), and catalog bodies
+  sampled where a cubic cannot hold them, with fits through close encounters.
+  Apophis's 2029 flyby had been 78,000 km wrong and Icarus 30,000 km at
+  perihelion. The published tables never asked between samples.
+
+**Untested:** where the 1–15 km left against Horizons comes from: the orbit
+solutions, or the force model's Earth and Moon, themselves cubics 2.85 days
+apart. Worth measuring before quoting anything near a close encounter.
+
 **Decided, not done:** astromcp's item 3. The 200 ms of `add_catalog` is the
 eager integrity check, kept so a corrupt file fails at load. A second
 Dataset's cost needs a shared library, which the build does not have.

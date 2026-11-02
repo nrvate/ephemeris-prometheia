@@ -51,6 +51,16 @@ public:
         // so density is the accuracy knob: 128/year keeps a 1 AU, 1 yr window
         // near 2e-9 AU; raise for long windows or high-eccentricity bodies.
         int min_samples = 128;
+        // A close encounter happens inside one of those segments, and a cubic
+        // through its ends misses it (Apophis in 2029, by 2,300 km: docs/
+        // ENGINE.md, "Small bodies"). So each segment's error is estimated,
+        // from the accelerations already in hand, and one past refine_au
+        // gets samples of its own, down to refined_au, at most 2^refine_depth
+        // to the segment. Its end state stays as integrated, so nothing
+        // outside it moves.
+        double refine_au = 1e-8;
+        double refined_au = 1e-12;
+        int refine_depth = 12;
     };
 
     WindowMemo(Force* force, IntegrateOptions opts) : WindowMemo(force, opts, Config{}) {}
@@ -117,6 +127,7 @@ public:
         uint64_t cache_misses = 0;
         uint64_t windows_built = 0;  // integrated by this memo
         uint64_t windows_shared = 0; // taken from the share
+        uint64_t segments_refined = 0;
         uint64_t accel_evals = 0;
     };
 
@@ -206,6 +217,56 @@ private:
 
     // Integrates one window from `from` to `to` (either direction), replacing
     // the sample list with a uniformly densified version over [from, to].
+    // The cubic's position error over a segment, estimated from how far its
+    // second derivative at each end is from the acceleration there. Over a
+    // span h with fourth derivative k the two are k h^2 / 12 and k h^4 / 384
+    // apart, so one is the other times h^2 / 32.
+    static double cubic_error(const TrajSample& a, const double acc_a[3], const TrajSample& b,
+                              const double acc_b[3]) {
+        const double h = b.t - a.t;
+        const double dp[3] = {b.px - a.px, b.py - a.py, b.pz - a.pz};
+        const double va[3] = {a.vx, a.vy, a.vz}, vb[3] = {b.vx, b.vy, b.vz};
+        double worst = 0.0;
+        for (int i = 0; i < 3; ++i) {
+            const double at_a = 6.0 * dp[i] / (h * h) - (4.0 * va[i] + 2.0 * vb[i]) / h;
+            const double at_b = -6.0 * dp[i] / (h * h) + (2.0 * va[i] + 4.0 * vb[i]) / h;
+            worst = std::max({worst, std::fabs(at_a - acc_a[i]), std::fabs(at_b - acc_b[i])});
+        }
+        return worst * h * h / 32.0;
+    }
+
+    // Samples from a to `to`, until the cubics through them are good to
+    // refined_au, appended to `out` in order, the last one left to the caller
+    // unless it is inside the segment. They lie on one continuous trajectory:
+    // y and acc carry the state from each sample to the next, for two
+    // integrations that met only at their ends would disagree by the
+    // integrator's own tolerance, a few decimetres, and at 50,000 km that is a
+    // milliarcsecond of wiggle between samples.
+    bool refine(double* y, double* acc, TrajSample& a, double to, bool last, int depth,
+                std::vector<TrajSample>& out, IntegrateStats& istats) {
+        double trial[6];
+        std::copy(y, y + 6, trial);
+        IntegrateOptions opts = opts_;
+        opts.first_step = to - a.t;
+        if (!integrate_dp54(trial, a.t, to, *force_, opts, &istats).ok())
+            return false;
+        double d[6];
+        (*force_)(trial, to, d);
+        const TrajSample b =
+            make_sample(to, State{Vec3(trial[0], trial[1], trial[2]), Vec3(d[0], d[1], d[2])});
+        if (depth >= cfg_.refine_depth || !(cubic_error(a, acc, b, d + 3) > cfg_.refined_au)) {
+            if (!last)
+                out.push_back(b);
+            std::copy(trial, trial + 6, y);
+            std::copy(d + 3, d + 6, acc);
+            a = b;
+            return true;
+        }
+        const double tm = 0.5 * (a.t + to);
+        return refine(y, acc, a, tm, false, depth + 1, out, istats) &&
+               refine(y, acc, a, to, last, depth + 1, out, istats);
+    }
+
     bool integrate_window(double from, double to, bool forward) {
         std::vector<TrajSample>& run = forward ? fwd_ : bwd_;
         size_t& windows = forward ? fwd_windows_ : bwd_windows_;
@@ -231,9 +292,11 @@ private:
         std::vector<TrajSample> fresh;
         fresh.reserve(size_t(nseg) + 1);
         // Seed sample for this window (velocity from the force at `from`).
+        double acc[3];
         {
             double d[6];
             (*force_)(y, from, d);
+            std::copy(d + 3, d + 6, acc);
             TrajSample p;
             p.t = from;
             p.px = y[0];
@@ -253,6 +316,8 @@ private:
         for (int i = 0; i < nseg; ++i) {
             const double ta = from + step * double(i);
             const double tb = from + step * double(i + 1);
+            double y_start[6];
+            std::copy(y, y + 6, y_start);
             auto r = integrate_dp54(y, ta, tb, *force_, seg, &istats);
             if (!r.ok())
                 return false;
@@ -266,7 +331,18 @@ private:
             p.vx = d[0];
             p.vy = d[1];
             p.vz = d[2];
+            if (cfg_.refine_au > 0.0 && cubic_error(fresh.back(), acc, p, d + 3) > cfg_.refine_au) {
+                ++stats_.segments_refined;
+                std::vector<TrajSample> inside;
+                TrajSample start = fresh.back();
+                double acc_start[3];
+                std::copy(acc, acc + 3, acc_start);
+                if (!refine(y_start, acc_start, start, tb, true, 0, inside, istats))
+                    return false;
+                fresh.insert(fresh.end(), inside.begin(), inside.end());
+            }
             fresh.push_back(p);
+            std::copy(d + 3, d + 6, acc);
         }
 
         // fresh[0] duplicates the run's last sample; the rest continue it

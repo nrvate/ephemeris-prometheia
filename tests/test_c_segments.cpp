@@ -540,6 +540,85 @@ TEST_CASE("c_object_coverage") {
     prometheia_engine_close(e);
 }
 
+TEST_CASE("c_segments_through_a_close_encounter") {
+    // Apophis through its 2029 Earth encounter and Icarus through a perihelion,
+    // against Horizons (tools/fetch/horizons_fetch.py, flyby-geo-apophis and
+    // perihelion-helio-icarus; geometric ICRF vectors at TDB instants, AU).
+    // Between stored samples a cubic had Apophis 78,000 km out and Icarus
+    // 30,000 km (docs/ENGINE.md, "Small bodies"), and the month was refused
+    // at 0.001". Needs the full catalog (PROMETHEIA_SBDB, else
+    // sbdb-20261027.epm in the source tree): SKIP when it is absent.
+    const std::string catalog =
+        env_or("PROMETHEIA_SBDB", std::string(PROMETHEIA_SOURCE_DIR) + "/sbdb-20261027.epm");
+    if (!readable(de440_path()) || !readable(perturbers_path()) || !readable(catalog)) {
+        MESSAGE("SKIP: DE440, the perturber kernel or the full catalog not found");
+        return;
+    }
+    prometheia_engine* e = nullptr;
+    REQUIRE(prometheia_engine_open(de440_path().c_str(), &e, nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_add_catalog(e, catalog.c_str(), nullptr) == PROMETHEIA_OK);
+    REQUIRE(prometheia_engine_add_perturbers(e, perturbers_path().c_str(), nullptr) ==
+            PROMETHEIA_OK);
+    const prometheia_object apophis{PROMETHEIA_OBJECT_BODY, 20099942, nullptr};
+    const prometheia_object icarus{PROMETHEIA_OBJECT_BODY, 20001566, nullptr};
+    const struct {
+        const prometheia_object* object;
+        int center;
+        double jd_tdb, x, y, z;
+        double limit_km; // the two orbit solutions differ by this much
+    } points[] = {
+        {&apophis, PROMETHEIA_CENTER_GEOCENTRIC, 2462239.40625, -2.738641180934251e-03,
+         -1.505234377990304e-03, -1.694789242463933e-03, 5.0},
+        {&apophis, PROMETHEIA_CENTER_GEOCENTRIC, 2462240.40625, -1.307966662117700e-04,
+         1.809061307329789e-04, 1.213983080025475e-04, 5.0},
+        {&apophis, PROMETHEIA_CENTER_GEOCENTRIC, 2462240.447917, 2.496835578480086e-05,
+         2.301447103472175e-04, 1.886883145380620e-04, 5.0},
+        {&apophis, PROMETHEIA_CENTER_GEOCENTRIC, 2462240.489583, 1.803972690124621e-04,
+         2.662011427058039e-04, 2.453656174095949e-04, 6.0},
+        {&apophis, PROMETHEIA_CENTER_GEOCENTRIC, 2462241.40625, 3.258325266430137e-03,
+         7.590302045081841e-04, 1.188055345114024e-03, 20.0},
+        {&icarus, PROMETHEIA_CENTER_HELIOCENTRIC, 2461225.5, 3.182929820682502e-01,
+         1.879618637670215e-01, -6.183303909282447e-02, 2.0},
+        {&icarus, PROMETHEIA_CENTER_HELIOCENTRIC, 2461235.5, -8.410519103819149e-02,
+         1.336839118155040e-01, 9.913062171512448e-02, 2.0},
+        {&icarus, PROMETHEIA_CENTER_HELIOCENTRIC, 2461236.0, -1.052410415210222e-01,
+         1.172179200221799e-01, 1.014373141072786e-01, 2.0},
+        {&icarus, PROMETHEIA_CENTER_HELIOCENTRIC, 2461245.5, -2.812154192899365e-01,
+         -2.474139941473893e-01, 1.789766919579109e-02, 2.0},
+    };
+    for (const auto& p : points) {
+        prometheia_options o = defaults();
+        o.speed = 0;
+        o.frame = PROMETHEIA_FRAME_ICRF;
+        o.coords = PROMETHEIA_COORDS_EQUATORIAL;
+        o.center = p.center;
+        o.light_time = o.deflection = o.aberration = 0;
+        prometheia_result r;
+        const double tt = p.jd_tdb - prometheia_tdb_minus_tt(p.jd_tdb) / 86400.0;
+        REQUIRE(prometheia_calc_object(e, p.object, tt, &o, &r, nullptr) == PROMETHEIA_OK);
+        const double km = 149597870.7;
+        const double dx = (r.xyz_au[0] - p.x) * km, dy = (r.xyz_au[1] - p.y) * km,
+                     dz = (r.xyz_au[2] - p.z) * km;
+        INFO("JD TDB ", p.jd_tdb, ": ", std::sqrt(dx * dx + dy * dy + dz * dz), " km");
+        CHECK(std::sqrt(dx * dx + dy * dy + dz * dz) < p.limit_km);
+    }
+
+    // And the month fits at 0.001", through the encounter.
+    const double from = 2462228.5, to = 2462258.5;
+    const Case flyby{"Apophis", apophis, defaults(), true};
+    prometheia_segments* s = nullptr;
+    prometheia_error err;
+    REQUIRE_MESSAGE(prometheia_segments_fit(e, &flyby.object, from, to, &flyby.opts, 0.001, &s,
+                                            &err) == PROMETHEIA_OK,
+                    err.message);
+    const Measured m = measure(e, flyby, s, from, to, 400, 11);
+    INFO("worst ", m.worst_arcsec, "\"");
+    CHECK(m.failures == 0);
+    CHECK(m.worst_arcsec <= 0.001);
+    prometheia_segments_close(s);
+    prometheia_engine_close(e);
+}
+
 TEST_CASE("c_segments_right_up_to_coverage") {
     // A fit's check set takes both ends, which mid +- half can round a double
     // past: 29% of span lengths were refused at either end of coverage, any

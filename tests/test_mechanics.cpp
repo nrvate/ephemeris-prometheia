@@ -149,6 +149,60 @@ TEST_CASE("memo_amortizes_and_stays_accurate") {
     CHECK(norm(past.pos - past_exact.pos) < 1e-8);
 }
 
+TEST_CASE("memo_samples_what_a_cubic_cannot_hold") {
+    // A deep perihelion passes between two of the 128 samples a year, and a
+    // cubic through them misses it: Icarus by 30,000 km against Horizons
+    // (docs/ENGINE.md). Against the exact two-body orbit, with the sampling
+    // that finds such a segment and without it, and in both directions.
+    std::vector<Perturber> none;
+    HeliocentricForce f{kMuSun, &none};
+    const State deep =
+        elements_to_state(kMuSun, Elements{1.078, 0.827, 0.4, 1.5, 0.5, -0.6}).value();
+
+    const auto worst_over_a_year = [&](WindowMemo<HeliocentricForce>& memo, double sign) {
+        double worst = 0.0;
+        for (int i = 1; i <= 3000; ++i) {
+            const double t = sign * i * 0.1217;
+            worst = std::max(
+                worst, norm(memo.at(t).pos - kepler_propagate(kMuSun, deep, 0.0, t).value().pos));
+        }
+        return worst;
+    };
+    WindowMemo<HeliocentricForce>::Config coarse;
+    coarse.refine_au = 0.0;
+    for (double sign : {1.0, -1.0}) {
+        WindowMemo<HeliocentricForce> plain(&f, IntegrateOptions{}, coarse);
+        plain.set_seed(deep, 0.0);
+        const double missed = worst_over_a_year(plain, sign);
+        WindowMemo<HeliocentricForce> memo(&f, IntegrateOptions{});
+        memo.set_seed(deep, 0.0);
+        const double held = worst_over_a_year(memo, sign);
+        std::printf("  deep orbit: %.3e AU sampled evenly, %.3e AU refined, %llu segments\n",
+                    missed, held, (unsigned long long)memo.stats().segments_refined);
+        CHECK(missed > 1e-5); // 1,500 km
+        CHECK(held < 2e-8);   // what the trigger leaves: 1.5 km of estimate
+        CHECK(memo.stats().segments_refined > 0);
+        CHECK(plain.stats().segments_refined == 0);
+    }
+
+    // An ordinary orbit is not touched, to the bit.
+    const State ordinary =
+        elements_to_state(kMuSun, Elements{2.77, 0.08, 0.18, 1.4, 1.3, 1.0}).value();
+    WindowMemo<HeliocentricForce> a(&f, IntegrateOptions{});
+    WindowMemo<HeliocentricForce> b(&f, IntegrateOptions{}, coarse);
+    a.set_seed(ordinary, 0.0);
+    b.set_seed(ordinary, 0.0);
+    for (int i = -400; i <= 400; ++i) {
+        const double t = i * 2.3;
+        const State x = a.at(t), y = b.at(t);
+        CHECK(x.pos.x == y.pos.x);
+        CHECK(x.pos.y == y.pos.y);
+        CHECK(x.pos.z == y.pos.z);
+        CHECK(x.vel.x == y.vel.x);
+    }
+    CHECK(a.stats().segments_refined == 0);
+}
+
 TEST_CASE("memo_rejects_state_beyond_coverage_failure") {
     // A memo whose integration fails (bad options) must not serve garbage.
     std::vector<Perturber> none;

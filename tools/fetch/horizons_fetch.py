@@ -36,6 +36,9 @@ PAUSE_S = 5.0
 
 # --- Epochs (JD) --------------------------------------------------------------
 
+FLYBY_APOPHIS_TDB = 2462240.40625  # 2029-04-13, about 21:45
+PERIHELION_ICARUS_TDB = 2461235.5  # 2026-07-13, about noon
+
 # Planets: span the DE440 era; 1975-2026 lie inside the EOP-corrected era of
 # Horizons' of-date frames, the others test the precession/nutation models.
 PLANET_EPOCHS_TT = [
@@ -203,6 +206,17 @@ def requests():
     for name, number in [("chiron", "2060"), ("nessus", "7066")]:
         out.append((f"centaur-helio-{name}", "centaur heliocentric vectors, 1900-2100 (TDB)",
                     vectors(f"{number};", "500@10", CENTAUR_EPOCHS_TDB)))
+    # Between a catalog body's stored samples, where only the interpolation
+    # answers: Apophis through its 2029 Earth encounter, every half hour for a
+    # day either side of closest approach, geocentric geometric; a measurement
+    # for docs/ENGINE.md, not a fixture (the generator skips them).
+    out.append(("flyby-geo-apophis", "Apophis through its 2029 encounter, vectors (TDB)",
+                vectors("99942;", "500@399", [FLYBY_APOPHIS_TDB + k / 48.0
+                                              for k in range(-48, 49, 2)])))
+    # The same for a routine deep perihelion: Icarus, 0.19 AU, heliocentric.
+    out.append(("perihelion-helio-icarus", "Icarus through a perihelion, vectors (TDB)",
+                vectors("1566;", "500@10", [PERIHELION_ICARUS_TDB + k / 2.0
+                                            for k in range(-20, 21)])))
     # The Moon's light-time-corrected (astrometric) vector asked in TDB:
     # grades the light-time solution with no time-scale conversion on either
     # side (docs/DE.md). Observer tables take only UT or TT.

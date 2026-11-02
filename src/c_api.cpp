@@ -2192,6 +2192,10 @@ constexpr int kSegmentStride = PROMETHEIA_SEGMENTS_MAX_DEGREE + 1;
 constexpr double kSegmentTargetFraction = 0.8;
 // Closer than this to the observer, a direction is noise (docs/C_API.md).
 constexpr double kSegmentMinDistanceAu = 1e-9;
+// A close encounter's direction turns in about an hour: at half a span of
+// 0.05 day, degree 16 stops near 0.01" through Apophis's 2029 flyby. A fit only
+// splits when it misses its target, so a fit that succeeds is unmoved by this.
+constexpr double kSegmentMinHalfSpan = 0.0125;
 // How far inside a cut a piece's fit stops (docs/C_API.md, "Steps").
 constexpr double kSegmentCutGap = 1e-8;
 
@@ -2459,6 +2463,7 @@ prometheia_status prometheia_segments_fit(prometheia_engine* engine,
         segments::FitOptions fo;
         fo.target_err_arcsec = kSegmentTargetFraction * tolerance_arcsec;
         fo.max_degree = PROMETHEIA_SEGMENTS_MAX_DEGREE;
+        fo.min_half_span_days = kSegmentMinHalfSpan;
         const size_t budget = fo.max_segments;
 
         // Each piece between two cuts is fitted on its own, so no segment

@@ -1484,7 +1484,7 @@ typedef struct prometheia_segments_point {
  * failure *out is NULL. PROMETHEIA_ERROR_ARGUMENT for a span not finite or
  * not increasing, a tolerance not positive and finite, an object within
  * 1e-9 AU of the observer (no direction), and a tolerance out of reach: a
- * segment of 0.1 day at degree 16 missing it, or a span needing more than
+ * segment of 0.025 day at degree 16 missing it, or a span needing more than
  * 4096 segments (a handle is at most 3.5 MB).
  */
 PROMETHEIA_API prometheia_status

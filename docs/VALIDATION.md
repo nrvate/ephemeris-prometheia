@@ -138,6 +138,75 @@ and 0.3–19″ at 5000. Without a perturber kernel they differ by 12–67″,
 to arcminutes, not degrees, because the perturbations are largely
 periodic.
 
+**Between the stored samples (2026-11-01).** A catalog body's trajectory is
+stored as cubics through 128 samples a year, 2.85 days apart, and a deep
+perihelion or a close encounter happens inside one of them. Every comparison
+above asked at instants where that does not show: main-belt bodies, or
+near-Earth bodies away from perihelion. So these tables did not find it, and
+astromcp's refused fit of Apophis did. Against Horizons, geometric vectors at
+49 half-hour instants through the 2029 flyby and 41 half-day instants through
+a perihelion of Icarus (0.19 AU), `flyby-geo-apophis` and
+`perihelion-helio-icarus` in `tools/fetch/horizons_fetch.py`:
+
+| | before, median | before, worst | after, median | after, worst |
+|---|---:|---:|---:|---:|
+| Apophis, geocentric | 34,547 km | 78,368 km | 2.5 km | 15 km |
+| Icarus, heliocentric | 3,367 km | 30,071 km (221″) | 1.1 km | 1.4 km (0.010″) |
+
+- **Closest approach** of Apophis went from 40,285 km to 38,017 km from the
+  Earth's centre, at 21:46 TT, one-minute sampling.
+- **What remains** is not this interpolation: tightening it tenfold moves
+  neither median. Where it comes from is untested. The candidates are the
+  catalog's elements against Horizons' solutions (JPL#220 and JPL#196), and the
+  force model, whose Earth and Moon are themselves cubics 2.85 days apart.
+  Apophis's worst is a day after closest approach.
+- **Who moves.** See ENGINE.md, "Small bodies". Every body of Astrolog's
+  13,808-body catalog was integrated across 1900–2100: 181 have a segment a
+  cubic cannot hold (1.31%). Over ±10 years it is 168, so a body's flyby decides
+  when it is flagged, and these counts hold for the span named. Against the
+  previous commit, at 40 random instants over 1900–2100 for those 181 and for
+  every 10th other body:
+  - 60,489 of 61,760 answers were identical to the bit;
+  - 152 bodies moved, all of them flagged;
+  - seen from Earth they moved 0.009″ at the median and 0.18″ at the 90th
+    percentile, with Icarus at 29″, Phaethon (3200) 7″ and Talos (5786) 3.6″.
+    858130 moved 74°, which is the Kepler solver below.
+  - Across every 50th of the 1.58M bodies over ±10 years, 2.63% are flagged.
+
+**What the check leaves behind** (measured 2026-11-01). The trigger is an
+estimated position error of 1e-8 AU, 1.496 km, so a segment under it stays a
+cubic. Measured from that side, against a build that refines every segment
+over 1e-11 AU, heliocentric positions at random instants over ±10 years on
+Astrolog's catalog:
+
+| bodies | instants | worst | seen from Earth |
+|---|---:|---:|---:|
+| 300 random bodies of numbers 1–10000, none flagged | 90,000 | 0.49 km | 0.0012″ |
+| the 90 just under the trigger: flagged at 3e-9 AU, not at 1e-8 | 225,000 | 1.495 km | 0.0062″ |
+| the 168 flagged, in the segments left as cubics | 134,400 | 2.30 km | 0.013″ |
+| those 168 with the trigger raised to 1e-7 AU (a fault) | 134,400 | 21.4 km | 0.17″ |
+
+- **The bound is the measured 2.3 km, not the trigger.** The estimate assumes
+  a steady fourth derivative, so a segment on a fast stretch can be half as
+  wrong again as it says.
+- **Raising the trigger shows up at once** in this comparison.
+- **Not bounded here:** a body close to the Earth just under the trigger,
+  where 2.3 km is a larger angle. The table's arcseconds are what these bodies
+  reached in these 20 years.
+
+**The Kepler solver (2026-11-01).** Newton from E = +π can wander for M just
+below 0 at high e, and it stopped wherever its iterations ran out. It returned
+a state half an orbit off with no error, for 0.3% of mean anomalies at e = 0.83,
+2% at 0.95 and 11% at 0.999, near M = ±π. A residual check now sends those to
+bisection, so every answer that was right is unchanged.
+- **Real bodies:** one record of 1.58M, 858130 (e 0.91, M 3.42), which was 38°
+  out on the sky.
+- **User elements** (`prometheia_calc_elements`, hypotheticals) were exposed
+  at any date near M = ±π, for e ≥ 0.8.
+- **How it stayed hidden:** tests held `kepler_propagate` to itself, and the
+  error needs an element set in a narrow range of M. A new test of the memo
+  found it, as a 2 AU error at 2 instants of 3,000.
+
 **Pinning the perturber grid (2026-10-27).** The perturber tables' samples
 now sit on one fixed grid instead of starting at the first instant an engine
 was asked for (ENGINE.md, "Memo"). Every figure in this section was re-run

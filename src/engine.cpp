@@ -4650,6 +4650,13 @@ uint64_t Engine::small_body_windows_integrated() const {
     return impl_ ? impl_->windows.integrated() : 0;
 }
 
+uint64_t Engine::small_body_segments_refined(int spkid) const {
+    if (!impl_)
+        return 0;
+    const auto it = impl_->small_bodies.find(uint64_t(spkid));
+    return it == impl_->small_bodies.end() ? 0 : it->second.memo->stats().segments_refined;
+}
+
 size_t Engine::small_body_windows_kept() const {
     return impl_ ? impl_->corpus.small_body_windows.size() : 0;
 }
