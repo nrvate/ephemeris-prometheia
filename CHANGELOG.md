@@ -13,6 +13,14 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **What "the same root from any window" promises** (docs/C_API.md, "Roots on
+  segments"; docs/SEGMENTS.md, "Windows"). The promise holds for the same
+  handles, target and `tol_days`: 1,456,398 roots from 47,870 windows were bit
+  for bit the whole year's, now under test at `tol_days` 1e-6 as well as 1e-8.
+  The sentence read as if it held however a caller built its request. A shorter
+  handle list, a re-anchored target or a finer `tol_days` can move a root inside
+  its solve bracket, 0.069 s at worst at 1e-6, within 0.78 of `err_days`. No
+  root changed.
 - **Kepler's equation is solved at every mean anomaly** (docs/VALIDATION.md,
   "The Kepler solver"). At high eccentricity the solver could silently return a
   state half an orbit off: 0.3% of mean anomalies at e = 0.83, 11% at e = 0.999.

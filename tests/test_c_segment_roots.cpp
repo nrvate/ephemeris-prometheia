@@ -4,20 +4,22 @@
 // oracle that never sees a segment: the same function built from
 // prometheia_calc_object, sampled on a uniform grid, every extremum between
 // two grid points located, and each sign change bisected to 1e-9 d. Then the
-// contract's edges: resume and counting against one call bit for bit, the
-// half-open window, month handles back to back, targets placed on the
+// contract's edges: resume, counting and any window against one call bit for
+// bit, the half-open window, month handles back to back, targets placed on the
 // steps at a coarse fit's bounds, forced grazes at stations, the refusals,
 // and one call from several threads. Needs DE440 (PROMETHEIA_DE440, else
 // ephe/linux_p1550p2650.440); SKIP when it is absent.
 //
 // c_segment_roots_report (doctest::skip) prints the time errors against
-// err_days that docs/SEGMENTS.md quotes.
+// err_days that docs/SEGMENTS.md quotes, c_segment_roots_windows_report what
+// does and does not move a root.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <random>
 #include <string>
 #include <thread>
 #include <utility>
@@ -401,6 +403,70 @@ bool same(const prometheia_segments_root& x, const prometheia_segments_root& y) 
            std::memcmp(&x.err_days, &y.err_days, sizeof(double)) == 0 && x.tangent == y.tangent;
 }
 
+// Uniform on [0, 1), from a sequence the standard fixes.
+double draw(std::mt19937_64& rng) {
+    return double(rng() >> 11) * 0x1p-53;
+}
+
+// Where a window's ends test most: the bounds and joins of a term, and the
+// roots themselves.
+std::vector<double> window_marks(const Term& term,
+                                 const std::vector<prometheia_segments_root>& roots) {
+    std::vector<double> out;
+    for (const Fitted* f : term)
+        out.insert(out.end(), f->layout->bounds_jd_tt,
+                   f->layout->bounds_jd_tt + f->layout->count + 1);
+    for (const prometheia_segments_root& r : roots)
+        out.push_back(r.jd_tt);
+    return out;
+}
+
+struct WindowScan {
+    long windows = 0, roots = 0, differ = 0;
+};
+
+// `whole` is f over [from, to). Each window's roots must be its stretch of
+// `whole`, bit for bit: odd windows random, even ones on the marks or an ulp
+// beside them.
+WindowScan scan_windows(const prometheia_segments_function* f,
+                        const std::vector<prometheia_segments_root>& whole,
+                        const std::vector<double>& marks, double from, double to, double tol_days,
+                        int windows, uint64_t seed) {
+    std::mt19937_64 rng(seed);
+    const auto mark = [&] {
+        double t = marks[size_t(draw(rng) * double(marks.size()))];
+        const double r = draw(rng);
+        if (r < 0.2)
+            t = std::nextafter(t, 0.0);
+        else if (r < 0.4)
+            t = std::nextafter(t, 1e9);
+        return std::clamp(t, from, to);
+    };
+    WindowScan scan;
+    for (int w = 0; w < windows; ++w) {
+        double a, b;
+        if (w % 2) {
+            a = from + draw(rng) * (to - from);
+            b = std::min(to, a + 1.0 + 60.0 * draw(rng));
+        } else {
+            a = mark();
+            b = mark();
+            if (b < a)
+                std::swap(a, b);
+        }
+        if (!(a < b))
+            continue;
+        const std::vector<prometheia_segments_root> got = roots_of(f, a, b, tol_days);
+        const auto at = [](const prometheia_segments_root& r, double t) { return r.jd_tt < t; };
+        const auto first = std::lower_bound(whole.begin(), whole.end(), a, at);
+        const auto last = std::lower_bound(whole.begin(), whole.end(), b, at);
+        ++scan.windows;
+        scan.roots += long(got.size());
+        scan.differ += !std::equal(got.begin(), got.end(), first, last, same);
+    }
+    return scan;
+}
+
 double percentile(std::vector<double> v, double p) {
     if (v.empty())
         return NAN;
@@ -687,6 +753,182 @@ TEST_CASE("c_segment_roots_resume") {
             REQUIRE(!after.empty());
             CHECK(same(after.front(), r));
             CHECK(before.size() + after.size() == once.size());
+        }
+    }
+    prometheia_engine_close(e);
+}
+
+// The same handles, target and tol_days give the same doubles from any
+// window. 1e-6 is where solve stops widest, so the most an answer could
+// wander if a window reached it.
+TEST_CASE("c_segment_roots_any_window") {
+    prometheia_engine* e = open_engine();
+    if (!e) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    {
+        Fits fits(e);
+        const double y0 = kJ2026, y1 = kJ2026 + kYear;
+        const Term moon = months(fits, PROMETHEIA_MOON, 0.001);
+        const Term sun = months(fits, PROMETHEIA_SUN, 0.001);
+        const Spec ingresses{"Moon sign ingresses, 12 handles",
+                             moon,
+                             {},
+                             1,
+                             0,
+                             PROMETHEIA_SEGMENTS_LON,
+                             0,
+                             0,
+                             0,
+                             30,
+                             y0,
+                             y1,
+                             0.05};
+        const Spec phases{"Sun-Moon phases, 12 handles each",
+                          moon,
+                          sun,
+                          1,
+                          -1,
+                          PROMETHEIA_SEGMENTS_LON,
+                          0,
+                          0,
+                          0,
+                          90,
+                          y0,
+                          y1,
+                          0.05};
+        for (const Spec& s : {ingresses, phases}) {
+            for (double tol : {1e-6, 1e-8}) {
+                INFO(s.name, " at tol_days ", tol);
+                const Function f(s);
+                const std::vector<prometheia_segments_root> whole =
+                    roots_of(f.get(), s.from, s.to, tol);
+                REQUIRE(whole.size() > 40);
+                const WindowScan w = scan_windows(f.get(), whole, window_marks(s.a, whole), s.from,
+                                                  s.to, tol, 200, 1);
+                CHECK(w.windows > 150);
+                CHECK(w.roots > w.windows);
+                CHECK(w.differ == 0);
+            }
+        }
+    }
+    prometheia_engine_close(e);
+}
+
+// What docs/SEGMENTS.md says does and does not move a root.
+TEST_CASE("c_segment_roots_windows_report" * doctest::skip()) {
+    prometheia_engine* e = open_engine();
+    if (!e) {
+        MESSAGE("SKIP: DE440 not found");
+        return;
+    }
+    {
+        Fits fits(e);
+        const double y0 = kJ2026, y1 = kJ2026 + kYear;
+        const Term moon = months(fits, PROMETHEIA_MOON, 0.001);
+        const Term sun = months(fits, PROMETHEIA_SUN, 0.001);
+        const Term sun_year{fits.fit(PROMETHEIA_SUN, PROMETHEIA_COORDS_ECLIPTIC, y0, y1, 0.001)};
+        const Term moon_year{fits.fit(PROMETHEIA_MOON, PROMETHEIA_COORDS_ECLIPTIC, y0, y1, 0.001)};
+        const auto spec = [&](const char* name, const Term& a, const Term& b, double cb,
+                              double target, double rate, double modulus) {
+            return Spec{name, a,       b,  1,  cb,  PROMETHEIA_SEGMENTS_LON, target, rate,
+                        y0,   modulus, y0, y1, 0.05};
+        };
+        const Spec ingresses = spec("Moon ingresses, 12 handles", moon, {}, 0, 0, 0, 30);
+        const Spec phases = spec("phases, 12 handles each", moon, sun, -1, 0, 0, 90);
+        const Spec degrees = spec("Sun whole degrees", sun_year, {}, 0, 0, 0, 1);
+        const Spec chase = spec("Moon v a target at 1 deg/d", moon_year, {}, 0, 100, 1, 360);
+
+        std::printf("same handles, target and tol_days, windows against the whole year\n");
+        WindowScan total;
+        for (const Spec* s : {&ingresses, &phases, &degrees, &chase}) {
+            for (double tol : {1e-6, 1e-8}) {
+                const Function f(*s);
+                const std::vector<prometheia_segments_root> whole = roots_of(f.get(), y0, y1, tol);
+                const WindowScan w =
+                    scan_windows(f.get(), whole, window_marks(s->a, whole), y0, y1, tol, 6000, 2);
+                std::printf("  %-28s tol %.0e: %6ld windows %8ld roots, %ld differ\n",
+                            s->name.c_str(), tol, w.windows, w.roots, w.differ);
+                total.windows += w.windows;
+                total.roots += w.roots;
+                total.differ += w.differ;
+            }
+        }
+        std::printf("  all: %ld windows, %ld roots, %ld differ\n", total.windows, total.roots,
+                    total.differ);
+
+        // The same crossing asked another way. Roots are paired in order.
+        struct Moved {
+            long roots = 0, moved = 0;
+            double worst = 0.0, worst_err = 0.0;
+            void add(const std::vector<prometheia_segments_root>& x,
+                     const std::vector<prometheia_segments_root>& y) {
+                REQUIRE(x.size() == y.size());
+                for (size_t i = 0; i < x.size(); ++i) {
+                    const double d = std::abs(x[i].jd_tt - y[i].jd_tt);
+                    ++roots;
+                    moved += d != 0.0;
+                    worst = std::max(worst, d);
+                    worst_err = std::max(worst_err, d / x[i].err_days);
+                }
+            }
+            void print(const char* what) const {
+                std::printf("  %-44s %6ld roots, %6ld moved, worst %.4f s, %.3f err_days\n", what,
+                            roots, moved, worst * 86400.0, worst_err);
+            }
+        };
+        std::printf("the same crossing, asked differently\n");
+        // Only the months a window touches, against all twelve.
+        for (double tol : {1e-6, 1e-9, 1e-11}) {
+            Moved m;
+            for (int first = 0; first < 12; ++first) {
+                for (int n = 1; n <= 3 && first + n <= 12; ++n) {
+                    Spec part = ingresses;
+                    part.a = Term(moon.begin() + first, moon.begin() + first + n);
+                    const double a = moon[size_t(first)]->layout->bounds_jd_tt[0];
+                    const prometheia_segments_layout* end = moon[size_t(first + n - 1)]->layout;
+                    const double b = end->bounds_jd_tt[end->count];
+                    const Function all(ingresses), cut(part);
+                    m.add(roots_of(all.get(), a, b, tol), roots_of(cut.get(), a, b, tol));
+                }
+            }
+            char what[64];
+            std::snprintf(what, sizeof what, "handles of the window only, tol %.0e", tol);
+            m.print(what);
+        }
+        // The same moving target, anchored at each month's start.
+        {
+            Moved m;
+            for (int k = 0; k < 12; ++k) {
+                const double a = y0 + k * (kYear / 12), b = a + kYear / 12;
+                Spec anchored = chase;
+                anchored.target_jd_tt = a;
+                anchored.target = std::fmod(chase.target + chase.target_rate * (a - y0), 360.0);
+                const Function x(chase), y(anchored);
+                m.add(roots_of(x.get(), a, b, 1e-6), roots_of(y.get(), a, b, 1e-6));
+            }
+            m.print("target anchored at the window's start");
+        }
+        // tol_days past the floor.
+        for (double tol : {1e-7, 1e-9}) {
+            Moved m;
+            const Function f(ingresses);
+            m.add(roots_of(f.get(), y0, y1, 1e-6), roots_of(f.get(), y0, y1, tol));
+            char what[64];
+            std::snprintf(what, sizeof what, "tol %.0e against 1e-6", tol);
+            m.print(what);
+        }
+        // The smallest change to f there is.
+        {
+            Moved m;
+            Spec next = ingresses;
+            next.target = 15.0;
+            Spec ulp = next;
+            ulp.target = std::nextafter(15.0, 1e9);
+            const Function x(next), y(ulp);
+            m.add(roots_of(x.get(), y0, y1, 1e-6), roots_of(y.get(), y0, y1, 1e-6));
+            m.print("target 15 deg, one ulp up");
         }
     }
     prometheia_engine_close(e);

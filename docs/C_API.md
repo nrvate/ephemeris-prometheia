@@ -617,8 +617,17 @@ prometheia_status prometheia_segments_roots(const prometheia_segments_function *
   - **The window** is `[jd_tt_start, jd_tt_end)`, and must lie inside each
     term's span (`PROMETHEIA_ERROR_COVERAGE` otherwise).
   - **Same roots from any window.** Every piece is searched whole, whatever
-    the window, so a root is the same double from any window that holds
+    the window. With the same handles in each term, the same target and the
+    same `tol_days`, a root is the same double from any window that holds
     it. Back-to-back windows give each root once.
+  - **What does move a root.** A root is the middle of a bracket `tol_days`
+    wide, 1e-6 day at the coarsest, so any change to f can land it elsewhere
+    in that bracket, however small the change. Passing only the handles a
+    window touches, anchoring a moving target elsewhere, a finer `tol_days`,
+    or a target one ulp higher all do. Measured at `tol_days` 1e-6, the worst
+    was 0.069 s, 0.78 of `err_days` (SEGMENTS.md). Compare such answers by
+    `err_days`, or ask for a finer `tol_days`: at 1e-9 the shorter handle
+    list moved a root by 0.0003 s at most.
   - **When the buffer fills.** At most `capacity` roots are written.
     `*jd_tt_resume` is then the instant of the first root not written: the
     start of a call that carries on. It is NaN when every root was

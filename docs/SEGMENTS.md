@@ -252,7 +252,9 @@ its ingresses, returns, stations, aspect windows and declination searches.
 **The method.**
 - **Pieces.** The window is cut into pieces, each where one segment of
   each term overlaps. Each piece is searched whole, whatever the window, so
-  a root is the same double from any window that holds it.
+  with the same handles, target and `tol_days` a root is the same double
+  from any window that holds it. Anything else that changes f can move a
+  root within its bracket ("Windows", below).
 - **Continuity first.** At a bound each term's two sides may differ by up
   to twice its tolerance. Half that step is spread linearly over the
   segment on each side, so each term is continuous, and so is f. Without
@@ -378,6 +380,29 @@ with the machine loaded (load average about 2.6).
   - **Contract edges.** Counting with `capacity` 0 gives the same total as
     one call. A root at `jd_tt_end` belongs to the next window. Four
     threads on the same handles get the same doubles.
+  - **Windows.** `c_segment_roots_windows_report` asked 47,870 windows for
+    1,456,398 roots: Moon ingresses, phases, the Sun's whole degrees and a
+    moving target over 2026, at `tol_days` 1e-6 and 1e-8. Half the windows
+    were random and half began and ended on a segment bound, a handle join
+    or a root, or one ulp beside one. All were bit-identical to the whole
+    year's call. A solve stops once its bracket is `tol_days` wide and
+    returns the middle, so the same crossing asked another way can land
+    elsewhere in that bracket, up to one width from another answer:
+
+    | The same crossing, asked another way | `tol_days` | Roots moved | Worst | Of `err_days` |
+    |---|---|---|---|---|
+    | Only the handles of the window, not all twelve | 1e-6 | 325 of 855 | 0.069 s | 0.78 |
+    | The same | 1e-9 | 250 of 855 | 0.0003 s | 0.18 |
+    | A moving target anchored at the window's start | 1e-6 | 2 of 13 | 0.030 s | 0.34 |
+    | `tol_days` 1e-9 against 1e-6 | | 101 of 160 | 0.043 s | 0.48 |
+    | The target one ulp higher | 1e-6 | 10 of 161 | 0.043 s | 0.48 |
+
+    At a fine `tol_days` what is left is f itself: a shorter list has no
+    join to spread at its ends. At 1e-11, all 172 roots that moved were in
+    the list's first or last segment, and the 465 elsewhere stayed bit for
+    bit. Cutting the search to the window at either end
+    fails `c_segment_roots_any_window`; the cut at the window's end passes
+    the resume test.
   - **Bounds.** On the 1″ fit, a longitude target at either end of the step
     at a bound, as well as halfway, gives one root within 1e-4 day of the
     bound. The step's ends are asked of the longitude only: the latitude

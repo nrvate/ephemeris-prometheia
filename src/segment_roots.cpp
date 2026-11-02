@@ -3,8 +3,9 @@
 // Roots on segment handles (docs/SEGMENTS.md, "Roots").
 //
 // The window is cut into pieces, each where one segment of a and one of b
-// overlap, and every piece is searched whole whatever the window, so a root
-// is the same double from any window that holds it. On a piece f is smooth:
+// overlap, and every piece is searched whole whatever the window, so with
+// the same handles, target and tol_days a root is the same double from any
+// window that holds it. On a piece f is smooth:
 // it is interpolated at Chebyshev points (degree kN, halving until the
 // series' tail is negligible), and Chebyshev bounds on the interpolant's
 // first and second derivatives cut it into runs on which f is monotone,

@@ -1655,8 +1655,13 @@ typedef struct prometheia_segments_root {
  *   bound f therefore differs from what prometheia_segments_eval gives, by
  *   at most half the step there (within the fits' tolerance).
  * - The answer does not depend on the window: every piece is searched
- *   whole, so a root is the same double from any window that holds it.
+ *   whole, so with the same handles in each term, the same target and the
+ *   same tol_days, a root is the same double from any window that holds it.
  *   Back-to-back windows and a resumed search give each root exactly once.
+ * - Anything else that changes f can move a root within err_days, however
+ *   small the change: a root is the middle of a bracket tol_days wide. That
+ *   includes passing only the handles a window touches, anchoring a moving
+ *   target elsewhere, and a finer tol_days (docs/C_API.md).
  * - The time error is about band / |slope|, plus tol_days: err_days.
  *
  * PROMETHEIA_ERROR_COVERAGE for a window outside a term's span;
