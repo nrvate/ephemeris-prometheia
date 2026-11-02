@@ -16,7 +16,8 @@ documented, not that it is frozen.
 - **Kepler's equation is solved at every mean anomaly** (docs/VALIDATION.md,
   "The Kepler solver"). At high eccentricity the solver could silently return a
   state half an orbit off: 0.3% of mean anomalies at e = 0.83, 11% at e = 0.999.
-  One real body of 1.58M was hit, 858130, up to 74° out. Elements given to
+  One real body of 1.58M was hit, 858130, 116° out on the sky on one date
+  sampled. Elements given to
   `prometheia_calc_elements` were exposed near M = ±π for e ≥ 0.8. Every answer
   that was right is unchanged.
 - **Catalog bodies are sampled where a cubic cannot hold them** (docs/ENGINE.md,

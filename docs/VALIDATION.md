@@ -170,7 +170,7 @@ a perihelion of Icarus (0.19 AU), `flyby-geo-apophis` and
   - 152 bodies moved, all of them flagged;
   - seen from Earth they moved 0.009″ at the median and 0.18″ at the 90th
     percentile, with Icarus at 29″, Phaethon (3200) 7″ and Talos (5786) 3.6″.
-    858130 moved 74°, which is the Kepler solver below.
+    858130 moved furthest, which is the Kepler solver below.
   - Across every 50th of the 1.58M bodies over ±10 years, 2.63% are flagged.
 
 **What the check leaves behind** (measured 2026-11-01). The trigger is an
@@ -199,8 +199,13 @@ below 0 at high e, and it stopped wherever its iterations ran out. It returned
 a state half an orbit off with no error, for 0.3% of mean anomalies at e = 0.83,
 2% at 0.95 and 11% at 0.999, near M = ±π. A residual check now sends those to
 bisection, so every answer that was right is unchanged.
-- **Real bodies:** one record of 1.58M, 858130 (e 0.91, M 3.42), which was 38°
-  out on the sky.
+- **Real bodies:** one record of 1.58M, 858130 (e 0.91, M 3.42). It was wrong
+  at every instant sampled, 116° on the sky on 2026-11-11, and that is a sampled
+  figure, not a maximum: its phase in its orbit was wrong.
+- **An outside check:** Astrolog compared Icarus and 858130 at 12:00 UT with
+  Swiss Ephemeris's asteroid files, output against output. 858130 now agrees to
+  the printed second on both dates compared, 2026-07-11 and 2026-11-11, and
+  Icarus to 1″ on 2026-07-11, near perihelion, where the old build was 21″ out.
 - **User elements** (`prometheia_calc_elements`, hypotheticals) were exposed
   at any date near M = ±π, for e ≥ 0.8.
 - **How it stayed hidden:** tests held `kepler_propagate` to itself, and the
