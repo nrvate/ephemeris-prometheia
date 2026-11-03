@@ -284,6 +284,15 @@ the extension. PIC was measured on the engine bench at a geometric mean of
   --no-build-isolation ./python` with that prefix's `pkg-config` path. The
   wheel installed into a clean venv, answered, and carried
   `cprometheia.pxd`.
+- **astromcp builds this package from source** (its D14), at a commit pinned
+  in its `Makefile`, so it sees a change here only when that pin moves. For
+  work on both at once it can build a checkout of this repository instead:
+  `make bootstrap PROMETHEIA_SRC=<this tree>` in astromcp builds the library
+  into its own cache directory (never this tree's `build/`), installs this
+  package from `python/` and relinks astromcp's scan kernel. The library is
+  static, so a change here reaches astromcp only after that rebuild and a
+  server restart. Run 2026-11-02 at `93c3949`. Its fetch tools then run from
+  this tree, with this tree's `build/`.
 - Linux is built and tested. macOS and Windows are untested.
 - Not on PyPI. Publishing there is a separate decision.
 
