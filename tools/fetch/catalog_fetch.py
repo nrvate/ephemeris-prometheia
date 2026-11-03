@@ -13,7 +13,7 @@ and matching its pin.
 Usage:
     tools/fetch/catalog_fetch.py --list
     tools/fetch/catalog_fetch.py --dir .                  # the newest catalog
-    tools/fetch/catalog_fetch.py --dir . --only sbdb-20261027.epm
+    tools/fetch/catalog_fetch.py --dir . --only sbdb-20261102.epm
     tools/fetch/catalog_fetch.py --dir . --verify
 """
 
@@ -28,6 +28,8 @@ BASE = "https://github.com/nrvate/ephemeris-prometheia/releases/download/"
 
 # Newest first: (asset, release tag, bytes, pinned sha256).
 CATALOGS = [
+    ("sbdb-20261102.epm", "catalog-20261102", 147321486,
+     "dfe74e5f88f1be4ef11d15d27dfe4ff2e0e3e2712dd98005704d434ae954a63b"),
     ("sbdb-20261027.epm", "catalog-20261027", 147254154,
      "1dd348aa203f341e0c499911262ea1265cf9a47ea9b0305f65eea85c23959919"),
     ("sbdb-full-20260916.epm", "v0.1.0", 136692088,

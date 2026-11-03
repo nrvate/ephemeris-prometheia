@@ -414,6 +414,13 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
 
 ## Released
 
+- **catalog-20261102**, published 2026-11-02
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/catalog-20261102).
+  `sbdb-20261102.epm` (EPM1 1.2, 1,581,053 records, sha256 `dfe74e5f…a63b`):
+  the 10-27 base with a refresh folded in, the first with MPC orbits and the
+  completeness check (INGESTION.md, "Freshness"). `sbdb-20261027.epm` stays
+  on this machine: the real-data tests default to it. The MCP config
+  (user scope) serves the new file.
 - **catalog-20261027**, published 2026-10-27
   (https://github.com/nrvate/ephemeris-prometheia/releases/tag/catalog-20261027).
   A data-only release tagged at `3ed2b9c`. Its asset is `sbdb-20261027.epm`

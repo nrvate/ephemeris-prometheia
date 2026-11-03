@@ -204,9 +204,11 @@ full catalog rather than shipping 1.5 million:
   such a line is named, marked `(skipped)` and left out, and the cut goes
   on. That is for a list of thousands cut from a catalog that has moved.
 - **Each record is copied as the source has it.** The metadata is the
-  source's, plus `subset_of` and `subset_of_records`. No time or tool
-  version is recorded, so the same catalog and list always give the same
-  bytes, and a shipped cut can be pinned.
+  source's, plus `subset_of` and `subset_of_records`. A fold's
+  `fetched_finished_utc` is its newest input's, so it says how current the
+  data is. `sbdb_count` stays the base's. No time or tool version is
+  recorded, so the same catalog and list always give the same bytes, and a
+  shipped cut can be pinned.
 - **Measured (2026-10-25)** on `sbdb-full-20260916.epm`, with (1)–(29),
   Chiron and twelve outer bodies (Pholus through Gonggong):
   - 42 bodies came to 4,629 bytes in 1.2 s;
@@ -307,7 +309,9 @@ orbit's solution date, which the 2026-09-16 reading of its documentation
 missed and Astrolog found on 2026-10-25: `sb-cdata` accepts
 `soln_date|GT|<date>`. Measured: 2,041 asteroids re-solved after
 2026-09-15; `name|DF` (has a name) gives 26,606; their `OR` gives 28,527,
-the sum less the overlap, so the server applies both. Freshness is still
+the sum less the overlap, so the server applies both. Only JPL's own orbits
+have a `soln_date`, and most new discoveries arrive with the MPC's, so
+`soln_date|ND` has to go with it (2a below). Freshness is still
 *our* mechanism, and the tiered machinery below is **implemented in
 `prometheia-fetch`**.
 
@@ -348,20 +352,48 @@ the sum less the overlap, so the server applies both. Freshness is still
    (`an`/`au`/`cn`/`cu` = numbered/unnumbered asteroid/comet); the
    converter classifies by leading letter.
 
-2a. **Refresh since the base (any cadence, two requests):** one
-   full-precision sweep of every body re-solved since a date, OR named, OR
-   numbered after the base's highest number. A naming or renaming moves no
-   orbit, so neither the `orbit_id` diff nor a date filter alone would
-   bring the name; the `name|DF` term brings every named body every time.
+2a. **Refresh since the base (any cadence, five requests):** one
+   full-precision sweep of every body re-solved since a date, OR with an
+   MPC orbit, OR named, OR numbered after the base's highest number. Every
+   body either has a `soln_date` or lacks one, so the first two terms
+   together cover every orbit: a date for JPL's, and `soln_date|ND` for all
+   of the MPC's, every time. A naming or renaming moves no orbit, so
+   neither the `orbit_id` diff nor a date filter alone would bring the
+   name; the `name|DF` term brings every named body every time.
 
    ```sh
-   sbdb_fetch.py --out-dir sbdb-raw-refresh-20261025 \
-                 --refresh-since 2026-09-16 --numbered-after 895910
-   prometheia-convert sbdb-raw-refresh-20261025 -o sbdb-refresh-20261025.epm
+   sbdb_fetch.py --out-dir sbdb-raw-refresh-20261102 \
+                 --refresh-since 2026-10-27 --numbered-after 895910 \
+                 --base-dir sbdb-raw-full-20261027
+   prometheia-convert sbdb-raw-refresh-20261102 -o sbdb-refresh-20261102.epm
    # Fold it into the base: one up-to-date catalog, nothing to stack.
-   prometheia-catalog-subset sbdb-full-20260916.epm sbdb-refresh-20261025.epm \
-       --all -o sbdb-20260916-refresh-20261025.epm
+   prometheia-catalog-subset sbdb-20261027.epm sbdb-refresh-20261102.epm \
+       --all -o sbdb-20261102.epm
    ```
+
+   `--base-dir` (repeat it for a base plus earlier refreshes) checks the
+   sweep against SBDB's own totals, one small request per kind: live count
+   less base less new bodies. Above zero is bodies in neither, and the run
+   exits 1. Below zero is bodies gone from SBDB, which is reported. The two
+   can cancel, so a zero says the counts agree and no more.
+
+   **Measured 2026-11-02, against the 10-27 base:** 84,957 asteroids and
+   4,076 comets in 15 MB, three pages. Against SBDB's totals of 1,578,733
+   and 4,083, that is 1,024 and 1 new bodies, 0 unaccounted for: 89,033
+   rows kept 87,272, and the fold gave `sbdb-20261102.epm`, 1,581,053
+   records, 147,321,486 bytes, sha256 `dfe74e5f…a63b`. 360 orbits moved,
+   the same 360 with or without the MPC term, so none of them was the
+   MPC's. Ten bodies at three epochs (five of them new) answered
+   identically from it and from base + overlay. At 2026-11-03 Horizons
+   puts 2026 ED138 (`JPL#2`) 0.006″ away and 2020 HE221 (`E2026-UB1`, new)
+   0.016″ away. It is the release `catalog-20261102`.
+
+   **What the term fixed.** Until 2026-11-02 the sweep had no MPC term,
+   and this section said a refresh cost two requests. It found 22 of the
+   1,025 bodies new that week. Between the 09-16 base and the 10-27 pull,
+   its sweep had 394 of the 13,255 new bodies, though re-solved orbits were
+   caught: of 1,687 that moved, 7 were not selected, and the 5 of those
+   checked were solved on 10-26 or 10-27, after that sweep ran.
 
    The fold keeps every body, the newest record of each. That is the data
    brought up to date: the catalog consumers load and cut from, with no
@@ -387,7 +419,7 @@ the sum less the overlap, so the server applies both. Freshness is still
    - `--numbered-after` is the base's highest asteroid number (895910 for
      `sbdb-full-20260916`). Numbered asteroids are SPK-ID 20000000 + number,
      so the range term catches a numbering whether or not the orbit was
-     re-solved. None had happened by 2026-10-25.
+     re-solved. None had happened by 2026-11-02.
    - The date is compared a day early, because SBDB keeps `soln_date` in
      Pacific local time.
    - Measured on 2026-10-25 against the 09-16 base: 28,527 asteroids and
@@ -395,12 +427,14 @@ the sum less the overlap, so the server applies both. Freshness is still
      skipped comets lack `a`/`e`, as in the base. The overlay is 2.95 MB.
    - With it stacked on the base, 768325 answers to `Geyagugv` (named in
      WGSBN Bulletin 6 #17, 2026-10-19), which the base alone does not.
-   - **Not caught:** deletions and merged designations. Nor are orbits
-     that are the MPC's (`MPC:mpo`, orbit ids like `E2026U79`): SBDB gives
-     them a null `soln_date`, so no date can select them. Astrolog found
-     16 at condition code ≤ 4, among them 2014 FG62 and 2026 BY16. A body numbered
-     after the base also keeps its old provisional record in the base,
-     under the old SPK-ID, until the next base.
+   - **MPC orbits** (`MPC:mpo`, orbit ids like `E2026U79`) have a null
+     `soln_date`: 57,995 asteroids on 2026-11-02, every one in every sweep.
+     Astrolog found 16 at condition code ≤ 4, among them 2014 FG62 and
+     2026 BY16.
+   - **Not caught:** deletions and merged designations. `--base-dir`
+     reports a net loss but cannot name the bodies. A body numbered after
+     the base also keeps its old provisional record in the base, under the
+     old SPK-ID, until the next base.
 
 3. **Consolidated base (weekly/monthly):** the full 33-page pull as the
    authoritative base catalog; tiers 1–2 produce small overlay catalogs
@@ -423,7 +457,7 @@ tagged GitHub release assets, not repo-tree files**:
   release pattern: SHA256SUMS, nothing binary in the tree), each pinned in
   `tools/fetch/catalog_fetch.py`: `sbdb-full-20260916.epm` on `v0.1.0`, and
   since 2026-10-27 `sbdb-YYYYMMDD.epm` on a data-only tag
-  `catalog-YYYYMMDD`. Release assets allow 2 GB each; the full catalog
+  `catalog-YYYYMMDD`, a full pull or a refresh folded into one. Release assets allow 2 GB each; the full catalog
   is 137 MB (`sbdb-full-20260916.epm`: 136,692,088 bytes, 1,566,773 records, 87.2
   bytes each including the index, metadata and string pool; sha256
   `35ae8b889a5646ad2481a8357ca09d818eff426a30cedee6f366dc2128d23ba4`).

@@ -140,7 +140,10 @@ TEST_CASE("catalog_subset_stacks_overlays_newest_wins") {
         auto w = catalog::Writer::create(overlay.string(), catalog::WriterOptions{});
         REQUIRE(w.ok());
         REQUIRE(w.value().add(renamed, "1", "Ceres Renamed").ok());
-        REQUIRE(w.value().finish(CborValue::make_map()).ok());
+        CborValue meta = CborValue::make_map();
+        meta.items.push_back(CborValue::make_text("fetched_finished_utc"));
+        meta.items.push_back(CborValue::make_text("2099-01-01T00:00:00Z"));
+        REQUIRE(w.value().finish(std::move(meta)).ok());
     }
     std::string err;
     write(list, "Ceres Renamed\nPallas\n");
@@ -165,6 +168,13 @@ TEST_CASE("catalog_subset_stacks_overlays_newest_wins") {
     auto pallas = folded.value().lookup(20000002);
     REQUIRE(pallas.ok());
     CHECK(pallas.value().a_au == src.value().lookup(20000002).value().a_au);
+    // Its pull ends with the overlay's, not the base's.
+    const CborValue* base_end = src.value().metadata().find("fetched_finished_utc");
+    REQUIRE(base_end != nullptr);
+    CHECK(base_end->text < "2099");
+    const CborValue* fold_end = folded.value().metadata().find("fetched_finished_utc");
+    REQUIRE(fold_end != nullptr);
+    CHECK(fold_end->text == "2099-01-01T00:00:00Z");
 
     // The base's old name no longer names anything.
     write(list, "Ceres\n");

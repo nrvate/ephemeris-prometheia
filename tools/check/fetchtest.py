@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""sbdb_fetch.py's covariance overlay against scripted SBDB answers.
+"""sbdb_fetch.py's covariance overlay and refresh against scripted SBDB answers.
 
 Astrolog found (2026-10-25) that one body's covariance JPL publishes with
 no element values at its epoch -- every "A/" object's -- raised out of the
@@ -16,7 +16,16 @@ Assertions (each fires on the defect it names):
   * reason-missing       the manifest does not say why it was not used;
   * refusal-silent       the refused designation did not make the exit
                          status 1;
-  * good-cells-wrong     the usable covariance's cells were not written.
+  * good-cells-wrong     the usable covariance's cells were not written;
+  * refresh-misses-body  the refresh constraint, evaluated term by term over
+                         a scripted table, left out a body it must bring. The
+                         date term alone found 22 of 1,025 new bodies: an
+                         MPC orbit has no soln_date;
+  * refresh-takes-all    the constraint brought a body it had no reason to;
+  * shortfall-silent     bodies in neither the base nor the sweep did not make
+                         the exit status 1;
+  * exact-refused        a base + sweep that agree with SBDB's count, or one
+                         with bodies gone from SBDB, failed the run.
 
 Hermetic and instant. In tools/gate.sh.
 """
@@ -37,7 +46,8 @@ import assertlib  # noqa: E402
 import sbdb_fetch  # noqa: E402
 
 ASSERTIONS = ("run-stopped", "unusable-written", "reason-missing", "refusal-silent",
-              "good-cells-wrong")
+              "good-cells-wrong", "refresh-misses-body", "refresh-takes-all",
+              "shortfall-silent", "exact-refused")
 
 DATA = [[float(10 * i + j + 1) for j in range(6)] for i in range(6)]
 
@@ -72,6 +82,53 @@ def fake_fetch(des, covariance=False):
 
 def fake_row(d):
     return ["a", d["object"]["spkid"]] + [""] * (len(sbdb_fetch.DEFAULT_FIELDS) - 1)
+
+
+# (spkid, soln_date, name, must the refresh since 2026-10-27 bring it?)
+REFRESH_TABLE = [
+    (54668182, "2026-10-29 11:09:54", None, True),   # re-solved by JPL
+    (54663758, None, None, True),                    # an MPC orbit: new, no date
+    (50000001, "2020-01-01 00:00:00", None, False),  # untouched
+    (20000001, "2020-01-01 00:00:00", "Ceres", True),  # named
+    (20895911, "2020-01-01 00:00:00", None, True),   # numbered after the base
+]
+
+
+def term_holds(term, body):
+    """One sb-cdata term, as the documented operators read it."""
+    spkid, soln_date, name, _ = body
+    field, op, *values = term.split("|")
+    value = {"soln_date": soln_date, "name": name, "spkid": spkid}[field]
+    if op == "DF":
+        return value is not None
+    if op == "ND":
+        return value is None
+    if op == "GT":
+        return value is not None and value > values[0]
+    if op == "RG":
+        return int(values[0]) <= value <= int(values[1])
+    raise ValueError(term)
+
+
+def refresh_selection():
+    terms = json.loads(sbdb_fetch.refresh_constraint("2026-10-27", 895910))["OR"]
+    return {b[0] for b in REFRESH_TABLE if any(term_holds(t, b) for t in terms)}
+
+
+def completeness_status(base, sweep, live):
+    """check_refresh_complete's exit status over scripted shards and count."""
+    sbdb_fetch.fetch_page = lambda *a, **k: {"count": live}
+    with tempfile.TemporaryDirectory() as root:
+        for name, ids in (("base", base), ("sweep", sweep)):
+            os.mkdir(os.path.join(root, name))
+            with open(os.path.join(root, name, "part-a-000000000.tsv"), "w") as f:
+                f.write("# fields: kind\tspkid\n")
+                f.writelines(f"a\t{i}\tx\n" for i in ids)
+        args = types.SimpleNamespace(kinds="a", delay=0, out_dir=os.path.join(root, "sweep"),
+                                     base_dir=[os.path.join(root, "base")])
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            return sbdb_fetch.check_refresh_complete(args)
 
 
 def main():
@@ -114,6 +171,20 @@ def main():
     asserts.judge("good-cells-wrong",
                   good is None or good[-ncov:][0] != "2460000.5" or "" in good[-ncov:],
                   f"good-cells-wrong: row {good}", into=fails)
+
+    picked = refresh_selection()
+    wanted = {b[0] for b in REFRESH_TABLE if b[3]}
+    asserts.judge("refresh-misses-body", wanted - picked,
+                  f"refresh-misses-body: {sorted(wanted - picked)}", into=fails)
+    asserts.judge("refresh-takes-all", picked - wanted,
+                  f"refresh-takes-all: {sorted(picked - wanted)}", into=fails)
+    short = completeness_status([1, 2, 3], [3, 4], 5)
+    asserts.judge("shortfall-silent", short != 1, f"shortfall-silent: status {short}",
+                  into=fails)
+    exact = completeness_status([1, 2, 3], [3, 4], 4)
+    gone = completeness_status([1, 2, 3], [3, 4], 3)
+    asserts.judge("exact-refused", (exact, gone) != (0, 0),
+                  f"exact-refused: statuses {exact}, {gone}", into=fails)
     for msg in fails:
         print(msg)
     asserts.report()

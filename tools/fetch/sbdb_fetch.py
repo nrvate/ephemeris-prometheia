@@ -27,11 +27,16 @@ Modes:
   --refresh-since DATE — one full-precision sweep of every body whose orbit
                          was re-solved since DATE (soln_date, a day earlier
                          than asked: SBDB keeps it as Pacific local time),
-                         OR that has a proper name (namings and renamings
-                         move no orbit), OR, with --numbered-after N, that
-                         was numbered after N. Standard 21-column shards, so
-                         prometheia-convert makes the overlay .epm that keeps
-                         a base current. See docs/INGESTION.md, "Freshness".
+                         OR whose orbit is the MPC's (soln_date null, so no
+                         date can select it, and most new discoveries are
+                         these), OR that has a proper name (namings and
+                         renamings move no orbit), OR, with --numbered-after
+                         N, that was numbered after N. Standard 21-column
+                         shards, so prometheia-convert makes the overlay .epm
+                         that keeps a base current. With --base-dir, base +
+                         sweep is then checked against SBDB's own totals, and
+                         a body neither carries fails the run. See
+                         docs/INGESTION.md, "Freshness".
   --covariance DES...  — on-demand full orbit covariance: one sbdb.api
                          request per designation (cov=mat), written as a
                          covariance overlay shard (the 20 standard columns
@@ -454,13 +459,58 @@ def delta(args) -> int:
 def refresh_constraint(since: str, numbered_after: int) -> str:
     """The sb-cdata of a refresh sweep. soln_date is compared a day early:
     SBDB stores it as Pacific local time, so a solution made late on the
-    base's date (UTC) can carry the previous date."""
+    base's date (UTC) can carry the previous date. An MPC orbit has no
+    soln_date at all, so soln_date|ND brings all of them every time: without
+    it a sweep found 22 of the 1,025 bodies new in six days."""
     day = datetime.strptime(since, "%Y-%m-%d") - timedelta(days=1)
-    terms = [f"soln_date|GT|{day:%Y-%m-%d}", "name|DF"]
+    terms = [f"soln_date|GT|{day:%Y-%m-%d}", "soln_date|ND", "name|DF"]
     if numbered_after > 0:
         # Numbered asteroids are SPK-ID 20000000 + number.
         terms.append(f"spkid|RG|{20000000 + numbered_after + 1}|29999999")
     return json.dumps({"OR": terms}, separators=(",", ":"))
+
+
+def shard_spkids(directory: Path, kind: str) -> set[str]:
+    """The SPK-IDs in one raw directory's shards of one kind."""
+    ids = set()
+    for shard in directory.glob(f"part-{kind}-*.tsv"):
+        with shard.open(encoding="utf-8") as fh:
+            for line in fh:
+                if not line.startswith("#"):
+                    ids.add(line.split("\t", 2)[1])
+    return ids
+
+
+def check_refresh_complete(args) -> int:
+    """Base + sweep against SBDB's own count of each kind, one small request
+    each: the refresh selects by filter, and a filter's misses are silent.
+    A positive shortfall is bodies neither carries, and fails the run. A
+    negative one is bodies gone from SBDB, which a sweep cannot name; the two
+    can cancel, so a zero says no more than that the counts agree."""
+    status = 0
+    for kind in [k.strip() for k in args.kinds.split(",") if k.strip()]:
+        if args.delay > 0:
+            time.sleep(args.delay)
+        base = set()
+        for directory in args.base_dir:
+            base |= shard_spkids(Path(directory), kind)
+        if not base:
+            print(f"kind {kind}: nothing in --base-dir", file=sys.stderr)
+            status = 1
+            continue
+        new = len(shard_spkids(Path(args.out_dir), kind) - base)
+        live = int(fetch_page(kind, ["spkid"], 0, 1, False).get("count", 0))
+        short = live - len(base) - new
+        print(f"kind {kind}: SBDB {live}, base {len(base)}, new in sweep {new}, "
+              f"unaccounted {short}")
+        if short > 0:
+            print(f"kind {kind}: {short} bodies are in neither the base nor the "
+                  "sweep; this refresh is incomplete", file=sys.stderr)
+            status = 1
+        elif short < 0:
+            print(f"kind {kind}: {-short} base bodies are gone from SBDB and stay "
+                  "in a fold until the next full pull", file=sys.stderr)
+    return status
 
 
 def covariance(args) -> int:
@@ -572,11 +622,16 @@ def main() -> int:
                     help="refetch at most this many changed bodies per delta "
                          "run; beyond it, insist on a full pull (default 1000)")
     ap.add_argument("--refresh-since", default="",
-                    help="YYYY-MM-DD: sweep bodies re-solved since then, every named "
-                         "body, and (with --numbered-after) every newly numbered one")
+                    help="YYYY-MM-DD: sweep bodies re-solved since then, every "
+                         "MPC-orbit body, every named body, and (with "
+                         "--numbered-after) every newly numbered one")
     ap.add_argument("--numbered-after", type=int, default=0,
                     help="the base catalog's highest asteroid number (895910 for "
-                         "sbdb-full-20260916): numbered bodies above it are refreshed")
+                         "sbdb-20261027): numbered bodies above it are refreshed")
+    ap.add_argument("--base-dir", action="append", default=[],
+                    help="with --refresh-since: a raw directory of the base (repeat "
+                         "for a base plus its refreshes); checks base + sweep "
+                         "against SBDB's totals and fails on a shortfall")
     ap.add_argument("--covariance", nargs="*", default=[],
                     help="designations to fetch full orbit covariance for "
                          "(one sbdb.api request each)")
@@ -602,6 +657,8 @@ def main() -> int:
 
     sweep(args, [f.strip() for f in args.fields.split(",") if f.strip()],
           "manifest.json", "part-", provenance=True)
+    if args.refresh_since and args.base_dir:
+        return check_refresh_complete(args)
     return 0
 
 

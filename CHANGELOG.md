@@ -13,6 +13,16 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **A catalog refresh brings new bodies** (docs/INGESTION.md, "Freshness").
+  `sbdb_fetch.py --refresh-since` selected on `soln_date`, which only JPL's
+  orbits have, so a body with an MPC orbit never came, and most discoveries
+  have one: it found 22 of the 1,025 bodies new since 2026-10-27. It now brings
+  every MPC orbit as well. `--base-dir` checks base + sweep against SBDB's own
+  totals and fails if a body is in neither; on 2026-11-02, 0 were. A fold's
+  `fetched_finished_utc` is now its newest input's instead of the base's.
+- **The catalog is current to 2026-11-03** (`catalog-20261102`,
+  `sbdb-20261102.epm`, 1,581,053 records): 1,025 new bodies and 360 moved
+  orbits, among them 2026 ED138's new solution.
 - **A catalog body answers to its SPK-ID** (docs/REGISTRY.md, "From an
   SPK-ID"). `object_info("naif:54667839")` gives the body with its canonical id,
   `sb:2026 ED138`, and `naif:20136199` gives `sb:136199`, read directly with no

@@ -209,10 +209,20 @@ int main(int argc, char** argv) {
     }
 
     // The first catalog's metadata, then what was cut and from what. No time
-    // and no tool version, so the output depends only on the inputs.
+    // and no tool version, so the output depends only on the inputs. Its
+    // pull ends with the newest input's: a fold is as current as its overlay.
     CborValue meta = readers.front().metadata();
     if (meta.type != CborValue::Type::Map)
         meta = CborValue::make_map();
+    for (size_t i = 0; i + 1 < meta.items.size(); i += 2) {
+        if (meta.items[i].text != "fetched_finished_utc")
+            continue;
+        for (const catalog::Reader& reader : readers) {
+            const CborValue* finished = reader.metadata().find("fetched_finished_utc");
+            if (finished && finished->text > meta.items[i + 1].text) // ISO 8601 sorts by time
+                meta.items[i + 1] = *finished;
+        }
+    }
     std::string from;
     for (const std::string& path : in_paths)
         from += (from.empty() ? "" : " + ") + std::filesystem::path(path).filename().string();
