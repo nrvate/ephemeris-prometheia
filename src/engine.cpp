@@ -3413,6 +3413,13 @@ struct Engine::Impl {
             pos.xyz_au[i] = v[i] / kAuKm;
         if (o.speed) {
             const double tp = jd_tt + kSpeedStepDays, tm = jd_tt - kSpeedStepDays;
+            // Hold the TDB offset fixed across the stencil: re-rounding it
+            // at each point puts a 40 us step of TDB into the difference
+            // about once in 5,000 instants (docs/ENGINE.md, "Rates"). The
+            // stencil then differences over equal spans of TDB and TT, so
+            // the result is per TDB day; the factor makes it per TT day.
+            time::TdbInterpolator::Pin pin(tdb, jd_tt);
+            const double per_tt = 1.0 + tdb.tdb_minus_tt_rate(jd_tt) / 86400.0;
             // The stencil starts its light-time solve from the centre's tau.
             double vp[3], vm[3], tau_p = tau, tau_m = tau;
             r = vec(tp, vp, tau_p);
@@ -3423,7 +3430,7 @@ struct Engine::Impl {
                 return r;
             const double span = (tp - tm) * kAuKm; // actual, rounded, step
             for (int i = 0; i < 3; ++i)
-                pos.vel_au_day[i] = (vp[i] - vm[i]) / span;
+                pos.vel_au_day[i] = (vp[i] - vm[i]) / span * per_tt;
         }
         const double* x = pos.xyz_au;
         const double* dx = pos.vel_au_day;

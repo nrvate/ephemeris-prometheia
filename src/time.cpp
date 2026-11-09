@@ -423,6 +423,17 @@ double TdbInterpolator::tdb_minus_tt(double jd_tt) {
            h * ((u3 - 2 * u2 + u) * a.rate + (u3 - u2) * b.rate);
 }
 
+double TdbInterpolator::tdb_minus_tt_rate(double jd_tt) {
+    const double k = std::floor(jd_tt / kNodeSpacingDays);
+    const auto index = static_cast<long long>(k);
+    const double u = (jd_tt - k * kNodeSpacingDays) / kNodeSpacingDays;
+    const Node a = node(index), b = node(index + 1);
+    const double h = kNodeSpacingDays, u2 = u * u;
+    return ((6 * u2 - 6 * u) * a.value + (-6 * u2 + 6 * u) * b.value +
+            h * ((3 * u2 - 4 * u + 1) * a.rate + (3 * u2 - 2 * u) * b.rate)) /
+           h;
+}
+
 double EspenakMeeusDeltaT::delta_t_seconds(double jd_tt) const {
     // Decimal year y = year + (month - 0.5)/12, as the dataset defines it
     // (the day within the month is neglected; dT changes by milliseconds

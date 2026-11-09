@@ -83,6 +83,16 @@ DE440): planets apparent 5.40 → 4.04, Moon mean node and apogee 18.6 →
 time was 56, 101 and 130. `prometheiad`'s latency on fresh 50-row requests
 is unchanged within run-to-run noise.
 
+A JD double also quantizes the *result*: `tdb_from_tt` rounds to the
+double grid (40 µs near the present), and the rounding steps once each
+time TDB−TT crosses a boundary, about 160 times a year, moving the Moon
+3–4 cm. A rate stencil that converted each of its points separately read
+that step as velocity. `TdbInterpolator::Pin` holds the offset of the
+stencil's centre, so that inside it `tdb_from_tt(t) = tdb_c + (t − tt_c)`
+exactly, and `tdb_minus_tt_rate` gives the interpolant's derivative
+(seconds per day) for the TDB-to-TT conversion of the resulting rate
+(docs/ENGINE.md, "Rates").
+
 **Against Horizons and the full series (measured 2026-09-29).** Horizons'
 own TT↔TDB is the one-term formula of JPL's SPICE leap-seconds kernel,
 K sin E with E = M + EB sin M (K 1.657 ms, EB 0.01671). It matches that

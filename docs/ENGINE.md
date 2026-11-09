@@ -239,6 +239,38 @@ For a TT epoch *t*:
      three-point truncation. At 0.001 day it was 2.6e-5 °/day; smaller
      steps than 1/4096 lose to roundoff. The cross-test's `rates` leg
      checks this through the server.
+   - **The TDB offset is held fixed across a stencil** (2026-11-09). A JD
+     double near the present holds 40 µs, so `tdb_from_tt` rounds TDB to
+     that grid, and the rounding steps by one ulp each time TDB−TT crosses
+     a rounding boundary, about 160 times a year. Each point of the ±1/4096
+     stencil converted on its own, so a stencil straddling a step differenced
+     a 3–4 cm jump of the Moon (21 µas) over 42 s: a rate off by up to
+     0.05″/day, at about one instant in 5,000 (DE440 itself, evaluated at
+     exact TDB instants, is smooth to 0.09 mm). The stencil now converts the
+     centre once and maps every other TT instant *t* in it to
+     `tdb_c + (t − tt_c)`, which is exact (`TdbInterpolator::Pin`; the
+     light-time solve, the observer and the Sun for deflection all go through
+     it). The difference is then per TDB day; it is multiplied by
+     1 + d(TDB−TT)/dTT, from the interpolant's own derivative, to make it per
+     TT day. That factor is 1 ± 3.4e-10, which is 1.6e-5″/day on the Moon;
+     it is applied because it is free. The centre's position does not go
+     through the pin and is bit-identical to before. **Measured**
+     (2026-11-09, DE440, 20,000 random 1/4096-day instants in 1800–1804)
+     against a five-point difference at step 1/64 day with exactly spaced
+     TDB instants, in ″/day:
+
+     | | median | 99% | max |
+     |---|---|---|---|
+     | apparent Moon, before | 4.4e-05 | 1.3e-04 | 4.9e-02 |
+     | apparent Moon, after | 4.3e-05 | 1.3e-04 | 2.1e-04 |
+     | geometric Moon (ICRF), before | 2.6e-05 | 5.6e-05 | 4.9e-02 |
+     | geometric Moon (ICRF), after | 2.6e-05 | 4.9e-05 | 6.3e-05 |
+     | apparent Mars, before | 5.5e-07 | 1.0e-06 | 2.6e-03 |
+     | apparent Mars, after | 1.4e-07 | 5.0e-07 | 9.5e-07 |
+
+     What remains on the Moon is the three-point truncation. Away from a
+     step the rate changed by at most 1.9e-5″/day (Moon; the factor), over
+     4,000 mixed calls.
    - **A fixed star's distance rate is the exception, and is computed in
      closed form** (2026-09-29). The reported distance is |star − observer|
      — deflection, aberration and the frame rotation all keep a vector's
@@ -330,7 +362,8 @@ instants):
     It re-summed the series almost every hourly row, which was 92% of the
     cost.
 - **Light time** is solved by Newton's method (step 2). The rate stencil
-  starts from the centre's τ.
+  starts from the centre's τ and holds the TDB offset of the centre
+  (step 6).
 - **Per-instant memos:** the observer's state and the Sun's state are kept
   for the last three instants, keyed exactly (topocentric entries also on
   ΔT), so bodies at one instant and its stencil read them once.

@@ -515,7 +515,12 @@ TEST_CASE("engine_orbit_points_geometry") {
     const double* x = state.value().pos.xyz_au;
     const double* v = state.value().pos.vel_au_day;
     const double r = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
-    const double v2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    // The engine's rates are per TT day; the dynamics (GM in AU^3/day^2) run
+    // in TDB, so the velocity goes back to a TDB day first (a 3e-10 factor).
+    double dtdb = 0.0, dtdb_rate = 0.0;
+    time::tdb_minus_tt_with_rate(jd, dtdb, dtdb_rate);
+    const double per_tdb = 1.0 / (1.0 + dtdb_rate / 86400.0);
+    const double v2 = per_tdb * per_tdb * (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     const double mu = 2.9591220828559115e-04 + 8.887692445125634e-10; // GM Sun + Earth, AU^3/d^2
     const double a = 1.0 / (2.0 / r - v2 / mu);
     if (a > 0.0) {
@@ -1145,6 +1150,88 @@ TEST_CASE("de440_engine_rates_match_differenced_swetest") {
     CHECK(worst_lon < 5e-6);
     CHECK(worst_lat < 5e-6);
     CHECK(worst_dist < 1e-7);
+}
+
+// A JD double near the present holds 40 us, so TDB = round(TT + (TDB-TT))
+// steps by one ulp each time TDB-TT crosses a rounding boundary, and the Moon
+// jumps 3-4 cm with it. A rate stencil that straddled such a step used to
+// read it as velocity (up to 0.05"/day, about one instant in 5,000); the
+// engine now holds the TDB offset fixed within a stencil. The reference is a
+// five-point difference at exactly spaced TDB instants (each reference TT is
+// nudged by whole ulps until the engine's own conversion lands on the wanted
+// TDB), and the instants include the two known steps.
+TEST_CASE("de440_moon_rate_is_free_of_tdb_rounding_steps") {
+    if (!available(kDe440Path, "PROMETHEIA_DE440"))
+        return;
+    auto opened = Engine::open(kDe440Path);
+    if (!opened)
+        return;
+    Engine e = std::move(opened).value();
+    CalcOptions geo = CalcOptions::geometric();
+    geo.frame = Frame::ICRF;
+    CalcOptions pos_only = geo;
+    pos_only.speed = false;
+    time::TdbInterpolator conv;
+    const double h = 1.0 / 64.0, grid = 1.0 / 4096.0;
+    std::vector<double> centres;
+    for (double step : {2378848.3601, 2379915.9338}) {
+        const double base = std::floor(step / grid) * grid;
+        for (int k = -24; k <= 24; ++k)
+            centres.push_back(base + k * grid);
+    }
+    for (int k = 0; k < 300; ++k)
+        centres.push_back(2378500.0 + k * (7.0 * grid) * 53.0);
+    int bad = 0, checked = 0;
+    double worst = 0.0;
+    for (const double tc : centres) {
+        auto r0 = e.calc(body::kMoon, tc, geo);
+        REQUIRE(r0.ok());
+        const double tdb_c = conv.tdb_from_tt(tc);
+        double xs[5][3];
+        bool ok = true;
+        for (int k = -2; k <= 2 && ok; ++k) {
+            if (k == 0)
+                continue;
+            const double want = tdb_c + k * h, t = tc + k * h;
+            double found = 0.0;
+            for (int j = -4; j <= 4 && found == 0.0; ++j) {
+                double cand = t;
+                for (int q = 0; q < std::abs(j); ++q)
+                    cand = std::nextafter(cand, j > 0 ? 1e9 : -1e9);
+                if (conv.tdb_from_tt(cand) == want)
+                    found = cand;
+            }
+            auto r = found != 0.0 ? e.calc(body::kMoon, found, pos_only) : r0;
+            ok = found != 0.0 && r.ok();
+            if (ok)
+                for (int i = 0; i < 3; ++i)
+                    xs[k + 2][i] = r.value().pos.xyz_au[i];
+        }
+        if (!ok)
+            continue;
+        ++checked;
+        double v, rate;
+        time::tdb_minus_tt_with_rate(tc, v, rate);
+        const double per_tt = 1.0 + rate / 86400.0;
+        const Position& p = r0.value().pos;
+        double d2 = 0.0;
+        for (int i = 0; i < 3; ++i) {
+            const double ref =
+                (-xs[4][i] + 8.0 * xs[3][i] - 8.0 * xs[1][i] + xs[0][i]) / (12.0 * h) * per_tt;
+            d2 += (p.vel_au_day[i] - ref) * (p.vel_au_day[i] - ref);
+        }
+        const double err_as = std::sqrt(d2) / p.dist_au * 206264.806;
+        worst = std::max(worst, err_as);
+        if (err_as > 0.001)
+            ++bad;
+    }
+    std::printf("  Moon rate vs exact-step difference: %d of %d instants over 0.001\"/day, worst "
+                "%.1e\"/day\n",
+                bad, checked, worst);
+    CHECK(checked > 300);
+    // Measured: worst 6e-5"/day with the offset held, 0.049 across a step
+    // without; the 3-point truncation sets the former.
+    CHECK(bad == 0);
 }
 
 // The fixed sidereal planes (protocol v4 A.8), by their definitions.

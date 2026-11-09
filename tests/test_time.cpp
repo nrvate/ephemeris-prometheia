@@ -253,6 +253,27 @@ TEST_CASE("time_tdb_tt_is_the_full_series") {
     std::printf("  interpolated engine series vs all 787 terms: worst %.3e s\n", worst);
     CHECK(worst < 1.6e-6);
     CHECK(worst > 1e-8); // it is the truncated set, not the full one
+
+    // Its rate is the derivative of its own interpolant, and a Pin holds the
+    // TDB offset: inside one, tdb_from_tt(t) = tdb_from_tt(tt_c) + (t - tt_c)
+    // exactly, with no rounding step; outside, nothing is changed.
+    TdbInterpolator ti;
+    double worst_rate = 0.0;
+    for (double jd = 2378496.25; jd < 2379900.0; jd += 17.3) {
+        const double h = 1.0 / 64.0;
+        const double fd = (ti.tdb_minus_tt(jd + h) - ti.tdb_minus_tt(jd - h)) / (2 * h);
+        worst_rate = std::max(worst_rate, std::fabs(ti.tdb_minus_tt_rate(jd) - fd));
+    }
+    CHECK(worst_rate < 1e-9); // s/day
+    const double tc = 2378848.25, unpinned = ti.tdb_from_tt(tc + 0.0001);
+    {
+        TdbInterpolator::Pin pin(ti, tc);
+        const double tdb_c = ti.tdb_from_tt(tc);
+        CHECK(ti.tdb_from_tt(tc) == tdb_c);
+        for (int k = -50; k <= 50; ++k)
+            CHECK(ti.tdb_from_tt(tc + k / 4096.0) == tdb_c + k / 4096.0);
+    }
+    CHECK(ti.tdb_from_tt(tc + 0.0001) == unpinned);
 }
 
 TEST_CASE("time_delta_t") {

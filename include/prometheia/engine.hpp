@@ -18,7 +18,8 @@
 //      sidereal option then rotates the longitude zero point by the
 //      zodiac's ayanamsha.
 // Rates come from central differences of the whole pipeline (h = 1/4096
-// day), so they are rates of the *apparent* coordinates. A fixed star's
+// day) with the TDB offset held fixed across the stencil (ENGINE.md,
+// "Rates"), so they are rates of the *apparent* coordinates. A fixed star's
 // distance rate is the exception: it is computed in closed form, since a
 // difference of its 1e5..1e10 AU distance is one f64 ulp (ENGINE.md, "Rates").
 //

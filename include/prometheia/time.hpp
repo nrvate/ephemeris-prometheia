@@ -97,10 +97,42 @@ void tdb_minus_tt_with_rate(double jd_tt, double& value, double& rate_per_day);
 // a JD double can hold there, at a tenth of the cost (docs/TIME.md). The
 // value depends only on the instant, never on query history. Nodes are kept
 // in a direct-mapped cache of 256. Not thread-safe; one per thread.
+//
+// A JD double near the present holds 40 us, so tdb_from_tt rounds its result
+// to that grid, and the rounding jumps by one step each time TDB-TT crosses a
+// rounding boundary (~160 times a year). A central difference whose points
+// each round on their own would straddle such a jump and read a position
+// step (3-4 cm on the Moon) as velocity. A Pin holds the offset fixed for
+// the length of a stencil (docs/ENGINE.md, "Rates").
 class TdbInterpolator {
 public:
     double tdb_minus_tt(double jd_tt);
-    double tdb_from_tt(double jd_tt) { return jd_tt + tdb_minus_tt(jd_tt) / 86400.0; }
+    // Rate of TDB-TT in seconds per day (the analytic derivative of the
+    // same Hermite interpolant).
+    double tdb_minus_tt_rate(double jd_tt);
+    // While a Pin is alive, tdb_from_tt(t) is tdb_from_tt(tt_c) + (t - tt_c)
+    // for the pinned tt_c, which is exact for t near tt_c (Sterbenz). Only
+    // tdb_from_tt is affected. Pins do not nest.
+    class Pin {
+    public:
+        Pin(TdbInterpolator& owner, double tt_c) : owner_(owner) {
+            owner_.pinned_ = false;
+            owner_.pin_tt_ = tt_c;
+            owner_.pin_tdb_ = owner_.tdb_from_tt(tt_c);
+            owner_.pinned_ = true;
+        }
+        ~Pin() { owner_.pinned_ = false; }
+        Pin(const Pin&) = delete;
+        Pin& operator=(const Pin&) = delete;
+
+    private:
+        TdbInterpolator& owner_;
+    };
+    double tdb_from_tt(double jd_tt) {
+        if (pinned_)
+            return pin_tdb_ + (jd_tt - pin_tt_);
+        return jd_tt + tdb_minus_tt(jd_tt) / 86400.0;
+    }
     // Series sums so far (for tests and benchmarks).
     unsigned long long evaluations() const { return evaluations_; }
     static constexpr double kNodeSpacingDays = 1.0;
@@ -113,6 +145,8 @@ private:
     const Node& node(long long index);
     std::array<Node, 256> nodes_{};
     unsigned long long evaluations_ = 0;
+    bool pinned_ = false;
+    double pin_tt_ = 0.0, pin_tdb_ = 0.0;
 };
 
 inline double tdb_from_tt(double jd_tt) {

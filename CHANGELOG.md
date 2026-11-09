@@ -31,6 +31,18 @@ documented, not that it is frozen.
   from 21-30 to 12-23 ms per body-year on one thread, and from 4.8-6.7 to
   3.2-5.4 on four (docs/SEGMENTS.md, "Cost"), measured before precession came
   from day nodes.
+- **Rates no longer jump at a TDB rounding step** (docs/ENGINE.md, "Rates").
+  The rate stencil converted TT to TDB at each of its three points, and TDB
+  held in a JD double is quantized to 40 µs, so about 160 times a year the
+  rounding steps and the Moon with it by 3-4 cm. A stencil straddling a step
+  read that as velocity: a Moon rate off by up to 0.05 arcsec/day at about one
+  instant in 5,000. The stencil now holds the centre's TDB offset
+  (`TdbInterpolator::Pin`) and converts the per-TDB-day difference to per TT
+  day. Measured against a five-point difference at exact steps over 20,000
+  instants in 1800-1804: the worst miss of the apparent Moon 0.049 -> 0.00021
+  arcsec/day, the geometric Moon 0.049 -> 0.000063, Mars 0.0026 -> 0.0000010;
+  medians unchanged for the Moon, Mars 5.5e-7 -> 1.4e-7. Positions are
+  bit-identical; no rate moves by more than 2e-5 arcsec/day except at a step.
 - **A catalog refresh brings new bodies** (docs/INGESTION.md, "Freshness").
   `sbdb_fetch.py --refresh-since` selected on `soln_date`, which only JPL's
   orbits have, so a body with an MPC orbit never came, and most discoveries
