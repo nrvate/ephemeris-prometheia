@@ -13,6 +13,10 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Month fits are 5-8 times cheaper** (docs/SEGMENTS.md, "Cost", "All of it
+  together"): the four entries below on precession, nutation, rates and segment
+  fits, together. On astromcp's month grid at 0.001″, body by body from a cold
+  engine, a body-year fell from 20-36 ms to 3.2-6.4.
 - **A body behind the Sun no longer turns back** (docs/ENGINE.md, "Pipeline",
   gravitational deflection). The taper of light deflection inside the solar disc
   swung the deflection round up to 4 times faster than at the limb, which

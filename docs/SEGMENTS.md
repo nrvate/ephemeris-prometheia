@@ -215,6 +215,23 @@ With four threads, each on its own context of one corpus and a quarter of
 the chunks, the five bodies took 6.4, 6.7, 5.7, 5.3 and 4.8 ms per
 body-year before and 6.3, 5.4, 4.4, 4.2 and 3.2 after.
 
+**All of it together** (2026-11-09): precession from day nodes, nutation
+nodes kept by the corpus, and the cheaper verification above, on astromcp's
+grid: 30.4375-day months from J2000 TT, 0.001″, geocentric apparent, default
+options, body by body over 1800–1810 from a cold engine, one thread, DE440.
+The machine was at load 9, so read the ratios.
+
+| Body | before (b0b8f85) | after | |
+|---|---:|---:|---:|
+| Sun | 25.1 ms/body-year | 3.3 | 7.7× |
+| Moon | 31.0 | 6.4 | 4.8× |
+| Mercury | 36.0 | 4.4 | 8.1× |
+| Mars | 26.8 | 3.5 | 7.7× |
+| Jupiter | 25.7 | 3.6 | 7.1× |
+| Saturn | 22.6 | 3.6 | 6.3× |
+| Neptune | 21.4 | 3.5 | 6.1× |
+| Pluto | 20.5 | 3.2 | 6.3× |
+
 The sampler calls are the fit's whole cost; afterwards the client pays no
 engine time at all, for any instant in the span. A year of the Moon is about
 1,900 engine evaluations and 21 segments — against the tens of thousands of
