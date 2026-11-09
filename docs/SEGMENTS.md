@@ -280,7 +280,11 @@ Before, every call asked for a rate. After, a month asks for 9 to 21 (11 to
 - **The contract held.** The check was 3,600 random instants an object and
   tolerance, each against its own segment's declaration. The worst direction
   ratio, random to declared, went from 1.118 (Moon, 0.001″) to 1.027; the rate
-  ratio, from 2.475 to 0.997.
+  ratio, from 2.475 to 0.997. An independent check of 7 bodies, the
+  topocentric Moon among them, at 3 tolerances and 2 spans, with 400 random
+  instants a segment, found up to 1.052 for direction, 1.085 for rate and
+  1.039 for distance, all on the Moon at its tightest tolerance, where the
+  residual is near the engine's own rounding noise.
   - Rate ratios are taken without the instants where the engine's own rate
     jumps, found by comparing it with an exact-step five-point difference of the
     engine's positions (a step of 2⁻⁶ day) and setting the instant aside when

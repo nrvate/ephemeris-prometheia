@@ -847,8 +847,9 @@ Engine e = Engine::open_context(corpus).value(); // one per thread
     a release store. An engine that finds a node taken by another thread
     uses its own sum, the same doubles, and drops its copy. A reader never
     waits for a writer.
-  - **Limits.** 128 MB of blocks (about 3,600 years, 35 KB a year); past it
-    nothing is dropped, nodes beyond the blocks are summed privately by each
+  - **Limits.** 128 MB of blocks (about 3,600 years of contiguous nodes, 35 KB
+    a year; scattered instants take a 48 KB block per 512 days touched); past
+    it nothing is dropped, nodes beyond the blocks are summed privately by each
     engine. Nothing in it goes stale, so no `add_*` drops it.
 - **Per engine:** the read cursors, the frame, observer and Sun memos, the
   nutation cache (4,096 nodes) and the TDB interpolator, and each engine's own run of the

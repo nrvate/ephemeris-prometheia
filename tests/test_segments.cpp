@@ -288,6 +288,16 @@ TEST_CASE("segments_rates_are_asked_only_where_the_derivative_peaks") {
     // the calls.
     CHECK(with_rates <= 9 * rep.segments.size());
     CHECK(with_rates * 5 <= positions);
+    // The same with a check set whose size is not a multiple of four: still
+    // the quarters, not every n/4-th point.
+    for (int multiple : {5, 7}) {
+        positions = with_rates = 0;
+        segments::FitOptions odd = fo;
+        odd.check_multiple = multiple;
+        auto ro = segments::fit(sampler, from, to, odd);
+        REQUIRE(ro.ok());
+        CHECK(with_rates <= 9 * ro.value().segments.size());
+    }
 
     std::mt19937 rng(5);
     for (const segments::Segment& s : rep.segments) {

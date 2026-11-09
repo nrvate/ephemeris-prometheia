@@ -30,11 +30,12 @@ struct Segment {
     // Chebyshev coefficients of the first kind, degree + 1 each, in AU.
     std::vector<double> x, y, z;
     // The largest residuals measured against the sampler over this segment.
-    // Direction and distance are taken on a check set of 4 x (degree + 1) + 1
-    // points between and beyond the fit's nodes, both ends of the interval
-    // among them, and the peaks between its points are read off the points
-    // around them. The rate is taken at the ends, the points beside them and
-    // the quarters of the interval, where the derivative's error peaks:
+    // Direction and distance are the worst over every sample taken in the
+    // interval: a check set of 4 x (degree + 1) + 1 points at a Chebyshev
+    // polynomial's extrema, both ends among them, the probes' own nodes, and
+    // the peaks between the check points, read off the points around them.
+    // The rate is taken at the ends, the points beside them and the quarters
+    // of the interval, where the derivative's error peaks:
     double err_arcsec = 0.0;              // direction
     double err_rel_dist = 0.0;            // |r| , relative
     double err_rate_arcsec_per_day = 0.0; // the analytic derivative against

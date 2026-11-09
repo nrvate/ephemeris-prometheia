@@ -81,7 +81,9 @@ documented, not that it is frozen.
     measured on 4 × (degree + 1) + 1 points at the extrema of a Chebyshev
     polynomial (the ends among them), with the peaks between read off the points
     around them. The worst random-instant to declared ratio fell from 1.118 to
-    1.027, and the rate ratio from 2.475 to 0.997 (instants where the engine's
+    1.027 (up to 1.052 on the Moon at its tightest tolerance in an independent
+    check, near rounding noise), and the rate ratio from 2.475 to 0.997 (1.085
+    there) (instants where the engine's
     own rate jumps set aside). With the ends left out of the rate points, three
     tests fail.
   - **Different segments for the same request.** A cut-back probe has less error

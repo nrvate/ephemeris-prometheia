@@ -396,7 +396,12 @@ constexpr int kHintMargin = 2; // the next probe starts this far above the last 
 // bound; the rest guard against a residual that is not the interpolant's smooth
 // error, such as noise in the sampler's own rates, which no end reaches.
 bool rate_point(int i, int n) {
-    return i <= 2 || i >= n - 2 || i % (n / 4) == 0;
+    if (i <= 2 || i >= n - 2)
+        return true;
+    for (int k = 1; k <= 3; ++k) // the quarters, the nearest point to each
+        if (i == (k * n + 2) / 4)
+            return true;
+    return false;
 }
 
 // The largest value a sequence of samples of a smooth oscillation reaches,

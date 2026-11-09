@@ -1205,8 +1205,11 @@ const PrecessionInterpolator::Node& PrecessionInterpolator::node(long long day,
 
 void PrecessionInterpolator::at(double jd_tt, PrecessionModel model, double pb[9],
                                 double& eps_mean) {
-    // Far outside any ephemeris (or not a number): no nodes, the direct value.
-    if (!(std::fabs(jd_tt) < 1e9)) {
+    // Beyond 27,000 years of J2000, past every ephemeris (DE441 spans
+    // -13000..17000), or not a number: the direct value. IAU 2006's
+    // polynomial turns too fast for day nodes from about 1e8 days out
+    // (matrix elements off by 8e-10 at JD 1e8, 0.4 at 2e8).
+    if (!(std::fabs(jd_tt - 2451545.0) < 1e7)) {
         double v[10];
         precession_direct(jd_tt, model, v);
         std::copy(v, v + 9, pb);

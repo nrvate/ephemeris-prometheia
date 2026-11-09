@@ -338,7 +338,8 @@ void horizontal_to_equatorial(double azimuth, double altitude, double lat, doubl
 // is 157.87 centuries, so the cubic agrees with the direct functions to
 // rounding: matrix elements within 2e-15 and the obliquity within 3e-10
 // arcseconds over -13000..17000, both models (docs/FRAMES.md, "Precession
-// nodes"). An epoch on a node gets the node's own values, the direct ones.
+// nodes"). Beyond 1e7 days of J2000, past every ephemeris, the direct
+// functions answer. An epoch on a node gets the node's own values, the direct ones.
 // The value depends only on the epoch and model, never on query history.
 // Nodes are kept in a direct-mapped cache of 64. Not thread-safe; one per
 // thread.

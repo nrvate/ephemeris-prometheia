@@ -117,8 +117,10 @@ other gets. The store holds blocks of 1,024 nodes (48 KB, 512 days), made
 when a node first lands in one, so a node costs 48 bytes and a year of them
 (730) 35 KB, and a century 3.5 MB. It is wait-free: a reader takes no lock,
 and a writer that finds a node taken drops its copy. Past 128 MB (about
-3,600 years) no block is added and nodes beyond are summed privately, as
-before. The engine uses it for every nutation (docs/ENGINE.md). An instant whose two nodes are both
+3,600 years of contiguous nodes) no block is added and nodes beyond are
+summed privately, as before. Scattered use fills it faster, a whole 48 KB
+block for each 512 days touched: one instant every 1,234 days over the
+whole store's range took 85 MB (the review of 2026-11-09). The engine uses it for every nutation (docs/ENGINE.md). An instant whose two nodes are both
 missing, which is every fresh instant a server is asked for, has them
 computed together by `nutation_with_rates_pair`, a lane each of a
 two-double vector (below). A walk through time needs one new node a step;

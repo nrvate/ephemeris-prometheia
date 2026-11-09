@@ -192,6 +192,17 @@ TEST_CASE("frames_precession_interpolator") {
         CHECK(std::equal(pb, pb + 9, again));
         CHECK(eps == again_eps);
     }
+    // Far beyond every ephemeris, where IAU 2006's polynomial outruns day
+    // nodes: the direct values, and no node is made.
+    for (PrecessionModel m : {PrecessionModel::Vondrak2011, PrecessionModel::IAU2006}) {
+        PrecessionInterpolator far;
+        double pb[9], eps, want[9], want_eps;
+        far.at(2451545.0 + 5e7 + 0.37, m, pb, eps);
+        direct(2451545.0 + 5e7 + 0.37, m, want, want_eps);
+        CHECK(std::equal(pb, pb + 9, want));
+        CHECK(eps == want_eps);
+        CHECK(far.evaluations() == 0);
+    }
     // Not a number: the direct functions decide, no node is made.
     PrecessionInterpolator pi;
     double pb[9], eps;
