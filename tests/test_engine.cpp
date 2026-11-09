@@ -178,6 +178,42 @@ TEST_CASE("light_deflection_limb_taper") {
         prev = d;
     }
     CHECK(worst_step < 0.01); // no jump anywhere through the disc
+
+    // As a field over the sky, the deflection inside the disc changes no
+    // faster than 1.52 times its rate just outside the limb, in any
+    // direction: a body passing behind the Sun is pushed about no faster
+    // than one grazing the limb (the taper before 2026-11-09 reached 4
+    // times, and reversed a slow body's rate behind the disc).
+    const auto offset = [&](double by, double bz, double out2[2]) {
+        const double q[3] = {D, by * (E + D) / E, bz * (E + D) / E};
+        const double p[3] = {q[0] + E, q[1], q[2]};
+        double o[3];
+        apparent::light_deflection(p, q, sun_to_obs, apparent::kSunGmOverC2Km, R, o);
+        const double pn = norm3(p), on = norm3(o);
+        out2[0] = (o[1] / on - p[1] / pn) * kRad2As;
+        out2[1] = (o[2] / on - p[2] / pn) * kRad2As;
+    };
+    const double h = 1e-4 * R;
+    const auto stretch = [&](double by, double bz) {
+        double c[2], y[2], z[2];
+        offset(by, bz, c);
+        offset(by + h, bz, y);
+        offset(by, bz + h, z);
+        // The Jacobian's largest singular value, from its 2x2 entries.
+        const double a11 = (y[0] - c[0]) / h, a21 = (y[1] - c[1]) / h;
+        const double a12 = (z[0] - c[0]) / h, a22 = (z[1] - c[1]) / h;
+        const double t = a11 * a11 + a12 * a12 + a21 * a21 + a22 * a22;
+        const double d = a11 * a22 - a12 * a21;
+        return std::sqrt(0.5 * (t + std::sqrt(std::max(0.0, t * t - 4.0 * d * d))));
+    };
+    const double limb = stretch(1.001 * R, 0.0);
+    double inside = 0.0;
+    for (double y = -0.99; y <= 0.99; y += 0.0275)
+        for (double z = -0.99; z <= 0.99; z += 0.0275)
+            if (y * y + z * z < 0.98)
+                inside = std::max(inside, stretch(y * R, z * R));
+    CHECK(inside > limb);        // it does rise inside, a little
+    CHECK(inside < 1.52 * limb); // measured 1.51
 }
 
 TEST_CASE("frame_bias_matrix_values") {

@@ -13,6 +13,16 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **A body behind the Sun no longer turns back** (docs/ENGINE.md, "Pipeline",
+  gravitational deflection). The taper of light deflection inside the solar disc
+  swung the deflection round up to 4 times faster than at the limb, which
+  turned Leleakuhonua's rate backwards for 6 hours on 1711-01-16/17: two
+  false stations, found by astromcp. The taper is now
+  s = 1 − v⁴ (20 − 48.5v + 42.5v² − 13v³), which keeps the smooth join at the
+  limb and swings at most 1.51 times as fast; Leleakuhonua's rate stays
+  above +0.0019°/day. Only bodies behind the disc move, by up to 1.19″ (at
+  0.44 solar radii from the centre, for a body far beyond the Sun).
+  Monthly fits at 0.001″ over 1950–2050 still refuse none of 13,200.
 - **`Engine::output_rotation`** (C++ only; docs/ENGINE.md, "Pipeline"): the
   ICRF-to-output rotation that `calc` applies, for fitters that fit a place
   once in ICRF and rotate it. Positions are unchanged.

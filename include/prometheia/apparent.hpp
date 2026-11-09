@@ -39,12 +39,16 @@ inline constexpr double kSunRadiusKm = 695700.0;
 // sight nears the deflector's centre (1 + q.e -> 0). Where the body lies
 // beyond the deflector and the line of sight passes within its radius
 // (impact parameter b < radius_km), the deflection is scaled by
-//   s = 1 - (1 - (b / radius)^2)^4,
+//   s = 1 - v^4 (20 - 48.5 v + 42.5 v^2 - 13 v^3),  v = 1 - (b / radius)^2,
 // which is 1 at the limb with its first three derivatives 0 there, and goes
 // as b^2 at the centre: the deflection falls to 0 there, and the apparent
-// place stays smooth through a conjunction. Outside the disc nothing
-// changes. The body is hidden there anyway; the taper only keeps the
-// position, and a fit through it, continuous (docs/ENGINE.md).
+// place stays smooth through a conjunction. Of the tapers that join the
+// limb so, it is one that keeps the deflection, as a field over the sky,
+// from changing faster than 1.51 times its rate at the limb, so a body
+// passing behind the disc is not pushed back and forth any faster than one
+// grazing the limb. Outside the disc nothing changes. The body is hidden
+// there anyway; the taper only keeps the position, and a fit through it,
+// smooth (docs/ENGINE.md).
 inline void light_deflection(const double p[3], const double deflector_to_body[3],
                              const double deflector_to_observer[3], double gm_over_c2_km,
                              double radius_km, double out[3]) {
@@ -79,8 +83,8 @@ inline void light_deflection(const double p[3], const double deflector_to_body[3
         const double c2 = e[0] * u[1] - e[1] * u[0];
         const double x2 = en * en * (c0 * c0 + c1 * c1 + c2 * c2) / (radius_km * radius_km);
         if (x2 < 1.0) {
-            const double m = (1.0 - x2) * (1.0 - x2);
-            const double s = 1.0 - m * m;
+            const double v = 1.0 - x2, v2 = v * v;
+            const double s = 1.0 - v2 * v2 * (20.0 - v * (48.5 - v * (42.5 - 13.0 * v)));
             f = s > 0.0 && 1.0 + qe > 0.0 ? f * s : 0.0;
         }
     }

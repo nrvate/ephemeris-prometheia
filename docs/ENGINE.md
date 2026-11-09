@@ -173,13 +173,29 @@ For a TT epoch *t*:
    (R = 695,700 km, IAU 2015 nominal) at impact parameter b, the term is
    now scaled by
 
-   s = 1 − (1 − (b/R)²)⁴
+   s = 1 − v⁴ (20 − 48.5 v + 42.5 v² − 13 v³),  v = 1 − (b/R)²
+
+   (from 2026-10-28 to 2026-11-09 it was s = 1 − v⁴)
 
    - **At the limb** s is 1, with its first three derivatives 0, so the
      place joins the untapered formula smoothly.
    - **At the centre** s goes as b², so the deflection falls to 0 linearly
      and the place is continuous through the conjunction.
    - **Outside the disc** nothing changes, to the bit.
+   - **No faster than at the limb.** The deflection points away from the
+     Sun, so as a body passes behind the disc it swings round, and how fast
+     it swings is the rate it adds. Just outside the limb that is 1.75″
+     per solar radius of relative motion, about 6.6″/day. With
+     s = 1 − v⁴ it reached 4 times that near the centre, and turned
+     Leleakuhonua's 17″/day backwards for 6 hours in January 1711 (astromcp
+     found it: two false stations, the only case among 56 bodies over
+     1550–2650). Among the tapers with the same join at the limb, this
+     degree-6 one comes near the least possible: 1.51 times the limb's
+     rate at most, in any direction (`light_deflection_limb_taper`; the
+     least is 1.48 with unrounded coefficients). Leleakuhonua's rate now dips
+     to +0.0019°/day behind the disc, against −0.0012°/day before. A body
+     slower than about 10″/day at conjunction can still turn there, and one
+     slower than 6.6″/day already turns at the limb, as physics has it.
    - **A convention, not physics:** the body is hidden behind the Sun, so
      no observation is at stake; the taper only keeps the position, and a
      fit through it, smooth.
@@ -195,16 +211,16 @@ For a TT epoch *t*:
        observation, and the convention needs no solar model.
    - **The rate** has no step either: through both limb crossings of that
      conjunction (Uranus passes 0.002° from the Sun's centre), it moves by
-     at most 3.7e-5°/day from one minute to the next, and stays within
-     0.0526–0.0609°/day. Before, it read −6.6°/day.
+     at most 5.1e-5°/day from one minute to the next, and stays within
+     0.0566–0.0606°/day. Before the taper, it read −6.6°/day.
    - **Measured** (`light_deflection_limb_taper`,
      `c_segments_through_a_solar_conjunction`):
      - Uranus's 10-minute second differences through that conjunction fell
-       from 229″ to 0.009″.
+       from 229″ to 0.013″ (0.009″ with s = 1 − v⁴).
      - Monthly fits at 0.001″ over 1950–2050 used to refuse 3 months of
        Mercury, 1 of Jupiter, 2 of Uranus and 105 of Jupiter's mean node
        (the Sun crosses it every June). With the taper, none of 13,200
-       is refused, across the Sun, Moon, planets, Pluto and that node.
+       is refused (measured again with the present form, 2026-11-09), across the Sun, Moon, planets, Pluto and that node.
    - **Stars** follow the same rule. Before, they skipped deflection
      outright inside the disc, a step at the limb. The catalog has 54
      stars within 0.27° of the ecliptic (Astrolog counted them). Two of
@@ -214,7 +230,7 @@ For a TT epoch *t*:
      - HR 7182, which passes 0.015°.
 
      Their longitude's second differences fell from up to 0.10″ to
-     0.0001″, and the rate's steps from up to 0.04°/day to 5e-5°/day.
+     0.00016″, and the rate's steps from up to 0.04°/day to 6.4e-5°/day.
 4. **Aberration**, relativistic, with the observer's barycentric velocity
    V = v/c and β⁻¹ = √(1 − V²):
 
