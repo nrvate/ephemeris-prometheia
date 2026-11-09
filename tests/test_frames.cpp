@@ -14,6 +14,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <random>
+#include <thread>
+#include <vector>
 
 #include <prometheia/frames.hpp>
 
@@ -713,4 +716,88 @@ TEST_CASE("raman_ayanamsa_is_his_linear_rule") {
     CHECK(anchor->mean0_deg == 0.0);
     CHECK(anchor->rate_arcsec_per_year == 151.0 / 3.0);
     CHECK(!ayanamsa(2, 2451545.0).has_value()); // De Luce: not served
+}
+
+// Nodes kept in a NutationNodeStore are the doubles a private interpolator
+// sums; a second interpolator on the store sums nothing the first has.
+TEST_CASE("nutation_nodes_shared_by_a_store") {
+    NutationNodeStore store;
+    NutationInterpolator first(&store), second(&store), alone;
+    std::vector<double> jds;
+    std::mt19937_64 rng(7);
+    for (int i = 0; i < 600; ++i) // both signs of the block seam and of zero
+        jds.push_back(std::uniform_real_distribution<double>(-3000.0, 2600000.0)(rng));
+    for (double jd : {-0.3, 0.0, 0.25, 511.9, 512.0, -511.9, -512.1})
+        jds.push_back(jd);
+    std::vector<double> want;
+    for (double jd : jds) {
+        double p, e;
+        first.at(jd, p, e);
+        want.push_back(p);
+        want.push_back(e);
+    }
+    CHECK(first.evaluations() > 0);
+    CHECK(store.bytes() > 0);
+    size_t i = 0;
+    for (double jd : jds) {
+        double p, e, ap, ae;
+        second.at(jd, p, e);
+        alone.at(jd, ap, ae);
+        CHECK(p == want[i]);
+        CHECK(e == want[i + 1]);
+        CHECK(ap == want[i]); // the private interpolator's, bit for bit
+        CHECK(ae == want[i + 1]);
+        i += 2;
+    }
+    CHECK(second.evaluations() == 0);
+    CHECK(alone.evaluations() > 0);
+    // And a sweep in either direction, which the pair logic walks.
+    NutationInterpolator walker(&store);
+    for (int r = 0; r < 480; ++r) {
+        double p, e, ap, ae;
+        walker.at(2461300.5 + 20.0 - r / 12.0, p, e);
+        alone.at(2461300.5 + 20.0 - r / 12.0, ap, ae);
+        CHECK(p == ap);
+        CHECK(e == ae);
+    }
+}
+
+// Threads filling and reading one store at once (TSan runs this): every
+// answer is the private interpolator's.
+TEST_CASE("nutation_store_concurrent") {
+    NutationNodeStore store;
+    constexpr int kThreads = 4;
+    std::vector<double> jds;
+    std::mt19937_64 rng(11);
+    for (int i = 0; i < 400; ++i)
+        jds.push_back(std::uniform_real_distribution<double>(2450000.0, 2450900.0)(rng));
+    std::vector<std::vector<double>> got(kThreads);
+    std::vector<std::thread> threads;
+    for (int k = 0; k < kThreads; ++k) {
+        threads.emplace_back([&, k] {
+            NutationInterpolator interp(&store);
+            std::vector<double> order = jds;
+            std::shuffle(order.begin(), order.end(), std::mt19937_64(uint64_t(k) + 1));
+            std::vector<double> out(jds.size() * 2);
+            for (double jd : order) {
+                double p, e;
+                interp.at(jd, p, e);
+                const size_t at = size_t(std::find(jds.begin(), jds.end(), jd) - jds.begin());
+                out[at * 2] = p;
+                out[at * 2 + 1] = e;
+            }
+            got[size_t(k)] = out;
+        });
+    }
+    for (std::thread& t : threads)
+        t.join();
+    NutationInterpolator alone;
+    for (size_t i = 0; i < jds.size(); ++i) {
+        double p, e;
+        alone.at(jds[i], p, e);
+        for (int k = 0; k < kThreads; ++k) {
+            CHECK(got[size_t(k)][i * 2] == p);
+            CHECK(got[size_t(k)][i * 2 + 1] == e);
+        }
+    }
 }

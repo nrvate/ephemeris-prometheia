@@ -323,8 +323,9 @@ instants):
   and its analytic first and second derivatives, and an epoch takes the
   quintic Hermite polynomial through the two surrounding nodes. The error
   is 0.004 µas. The value depends only on the epoch. The engine keeps 4,096
-  nodes (about 5.6 years), so a many-body sweep sums the series once per
-  half day in total.
+  nodes (about 5.6 years) and its corpus keeps every node any engine has
+  summed (below, "Threads"), so a sweep of many bodies over any window, or
+  from many threads, sums the series once per half day in total.
   - The previous scheme, a Taylor step from a 0.05-day grid, was 0.68 µas.
     It re-summed the series almost every hourly row, which was 92% of the
     cost.
@@ -775,8 +776,22 @@ Engine e = Engine::open_context(corpus).value(); // one per thread
     the same doubles. A year of one body is 7 KB, so 11 bodies across all
     of DE440 would take 85 MB.
   - **Dropped** when any file is added, the records only when a catalog is.
+- **Shared, kept as they are made (2026-11-09):** the nutation nodes, one
+  per half day (`frames::NutationNodeStore`, docs/FRAMES.md).
+  - **Why they can be.** A node is the series at its index times 0.5 day,
+    so whichever engine sums it gets the same doubles. Each engine keeps its
+    direct-mapped cache in front, so a node it has used comes nowhere near
+    the store.
+  - **No waiting and no lock.** Blocks of 1,024 nodes are found through a
+    fixed directory of atomic pointers and each node is published once with
+    a release store. An engine that finds a node taken by another thread
+    uses its own sum, the same doubles, and drops its copy. A reader never
+    waits for a writer.
+  - **Limits.** 128 MB of blocks (about 3,600 years, 35 KB a year); past it
+    nothing is dropped, nodes beyond the blocks are summed privately by each
+    engine. Nothing in it goes stale, so no `add_*` drops it.
 - **Per engine:** the read cursors, the frame, observer and Sun memos, the
-  nutation and TDB interpolators, and each engine's own run of the
+  nutation cache (4,096 nodes) and the TDB interpolator, and each engine's own run of the
   small-body windows it has reached, with its sigma tracks.
 - **`Engine::open`** builds a private Corpus as before. Its `add_*` calls
   add to that Corpus and drop the engine's caches. An engine from
@@ -800,8 +815,8 @@ indexes, for one, take 41 MB once, however many engines read them: 40 MB of
 hashed names and 1.2 MB of folded proper names. Before 2026-10-28 each
 engine's registry kept its own folded names.
 
-Most of the 241 KB is the nutation interpolator's node cache (4096 x 56
-bytes), which is allocated on first use: until 2026-10-28 every engine paid
+Most of the 241 KB is the nutation interpolator's private node cache (4096
+x 56 bytes), which is allocated on first use: until 2026-10-28 every engine paid
 it at open. What a catalog body adds now is its own trajectory; the
 perturber tables it was integrated through (about 200 KB per year of
 coverage with SB441's sixteen masses) are the corpus's.

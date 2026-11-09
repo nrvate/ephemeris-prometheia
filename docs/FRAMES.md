@@ -108,14 +108,26 @@ spacing:
 | 0.5 d | 0.004 µas | 3.9 µas |
 | 0.25 d | 0.0001 µas | 0.24 µas |
 
-Nodes are cached, direct-mapped, 4,096 of them. The engine uses it for
-every nutation (docs/ENGINE.md). An instant whose two nodes are both
+Nodes are cached in two levels. Each interpolator keeps a direct-mapped
+cache of 4,096 (229 KB, about 5.6 years). Behind it a `NutationNodeStore`,
+which the engine's corpus owns, keeps every node any interpolator has
+summed, once, for every body, engine and thread on the corpus: a node is a
+function of its index alone, so whoever sums it stores the doubles every
+other gets. The store holds blocks of 1,024 nodes (48 KB, 512 days), made
+when a node first lands in one, so a node costs 48 bytes and a year of them
+(730) 35 KB, and a century 3.5 MB. It is wait-free: a reader takes no lock,
+and a writer that finds a node taken drops its copy. Past 128 MB (about
+3,600 years) no block is added and nodes beyond are summed privately, as
+before. The engine uses it for every nutation (docs/ENGINE.md). An instant whose two nodes are both
 missing, which is every fresh instant a server is asked for, has them
 computed together by `nutation_with_rates_pair`, a lane each of a
 two-double vector (below). A walk through time needs one new node a step;
 it is computed with the next one in the walk's direction, which the pair
-gives for nothing. A segments request for ten bodies over 1,000 days fell
-from 0.20–0.22 s to 0.16–0.19 s with it.
+gives for nothing; what the store has is taken before anything is summed.
+A segments request for ten bodies over 1,000 days fell
+from 0.20–0.22 s to 0.16–0.19 s with it. The store's effect is in
+docs/SEGMENTS.md, "Cost": month-chunk fits body by body over 20 years fell
+from 21–30 to 12–23 ms per body-year after the first body.
 
 ## How the series is summed
 

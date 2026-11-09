@@ -19,6 +19,18 @@ documented, not that it is frozen.
   0.64 µs in precession alone, and a fit samples a new instant every call. A
   warm apparent place fell from 1.73 to 1.24 µs, and month fits from about 26
   to 19 ms per body-year. Positions move by at most 4e-10″.
+- **Nutation nodes are kept by the corpus** (docs/FRAMES.md, docs/ENGINE.md
+  "Threads"). Each half-day node of the nutation series was summed again by
+  every engine, and again for every body of a scan longer than an engine's
+  5.6-year cache. The corpus now keeps each once, wait-free, for every body,
+  engine and thread: 35 KB a year, capped at 128 MB (about 3,600 years), past
+  which engines sum privately as before. Values are unchanged bit for bit
+  (4,000 `calc` answers and 21 fits sampled 13 times, rates included, in 8 option
+  sets, single-threaded and from 4 threads, identical to the build before).
+  Month-chunk fits over 1800-1820 (DE440, 0.001″) fell, after the first body,
+  from 21-30 to 12-23 ms per body-year on one thread, and from 4.8-6.7 to
+  3.2-5.4 on four (docs/SEGMENTS.md, "Cost"), measured before precession came
+  from day nodes.
 - **A catalog refresh brings new bodies** (docs/INGESTION.md, "Freshness").
   `sbdb_fetch.py --refresh-since` selected on `soln_date`, which only JPL's
   orbits have, so a body with an MPC orbit never came, and most discoveries

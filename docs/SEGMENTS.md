@@ -121,7 +121,23 @@ The first fit over a time window costs more than the ones after it, which is
 the 35 ms against 12 ms above for the same body: the frame work underneath —
 chiefly the nutation nodes, one per half day — is computed once for a window
 and shared by everything else that touches it (docs/FRAMES.md). A year of
-window is about 15 ms, paid by whoever asks first.
+window is about 15 ms, paid by whoever asks first; the nodes, 7 ms of it,
+are kept by the corpus, so they are paid once for every body, engine and
+thread, however long the scan (35 KB a year, capped at 128 MB). Month-chunk
+fits (30.4375 days from J2000 TT, 0.001″, geocentric apparent, default
+options) body by body over 1800–1820 on DE440, one thread (2026-11-09):
+
+| Body | before | after |
+|---|---:|---:|
+| Sun (first) | 23.2 ms/body-year | 23.2 |
+| Moon | 29.8 | 23.0 |
+| Mars | 25.2 | 15.1 |
+| Jupiter | 24.8 | 15.6 |
+| Pluto | 21.1 | 11.7 |
+
+With four threads, each on its own context of one corpus and a quarter of
+the chunks, the five bodies took 6.4, 6.7, 5.7, 5.3 and 4.8 ms per
+body-year before and 6.3, 5.4, 4.4, 4.2 and 3.2 after.
 
 The sampler calls are the fit's whole cost; afterwards the client pays no
 engine time at all, for any instant in the span. A year of the Moon is about

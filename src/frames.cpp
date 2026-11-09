@@ -6,11 +6,13 @@
 #include "prometheia/frames.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -921,10 +923,6 @@ void observer_geocentric(const GeoSite& site, double gast, double out[3]) {
     out[2] = z / 1000.0;
 }
 
-// ---------------------------------------------------------------------------
-// NutationInterpolator
-// ---------------------------------------------------------------------------
-
 namespace {
 constexpr size_t kNutationCacheSize = 4096; // a power of two
 } // namespace
@@ -934,9 +932,86 @@ struct NutationInterpolator::Node {
     double n[6] = {0, 0, 0, 0, 0, 0};
 };
 
+// ---------------------------------------------------------------------------
+// NutationNodeStore
+// ---------------------------------------------------------------------------
+
+struct NutationNodeStore::Block {
+    // 0 empty, 1 being written, 2 readable. Only the thread that moved a
+    // slot from 0 to 1 writes its values, and publishes them with the 2.
+    std::atomic<uint8_t> state[kBlockNodes] = {};
+    double values[kBlockNodes][6];
+};
+
+struct NutationNodeStore::Impl {
+    std::unique_ptr<std::atomic<Block*>[]> directory { new std::atomic<Block*>[ kDirectory ]() };
+    std::atomic<size_t> bytes{0};
+};
+
+NutationNodeStore::NutationNodeStore() : d_(new Impl) {}
+
+NutationNodeStore::~NutationNodeStore() {
+    for (long long i = 0; i < kDirectory; ++i)
+        delete d_->directory[size_t(i)].load(std::memory_order_relaxed);
+    delete d_;
+}
+
+NutationNodeStore::Block* NutationNodeStore::block_for(long long index, bool create) {
+    // Floor division keeps the blocks of negative indices contiguous.
+    const long long number = (index >> 10) + kDirectory / 2;
+    if (number < 0 || number >= kDirectory)
+        return nullptr;
+    std::atomic<Block*>& slot = d_->directory[size_t(number)];
+    Block* block = slot.load(std::memory_order_acquire);
+    if (block || !create)
+        return block;
+    if (d_->bytes.fetch_add(sizeof(Block), std::memory_order_relaxed) + sizeof(Block) > kMaxBytes) {
+        d_->bytes.fetch_sub(sizeof(Block), std::memory_order_relaxed);
+        return nullptr;
+    }
+    Block* fresh = new Block;
+    if (slot.compare_exchange_strong(block, fresh, std::memory_order_acq_rel))
+        return fresh;
+    delete fresh; // another thread's block stands
+    d_->bytes.fetch_sub(sizeof(Block), std::memory_order_relaxed);
+    return block;
+}
+
+bool NutationNodeStore::load(long long index, double out[6]) const {
+    const Block* block = const_cast<NutationNodeStore*>(this)->block_for(index, false);
+    if (!block)
+        return false;
+    const size_t at = size_t(index & (kBlockNodes - 1));
+    if (block->state[at].load(std::memory_order_acquire) != 2)
+        return false;
+    std::copy(block->values[at], block->values[at] + 6, out);
+    return true;
+}
+
+void NutationNodeStore::store(long long index, const double in[6]) {
+    Block* block = block_for(index, true);
+    if (!block)
+        return;
+    const size_t at = size_t(index & (kBlockNodes - 1));
+    uint8_t expected = 0;
+    if (!block->state[at].compare_exchange_strong(expected, 1, std::memory_order_acquire))
+        return;
+    std::copy(in, in + 6, block->values[at]);
+    block->state[at].store(2, std::memory_order_release);
+}
+
+size_t NutationNodeStore::bytes() const {
+    return d_->bytes.load(std::memory_order_relaxed);
+}
+
+// ---------------------------------------------------------------------------
+// NutationInterpolator
+// ---------------------------------------------------------------------------
+
 // The node cache (4096 x 56 bytes) is allocated on first use: an engine
 // that never asks for nutation, or not yet, does not carry it.
-NutationInterpolator::NutationInterpolator() : nodes_(nullptr) {}
+NutationInterpolator::NutationInterpolator(NutationNodeStore* shared)
+    : nodes_(nullptr), shared_(shared) {}
 
 NutationInterpolator::~NutationInterpolator() {
     delete[] nodes_;
@@ -947,9 +1022,15 @@ const NutationInterpolator::Node& NutationInterpolator::node(long long index) {
         nodes_ = new Node[kNutationCacheSize];
     Node& slot = nodes_[size_t(index) & (kNutationCacheSize - 1)];
     if (slot.index != index) {
+        if (shared_ && shared_->load(index, slot.n)) {
+            slot.index = index;
+            return slot;
+        }
         slot.index = index;
         nutation_with_rates(double(index) * kNodeSpacingDays, slot.n);
         ++evaluations_;
+        if (shared_)
+            shared_->store(index, slot.n);
     }
     return slot;
 }
@@ -976,13 +1057,26 @@ void NutationInterpolator::at(double jd_tt, double& dpsi, double& deps) {
         y.index = i + 1;
         evaluations_ += 2;
     };
+    // What the store holds is taken first (the same doubles the pair would
+    // sum), and what the pair sums is offered to it.
+    if (shared_) {
+        if (na.index != index && shared_->load(index, na.n))
+            na.index = index;
+        if (nb.index != index + 1 && shared_->load(index + 1, nb.n))
+            nb.index = index + 1;
+    }
     const bool miss_a = na.index != index, miss_b = nb.index != index + 1;
+    long long first = index;
     if (miss_a && miss_b)
         pair(index);
     else if (miss_b)
-        pair(index + 1); // walking forward
+        pair(first = index + 1); // walking forward
     else if (miss_a)
-        pair(index - 1); // walking backward
+        pair(first = index - 1); // walking backward
+    if (shared_ && (miss_a || miss_b)) {
+        shared_->store(first, nodes_[size_t(first) & (kNutationCacheSize - 1)].n);
+        shared_->store(first + 1, nodes_[size_t(first + 1) & (kNutationCacheSize - 1)].n);
+    }
     // Zeroed only for GCC 13's -Wmaybe-uninitialized, which cannot see the
     // copies below fill every element; the values are the copies'.
     double a[6] = {}, b[6] = {};

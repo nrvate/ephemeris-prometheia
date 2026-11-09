@@ -1538,6 +1538,11 @@ struct Corpus::Data {
     WindowStore small_body_windows;
     RecordStore small_body_records;
 
+    // The nutation nodes every engine on the corpus has summed, each kept
+    // once; a node is a function of its index alone, so nothing here goes
+    // stale and nothing drops when a file is added.
+    frames::NutationNodeStore nutation_nodes;
+
     // The Moon's apsis passages by block (Engine::Impl::ensure_apsides),
     // each block scanned once for every engine; dropped when an ephemeris is
     // added.
@@ -1741,9 +1746,10 @@ struct Engine::Impl {
     // us an epoch against 0.024.
     frames::PrecessionInterpolator precession_nodes;
     // Nutation interpolated from half-day nodes (frames::NutationInterpolator,
-    // 0.004 uas): the value depends only on the epoch, and the node cache is
-    // shared by every body and every rate stencil this engine evaluates.
-    frames::NutationInterpolator nutation;
+    // 0.004 uas): the value depends only on the epoch. The node cache is
+    // shared by every body and every rate stencil this engine evaluates, and
+    // behind it the corpus keeps each node once for every engine and thread.
+    frames::NutationInterpolator nutation{&corpus.nutation_nodes};
     // TDB-TT from one-day nodes (time::TdbInterpolator, docs/TIME.md): the
     // full series costs ~12 us and a calc converts several instants. Within
     // 1.55 us of all 787 terms, below what a JD double holds.

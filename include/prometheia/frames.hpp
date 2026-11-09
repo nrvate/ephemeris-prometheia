@@ -51,26 +51,67 @@ void nutation_with_rates_pair(double jd_a, double jd_b, double out_a[6], double 
 // test can hold the two against each other, and nothing else should call it.
 void nutation_printed_form(double jd_tt, double& dpsi, double& deps);
 
+// The nutation nodes a set of interpolators have summed, each kept once and
+// shared: a node is the series at index * 0.5 day, a function of its index
+// alone, so whichever interpolator or thread sums it gets the same doubles.
+// Nodes live in blocks of 1024 (512 days, 48 KB of values), allocated on the
+// first node stored in them and found through a fixed directory (256 KB,
+// covering node indices of about +-23,000 years), so a node costs 48 bytes
+// and a year of them (730) 35 KB. Past kMaxBytes (128 MB, about 3,600 years
+// of nodes) no new block is allocated and nodes beyond are summed privately
+// by each interpolator, as without a store. Thread-safe and wait-free: a
+// reader takes no lock and never waits for a writer, and a writer that
+// loses the race for a node simply drops its copy (the same doubles).
+class NutationNodeStore {
+public:
+    NutationNodeStore();
+    ~NutationNodeStore();
+    NutationNodeStore(const NutationNodeStore&) = delete;
+    NutationNodeStore& operator=(const NutationNodeStore&) = delete;
+
+    // Copies node `index` to out and returns true if it has been stored.
+    bool load(long long index, double out[6]) const;
+    // Keeps node `index` unless it is kept already or the store is full.
+    void store(long long index, const double in[6]);
+    // Bytes of node blocks held (not the directory).
+    size_t bytes() const;
+
+    static constexpr size_t kMaxBytes = size_t(128) << 20;
+
+private:
+    struct Block;
+    static constexpr long long kBlockNodes = 1024;
+    static constexpr long long kDirectory = 32768;
+    Block* block_for(long long index, bool create);
+    struct Impl;
+    Impl* d_;
+};
+
 // IAU 2000A nutation interpolated from nodes on a fixed half-day grid: each
 // node holds the series value and its first and second derivatives
 // (nutation_with_rates), and an epoch between two nodes takes the quintic
 // Hermite polynomial matching all six. Measured against the full series
 // over 1800-2100: 0.004 uas (docs/FRAMES.md). The value depends only on the
-// epoch, never on query history. Nodes are kept in a direct-mapped cache
-// (4096 nodes, 229 KB, about 5.6 years, allocated on the first evaluation),
-// so a sweep of many bodies over one time window sums the series once per
-// half day in total. Not thread-safe; one per thread (the Engine keeps its
-// own).
+// epoch, never on query history. Nodes are kept in a private direct-mapped
+// cache (4096 nodes, 229 KB, about 5.6 years, allocated on the first
+// evaluation) in front of an optional NutationNodeStore the caller shares
+// between interpolators: a node missing from the cache is taken from the
+// store when it is there, and summed (and offered to the store) when not, so
+// many bodies over any window, and many threads, sum the series once per
+// half day in total. The interpolator itself is not thread-safe; one per
+// thread (the Engine keeps its own, on its corpus's store).
 class NutationInterpolator {
 public:
-    NutationInterpolator();
+    // `shared` is not owned and must outlive the interpolator; null keeps
+    // every node private.
+    explicit NutationInterpolator(NutationNodeStore* shared = nullptr);
     ~NutationInterpolator();
     NutationInterpolator(const NutationInterpolator&) = delete;
     NutationInterpolator& operator=(const NutationInterpolator&) = delete;
 
     void at(double jd_tt, double& dpsi, double& deps);
 
-    // Series sums so far (for tests and benchmarks).
+    // Series sums so far, by this interpolator (for tests and benchmarks).
     unsigned long long evaluations() const { return evaluations_; }
 
     static constexpr double kNodeSpacingDays = 0.5;
@@ -79,6 +120,7 @@ private:
     struct Node;
     const Node& node(long long index);
     Node* nodes_;
+    NutationNodeStore* shared_;
     unsigned long long evaluations_ = 0;
 };
 
