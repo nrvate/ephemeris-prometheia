@@ -3473,22 +3473,19 @@ struct Engine::Impl {
         return jd_ut1 + delta_t_seconds(jd_tt) / 86400.0;
     }
 
-    // An ICRF vector (km) into the requested output frame and zodiac.
-    Result<void> to_output(double jd_tt, const CalcOptions& o, const double p[3], double out[3]) {
+    // The rotation from ICRF into the requested output frame and zodiac:
+    // what to_output applies (Engine::output_rotation).
+    Result<void> output_matrix(double jd_tt, const CalcOptions& o, double m[9]) {
         if (o.sidereal != SiderealMode::Tropical &&
             o.sidereal_plane != SiderealPlane::EclipticOfDate) {
             if (o.coords != Coords::Ecliptic)
                 return make_error(ErrorCode::ArgumentError,
                                   "a fixed sidereal plane needs ecliptic coordinates");
-            double m[9];
-            auto r = fixed_sidereal_matrix(o, jd_tt, m);
-            if (!r)
-                return r;
-            apply(m, p, out);
-            return {};
+            return fixed_sidereal_matrix(o, jd_tt, m);
         }
         const bool need_nut = o.frame == Frame::TrueOfDate;
-        double m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        static constexpr double kIdentity[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        std::memcpy(m, kIdentity, sizeof kIdentity);
         switch (o.frame) {
         case Frame::ICRF:
             if (o.coords == Coords::Ecliptic) {
@@ -3500,7 +3497,7 @@ struct Engine::Impl {
                 rot1(eps_j2000, m);
                 matmul(m, bias, m);
             } else {
-                std::memcpy(m, bias, sizeof m);
+                std::memcpy(m, bias, 9 * sizeof(double));
             }
             break;
         case Frame::MeanOfDate: {
@@ -3509,7 +3506,7 @@ struct Engine::Impl {
                 rot1(f.eps_mean, m);
                 matmul(m, f.pb, m);
             } else {
-                std::memcpy(m, f.pb, sizeof m);
+                std::memcpy(m, f.pb, 9 * sizeof(double));
             }
             break;
         }
@@ -3523,7 +3520,7 @@ struct Engine::Impl {
                 matmul(a, b, m);
                 matmul(m, f.pb, m);
             } else {
-                std::memcpy(m, f.npb, sizeof m);
+                std::memcpy(m, f.npb, 9 * sizeof(double));
             }
             break;
         }
@@ -3566,6 +3563,15 @@ struct Engine::Impl {
                 matmul(t, m, m);
             }
         }
+        return {};
+    }
+
+    // An ICRF vector (km) into the requested output frame and zodiac.
+    Result<void> to_output(double jd_tt, const CalcOptions& o, const double p[3], double out[3]) {
+        double m[9];
+        auto r = output_matrix(jd_tt, o, m);
+        if (!r)
+            return r;
         apply(m, p, out);
         return {};
     }
@@ -4260,6 +4266,14 @@ Result<Engine::Phenomena> Engine::phenomena_ut(const ObjectRef& object, double j
     if (!impl_)
         return make_error(ErrorCode::ArgumentError, "engine is not open");
     return phenomena(object, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+Result<void> Engine::output_rotation(const CalcOptions& opts, double jd_tt, double m[9]) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "the instant must be finite");
+    return impl_->output_matrix(jd_tt, opts, m);
 }
 
 Result<CalcResult> Engine::calc_object(const ObjectRef& object, double jd_tt,

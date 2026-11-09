@@ -13,6 +13,9 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **`Engine::output_rotation`** (C++ only; docs/ENGINE.md, "Pipeline"): the
+  ICRF-to-output rotation that `calc` applies, for fitters that fit a place
+  once in ICRF and rotate it. Positions are unchanged.
 - **Precession from day nodes** (docs/FRAMES.md, "Precession nodes"). The
   engine interpolates P·B and the mean obliquity from nodes one day apart,
   within 4e-10″ of the direct series over −13000..17000. A new instant cost

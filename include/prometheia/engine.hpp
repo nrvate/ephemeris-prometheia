@@ -572,6 +572,17 @@ public:
     Result<CalcResult> calc_object(const ObjectRef& object, double jd_tt,
                                    const CalcOptions& opts = {});
 
+    // The rotation, row-major with out = m * in, that carries an ICRF vector
+    // into the frame, coordinates and zodiac of `opts` at jd_tt. The engine
+    // forms every place in ICRF first, so an object's position (xyz_au) in
+    // `opts` is m times its position with the frame ICRF, equatorial
+    // coordinates and the tropical zodiac and every other option the same.
+    // Not its rate: a rotating frame adds dm/dt times the position. For
+    // fitters, which can then fit the ICRF place once and rotate it
+    // cheaply (docs/SEGMENTS.md). ArgumentError where calc would refuse the
+    // options' frame or zodiac.
+    Result<void> output_rotation(const CalcOptions& opts, double jd_tt, double m[9]);
+
     // What an object looks like from the options' observer
     // (docs/PHENOMENA.md): the phase angle at the object between the Sun and
     // the observer, the illuminated fraction (1 + cos phase) / 2, the

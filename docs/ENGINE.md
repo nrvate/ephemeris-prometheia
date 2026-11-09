@@ -367,6 +367,13 @@ instants):
 - **Per-instant memos:** the observer's state and the Sun's state are kept
   for the last three instants, keyed exactly (topocentric entries also on
   ΔT), so bodies at one instant and its stencil read them once.
+- **The output rotation:** every place is formed in ICRF, then rotated into
+  the options' frame, coordinates and zodiac. `Engine::output_rotation(opts,
+  jd_tt, m)` gives that rotation, so a position in any options is m times the
+  position in ICRF equatorial tropical with the same observer and
+  corrections (`engine_output_rotation`, 72 combinations of observer, frame,
+  coordinates and zodiac). A rate is not, since the frame turns. Fitters use
+  it to fit a place once in ICRF and rotate it cheaply.
 - **Precession from day nodes:** P·B and the mean obliquity are interpolated
   from nodes one day apart, within 4e-10″ of the direct series
   (FRAMES.md, "Precession nodes"). An instant the memos have not seen, which

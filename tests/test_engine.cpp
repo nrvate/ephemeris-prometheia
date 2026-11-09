@@ -236,6 +236,59 @@ TEST_CASE("engine_synthetic_geometric") {
     CHECK(r.value().provenance.source.find("SPK") != std::string_view::npos);
 }
 
+// output_rotation is the rotation calc applies: a place in any frame,
+// coordinates and zodiac is the rotation times the place in ICRF equatorial
+// tropical, for every observer the rotation does not depend on.
+TEST_CASE("engine_output_rotation") {
+    TempFile tf("engine-rotation");
+    Engine e = open_synthetic(tf);
+    const double jd_tt = 2460000.5 + 0.3719;
+    int compared = 0;
+    for (Center center : {Center::Geocentric, Center::Topocentric, Center::Heliocentric}) {
+        CalcOptions base = CalcOptions::apparent();
+        base.center = center;
+        base.site = {0.3, 0.8, 120.0};
+        base.speed = false;
+        base.frame = Frame::ICRF;
+        base.coords = Coords::Equatorial;
+        auto icrf = e.calc(body::kJupiter, jd_tt, base);
+        REQUIRE(icrf.ok());
+        for (Frame frame : {Frame::ICRF, Frame::J2000, Frame::MeanOfDate, Frame::TrueOfDate})
+            for (Coords coords : {Coords::Ecliptic, Coords::Equatorial})
+                for (SiderealMode mode : {SiderealMode::Tropical, SiderealMode::Lahiri})
+                    for (SiderealPlane plane :
+                         {SiderealPlane::EclipticOfDate, SiderealPlane::EclipticOfAnchor,
+                          SiderealPlane::Invariable}) {
+                        if (mode == SiderealMode::Tropical &&
+                            plane != SiderealPlane::EclipticOfDate)
+                            continue;
+                        CalcOptions o = base;
+                        o.frame = frame;
+                        o.coords = coords;
+                        o.sidereal = mode;
+                        o.sidereal_plane = plane;
+                        auto want = e.calc(body::kJupiter, jd_tt, o);
+                        double m[9];
+                        auto got = e.output_rotation(o, jd_tt, m);
+                        REQUIRE(got.ok() == want.ok()); // both refuse the same options
+                        if (!got.ok())
+                            continue;
+                        const double* x = icrf.value().pos.xyz_au;
+                        const double* w = want.value().pos.xyz_au;
+                        const double n = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+                        for (int i = 0; i < 3; ++i)
+                            CHECK(std::fabs(m[3 * i] * x[0] + m[3 * i + 1] * x[1] +
+                                            m[3 * i + 2] * x[2] - w[i]) < 1e-15 * n * 4);
+                        ++compared;
+                    }
+    }
+    // Each observer: 8 tropical, 8 Lahiri on the ecliptic of date, and 8 on a
+    // fixed plane, which takes ecliptic coordinates only (equatorial is refused).
+    CHECK(compared == 3 * 24);
+    double m[9];
+    CHECK(!e.output_rotation(CalcOptions{}, NAN, m).ok());
+}
+
 TEST_CASE("engine_synthetic_light_time") {
     TempFile tf("engine-lt");
     Engine e = open_synthetic(tf);
