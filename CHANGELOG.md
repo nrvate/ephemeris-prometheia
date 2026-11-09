@@ -38,8 +38,10 @@ documented, not that it is frozen.
   The rate stencil converted TT to TDB at each of its three points, and TDB
   held in a JD double is quantized to 40 µs, so about 160 times a year the
   rounding steps and the Moon with it by 3-4 cm. A stencil straddling a step
-  read that as velocity: a Moon rate off by up to 0.05 arcsec/day at about one
-  instant in 5,000. The stencil now holds the centre's TDB offset
+  read that as velocity: a Moon rate off by up to 0.05 arcsec/day, at about 1
+  instant in 4,300 (daily at 0:00, 6:00 and 13:37 UT over 1901-2099, and at
+  random instants: 1 in 3,800 to 4,800 on each). Astrolog's check against
+  Swiss output confirms the corrected rates at two such instants. The stencil now holds the centre's TDB offset
   (`TdbInterpolator::Pin`) and converts the per-TDB-day difference to per TT
   day. Measured against a five-point difference at exact steps over 20,000
   instants in 1800-1804: the worst miss of the apparent Moon 0.049 -> 0.00021

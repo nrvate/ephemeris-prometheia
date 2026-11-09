@@ -3415,7 +3415,7 @@ struct Engine::Impl {
             const double tp = jd_tt + kSpeedStepDays, tm = jd_tt - kSpeedStepDays;
             // Hold the TDB offset fixed across the stencil: re-rounding it
             // at each point puts a 40 us step of TDB into the difference
-            // about once in 5,000 instants (docs/ENGINE.md, "Rates"). The
+            // about once in 4,300 instants (docs/ENGINE.md, "Rates"). The
             // stencil then differences over equal spans of TDB and TT, so
             // the result is per TDB day; the factor makes it per TT day.
             time::TdbInterpolator::Pin pin(tdb, jd_tt);

@@ -1208,7 +1208,7 @@ TEST_CASE("de440_engine_rates_match_differenced_swetest") {
 // A JD double near the present holds 40 us, so TDB = round(TT + (TDB-TT))
 // steps by one ulp each time TDB-TT crosses a rounding boundary, and the Moon
 // jumps 3-4 cm with it. A rate stencil that straddled such a step used to
-// read it as velocity (up to 0.05"/day, about one instant in 5,000); the
+// read it as velocity (up to 0.05"/day, about one instant in 4,300); the
 // engine now holds the TDB offset fixed within a stencil. The reference is a
 // five-point difference at exactly spaced TDB instants (each reference TT is
 // nudged by whole ulps until the engine's own conversion lands on the wanted

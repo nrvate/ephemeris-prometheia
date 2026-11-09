@@ -245,8 +245,12 @@ For a TT epoch *t*:
      a rounding boundary, about 160 times a year. Each point of the ±1/4096
      stencil converted on its own, so a stencil straddling a step differenced
      a 3–4 cm jump of the Moon (21 µas) over 42 s: a rate off by up to
-     0.05″/day, at about one instant in 5,000 (DE440 itself, evaluated at
-     exact TDB instants, is smooth to 0.09 mm). The stencil now converts the
+     0.05″/day (DE440 itself, evaluated at exact TDB instants, is smooth to
+     0.09 mm). Counted against this fix on the Sun through `calc_ut`, daily
+     over 1901–2099, a step fell in the stencil at 1 instant in 4,846 at
+     0:00 UT, 4,276 at 6:00, 3,825 at 13:37, and 4,276 at random instants.
+     Round civil times are not more exposed: whether a stencil straddles a
+     step depends on the TT instant alone. The stencil now converts the
      centre once and maps every other TT instant *t* in it to
      `tdb_c + (t − tt_c)`, which is exact (`TdbInterpolator::Pin`; the
      light-time solve, the observer and the Sun for deflection all go through
