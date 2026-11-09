@@ -1078,4 +1078,68 @@ void horizontal_to_equatorial(double az, double alt, double lat, double& ha, dou
     dec = std::atan2(z, std::hypot(x, y));
 }
 
+// ---------------------------------------------------------------------------
+// PrecessionInterpolator
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// P * B and the mean obliquity, computed directly.
+void precession_direct(double jd_tt, PrecessionModel model, double v[10]) {
+    double p[9], b[9];
+    mean_equator_of_date_matrix(jd_tt, model, p);
+    frame_bias_matrix(b);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            v[3 * i + j] = p[3 * i] * b[j] + p[3 * i + 1] * b[3 + j] + p[3 * i + 2] * b[6 + j];
+    v[9] = mean_obliquity(jd_tt, model);
+}
+
+} // namespace
+
+const PrecessionInterpolator::Node& PrecessionInterpolator::node(long long day,
+                                                                 PrecessionModel model) {
+    Node& n = nodes_[static_cast<unsigned long long>(day) & 63u];
+    if (n.day != day || n.model != model) {
+        n.day = day;
+        n.model = model;
+        precession_direct(double(day), model, n.v);
+        ++evaluations_;
+    }
+    return n;
+}
+
+void PrecessionInterpolator::at(double jd_tt, PrecessionModel model, double pb[9],
+                                double& eps_mean) {
+    // Far outside any ephemeris (or not a number): no nodes, the direct value.
+    if (!(std::fabs(jd_tt) < 1e9)) {
+        double v[10];
+        precession_direct(jd_tt, model, v);
+        std::copy(v, v + 9, pb);
+        eps_mean = v[9];
+        return;
+    }
+    const double k = std::floor(jd_tt);
+    const auto day = static_cast<long long>(k);
+    const double u = jd_tt - k; // exact: in [0, 1)
+    if (u == 0.0) {
+        const Node& n = node(day, model);
+        std::copy(n.v, n.v + 9, pb);
+        eps_mean = n.v[9];
+        return;
+    }
+    // Lagrange weights of the cubic through nodes day - 1 .. day + 2. The four
+    // nodes fall in distinct slots of the cache, so none evicts another.
+    const double w[4] = {-u * (u - 1.0) * (u - 2.0) / 6.0, (u + 1.0) * (u - 1.0) * (u - 2.0) / 2.0,
+                         -(u + 1.0) * u * (u - 2.0) / 2.0, (u + 1.0) * u * (u - 1.0) / 6.0};
+    const Node* n[4];
+    for (int i = 0; i < 4; ++i)
+        n[i] = &node(day - 1 + i, model);
+    double out[10];
+    for (int j = 0; j < 10; ++j)
+        out[j] = w[0] * n[0]->v[j] + w[1] * n[1]->v[j] + w[2] * n[2]->v[j] + w[3] * n[3]->v[j];
+    std::copy(out, out + 9, pb);
+    eps_mean = out[9];
+}
+
 } // namespace prometheia::frames

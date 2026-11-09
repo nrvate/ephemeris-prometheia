@@ -333,6 +333,10 @@ instants):
 - **Per-instant memos:** the observer's state and the Sun's state are kept
   for the last three instants, keyed exactly (topocentric entries also on
   ΔT), so bodies at one instant and its stencil read them once.
+- **Precession from day nodes:** P·B and the mean obliquity are interpolated
+  from nodes one day apart, within 4e-10″ of the direct series
+  (FRAMES.md, "Precession nodes"). An instant the memos have not seen, which
+  is every sample of a fit, pays 0.024 µs for them instead of 0.64 µs.
 
 ## Nodes and apsides
 

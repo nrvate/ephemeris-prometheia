@@ -21,6 +21,7 @@
 #ifndef PROMETHEIA_FRAMES_HPP
 #define PROMETHEIA_FRAMES_HPP
 
+#include <limits>
 #include <optional>
 
 namespace prometheia::frames {
@@ -286,6 +287,35 @@ void equatorial_to_horizontal(double hour_angle, double dec, double lat, double&
                               double& altitude);
 void horizontal_to_equatorial(double azimuth, double altitude, double lat, double& hour_angle,
                               double& dec);
+
+// The mean equator of date matrix with the frame bias, P * B, and the mean
+// obliquity, for code that evaluates many epochs (the Engine keeps one).
+// Both are interpolated from nodes one day apart, at integer TT Julian
+// dates: the cubic through the four nodes around an epoch, each matrix
+// element and the obliquity on its own. Precession's shortest periodic term
+// is 157.87 centuries, so the cubic agrees with the direct functions to
+// rounding: matrix elements within 2e-15 and the obliquity within 3e-10
+// arcseconds over -13000..17000, both models (docs/FRAMES.md, "Precession
+// nodes"). An epoch on a node gets the node's own values, the direct ones.
+// The value depends only on the epoch and model, never on query history.
+// Nodes are kept in a direct-mapped cache of 64. Not thread-safe; one per
+// thread.
+class PrecessionInterpolator {
+public:
+    void at(double jd_tt, PrecessionModel model, double pb[9], double& eps_mean);
+    // Nodes computed so far (for tests and benchmarks).
+    unsigned long long evaluations() const { return evaluations_; }
+
+private:
+    struct Node {
+        long long day = std::numeric_limits<long long>::min();
+        PrecessionModel model = PrecessionModel::IAU2006;
+        double v[10]; // P * B row-major, then the mean obliquity
+    };
+    const Node& node(long long day, PrecessionModel model);
+    Node nodes_[64];
+    unsigned long long evaluations_ = 0;
+};
 
 } // namespace prometheia::frames
 

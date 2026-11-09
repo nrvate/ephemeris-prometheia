@@ -151,6 +151,33 @@ it shows up as Jupiter's apparent place falling from 36 to 14 µs when it is
 the body that pays, and a year-long segment fit of the Moon from 57 to
 26 ms.
 
+## Precession nodes
+
+The engine reads P·B and the mean obliquity from nodes one day apart
+(`frames::PrecessionInterpolator`). Each matrix element and the obliquity are
+interpolated on their own, by the cubic through the four nodes around the
+epoch. A chart asks for many bodies at one instant, and the engine's
+per-instant cache serves those. A segment fit asks for a new instant on every
+sample, and computing directly cost 0.64 µs per epoch: 0.32 µs each for the
+Vondrák matrix and the obliquity. Interpolated, it costs 0.024 µs. A warm
+apparent place of Mars fell from 1.73 to 1.24 µs (no rates), and a month fit
+from about 26 to 19 ms per body-year, nutation not yet shared.
+
+Precession's shortest periodic term is 157.87 centuries, so a cubic across
+three days leaves only rounding. Measured against the direct functions at
+400,000 epochs per span (2026-11-09):
+
+| Model | Span | Matrix element | Obliquity |
+|---|---|---:|---:|
+| Vondrák 2011 | 1550–2650 | 7.8e-16 | 8.0e-11″ |
+| Vondrák 2011 | −13000..17000 | 2.0e-15 | 2.9e-10″ |
+| IAU 2006 | 1550–2650 | 6.7e-16 | 6.9e-11″ |
+| IAU 2006 | −13000..17000 | 1.8e-15 | 6.9e-11″ |
+
+An element error of 2e-15 is 4e-10″. An epoch on a node gets the direct
+values, and the value never depends on what was asked before
+(`frames_precession_interpolator`).
+
 ## Long-term precession (Vondrák, Capitaine & Wallace 2011)
 
 IAU 2006 precession is a set of polynomials fitted near J2000; their errors

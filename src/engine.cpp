@@ -1729,15 +1729,17 @@ struct Engine::Impl {
         f.jd_tt = jd_tt;
         f.model = model;
         f.have_nutation = false;
-        double p[9];
-        frames::mean_equator_of_date_matrix(jd_tt, model, p);
-        matmul(p, bias, f.pb);
-        f.eps_mean = frames::mean_obliquity(jd_tt, model);
+        precession_nodes.at(jd_tt, model, f.pb, f.eps_mean);
         if (need_nutation)
             add_nutation(f);
         return f;
     }
 
+    // P * B and the mean obliquity interpolated from day nodes
+    // (frames::PrecessionInterpolator, within 2e-15 of the direct values): a
+    // fit samples a new epoch on every call, and the direct series cost 0.64
+    // us an epoch against 0.024.
+    frames::PrecessionInterpolator precession_nodes;
     // Nutation interpolated from half-day nodes (frames::NutationInterpolator,
     // 0.004 uas): the value depends only on the epoch, and the node cache is
     // shared by every body and every rate stencil this engine evaluates.

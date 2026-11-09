@@ -143,6 +143,60 @@ TEST_CASE("frames_obliquity") {
     CHECK(near(mean_obliquity(2451545.0), 84381.406 * kDeg2Rad / 3600.0, 1e-12));
 }
 
+// P * B and the mean obliquity from day nodes against the direct functions,
+// both models, near J2000 and at DE441's ends; an epoch on a node gets the
+// direct values; and the answer does not depend on what was asked before.
+TEST_CASE("frames_precession_interpolator") {
+    double b[9];
+    frame_bias_matrix(b);
+    const auto direct = [&](double t, PrecessionModel m, double pb[9], double& eps) {
+        double p[9];
+        mean_equator_of_date_matrix(t, m, p);
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c)
+                pb[3 * r + c] = p[3 * r] * b[c] + p[3 * r + 1] * b[3 + c] + p[3 * r + 2] * b[6 + c];
+        eps = mean_obliquity(t, m);
+    };
+    for (PrecessionModel m : {PrecessionModel::Vondrak2011, PrecessionModel::IAU2006}) {
+        PrecessionInterpolator pi;
+        double worst = 0.0, worst_eps = 0.0;
+        for (double base : {2451545.0, -3027215.5, 7930190.5}) {
+            for (int i = 0; i < 400; ++i) {
+                const double t = base + i * 0.137; // across 55 days, off and on nodes
+                double pb[9], eps, want[9], want_eps;
+                pi.at(t, m, pb, eps);
+                direct(t, m, want, want_eps);
+                for (int j = 0; j < 9; ++j)
+                    worst = std::max(worst, std::fabs(pb[j] - want[j]));
+                worst_eps = std::max(worst_eps, std::fabs(eps - want_eps));
+            }
+        }
+        CHECK(worst < 5e-15);     // measured 2e-15 (4e-10")
+        CHECK(worst_eps < 3e-15); // measured 1.4e-15 rad (3e-10")
+
+        // On a node: the direct values, exactly.
+        double pb[9], eps, want[9], want_eps;
+        pi.at(2451545.0, m, pb, eps);
+        direct(2451545.0, m, want, want_eps);
+        CHECK(std::equal(pb, pb + 9, want));
+        CHECK(eps == want_eps);
+
+        // History does not matter: a fresh interpolator gives the same bits.
+        PrecessionInterpolator fresh;
+        double again[9], again_eps;
+        pi.at(2378496.123, m, pb, eps);
+        fresh.at(2378496.123, m, again, again_eps);
+        CHECK(std::equal(pb, pb + 9, again));
+        CHECK(eps == again_eps);
+    }
+    // Not a number: the direct functions decide, no node is made.
+    PrecessionInterpolator pi;
+    double pb[9], eps;
+    pi.at(NAN, PrecessionModel::Vondrak2011, pb, eps);
+    CHECK(pi.evaluations() == 0);
+    CHECK(std::isnan(eps));
+}
+
 TEST_CASE("frames_matrices_are_rotations") {
     const double epochs[] = {2305424.5, 2415020.0, 2451545.0, 2461443.0, 2513392.5};
     for (double jd : epochs) {

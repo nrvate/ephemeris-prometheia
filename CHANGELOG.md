@@ -13,6 +13,12 @@ documented, not that it is frozen.
 
 ## Unreleased
 
+- **Precession from day nodes** (docs/FRAMES.md, "Precession nodes"). The
+  engine interpolates P·B and the mean obliquity from nodes one day apart,
+  within 4e-10″ of the direct series over −13000..17000. A new instant cost
+  0.64 µs in precession alone, and a fit samples a new instant every call. A
+  warm apparent place fell from 1.73 to 1.24 µs, and month fits from about 26
+  to 19 ms per body-year. Positions move by at most 4e-10″.
 - **A catalog refresh brings new bodies** (docs/INGESTION.md, "Freshness").
   `sbdb_fetch.py --refresh-since` selected on `soln_date`, which only JPL's
   orbits have, so a body with an MPC orbit never came, and most discoveries
