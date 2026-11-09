@@ -58,6 +58,38 @@ documented, not that it is frozen.
   arcsec/day, the geometric Moon 0.049 -> 0.000063, Mars 0.0026 -> 0.0000010;
   medians unchanged for the Moon, Mars 5.5e-7 -> 1.4e-7. Positions are
   bit-identical; no rate moves by more than 2e-5 arcsec/day except at a step.
+- **A segment fit takes half the engine work** (docs/SEGMENTS.md, "How the
+  degree and the span are chosen", "Cost"). A month of the grid 1800–1810 took
+  85–332 sampler calls, every one with a rate, for a fit that needs about 13–17
+  samples. The fit now probes each interval at the largest degree and cuts it
+  back, asks the engine for a rate only at 9 points of a segment, keeps every
+  sample so that raising the degree costs none, and tries `max_degree` before it
+  splits. Over 9 objects and 3 tolerances (0.001″, 0.01″, 0.1″) a month costs
+  1.03 to 2.3 times fewer calls (1.7 overall) and 1.3 to 2.6 times less time
+  (1.8), the Sun at 0.001″ from 222 calls to 101 and Mercury from 332 to 145;
+  the Moon, which is two segments a month, gains least. A year of Jupiter at
+  0.1″ is 1,008 calls against 3,459.
+  - **The sampler may be asked for a position only.** `segments::Sampler` is
+    called with a NULL `vel_au_day` when no rate is wanted, which is most calls,
+    and must not write through it then. C++ only: no C ABI changed.
+    `FitOptions` has a new `probe_degree`.
+  - **The check set is where the error peaks.** Direction and distance are
+    measured on 4 × (degree + 1) + 1 points at the extrema of a Chebyshev
+    polynomial (the ends among them), with the peaks between read off the points
+    around them. The worst random-instant to declared ratio fell from 1.118 to
+    1.027, and the rate ratio from 2.475 to 0.997 (instants where the engine's
+    own rate jumps set aside). With the ends left out of the rate points, three
+    tests fail.
+  - **Different segments for the same request.** A cut-back probe has less error
+    than an interpolation of its degree, and fewer months split on a pessimistic
+    estimate: Mercury's year at 0.001″ is 23 segments (was 30), Mars
+    topocentric 157 (was 257), the declared errors are lower (Venus 0.000343″,
+    was 0.000470″), and the Sun's year comes in degrees 11–15 (was 10–16). The
+    tolerance holds everywhere. The coefficients for the same samples differ
+    from before by rounding (4e-15 of the series' size at degree 16).
+  - **The fitter's own arithmetic** is 56 → 18.5 µs a month on a sampler that
+    costs nothing and a body that needs splits, and 5.6–6.9 → 8.0–8.5 µs where
+    nothing splits (a bigger probe).
 - **A catalog refresh brings new bodies** (docs/INGESTION.md, "Freshness").
   `sbdb_fetch.py --refresh-since` selected on `soln_date`, which only JPL's
   orbits have, so a body with an MPC orbit never came, and most discoveries

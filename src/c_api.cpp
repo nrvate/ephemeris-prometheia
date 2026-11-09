@@ -2444,11 +2444,14 @@ prometheia_status prometheia_segments_fit(prometheia_engine* engine,
             if (prometheia_status st = translate(*opts, o, err); st != PROMETHEIA_OK)
                 return st;
         }
-        o.speed = true; // the fit's rate residual is measured against the engine's rates
         o.sigma = false;
+        // Rates are asked for only where the rate residual is measured.
+        CalcOptions o_rates = o;
+        o_rates.speed = true;
+        o.speed = false;
         Engine& e = engine->engine;
         const segments::Sampler sampler = [&](double jd, double p[3], double v[3]) -> Result<void> {
-            auto c = e.calc_object(ref, jd, o);
+            auto c = e.calc_object(ref, jd, v ? o_rates : o);
             if (!c)
                 return c.error();
             if (!(c.value().pos.dist_au >= kSegmentMinDistanceAu)) {
@@ -2457,7 +2460,8 @@ prometheia_status prometheia_segments_fit(prometheia_engine* engine,
                     "segments: the object is at the observer, so it has no direction");
             }
             std::copy_n(c.value().pos.xyz_au, 3, p);
-            std::copy_n(c.value().pos.vel_au_day, 3, v);
+            if (v)
+                std::copy_n(c.value().pos.vel_au_day, 3, v);
             return {};
         };
         segments::FitOptions fo;

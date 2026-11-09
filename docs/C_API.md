@@ -412,8 +412,13 @@ void prometheia_segments_close(prometheia_segments *segments);
   between its check points than on them (Venus by 1% at 0.01″).
   - The layout reports the worst residuals measured against
     `prometheia_calc_object` on each segment's check set. The check set is
-    both ends of the segment plus 4 × (degree + 1) + 1 interior points
-    offset from the nodes the fit interpolated.
+    4 × (degree + 1) + 1 points, both ends of the segment among them, at the
+    extrema of a Chebyshev polynomial of that order and so not at the nodes
+    the fit interpolated. The peaks between its points are read off the
+    points around them (SEGMENTS.md, "The residuals"). `err_rate_arcsec_per_day`
+    is taken at the ends, the points beside them and the quarters of the
+    segment, where the derivative's error peaks, because the engine's rates
+    cost three times its positions.
   - `err_arcsec` is the angular separation of the fitted and computed
     directions, not a longitude difference. It is at most 0.8 × the
     tolerance on those points: a measured bound there, not a guarantee

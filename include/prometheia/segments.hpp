@@ -29,8 +29,12 @@ struct Segment {
     int degree = 0;
     // Chebyshev coefficients of the first kind, degree + 1 each, in AU.
     std::vector<double> x, y, z;
-    // The largest residuals measured against the sampler over this segment,
-    // on a check set that includes points between the fit's nodes:
+    // The largest residuals measured against the sampler over this segment.
+    // Direction and distance are taken on a check set of 4 x (degree + 1) + 1
+    // points between and beyond the fit's nodes, both ends of the interval
+    // among them, and the peaks between its points are read off the points
+    // around them. The rate is taken at the ends, the points beside them and
+    // the quarters of the interval, where the derivative's error peaks:
     double err_arcsec = 0.0;              // direction
     double err_rel_dist = 0.0;            // |r| , relative
     double err_rate_arcsec_per_day = 0.0; // the analytic derivative against
@@ -46,7 +50,9 @@ std::vector<double> derivative(const std::vector<double>& c);
 
 // What the fitter samples: the rectangular position (AU) and velocity
 // (AU/day) of the thing being fitted, at a TT instant, in whatever frame the
-// caller wants the segments in. An error stops the fit.
+// caller wants the segments in. vel_au_day is NULL when only the position is
+// wanted, which is most calls: the sampler then need not compute rates, which
+// cost about three times a position. An error stops the fit.
 using Sampler = std::function<Result<void>(double jd_tt, double pos_au[3], double vel_au_day[3])>;
 
 struct FitOptions {
@@ -58,10 +64,16 @@ struct FitOptions {
     int max_degree = 16;              // a consumer's buffer bound
     double min_half_span_days = 0.05; // stop splitting here
     size_t max_segments = 4096;
-    // Check points per segment, as a multiple of the coefficient count: the
-    // residuals are measured on this set, which includes points between the
-    // nodes the fit interpolated.
+    // Check points per segment, as a multiple of the coefficient count (never
+    // fewer than 4): the direction and distance residuals are measured on this
+    // set, which includes both ends and points between the nodes the fit
+    // interpolated.
     int check_multiple = 4;
+    // The degree the first interval is probed at, 0 for max_degree. A probe
+    // is cut back to the degree the interval needs, so a high one costs only
+    // its nodes; one too low costs a second probe. Later intervals start two
+    // above the degree their predecessor needed.
+    int probe_degree = 0;
 };
 
 struct FitReport {

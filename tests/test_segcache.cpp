@@ -30,9 +30,11 @@ struct Circle {
             p[0] = std::cos(a);
             p[1] = std::sin(a);
             p[2] = 0.0;
-            v[0] = -w * std::sin(a);
-            v[1] = w * std::cos(a);
-            v[2] = 0.0;
+            if (v) {
+                v[0] = -w * std::sin(a);
+                v[1] = w * std::cos(a);
+                v[2] = 0.0;
+            }
             return {};
         };
     }

@@ -31,7 +31,9 @@ segments::Sampler body_sampler(Engine& e, int id, const CalcOptions& o) {
         }
         for (int i = 0; i < 3; ++i) {
             p[i] = r.value().pos.xyz_au[i];
-            v[i] = r.value().pos.vel_au_day[i];
+            if (v) {
+                v[i] = r.value().pos.vel_au_day[i];
+            }
         }
         return {};
     };
@@ -93,6 +95,44 @@ TEST_CASE("segments_fit_synthetic_exactly") {
         for (int k = 0; k < 3; ++k) {
             CHECK(std::fabs(v[k] - truth.vel_au_day[k]) < 1e-10);
         }
+    }
+}
+
+TEST_CASE("segments_fit_recovers_known_chebyshev_coefficients") {
+    // A sampler that is a Chebyshev series of known coefficients, fitted over
+    // one interval: the interpolation must give them back, to the rounding of
+    // the instants (a Julian date near 2.4e6 is quantized to 40 microseconds,
+    // 2e-11 of this interval's half span). This pins the cosine table the three
+    // components share: a wrong entry puts an error of the coefficient's size.
+    const double from = 2451545.0, to = from + 20.0;
+    const double mid = 0.5 * (from + to), half = 0.5 * (to - from);
+    const double cx[6] = {0.3, 0.2, -0.1, 0.05, 0.02, -0.01};
+    const double cy[3] = {1.0, 0.0, 0.1};
+    const auto series = [&](const double* c, int n, double t) {
+        double t0 = 1.0, t1 = t, sum = c[0];
+        for (int k = 1; k < n; ++k) {
+            sum += c[k] * t1;
+            const double t2 = 2.0 * t * t1 - t0;
+            t0 = t1;
+            t1 = t2;
+        }
+        return sum;
+    };
+    const segments::Sampler sampler = [&](double jd, double p[3], double*) -> Result<void> {
+        const double t = (jd - mid) / half;
+        p[0] = series(cx, 6, t);
+        p[1] = series(cy, 3, t);
+        p[2] = 0.5;
+        return {};
+    };
+    auto r = segments::fit(sampler, from, to);
+    REQUIRE_MESSAGE(r.ok(), r.error().message);
+    REQUIRE(r.value().segments.size() == 1);
+    const segments::Segment& s = r.value().segments[0];
+    for (size_t k = 0; k < s.x.size(); ++k) {
+        CHECK(std::fabs(s.x[k] - (k < 6 ? cx[k] : 0.0)) < 5e-11);
+        CHECK(std::fabs(s.y[k] - (k < 3 ? cy[k] : 0.0)) < 5e-11);
+        CHECK(std::fabs(s.z[k] - (k == 0 ? 0.5 : 0.0)) < 5e-11);
     }
 }
 
@@ -203,6 +243,153 @@ TEST_CASE("segments_de440_declared_residuals_bound_the_truth") {
                     worst, worst_rate, rep.sampler_calls);
         CHECK(worst <= declared * 1.05 + 1e-9);
         CHECK(worst_rate <= declared_rate * 1.05 + 1e-9);
+    }
+}
+
+// What a fit costs. The sampler is asked for rates only where the rate
+// residual is measured, and the declared rate must still bound what an
+// outsider measures at random instants: the derivative's error peaks at the
+// interval's ends, so a rate subset without them under-reports it severalfold.
+TEST_CASE("segments_rates_are_asked_only_where_the_derivative_peaks") {
+    // Closed-form motion with closed-form rates, fast enough to need splits.
+    const double j0 = 2451545.0, w = 0.2;
+    size_t positions = 0, with_rates = 0;
+    const auto at = [&](double jd, double p[3], double v[3]) {
+        const double a = w * (jd - j0);
+        p[0] = std::cos(a) + 0.05 * std::cos(2.3 * a);
+        p[1] = std::sin(a) + 0.05 * std::sin(2.3 * a);
+        p[2] = 0.1 * std::sin(0.5 * a);
+        if (v) {
+            v[0] = -w * std::sin(a) - 0.05 * 2.3 * w * std::sin(2.3 * a);
+            v[1] = w * std::cos(a) + 0.05 * 2.3 * w * std::cos(2.3 * a);
+            v[2] = 0.05 * w * std::cos(0.5 * a);
+        }
+    };
+    const segments::Sampler sampler = [&](double jd, double p[3], double v[3]) -> Result<void> {
+        ++positions;
+        if (v) {
+            ++with_rates;
+        }
+        at(jd, p, v);
+        return {};
+    };
+    segments::FitOptions fo;
+    fo.target_err_arcsec = 0.001;
+    const double from = j0 + 10.0, to = from + 30.4375;
+    auto r = segments::fit(sampler, from, to, fo);
+    REQUIRE_MESSAGE(r.ok(), r.error().message);
+    const segments::FitReport& rep = r.value();
+    CHECK(rep.met_target);
+    CHECK(rep.sampler_calls == positions);
+    check_tiling(rep.segments, from, to);
+
+    // Rates: both ends, the points beside them and the quarters between, at
+    // most nine a segment (the ends shared by neighbours), a small share of
+    // the calls.
+    CHECK(with_rates <= 9 * rep.segments.size());
+    CHECK(with_rates * 5 <= positions);
+
+    std::mt19937 rng(5);
+    for (const segments::Segment& s : rep.segments) {
+        std::uniform_real_distribution<double> in(s.mid_jd_tt - s.half_span_days,
+                                                  s.mid_jd_tt + s.half_span_days);
+        double worst = 0.0, worst_rate = 0.0;
+        for (int i = 0; i < 300; ++i) {
+            const double jd = i == 0   ? s.mid_jd_tt - s.half_span_days
+                              : i == 1 ? s.mid_jd_tt + s.half_span_days
+                                       : in(rng);
+            double p[3], v[3], tp[3], tv[3];
+            s.position(jd, p);
+            s.velocity(jd, v);
+            at(jd, tp, tv);
+            worst = std::max(worst, arcsec_between(p, tp));
+            const double d = std::sqrt(tp[0] * tp[0] + tp[1] * tp[1] + tp[2] * tp[2]);
+            const double dv =
+                std::sqrt((v[0] - tv[0]) * (v[0] - tv[0]) + (v[1] - tv[1]) * (v[1] - tv[1]) +
+                          (v[2] - tv[2]) * (v[2] - tv[2]));
+            worst_rate = std::max(worst_rate, dv / d * 180.0 / 3.14159265358979323846 * 3600.0);
+        }
+        CHECK(worst <= s.err_arcsec * 1.03 + 1e-9);
+        CHECK(worst_rate <= s.err_rate_arcsec_per_day * 1.03 + 1e-9);
+    }
+}
+
+// The cost of a month against DE440 (docs/SEGMENTS.md, "Cost"). The bounds
+// are measured with room; the fit used to take 223 sampler calls a month for
+// the Sun at 0.001" and 174 for Pluto, every one of them with rates. The
+// declared residuals of each segment must still bound a random instant in it.
+TEST_CASE("segments_de440_a_month_costs_what_the_docs_say") {
+    const char* env = std::getenv("PROMETHEIA_DE440");
+    const std::string de =
+        (env && *env) ? env : std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/linux_p1550p2650.440";
+    if (access(de.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s not present\n", de.c_str());
+        return;
+    }
+    auto opened = Engine::open(de);
+    REQUIRE(opened.ok());
+    Engine e = std::move(opened).value();
+    CalcOptions o;
+    o.sigma = false;
+    struct Case {
+        int id;
+        const char* name;
+        double target;
+        size_t before; // calls a month before the rework: the mean over 1800-1810
+        size_t limit;  // allowed now
+    };
+    const double month = 30.4375, j2000 = 2451545.0;
+    std::mt19937 rng(41);
+    for (const Case& c : {Case{10, "Sun", 0.0008, 223, 110}, Case{9, "Pluto", 0.0008, 174, 105},
+                          Case{4, "Mars", 0.0008, 226, 105}, Case{5, "Jupiter", 0.08, 150, 80},
+                          Case{301, "Moon", 0.08, 175, 210}}) {
+        size_t calls = 0, segs = 0;
+        double worst = 0.0, worst_declared = 0.0, worst_rate = 0.0, worst_rate_declared = 0.0;
+        const int months = 8;
+        for (int m = 0; m < months; ++m) {
+            const double from = j2000 + (400 + m) * month, to = from + month;
+            segments::FitOptions fo;
+            fo.target_err_arcsec = c.target;
+            auto r = segments::fit(body_sampler(e, c.id, o), from, to, fo);
+            REQUIRE_MESSAGE(r.ok(), r.error().message);
+            CHECK(r.value().met_target);
+            calls += r.value().sampler_calls;
+            segs += r.value().segments.size();
+            for (const segments::Segment& s : r.value().segments) {
+                std::uniform_real_distribution<double> in(s.mid_jd_tt - s.half_span_days,
+                                                          s.mid_jd_tt + s.half_span_days);
+                double seg_worst = 0.0, seg_rate = 0.0;
+                for (int i = 0; i < 60; ++i) {
+                    const double jd = in(rng);
+                    double p[3], v[3];
+                    s.position(jd, p);
+                    s.velocity(jd, v);
+                    const Position t = e.calc(c.id, jd, o).value().pos;
+                    seg_worst = std::max(seg_worst, arcsec_between(p, t.xyz_au));
+                    const double d =
+                        std::sqrt(t.xyz_au[0] * t.xyz_au[0] + t.xyz_au[1] * t.xyz_au[1] +
+                                  t.xyz_au[2] * t.xyz_au[2]);
+                    double dv = 0.0;
+                    for (int k = 0; k < 3; ++k) {
+                        dv += (v[k] - t.vel_au_day[k]) * (v[k] - t.vel_au_day[k]);
+                    }
+                    seg_rate = std::max(seg_rate, std::sqrt(dv) / d * 180.0 /
+                                                      3.14159265358979323846 * 3600.0);
+                }
+                // Each segment on its own: the declared numbers bound it.
+                CHECK(seg_worst <= s.err_arcsec * 1.05 + 1e-9);
+                CHECK(seg_rate <= s.err_rate_arcsec_per_day * 1.05 + 1e-9);
+                worst = std::max(worst, seg_worst / s.err_arcsec);
+                worst_rate = std::max(worst_rate, seg_rate / s.err_rate_arcsec_per_day);
+                worst_declared = std::max(worst_declared, s.err_arcsec);
+                worst_rate_declared = std::max(worst_rate_declared, s.err_rate_arcsec_per_day);
+            }
+        }
+        std::printf("  %-8s %.1f calls a month (was %zu), %.2f segments a month, direction %.3f "
+                    "and rate %.3f of declared\n",
+                    c.name, double(calls) / months, c.before, double(segs) / months, worst,
+                    worst_rate);
+        CHECK(calls <= c.limit * size_t(months));
     }
 }
 

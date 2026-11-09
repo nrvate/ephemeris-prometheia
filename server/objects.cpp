@@ -208,18 +208,22 @@ Result<CalcResult> calc_at(Engine& engine, const ResolvedObject& obj, double jd,
 }
 
 segments::Sampler sampler_for(Engine& engine, const ResolvedObject& obj, CalcOptions opts) {
-    opts.speed = true;  // the fit is of position and rate together
     opts.sigma = false; // twelve extra integrations a sample, for nothing
     return
         [&engine, obj, opts](double jd_tt, double pos_au[3], double vel_au_day[3]) -> Result<void> {
-            auto res = calc_at(engine, obj, jd_tt, eph::kTimeTT, opts);
+            // Rates only when the fit asks: they cost three times a position.
+            CalcOptions o = opts;
+            o.speed = vel_au_day != nullptr;
+            auto res = calc_at(engine, obj, jd_tt, eph::kTimeTT, o);
             if (!res) {
                 return res.error();
             }
             const Position& p = res.value().pos;
             for (int i = 0; i < 3; ++i) {
                 pos_au[i] = p.xyz_au[i];
-                vel_au_day[i] = p.vel_au_day[i];
+                if (vel_au_day) {
+                    vel_au_day[i] = p.vel_au_day[i];
+                }
             }
             return {};
         };

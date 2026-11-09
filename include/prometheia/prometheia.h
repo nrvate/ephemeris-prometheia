@@ -1449,13 +1449,15 @@ typedef struct prometheia_segments_layout {
     const double* dcoef;          /* 3 * stride * count: d/du of coef */
     double tolerance_arcsec;      /* as asked */
     /* The worst residuals measured against prometheia_calc_object while
-     * fitting, on each segment's check set: both ends and 4 x (degree + 1) + 1
-     * interior points offset from the fit's nodes. err_arcsec is the angular
-     * separation of the two directions, and is at most 0.8 x
-     * tolerance_arcsec on those points; elsewhere it is not a guarantee.
-     * err_rel_dist is |r| relative; err_rate_arcsec_per_day is the
-     * derivative's disagreement with the engine's rates, seen from the
-     * observer. */
+     * fitting, on each segment's check set: 4 x (degree + 1) + 1 points, both
+     * ends among them, at the extrema of a Chebyshev polynomial of that
+     * order (not the fit's nodes), with the peaks between them read off the
+     * points around them. err_arcsec is the angular separation of the two
+     * directions, and is at most 0.8 x tolerance_arcsec on those points;
+     * elsewhere it is not a guarantee. err_rel_dist is |r| relative;
+     * err_rate_arcsec_per_day is the derivative's disagreement with the
+     * engine's rates, seen from the observer, taken at the ends, the points
+     * beside them and the quarters of the segment, where it peaks. */
     double err_arcsec;
     double err_rel_dist;
     double err_rate_arcsec_per_day;
