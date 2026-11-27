@@ -15,7 +15,7 @@ in NAIF's SPK container are read by `prometheia::spk`
 | `lnxm1600p2170.200` | JPL, via the Swiss Ephemeris download page | 43 MB | DE200, 1600–2170; tracked at `/shares/swisseph/ephe/de200.eph` (`PROMETHEIA_DE200`) |
 | `linux_p1550p2650.440` | `ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/` | 98 MB | DE440, 1550–2650 (`PROMETHEIA_DE440`) |
 | `testpo.440` | same directory | 838 KB | JPL's official test points for DE440 (`PROMETHEIA_TESTPO440`) |
-| `header.440`, `header.200` | JPL ASCII headers | 22 KB | published GROUP 1050 pointer tables, used to pin the tests |
+| `header.440`, `header.200` | JPL ASCII headers | 7 KB and 22 KB | published GROUP 1050 pointer tables, used to pin the tests |
 | `linux_m13000p17000.441` | `ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de441/` | 2.79 GB | DE441, −13200..+17191 per its header (`PROMETHEIA_DE441`) |
 | `testpo.441` | same directory | 24 MB | JPL's test points for DE441, 364,687 of them (`PROMETHEIA_TESTPO441`) |
 
@@ -246,7 +246,10 @@ solar-system barycentre, 13 = Earth-Moon barycentre):
 Earth/Moon/EMB pairs directly from the geocentric Moon column so no
 precision is lost through barycentric magnitudes.
 
-A `DeFile` caches its last record and is not safe for concurrent use.
+A `DeFile` holds no mutable state: the record last decoded lives in a
+caller-owned `DeCursor`, so one open file serves any number of threads, each
+with a cursor of its own (`de_one_file_two_cursors_two_threads`). The forms
+without a cursor decode into one of their own on every call.
 
 ## Validation
 

@@ -54,7 +54,15 @@ with prometheia.Client(ephemeris="ephe") as c:     # the JSON tools, no compiler
 
 ## Where the answers come from
 
-`Client(server=…)` or `Client(ephemeris=…)` choose directly. A `Client()`
+`Client(server=None, ephemeris=None, executable=None, token=None,
+catalogs=(), perturbers=())`: `server=` and `ephemeris=` choose directly,
+`executable=` names the `prometheia-json` to start, `token=` is the server
+token, and `catalogs=` and `perturbers=` add files to a local one. The
+methods are `positions`, `houses`, `convert_time`, `lookup` and
+`capabilities` (each takes the tool's arguments as keywords and returns the
+parsed JSON), `call(tool, **arguments)` for any tool by name, and `close()`;
+a `Client` is a context manager. A whole-call refusal raises `ToolError`
+(a subclass of `Error`, `code` `None`). A `Client()`
 with neither follows the environment, and the first match wins. There is no
 module-level state. The `set_server`, `set_ephe_path`, `default_client` and
 `close` functions, which configured one process-wide client for
@@ -110,6 +118,7 @@ the C++ engine's, bit for bit.
 **Shape** (Prometheia's own; nothing Swiss-shaped):
 - `Dataset(ephemeris, *, ephemerides=(), catalogs=(), perturbers=(),
   hypotheticals=())` names the files, in the order they are added.
+  - `Dataset` keeps its arguments as attributes of the same names.
   - `ephemerides` are planetary files behind the first, such as DE441
     behind DE440.
   - `dataset.context()` opens a new engine over them.
@@ -154,7 +163,9 @@ the C++ engine's, bit for bit.
     object `calc` takes over a TT span ([C_API.md](C_API.md), "Segments").
     `segments.eval(jd_tt)` gives a `SegmentPoint` (Position's fields, from
     the fit), `segments.layout()` the arrays as lists, and `err_arcsec` the
-    worst residual measured while fitting. A `Segments` is immutable: any
+    worst residual measured while fitting. Also `start`, `end`, `count`,
+    `tolerance_arcsec`, `err_rel_dist`, `err_rate_arcsec_per_day`,
+    `coordinates` and `close()`. A `Segments` is immutable: any
     thread may evaluate it, and it outlives its context. Cython code
     `cimport`s the layout from `cprometheia.pxd` and evaluates it without
     the GIL;
@@ -166,7 +177,7 @@ the C++ engine's, bit for bit.
     milliseconds for a catalog body;
   - `segment_roots(a, b=None, *, component="lon", ca=1, cb=None,
     target=0, target_rate=0, target_jd_tt=None, modulus=0, start=None,
-    end=None, tol_days=1e-6)` (module level) returns, in time order, every
+    end=None, tol_days=1e-6, capacity=256)` (module level) returns, in time order, every
     TT instant in [start, end) where `ca a + cb b - (target + target_rate
     (t - target_jd_tt))` passes 0, as `SegmentRoot`s (`jd_tt`, `slope`,
     `err_days`, `tangent`) ([C_API.md](C_API.md), "Roots on segments"). A term
@@ -184,7 +195,9 @@ the C++ engine's, bit for bit.
     "Sums of more than two terms"). Terms naming the same handles combine,
     and modulo 180 a midpoint is both of its points, so each branch gives
     roots. `segment_roots` is this with one or two terms;
-  - `houses(system, jd, lon, lat, options)`;
+  - `houses(system, jd, lon, lat, options, scale="tt")`;
+  - `delta_t(jd_tt)` in seconds, `close()`; a `Context` is a context
+    manager and keeps its `dataset`;
   - `sidereal_time(jd_ut1, "mean"|"apparent")` and
     `obliquity(jd_tt, "mean"|"true")`;
   - `rise_set(object, event, jd_ut1_start, lon, lat, height_m=0, *,
@@ -201,7 +214,9 @@ the C++ engine's, bit for bit.
     contact and the maximum from `site=(lon, lat[, height_m])`). See
     [ECLIPSES.md](ECLIPSES.md);
   - `horizontal(jd_ut1, lon, lat, ra, dec, atmosphere=None, height_m=0)`
-    and `equatorial_from_horizontal(…)`. The azimuth runs from north
+    gives a `Horizontal` (`azimuth_deg`, `altitude_deg`,
+    `apparent_altitude_deg`, `hour_angle_deg`), and
+    `equatorial_from_horizontal(…)` returns `(ra, dec)`. The azimuth runs from north
     through east. An atmosphere is `"standard"`, `(hPa, °C)` or a dict, and
     `None` means none;
   - `ephemeris_spans()`, `catalogs()`, `catalog_bodies()` (the distinct
@@ -224,8 +239,10 @@ the C++ engine's, bit for bit.
 - Engine-free functions: `houses_from_armc`, `refraction`,
   `ecliptic_to_equatorial` and `equatorial_to_ecliptic`, the time scales (`utc_to_tt`, `tt_to_utc`,
   `delta_t`, `tdb_minus_tt`, `jd_from_ymdhms`, `civil_from_jd`), and the
-  star catalog (`star_find`, `star_lookup`, `star_info`,
-  `constellation_at`).
+  star catalog (`star_find`, `star_lookup`, `star_count`, `star_info`,
+  `constellation_at`), `version()` and `abi_version()` of the linked
+  library, and `limiting_magnitude`. `prometheia.native` is `True` when
+  the extension is built.
 - Every engine call releases the GIL while the engine works.
 - **Every public name is at the top of the package:** `prometheia.Dataset`,
   `prometheia.refraction`, `prometheia.ZODIACS`, and the rest. The
@@ -302,9 +319,11 @@ the extension. PIC was measured on the engine bench at a geometric mean of
 k_umbra=None, k_penumbra=None, sun_radius_km=None)` returns a
 `SolarEclipse` (kind, central, saros, TT and UT1 of greatest eclipse, gamma,
 magnitude, obscuration, the greatest-eclipse point, path width, contacts,
-`elements` as a `Besselian`); `solar_eclipse_where(jd_tt)` a `SolarWhere`
+`elements` as a `Besselian`); `solar_eclipse_where(jd_tt, *, k_umbra=None, k_penumbra=None,
+sun_radius_km=None)` a `SolarWhere`
 (centre line and the umbra's limits, `axis_hits` False when it misses);
-`solar_eclipse_local_next(jd_start, lon_deg, lat_deg, height_m=0.0)` a
+`solar_eclipse_local_next(jd_start, lon_deg, lat_deg, height_m=0.0, *,
+backward=False, k_umbra=None, k_penumbra=None, sun_radius_km=None)` a
 `SolarLocal` (C1-C4 as lists, None for a contact that is missing or below the
 horizon). `jd_start` and `jd_tt` are TT; `kinds` are `SOLAR_KINDS` names.
 Method and validation: [SOLAR_ECLIPSES.md](SOLAR_ECLIPSES.md).

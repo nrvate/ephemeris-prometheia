@@ -36,8 +36,17 @@ headers, query strings, search queries or prompts to outside agents.
   instead; GitHub began refusing pushes that expose it on 2026-09-19,
   and the maintainer chose the noreply address over relaxing the
   setting. Do not rewrite the older commits to match.
-- The working branch is `initial`. Push over SSH to `origin/initial`
-  only — never `main`, and never use the `gh` CLI for anything.
+- `main` is the working branch. Since 2026-11-26 it starts from one
+  squashed root commit (`e794bb3`) whose tree is `initial` at `431205a`.
+  `initial` is frozen: it keeps the full bring-up history, the release
+  tags up to `v0.7.3` and `catalog-20261102`, and every commit hash the
+  docs cite. Do not push to it. The two histories share no ancestor, so
+  bring anything over from `initial` with `git cherry-pick`, never a
+  merge.
+- Work on a feature branch made from `main`, and land each feature or
+  rollup as one squash commit or PR. Push over SSH to `origin`, which
+  is the `github-nrvate` host alias. Never use the `gh` CLI for
+  anything.
 - No hosted CI, ever: no GitHub Actions, no external runners. The gate
   is `tools/gate.sh`, run locally before every commit, and it must stay
   fast (seconds); anything slow goes behind `doctest::skip()`.

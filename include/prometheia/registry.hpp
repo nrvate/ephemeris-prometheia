@@ -123,8 +123,8 @@ struct Filter {
     std::string orbit_class;
     bool named_only = false;
     bool numbered_only = false;
-    double h_max = std::nan("");    // catalog bodies: H at most this (others pass)
-    double vmag_max = std::nan(""); // stars and deep sky: V at most this (others pass)
+    double h_max = std::nan("");    // catalog bodies: H at most this; nothing else passes
+    double vmag_max = std::nan(""); // stars, deep sky: V at most this; nothing else passes
 };
 
 struct Page {

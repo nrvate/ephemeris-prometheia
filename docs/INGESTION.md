@@ -12,7 +12,10 @@ produces an `.epm` file. Companion documents: the container byte spec is
    public services: SBDB (orbit solutions), Horizons (validation
    sampling), DE binaries (planetary truth, M3). These are US-government
    work, so the *data* in a catalog is public domain regardless of the
-   code's GPL license. MPC data is excluded (attribution conditions).
+   code's GPL license. MPC data is excluded (attribution conditions):
+   nothing here fetches from the MPC's own services. The orbits SBDB itself
+   serves from the MPC (`MPC:mpo`, under "Freshness" below) arrive through
+   JPL's API like any other record.
 2. **One format encoder.** The Python fetcher never writes EPM1; it
    produces a neutral intermediate (`sbdb-raw v1` TSV). Only the C++
    converter encodes the container, so the byte format has exactly one
@@ -48,7 +51,7 @@ inspection: counts, coverage, bytes/record, sample records
 
 ```
 GET https://ssd-api.jpl.nasa.gov/sbdb_query.api
-    ?fields=<20 fields, comma-joined>
+    ?fields=<21 fields, comma-joined>
     &sb-kind=a            (or c for comets; one kind per query)
     &limit=50000
     &limit-from=<0|50000|100000|...>
@@ -72,7 +75,7 @@ Connection: close
 - Transport failures retry with 5/10/20/40 s backoff, 4 tries, then abort
   the run (the manifest makes the abort resumable).
 
-### Fields requested (21, 22 from 2026-10-27)
+### Fields requested (21; 20 before 2026-10-27)
 
 | SBDB field | meaning | unit as delivered |
 |---|---|---|
@@ -95,31 +98,34 @@ Per page, one file `part-<kind>-<limit_from:09d>.tsv`:
 - First line: `# fields: kind<TAB><field>...` — the kind column is
   prepended by the fetcher (`a`/`c`), so downstream stages need no side
   channel to know what a row is.
-- One body per line: `kind`, then the 20 fields, TAB-separated, in field
+- One body per line: `kind`, then the 21 fields, TAB-separated, in field
   order. JSON `null` → empty cell. UTF-8. No quoting needed (SBDB text
-  fields contain no tabs or newlines; the converter rejects any it finds).
+  fields contain no tabs or newlines; neither stage checks).
 - `manifest.json`: schema tag, base URL, fields, page size, and one record
   per completed page (`kind`, `limit_from`, `count`,
-  `total_reported`, `file`, `fetched_at_utc`). Re-running the fetcher
+  `total_reported`, `file`, `fetched_at_utc`, `status`). Re-running the fetcher
   skips completed pages — resume is free.
 - `provenance.txt`: flat `key=value` (`schema`, `source`, `url`,
-  `started_utc`, `finished_utc`, `fields`, `kinds`, `page_size`, `pages`,
-  `count`, `tool`) — deliberately trivial so the C++ converter can read it
+  `started_utc`, `finished_utc`, `fields`, `kinds`, `page_size`,
+  `sb_class`, `sb_cdata`, `pages`, `count`, `tool`) — deliberately trivial so the C++ converter can read it
   without a JSON parser.
 
 ### Etiquette (binding; full policy in DESIGN.md)
 
 Strictly sequential — one request in flight, no threads or pools. ≥2 s
 between pages (`--delay`), more for big pulls. A generic User-Agent, nothing that identifies us.
-Backoff-only retries. Development pulls stay tiny (`--page-size 100
+Backoff-only retries. Every GET is logged on stderr with its UTC time and
+URL, then its outcome (`tools/fetch/fetchlog.py`). Development pulls stay tiny (`--page-size 100
 --max-pages 1`); a full-catalog pull (~34 asteroid pages + 1 comet page ≈
 350 MB, 5–10 min) is a deliberate, announced run, never a build side
 effect. If JPL publishes guidance that conflicts, their guidance wins.
 
 ## Stage 2 — `prometheia-convert`
 
-Reads `provenance.txt`, every `part-*.tsv` shard (sorted, so page order is
-deterministic), and emits one EPM1 container.
+Reads `provenance.txt`, every `*.tsv` shard in the directory (sorted, so page order is
+deterministic), and emits one EPM1 container. Options: `-o FILE` (required),
+`--chunk N` (records per chunk, default 4096), `--level N` (zstd level, default
+3), `--no-compress`.
 
 ### Unit conversions (the only place units ever change)
 
@@ -138,23 +144,28 @@ comfortably beyond their observational accuracy.
 
 | condition | EPM1 record flags |
 |---|---|
-| all six sigmas present and ≥ 0 (missing treated as 0) | `kSigmas` |
-| `H` or `G` present | `kHg` |
+| any of the six sigmas present (a missing or negative one is stored as 0) | `kSigmas` |
+| `H` or `G` present (a missing `G` is stored as 0.15, a missing `H` as 0) | `kHg` |
 | `diameter` present and > 0 | `kDiameter` |
 | `name` non-empty | `kHasName` (also derived by the writer) |
+| `class` present | `kOrbitClass` (also derived by the writer) |
+| `full_name` ends in a parenthesis and `pdes` is all digits | `kHasProvDes` (set by the writer, when it differs from `pdes`) |
 
 ### Validation and cleanup
 
-- Rows with missing/bad `spkid`, `epoch`, `a` or `e` are counted and
-  skipped, never silently dropped (count lands in metadata as
-  `rows_skipped`).
+- Rows with a bad `spkid`, or a missing `epoch`, `a` or `e`, are counted and
+  skipped with a line on stderr (count lands in metadata as
+  `rows_skipped`). A row with an empty `spkid` is ignored without being
+  counted.
 - Rows sorted by `spkid`; duplicate spkids keep the first occurrence,
   count in metadata as `spkid_dupes`.
 - The EPM1 writer re-validates every record (finiteness, `e ≠ 1`,
   sign(a) consistent with e, ascending order) — the container never
-  stores what it would refuse to read.
+  stores what it would refuse to read. A record the writer refuses stops
+  the conversion (exit 1, naming the spkid); it is not skipped.
 - Hyperbolic comets (`e > 1`, `a < 0`) are legal and expected; parabolic
-  (`e = 1`) is rejected (singular elements).
+  (`e = 1`) is refused by the writer (singular elements), and so is a
+  row whose sign of `a` disagrees with `e`.
 
 ### Metadata written into the catalog
 
@@ -261,7 +272,7 @@ python3 tools/fetch/sbdb_fetch.py --out-dir cov-raw --covariance-file mine.txt
 ./build/prometheia-convert cov-raw -o covariance-overlay.epm
 ```
 
-- The shard `covariance.tsv` carries the standard 20 columns plus
+- The shard `covariance.tsv` carries the standard 22 columns (`kind` and the 21 fields) plus
   `cov_epoch`, the cometary elements at that epoch (`cov_e`, `cov_q`,
   `cov_tp`, `cov_om`, `cov_w`, `cov_i`; angles in degrees as delivered)
   and the packed upper triangle `cov_00 … cov_55` in {e, q, tp, node,
@@ -331,7 +342,7 @@ have a `soln_date`, and most new discoveries arrive with the MPC's, so
    value means a new solution for that body, and only those bodies are
    re-fetched, one request each via the single-object endpoint
    (capped by `--max-delta`; beyond the cap the tool demands a full pull).
-   Output is an **overlay catalog** in the standard 21-column layout, so
+   Output is an **overlay catalog** in the standard layout (`kind` and the 21 fields), so
    the unmodified converter turns it into a stackable `.epm`.
 
    ```sh

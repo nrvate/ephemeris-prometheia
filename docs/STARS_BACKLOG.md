@@ -14,7 +14,7 @@ that grades it.
 ## Done, for the record
 
 - **A star's distance rate is computed in closed form** (`dd3d14d`, v0.7.1;
-  ENGINE.md "Rates"). It had missed by one f64 ulp of the position, 2.3e-5
+  ENGINE.md "Pipeline", step 6). It had missed by one f64 ulp of the position, 2.3e-5
   AU/day on Polaris. Confirmed independently by the Astrolog side.
 - **Vega's radial velocity** kept at −13.5 km/s, re-confirmed against SIMBAD
   2026-09-29; −20.6 recorded as SIMBAD's 2018 value (STARS.md).
@@ -64,7 +64,7 @@ they move:
 
 ## Where the evidence lives
 
-- ENGINE.md "Rates"; STARS.md; CROSS-TEST.md from "The distance tolerance
+- ENGINE.md "Pipeline", step 6 "Rates"; STARS.md; CROSS-TEST.md from "The distance tolerance
   cannot be met for a star" through "The instrument gap this fell through".
 - `docs/crosstest/2026-09-29-ratesweep-ours-graded.tsv` (stars within the
   default bound under the max(1 AU, r) reading).

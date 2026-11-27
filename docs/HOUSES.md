@@ -2,9 +2,8 @@
 
 House cusps and the chart's angles, computed by the engine
 (`include/prometheia/houses.hpp`, `Engine::houses` and `houses_ut`) and
-served by the JSON/MCP `houses` tool. These are phases 1 and 2 of the
-Python library plan ([PYTHON.md](PYTHON.md)); the protocol extension comes
-later. Each system is built from its
+served by the JSON/MCP `houses` tool, the C API and protocol v4's object
+kind 6 (see "Served as" below). Each system is built from its
 published geometric definition, and the arithmetic is our own.
 `swetest`'s printed output is an oracle only.
 
@@ -217,6 +216,5 @@ were in their specification and server, and neither was in our engine.
 
 - rates in the engine and the JSON tool (`prometheiad` answers them for kind 6,
   as the stencil of its answered longitudes);
-- the C ABI (relayed to Astrolog before it lands);
 - the remaining systems (Gauquelin sectors, Vehlow, Sunshine, APC,
   Krusinski and others).

@@ -159,6 +159,10 @@ Every class in the 2026-10 SBDB holdings is in the table (21 of them; PAA
 is documented by SBDB and held none). A record with any other byte is
 corruption. The converter refuses a class the table lacks, naming it.
 
+The writer derives `kHasName`, `kHasProvDes` and `kOrbitClass` from the
+name, provisional designation and orbit class it is given, and ignores what
+the caller set for them in `flags`.
+
 **Writer validation** (records failing these are rejected at `add()`):
 strictly ascending spkid; all six elements and epoch finite; `e >= 0` and
 `e != 1`; `a != 0` with sign(a) = sign(1 − e) (elliptic a > 0, hyperbolic
@@ -175,8 +179,8 @@ high bit set on all but the final byte, at most 10 bytes.
 Raw UTF-8. Per record: `pdes` NUL-terminated, then optionally `name`
 NUL-terminated when `kHasName` is set, then optionally the provisional
 designation NUL-terminated when `kHasProvDes` is set (1.2). A record's `name_offset` points at the
-start of its `pdes`. The pool is not compressed in v1 (~15 MB at full-catalog
-scale); a future minor version may zstd-compress it without breaking the
+start of its `pdes`. The pool is not compressed in v1 (22.7 MB in the 1,581,053-body
+`sbdb-20261102.epm`, measured from its footer); a future minor version may zstd-compress it without breaking the
 record format.
 
 ## Metadata
@@ -186,6 +190,9 @@ Exactly one CBOR map, decoded with the library's RFC 8949 subset codec
 depth capped at 64). The converter writes: `format`, `generator`, `frame`,
 `time_scale`, `elements`, `source`, `source_url`, `fetched_started_utc`,
 `fetched_finished_utc`, `sbdb_count`, `rows_skipped`, `spkid_dupes`.
+`prometheia-catalog-subset` keeps the first input's map and adds `subset_of`
+and `subset_of_records` (and sets `fetched_finished_utc` to the newest
+input's).
 Metadata is descriptive — correctness of positions never depends on it.
 
 ## Integrity

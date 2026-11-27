@@ -102,10 +102,14 @@ if (prometheia_calc_houses_ut(eph, PROMETHEIA_HOUSES_PLACIDUS, jd_ut1,
   - A sidereal zodiac shifts every cusp and angle but the ARMC.
 - **Refusals** are `PROMETHEIA_ERROR_ARGUMENT`, with a message naming the
   system and the reason. Another system is never put in its place:
-  - Placidus and Koch inside a polar circle;
-  - Regiomontanus, Campanus and Topocentric where their cusps fall out of
-    zodiacal order, near the poles;
-  - every system at a pole.
+  - Placidus and Koch inside a polar circle (|lat| > 90° − obliquity);
+  - Regiomontanus and Campanus inside one, and Topocentric from about 1.6°
+    short of one, at the sidereal times their cusps fall out of zodiacal
+    order;
+  - every system at an instant when the ecliptic lies along one of its
+    defining circles (only on a polar circle's edge);
+  - a latitude not strictly inside ±90°, which is refused before any system
+    is tried.
   Every answer's twelve cusps go once round the zodiac.
 - **The angles:** `asc_deg` is the rising point at every latitude, and
   `mc_deg` is the upper meridian (hour angle 0), even where it culminates
@@ -119,14 +123,18 @@ if (prometheia_calc_houses_ut(eph, PROMETHEIA_HOUSES_PLACIDUS, jd_ut1,
   degrees.
 - `prometheia_sidereal_time_ut(engine, jd_ut1, kind, opts, &deg, &err)` is
   Greenwich mean (GMST, IAU 2006) or apparent (GAST) sidereal time as an
-  angle in [0, 360). GAST plus the east longitude is the houses' ARMC, to
+  angle in [0, 360), `kind` being `PROMETHEIA_SIDEREAL_TIME_MEAN` (0) or
+  `_APPARENT` (1). GAST plus the east longitude is the houses' ARMC, to
   1e-10″. `prometheia_obliquity(engine, jd_tt, kind, opts, &deg, &err)`
-  gives the mean or true obliquity. Both read only `opts->precession`.
+  gives the mean or true obliquity (`PROMETHEIA_OBLIQUITY_MEAN` (0) or
+  `_TRUE` (1)). Both read only `opts->precession`.
   Against ERFA over 1600–2200, the agreement is GMST 3e-8″, GAST 0.00015″,
   mean obliquity 1e-11″ and true obliquity 0.00005″.
-- `prometheia_ecliptic_to_equatorial` and `_equatorial_to_ecliptic` rotate
+- `prometheia_ecliptic_to_equatorial(lon, lat, obliquity, &ra, &dec)` and
+  `prometheia_equatorial_to_ecliptic(ra, dec, obliquity, &lon, &lat)` rotate
   about the equinox by a given obliquity. They are pure functions: no
-  engine, no instant, no status.
+  engine, no instant, no status. Declination and latitude come from
+  `atan2`, never `asin`.
 - **Cusp speeds** are not served. If they come, they come as a separate
   call with its own struct, so `prometheia_houses` keeps its layout.
 
@@ -143,12 +151,17 @@ announced to the Astrolog side first, 2026-10-27). [FRAMES.md](FRAMES.md),
     off and still looks plausible.
   - The hour angle is positive westward.
   - `height_m` sets only the dip. No parallax is applied here.
-- `prometheia_equatorial_from_horizontal_ut` goes back, removing the
-  refraction from an apparent altitude first.
+- `prometheia_equatorial_from_horizontal_ut(engine, jd_ut1, lon, lat,
+  height_m, azimuth, altitude, apparent, &atmosphere, opts, &ra, &dec,
+  &err)` goes back. With `apparent` nonzero and an atmosphere, the altitude
+  is apparent and its refraction is removed first.
 - `prometheia_refraction(alt, PROMETHEIA_REFRACTION_FROM_TRUE |
   _FROM_APPARENT, &atmosphere, height_m, &deg, &err)` is Bennett 1982,
   applied down to the dip or −1°.
-- `prometheia_atmosphere_init` gives 1013.25 hPa and 15 °C. A `NULL`
+- `prometheia_atmosphere` is `{pressure_hpa, temperature_c}`, and
+  `prometheia_atmosphere_init` gives 1013.25 hPa and 15 °C. The dip of the
+  sea horizon is the almanac value for standard conditions,
+  1.76′·√`height_m`; no lapse rate enters. A `NULL`
   atmosphere means none on the horizon calls, and the standard one on
   `prometheia_refraction`.
 - `c_api_horizon_matches_engine` holds every field to `Engine` with `==`,
@@ -162,13 +175,18 @@ announced to the Astrolog side first, 2026-10-27). [ENGINE.md](ENGINE.md),
   height_m, &options, opts, &out, &err)`:
   - the object is a `prometheia_object` naming a body, a star, a
     hypothetical, an orbit point or a registry id;
-  - the event is a rise, a set, or an upper or lower transit;
+  - the event is a rise, a set, or an upper or lower transit
+    (`PROMETHEIA_EVENT_RISE`, `_SET`, `_UPPER_TRANSIT`, `_LOWER_TRANSIT`);
   - the answer is the first event after the start, or the last before it
     with `backward`.
 - The options (`prometheia_rise_set_options_init`) are the limb (upper by
   default, centre or lower), refraction (on by default) with its
   atmosphere, the dip's eye height (0 by default: the mathematical horizon,
-  whatever the site's height), and the window in days (2 by default).
+  whatever the site's height), the window in days (2 by default; more than
+  0 and at most 3660, else `PROMETHEIA_ERROR_ARGUMENT`) and `backward`. An
+  event outside `PROMETHEIA_EVENT_RISE` .. `_LOWER_TRANSIT` (0..3) is
+  `PROMETHEIA_ERROR_ARGUMENT`. The limb values are
+  `PROMETHEIA_LIMB_UPPER` (1), `_CENTRE` (0) and `_LOWER` (−1).
 - `height_m` gives the site's parallax and no dip. An orbit point has none:
   it rises as a direction seen from the Earth's centre (ENGINE.md, "Rise,
   set and transit").
@@ -200,8 +218,9 @@ method and the measurements.
 To build the library inside another project (a git submodule, plain make,
 no CMake), see [EMBEDDING.md](EMBEDDING.md).
 
-The fixed-star functions (`prometheia_star_find`, `_lookup`, `_info`,
-`prometheia_calc_star`, `prometheia_constellation_at`) are described in
+The fixed-star functions (`prometheia_star_count`, `prometheia_star_find`,
+`_lookup`, `_info`, `prometheia_calc_star` and `_ut`,
+`prometheia_constellation_at`) are described in
 [STARS.md](STARS.md).
 
 `prometheia_calc_orbit_point` and `_ut` wrap `Engine::calc_orbit_point`
@@ -285,7 +304,9 @@ prometheia_calc_object(eph, &obj, jd_tt, &opts, &r, &err);
   computes it. `prometheia_object` gains two kinds:
   `PROMETHEIA_OBJECT_ORBIT_POINT` (`id` the body, `token`
   `"<point>:<method>"`) and `PROMETHEIA_OBJECT_ID` (`token` a registry id).
-  `prometheia_rise_set_ut` takes both as well.
+  `prometheia_rise_set_ut` takes both as well. The four kinds before them
+  are `PROMETHEIA_OBJECT_BODY` (`id` a NAIF id or catalog SPK-ID),
+  `_STAR` (`id` a star index) and `_HYPOTHETICAL` (`token`), numbered 0 to 2.
 - The registry's indexes are built on first use and kept by the engine
   handle until a catalog is added. REGISTRY.md has the measured cost.
 
@@ -297,7 +318,8 @@ Additive: no existing struct or function changed (ABI version unchanged).
 - `prometheia_solar_eclipse_next(engine, jd_start, kinds, backward, out, err)`:
   the next eclipse after `jd_start` (a **TT** Julian date; the last before it
   with `backward`) whose kind is among `kinds` (`PROMETHEIA_SOLAR_PARTIAL`,
-  `_ANNULAR`, `_TOTAL`, `_HYBRID`, or'ed; 0 or `_ALL_KINDS` for any).
+  `_ANNULAR`, `_TOTAL`, `_HYBRID`, or'ed; 0 or `_ALL_KINDS` (15) for any;
+  a value above 15 is `PROMETHEIA_ERROR_ARGUMENT`).
   `prometheia_solar_eclipse` carries the type bits (one kind plus
   `_CENTRAL` or `_NONCENTRAL` for umbral kinds), TT and UT1 of greatest
   eclipse, gamma, magnitude (NASA's convention) and `magnitude_covered`,
@@ -317,7 +339,10 @@ Additive: no existing struct or function changed (ABI version unchanged).
   altitudes and azimuths, `visible_max`, magnitude, obscuration, the Moon/Sun
   diameter ratio, the C2-C3 duration, saros. A contact below the horizon or
   not happening has NaN times.
-- Each has an `_ex` form taking a `const prometheia_solar_eclipse_options*`
+- The three results are `prometheia_solar_eclipse`, `prometheia_solar_where`
+  and `prometheia_solar_local`.
+- Each call has an `_ex` form (`prometheia_solar_eclipse_next_ex`,
+  `_where_ex`, `_local_next_ex`) taking a `const prometheia_solar_eclipse_options*`
   (`k_umbra`, `k_penumbra`, `sun_radius_km`; NULL or
   `prometheia_solar_eclipse_options_init` for NASA's 0.272281, 0.272488,
   696000 km; swetest's is 0.2725076 for both). Delta T is the engine's,
@@ -341,7 +366,11 @@ temperature, for refraction) already exists.
   (`prometheia_visibility_model`: `kind` `PROMETHEIA_VISIBILITY_SCHAEFER` or
   `_ARCUS_VISIONIS`, the arc and object altitude, the detection margin,
   moonlight, the dark-sky brightness, `search_days`) may be NULL for the
-  defaults of their `_init` functions. The result `prometheia_heliacal` has
+  defaults of their `_init` functions (`prometheia_air_init`,
+  `prometheia_observer_init`, `prometheia_visibility_model_init`; the header
+  states each default beside its declaration). `object` is any
+  `prometheia_object`; Schaefer's model needs a magnitude, so a hypothetical
+  body or an orbit point needs `PROMETHEIA_VISIBILITY_ARCUS_VISIONIS`. The result `prometheia_heliacal` has
   the event (the start of the visibility window), the optimum and the end in
   TT and UT1, and the circumstances at the optimum (V, altitude, azimuth, the
   Sun's depression, sky brightness, extinction, limiting magnitude, margin),
@@ -926,6 +955,27 @@ prometheia_status prometheia_context_open(const prometheia_dataset *dataset,
   sidereal zodiac, need ecliptic coordinates (`PROMETHEIA_ERROR_ARGUMENT`
   otherwise), ignore `frame`, and report A0 as `ayanamsa_deg`
   ([FRAMES.md](FRAMES.md), "Sidereal planes").
+- **Option values.** `center`: `PROMETHEIA_CENTER_GEOCENTRIC` 0,
+  `_TOPOCENTRIC` 1, `_HELIOCENTRIC` 2, `_BARYCENTRIC` 3, `_BODY` 4.
+  `frame`: `PROMETHEIA_FRAME_ICRF` 0, `_J2000` 1, `_MEAN_OF_DATE` 2,
+  `_TRUE_OF_DATE` 3. `coords`: `PROMETHEIA_COORDS_ECLIPTIC` 0, `_EQUATORIAL`
+  1. `sidereal`: `PROMETHEIA_SIDEREAL_TROPICAL` −1, `_FAGAN_BRADLEY` 0,
+  `_LAHIRI` 1, `_RAMAN` 3 (added after 0.7.3), the instant-defined modes
+  below, and `_USER` 255, which reads `sidereal_epoch_jd` (TT) and
+  `sidereal_ayanamsa_deg` (the mean ayanamsha at that date). `precession`:
+  `PROMETHEIA_PRECESSION_IAU2006` 0, `_VONDRAK2011` 1. `sidereal_plane`:
+  `PROMETHEIA_SIDEREAL_PLANE_DATE` 0, `_ANCHOR` 1, `_INVARIABLE` 2.
+  `light_time`, `deflection`, `aberration`, `speed` and `sigma` are
+  switches, all on in `prometheia_options_init()`. `site_lon_deg`,
+  `site_lat_deg` and `site_height_m` apply with `_TOPOCENTRIC`;
+  `center_body` (default the Sun) with `_BODY`.
+- **Bodies** are `PROMETHEIA_SOLAR_SYSTEM_BARY` 0, `_EARTH_MOON_BARY` 3,
+  `_SUN` 10, `_MERCURY` 199, `_VENUS` 299, `_EARTH` 399, `_MOON` 301, and the
+  system barycentres `_MARS` 4, `_JUPITER` 5, `_SATURN` 6, `_URANUS` 7,
+  `_NEPTUNE` 8, `_PLUTO` 9.
+- **Orbit points.** `PROMETHEIA_ORBIT_ASCENDING_NODE` 0, `_DESCENDING_NODE`
+  1, `_PERIHELION` 2, `_APHELION` 3; elements `PROMETHEIA_ELEMENTS_MEAN` 0,
+  `_OSCULATING` 1, `_INTERPOLATED` 2.
 - **Zodiacs defined at the instant** (library 0.4, ABI still 6: enumerated
   values are only appended).
   - The modes are `PROMETHEIA_SIDEREAL_TRUE_CITRA`, `_TRUE_REVATI`,
@@ -971,8 +1021,24 @@ prometheia_status prometheia_context_open(const prometheia_dataset *dataset,
   Catalog bodies use their SPK-ID, which `prometheia_engine_lookup`
   resolves from a designation or proper name, and, from an EPM1 1.2
   catalog, from a numbered body's old provisional designation.
-- **Time helpers.** Calendar ↔ JD, UTC ↔ TT across leap seconds
-  (1972 onward), the default ΔT and TDB−TT, all as in [TIME.md](TIME.md).
+- **Time helpers**, all as in [TIME.md](TIME.md):
+  - `prometheia_jd_from_ymdhms(y, m, d, h, min, s)` (proleptic Gregorian, in
+    whatever continuous scale the caller means) and
+    `prometheia_civil_from_jd(jd, &y, &m, &day)` (`day` 1-based and
+    fractional);
+  - `prometheia_utc_to_tt` and `prometheia_tt_to_utc` (a `prometheia_utc`
+    with `tai_minus_utc`; `second` is 60.x in a leap second) across leap
+    seconds, 1972 onward;
+  - `prometheia_delta_t(jd_tt)`, the default observed ΔT in seconds;
+    `prometheia_engine_delta_t(engine, jd_tt)`, the engine's own (NaN for a
+    NULL engine), so a caller holding a TT result can give its UT1 as the
+    engine would;
+  - `prometheia_tdb_minus_tt(jd_tt)`, in seconds at the geocentre.
+- **Library version.** `prometheia_version()` is a string ("0.7.3" as built
+  from this tree); `prometheia_abi_version()` is `PROMETHEIA_ABI_VERSION`.
+- **Sizes.** `PROMETHEIA_ERROR_MESSAGE_SIZE` is 256 and `PROMETHEIA_ID_SIZE`
+  is 96 (the registry's id and token buffers). `PROMETHEIA_API` marks the
+  exported functions.
 
 ## ABI stability
 
@@ -993,9 +1059,10 @@ this header alone.
 Two pkg-config files are generated. The build-tree `build/prometheia.pc`
 points at the uninstalled artifacts, so
 `PKG_CONFIG_PATH=build pkg-config --cflags --libs prometheia` links
-against them as they sit — the library is static-only, so zstd and the
-C++ runtime are in the public sections and that plain link line works for
-a C or a C++ consumer alike. Outside the source tree,
+against them as they sit. Both files carry zstd (`Requires: libzstd`) and
+the C++ runtime (`-lstdc++`) in their public sections, so that plain link
+line works for a C or a C++ consumer alike (CMake builds a static library
+unless `-DBUILD_SHARED_LIBS=ON` is given). Outside the source tree,
 `cmake --install build --prefix <dir>` installs `libprometheia`, the
 headers and a relocatable `lib/pkgconfig/prometheia.pc` (paths relative
 to itself): `cc -std=c99 app.c $(pkg-config --cflags --libs prometheia)`.

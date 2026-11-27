@@ -442,6 +442,24 @@ modulo M. It is the scanner the section above describes, done once, in
 C++, for every caller (`src/segment_roots.cpp`). astromcp asked for it, for
 its ingresses, returns, stations, aspect windows and declination searches.
 
+`prometheia_segments_roots` takes one or two terms. `prometheia_segments_roots_sum`
+takes a sum of up to `PROMETHEIA_SEGMENTS_MAX_TERMS` (8) terms, f = Σ cᵢ·Xᵢ −
+target, for a midpoint against a midpoint or any other combination, and the
+same search runs on it:
+- the band is the sum of |cᵢ|·tolᵢ, so it widens with every term;
+- terms that name the same handles are one term with their coefficients
+  summed, and one whose coefficient is then 0 is dropped (midpoint(a, b) − a
+  is 0.5 b − 0.5 a); if nothing is left the call is refused;
+- the branches multiply. Modulo 180 a midpoint is both of its points, so a
+  midpoint against a body gives the roots of both, and a midpoint against a
+  midpoint those of all four pairings. A caller wanting one branch evaluates
+  it at each root and keeps the ones it wants;
+- the limit of 8 is checked by the call, not part of the layout, and may
+  grow without an ABI change.
+The measured table below includes a three- and a four-term sum;
+`c_segment_roots_sum_against_calc` and `c_segment_roots_sum_terms` check
+sums against `prometheia_calc_object`.
+
 **The method.**
 - **Pieces.** The window is cut into pieces, each where one segment of
   each term overlaps. Each piece is searched whole, whatever the window, so

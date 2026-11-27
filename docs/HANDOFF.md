@@ -8,6 +8,11 @@ cross-test's full story in [CROSS-TEST.md](CROSS-TEST.md); what shipped in
 
 ## Resume here (state at 2026-11-01)
 
+**Branches since 2026-11-26.** `main` is now the working branch. It is
+one squashed root commit, `e794bb3`, whose tree is `initial` at
+`431205a`. `initial` is frozen and keeps the history, the tags and the
+hashes cited below. See [CLAUDE.md](../CLAUDE.md), "Git".
+
 **astromcp's port plan, Part A, is complete, and astromcp is building on
 it.** Requests now come from its live searches, not the plan. The peer
 sessions change; `ListAgents` names them. Astrolog's session hears about every

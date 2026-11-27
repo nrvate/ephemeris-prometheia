@@ -36,7 +36,7 @@ non-commercial terms.
 | NASA HEASARC NGC 2000.0 table (Sinnott 1988) | NGC 869 and 884: J2000 position to 0.1 min of RA and 1′ of Dec, type, size. SIMBAD was unreachable when they were added (2026-10-28) | US Government service |
 | Identification of a Constellation from Position (Roman 1987, PASP 99, 695), CDS VI/42 | the constellation boundaries (Delporte 1930), equinox B1875.0 | CDS: free use, acknowledge |
 | Basic Fifth Fundamental Catalogue, FK5 Part I (Fricke et al. 1988), CDS I/149A | not used by the catalog: the outside check on its positions ("Checked against FK5") | CDS: free use, acknowledge |
-| Swiss Ephemeris general documentation (Astrodienst), published | not used by the catalog: the published definitions of the zodiacs defined at the instant (FRAMES.md). Read, never copied; its code is never read | published documentation |
+| Swiss Ephemeris general documentation (Astrodienst), published | not used by the catalog: the published definitions of the zodiacs defined at the instant (FRAMES.md) and of the interpolated lunar apogee and perigee (ORBIT-POINTS.md; pinned twice in the script, as `swisseph.htm` and `swisseph-doc.htm`). Read, never copied; its code is never read | published documentation |
 | SIMBAD, one query | Sgr A*'s ICRS position (Petrov et al. 2011), for the Galactic-Centre zodiacs | CDS: free use, acknowledge |
 | Reid & Brunthaler 2020 (ApJ 892, 39), arXiv abstract | Sgr A*'s apparent proper motion | facts from a public abstract |
 | Liu, Zhu & Zhang 2011 (A&A 526, A16), arXiv abstract and paper | the IAU 1958 galactic pole in the ICRS and the modern pole, for the galactic-node zodiacs | facts from a public preprint |
@@ -54,8 +54,8 @@ Acknowledgements the terms ask for:
 The fetched files are not committed. `stars-raw/` is gitignored.
 
 ```sh
-tools/fetch/stars_fetch.py --list                       # the 26 sources
-tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~17 MB, 26 requests, 5 s apart
+tools/fetch/stars_fetch.py --list                       # the 29 sources
+tools/fetch/stars_fetch.py --raw-dir stars-raw          # ~22 MB, 29 requests, 5 s apart
 tools/fetch/stars_fetch.py --raw-dir stars-raw --verify # against the pinned checksums
 ```
 
@@ -196,8 +196,9 @@ best first; `stars::find(query)` returns the one it means.
 - **`find` errors:** ArgumentError (listing the candidates) when several
   different objects match equally well; NotFound when nothing does.
 
-Match qualities (exact, alias, prefix) follow the LOOKUP message planned
-for Astrolog's ephemeris protocol version 4.
+Match qualities (exact, alias, prefix) are those of the LOOKUP message of
+Astrolog's ephemeris protocol version 4, which `prometheiad` answers
+([SERVER.md](SERVER.md)); the JSON/MCP `lookup` tool serves the same lookup.
 
 Each object also carries:
 - its constellation — the designation's, else the one containing its
@@ -214,7 +215,7 @@ Each object also carries:
 catalog object like any body: any observer (geocentric, topocentric,
 heliocentric, barycentric, planet-centred), frame, coordinates and zodiac,
 with rates from central differences, except the distance rate, which is
-computed in closed form (ENGINE.md, "Rates").
+computed in closed form (ENGINE.md, "Pipeline", step 6, "Rates").
 
 1. **Space motion.** The catalog position at its epoch (J1991.25 for
    Hipparcos, J2000 otherwise) is placed at its parallax distance and moved

@@ -55,8 +55,8 @@ auto mars = engine.calc_ut(prometheia::body::kMars, jd_ut1, {    // any preset o
 
 | field | values | default |
 |-------|--------|---------|
-| `center` | `Geocentric`, `Topocentric` (+ `site`, WGS84), `Heliocentric`, `Barycentric` | geocentric |
-| `frame` | `ICRF`, `J2000` (ICRF + frame bias), `MeanOfDate` (+ IAU 2006 precession), `TrueOfDate` (+ IAU 2000A nutation) | true of date |
+| `center` | `Geocentric`, `Topocentric` (+ `site`, WGS84), `Heliocentric`, `Barycentric`, `Body` (+ `center_body`: planet-centred) | geocentric |
+| `frame` | `ICRF`, `J2000` (ICRF + frame bias), `MeanOfDate` (+ precession, the `precession` option's model), `TrueOfDate` (+ IAU 2000A nutation) | true of date |
 | `coords` | `Ecliptic`, `Equatorial` | ecliptic |
 | `sidereal` | `Tropical`, `FaganBradley`, `Lahiri`, `Raman`, `User` (+ `sidereal_epoch_jtdb`, `sidereal_ayanamsa_deg`), and eleven zodiacs defined at the instant: `TrueCitra` … `GalacticEquatorMula` ([FRAMES.md](FRAMES.md), "Zodiacs defined at the instant") | tropical |
 | `sidereal_plane` | `EclipticOfDate`, `EclipticOfAnchor`, `Invariable` (fixed planes: [FRAMES.md](FRAMES.md), "Sidereal planes") | ecliptic of date |
@@ -80,7 +80,8 @@ ecliptic does not nutate, only the equinox slides by Δψ ([FRAMES.md](FRAMES.md
 `User`, anchored at `sidereal_epoch_jtdb` / `sidereal_ayanamsa_deg` —
 the **mean** ayanamsha at that TT epoch, the same convention as
 swetest's `-sidudef`. The ayanamsha at the query epoch is the anchor
-value plus the IAU 2006 general precession in longitude accumulated
+value plus the general precession in longitude (the `precession`
+option's model: Vondrák 2011 by default, IAU 2006 selectable) accumulated
 since (mean), plus the nutation in longitude (true), measured on the
 ecliptic of date — the traditional realization
 ([FRAMES.md](FRAMES.md)).
@@ -239,7 +240,8 @@ For a TT epoch *t*:
    Topocentric velocity includes the diurnal term (≤ 0.32″). For a
    heliocentric observer the Sun's own barycentric velocity applies
    (~0.01″); barycentric has none.
-5. **Frame:** ICRF → B (frame bias) → P (IAU 2006) → N (IAU 2000A) as the
+5. **Frame:** ICRF → B (frame bias) → P (the `precession` option's model,
+   Vondrák 2011 by default) → N (IAU 2000A) as the
    frame requires, then R1(ε) for ecliptic coordinates.
 6. **Rates:** the whole pipeline at *t* ± 1/4096 day (21 s); the vector
    difference over the actual rounded step gives the rectangular
@@ -657,7 +659,9 @@ name hashes, each hit confirmed against the record's own names, so hash
 collisions cannot answer a wrong body):
 `Engine::lookup(name)` — `lookup("Ceres")`, `lookup("1")`,
 `lookup("ceres")`, ASCII-case-insensitive — returns the SPK-ID to feed
-`calc`. A shared name is answered by the newest catalog; planets are
+`calc`. A number of up to seven digits is checked against the record at
+its numbered SPK-ID first, so a numbered body needs no name index; any
+other name, and a body not found there, goes through the index. A shared name is answered by the newest catalog; planets are
 not indexed (address those by their NAIF IDs).
 
 - **Seed:** the record's osculating elements (heliocentric, JPL's

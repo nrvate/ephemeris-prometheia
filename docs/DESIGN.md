@@ -73,7 +73,11 @@ no code read or reused — see Cleanroom policy):
    params; Horizons for validation sampling; DE binaries), USNO (the
    leap-second table, Circular 179 constants), and Earth-orientation / ΔT
    data from USNO or IERS, subject to checking their terms. MPC data is
-   excluded because its terms carry attribution conditions. *(Corrected
+   excluded because its terms carry attribution conditions: nothing here
+   fetches from the MPC's own services. SBDB itself serves some orbits the
+   MPC computed (orbit source `MPC:mpo`); those arrive through JPL's API
+   like any other SBDB record ([INGESTION.md](INGESTION.md),
+   "Freshness"). *(Corrected
    2026-09-16: earlier drafts said "JPL-only", which narrowed the owner's
    actual principle.)* SBDB's count as of 2026-09-16: **1,564,460
    asteroids**, 3.7k comets.
@@ -88,7 +92,9 @@ no code read or reused — see Cleanroom policy):
    core. M6: `prometheiad`, Astrolog's binary WebSocket protocol.
 8. **Astrology transforms in v1:** ICRF-native core with ecliptic-of-date,
    topocentric, light-time/aberration, sidereal ayanamsas from published
-   formulas. Houses, fictitious bodies, fixed stars: later milestones.
+   formulas. Houses, fictitious bodies, fixed stars: later milestones
+   *(all since done: [HOUSES.md](HOUSES.md), [HYPOTHETICALS.md](HYPOTHETICALS.md),
+   [STARS.md](STARS.md))*.
 9. **License: GPL-2.0-or-later**, matching Astrolog, the project this
    work supports. (The original sketch said public domain; superseded
    2026-09-16 by explicit owner decision. Data files remain US-government
@@ -208,7 +214,8 @@ tool and script in this repo, and for anyone running them:
     the SBDB-vs-SWE source-elements difference; our own integration
     contributes 0.001″ over ±26 yr.
   - Increment 4 (done 2026-09-16): sidereal output — Fagan/Bradley,
-    Lahiri and user-anchored ayanamshas (published anchor + IAU 2006
+    Lahiri and user-anchored ayanamshas *(Raman and eleven zodiacs defined at
+    the instant came later: ENGINE.md, FRAMES.md)* (published anchor + IAU 2006
     general precession p_A; the true ayanamsha adds nutation in
     longitude), applied as a longitude rotation of the output ecliptic
     (of-date frames; a fixed zero point for J2000/ICRF); reported in
@@ -297,7 +304,8 @@ tool and script in this repo, and for anyone running them:
     name index; the index is now built on the first `lookup()` as sorted
     name hashes (`add_catalog` 1.97 → 0.56 s and 249 → 17 MB; first
     lookup 0.7 s, +25 MB).
-  - Increment 7 (done 2026-09-17): long-term precession option
+  - Increment 7 (done 2026-09-17): long-term precession option *(made the
+    default 2026-09-29, FRAMES.md)*
     (Vondrák, Capitaine & Wallace 2011, with its corrigendum;
     docs/FRAMES.md): `CalcOptions::precession`, C ABI 3,
     `ephem --precession`. Reduces to IAU 2006 at J2000 to the published
@@ -309,7 +317,9 @@ tool and script in this repo, and for anyone running them:
     pre-telescopic branch of `ObservedDeltaT`; Espenak–Meeus stays
     selectable (`ObservedDeltaT::Early::kEspenakMeeus`). It moves ΔT by
     +94 s at 1500, +76 s at 1000 and −265 s at −500.
-- **M6** — transports. Decided 2026-09-17: no HTTP head.
+- **M6** — transports. Decided 2026-09-17: no HTTP head. *(`prometheiad`
+  still has none; since 2026-09-18 the separate `prometheia-json` serves
+  JSON and MCP over HTTP, [JSON_API.md](JSON_API.md).)*
   - `prometheiad` speaks Astrolog's ephemeris protocol (version 4 since
     2026-09-17; version 3 before, with a wire map) over WebSocket, so it
     serves Astrolog directly. Astrolog owns the protocol; this repository

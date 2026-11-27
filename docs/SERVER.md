@@ -245,7 +245,7 @@ there is no wire map. The full spec is Astrolog's §3; the shape:
 
 The wire map is gone with version 3: bodies are NAIF/SPK-IDs the ephemeris
 and catalogs answer directly, zodiacs are tokens this engine implements
-(`fagan-bradley`, `lahiri`, `user`, and the eleven zodiacs defined at the
+(`fagan-bradley`, `lahiri`, `raman`, `user`, and the eleven zodiacs defined at the
 instant: [FRAMES.md](FRAMES.md), "Zodiacs defined at the instant"; they
 refuse plane 1 per object, errCode 2), and the observers, planes, forms,
 frames and corrections are typed profile fields. What the cleanroom server
@@ -832,7 +832,7 @@ them.
 Cells are cached per event loop, LRU under a byte budget (`--seg-cache-mb`),
 alongside the result cache. A segments request's work scales with its span,
 which no size limit expresses, so the span is bounded in days — this is what
-version 4 advertises as `maxSegSpanDays` (`--max-seg-span-days`, 1024 by
+version 4 advertises as `segMaxSpanDays` (`--max-seg-span-days`, 1024 by
 default, 32 cells).
 
 The cache key is supplied by the caller: everything that identifies the

@@ -14,11 +14,15 @@ that are *not* usable as an anchor — Horizons' apparent place carries a
 documented −53 mas equinox offset and a 42 mas obliquity difference, and its
 Sun-centred "apparent" is referred to the Sun's equator.
 
-- **Corpus:** 39 requests, declared in `tools/fetch/horizons_fetch.py` and
-  fetched on 2026-09-17, strictly sequentially with 5 s pauses.
-  `tools/gen/gen_horizons_corpus.py` turns the responses into
-  `tests/horizons_corpus.inc`: 245 observer rows and 63 vector rows, with
-  per-request provenance. Horizons output is a US-government work.
+- **Corpus:** declared in `tools/fetch/horizons_fetch.py` (60 requests now;
+  the first 39 were fetched on 2026-09-17), strictly sequentially with 5 s
+  pauses. `tools/gen/gen_horizons_corpus.py` turns the responses into
+  `tests/horizons_corpus.inc`: 52 requests, 245 observer rows, 63 vector rows,
+  80 extended-span rows (DE441) and 27 small-body long-span rows, with
+  per-request provenance. The measurements below that name a request of the
+  fetcher (`centaur-helio-*`, `flyby-geo-apophis`,
+  `perihelion-helio-icarus`) are not fixtures in it. Horizons output is a
+  US-government work.
 - **Test:** `tests/test_horizons.cpp`, in the pre-commit gate. It needs the
   DE440 binary under `ephe/` and SKIPs without it. It takes 0.2 s.
 - **Horizons' sources:** DE441 for planets. For small bodies, it integrates
@@ -160,7 +164,7 @@ a perihelion of Icarus (0.19 AU), `flyby-geo-apophis` and
   catalog's elements against Horizons' solutions (JPL#220 and JPL#196), and the
   force model, whose Earth and Moon are themselves cubics 2.85 days apart.
   Apophis's worst is a day after closest approach.
-- **Who moves.** See ENGINE.md, "Small bodies". Every body of Astrolog's
+- **Who moves.** See ENGINE.md, "Small bodies: the catalog overlay". Every body of Astrolog's
   13,808-body catalog was integrated across 1900–2100: 181 have a segment a
   cubic cannot hold (1.31%). Over ±10 years it is 168, so a body's flyby decides
   when it is flagged, and these counts hold for the span named. Against the
@@ -214,7 +218,7 @@ bisection, so every answer that was right is unchanged.
 
 **Pinning the perturber grid (2026-10-27).** The perturber tables' samples
 now sit on one fixed grid instead of starting at the first instant an engine
-was asked for (ENGINE.md, "Memo"). Every figure in this section was re-run
+was asked for (ENGINE.md, "Small bodies: the catalog overlay", "Memo"). Every figure in this section was re-run
 afterwards (`horizons_small_bodies*`, `horizons_sigma_calibration`,
 `horizons_small_bodies_centuries`) and is unchanged at its printed
 precision. The change moved each catalog answer once. Measured against the
@@ -317,8 +321,8 @@ a new DE, a rebuilt `sample-100.epm`, or a Horizons model change you want to
 track. To refresh:
 
 1. Delete `horizons-raw/`.
-2. Run `tools/fetch/horizons_fetch.py` (39 requests, ~4 minutes; check
-   `--list` first).
+2. Run `tools/fetch/horizons_fetch.py` (60 requests, ~5 minutes of pauses;
+   check `--list` first).
 3. Run `tools/gen/gen_horizons_corpus.py`.
 4. Re-run the gate and review any moved residual before committing.
 

@@ -64,6 +64,9 @@ To register it with Claude Code:
 `claude mcp add prometheia -- /path/to/prometheia-json --ephemeris /path/to/linux_p1550p2650.440 --stdio`.
 The `--catalog`, `--perturbers` and `--hypotheticals` options are those of
 `prometheiad`, and the dataset identity is computed the same way.
+`--ephemeris` may be repeated (DE440 then DE441). `--max-objects N` (1 to
+4096) and `--max-times N` (1 to 100000) set the per-call limits, and
+`--log-level quiet|info|debug` the log.
 
 **Streamable HTTP, as served:**
 - **`POST /mcp`:** one JSON-RPC message or a batch. Requests are answered
@@ -79,13 +82,16 @@ The `--catalog`, `--perturbers` and `--hypotheticals` options are those of
 - `GET /v1/tools` lists the tools with their schemas.
 - `GET /llms.txt` is the agent-facing summary.
 - `GET /healthz` answers ok.
+- Errors on `/v1`: HTTP 400 with `{"error": {"code", "message"}}`, and 404
+  for a tool that does not exist.
 
 **Security defaults:**
 - It binds 127.0.0.1.
 - An `Origin` other than localhost is 403 unless `--allow-origin` names it
   (against DNS rebinding).
-- `--tokens FILE` requires `Authorization: Bearer`.
-- Bodies over 1 MiB are refused.
+- `--tokens FILE` requires `Authorization: Bearer` (401 otherwise).
+- Bodies over 1 MiB are refused (413).
+- `--bind ADDR` changes the listen address.
 - The log (stderr) names the method and tool, never the arguments.
 
 **Measured, 2026-09-18:** the same question over MCP and over `/v1` gives the
@@ -281,7 +287,7 @@ digits cut):
  "zodiac": "lahiri"}
 ```
 
-- `systems` takes tokens or letters, and defaults to `["placidus"]`.
+- `systems` is 1 to 12 tokens or letters, and defaults to `["placidus"]`.
   `capabilities` lists them under `house_systems`.
 - `site` is geodetic. A `height_m` is accepted, and the provenance says it
   does not enter.

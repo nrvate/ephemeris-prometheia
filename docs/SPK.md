@@ -81,14 +81,18 @@ SPK precedence rule. `state_et` / `segment_state_et` take TDB seconds past
 J2000 directly: a JD double near the present only resolves ~40 µs, which
 matters for queries at exact segment boundaries.
 
-An `SpkFile` caches one record per segment and is not safe for
-concurrent use.
+An `SpkFile` holds no mutable state: the record last read of each segment
+lives in a caller-owned `SpkCursor`, so one open file serves any number of
+threads, each with a cursor of its own (the forms without a cursor read
+into one of their own on every call). A cursor follows one file.
 
 ## Validation
 
 `tests/test_spk.cpp`:
 
-- **Synthetic** (runs everywhere, no data files needed), in both byte orders:
+- **Synthetic** (runs everywhere, no data files needed), in both byte orders
+  (and one file read by two threads through two cursors,
+  `spk_one_file_two_cursors_two_threads`):
   type-2 and type-3 segments, a later segment overriding the middle
   record of an earlier one, an unsupported type-1 segment; direct
   evaluation across record boundaries (exact), chaining in both
@@ -115,7 +119,9 @@ records and the comment text back.
 records covering [et0, et1], copied verbatim, with the directory's initial
 epoch and the coverage narrowed to them; states inside the span are
 bit-identical. `prometheia-spk-trim <in> <out> --from <JD> --to <JD>` wraps
-it and prepends a provenance line to the original comments.
+it and prepends a provenance line to the original comments. A segment of
+another type that overlaps the span is an error; segments outside it are
+dropped.
 
 - **Test** (`tests/test_spk.cpp`, `spk_writer_roundtrip_and_trim`): a type-2
   (degree 5) and a type-3 (degree 2, offset half a record) segment of 12

@@ -54,14 +54,17 @@ so that `R1(ε)` converts equatorial components to ecliptic components.
 - **Topocentric:** WGS84 geodetic → geocentric, rotated into the
   true-equator-of-date frame by GAST. Polar motion (≤0.3″) neglected.
 - **Ayanamshas** (`ayanamsa`, `ayanamsa_anchored`): the mean ayanamsha
-  is the anchor value plus the IAU 2006 general precession in longitude
-  p_A = 5028.796195″·T + 1.1054348″·T² + … (Capitaine et al. 2003)
-  accumulated since the anchor epoch, measured on the ecliptic of date
+  is the anchor value plus the general precession in longitude of the
+  selected model (Vondrák 2011 by default, `ltp_precession_in_longitude_deg`;
+  IAU 2006's is p_A = 5028.796195″·T + 1.1054348″·T² + …, Capitaine et al.
+  2003) accumulated since the anchor epoch, measured on the ecliptic of date
   — the traditional sidereal realization; the true ayanamsha adds Δψ.
   Anchor instants and values, and the engine-side conventions:
   [ENGINE.md](ENGINE.md). Against swetest's `-ay<mode>` output the mean
   series differs only by SWE's precession model: 0.0026″ over
-  1800–2200.
+  1800–2200. Raman is the exception to "anchor plus precession": his
+  own linear rule, `AyanamsaAnchor::rate_arcsec_per_year` (ENGINE.md,
+  "Sidereal output").
 
 ## Validation
 
@@ -458,5 +461,6 @@ and `equatorial_from_horizontal_ut`, the C API's `prometheia_horizontal_ut`,
   outputs the composed chain agrees to 0.0001″.
 - The equation-of-equinoxes complementary series is the circular's
   truncation (sub-microarcsecond for practical dates).
-- Nutation evaluation costs 1365 sin/cos pairs (~10 µs); memoize per
-  timestamp at the engine layer if that ever matters.
+- A direct nutation evaluation costs about 13 µs per epoch (18.4 µs a node
+  with rates; "How the series is summed"); the engine interpolates it from
+  half-day nodes instead ("Nutation rates").

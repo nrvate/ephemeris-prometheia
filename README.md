@@ -8,8 +8,8 @@ precomputing and storing positions (the Swiss-Ephemeris bake-then-read
 model, where file size grows with objects × time-span until 800,000+
 asteroids become tens of gigabytes across thousands of files), Prometheia
 stores **initial conditions** and integrates on demand. File size scales
-with the number of objects, period — the whole 1.57-million-body catalog is
-a 137 MB file with no time axis at all.
+with the number of objects, period — the whole SBDB catalog (1,581,053
+bodies in `catalog-20261102`) is a 147 MB file with no time axis at all.
 
 **License: GPL-2.0-or-later** (matching Astrolog, this project's host
 application). The ephemeris *data* it ingests is US-government public domain
@@ -22,7 +22,9 @@ version and a plain statement of what is *not* in it:
 ## Status
 
 All six milestones complete, plus protocol version 4 (2026-09-17) and, in
-releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list:
+releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list.
+The last release is 0.7.3; what has landed since is under "Unreleased" in
+[CHANGELOG.md](CHANGELOG.md) and summarised after the list:
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
@@ -123,9 +125,13 @@ releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list:
   own scalar series — plus block-wise compute with CANCEL and priority,
   cell caches shared across requests, and a reference wire client.
   [docs/SERVER.md](docs/SERVER.md), [docs/SEGMENTS.md](docs/SEGMENTS.md).
-- **Tools** — `ephem`, `prometheia-fetch` (Python), `prometheia-convert`, `prometheia-spk-trim`,
-  `prometheia-info`, `prometheia-bench`; `prometheiad` and `prometheia-wire-client`
-  ([docs/SERVER.md](docs/SERVER.md)). Twenty-three test suites (a ~20 s local gate, `tools/gate.sh`), clean under
+- **Tools** — `ephem`, the Python fetch scripts in `tools/fetch/`
+  (`sbdb_fetch.py`, `de_fetch.py`, `horizons_fetch.py`, `stars_fetch.py`,
+  `catalog_fetch.py`, the eclipse fetchers), `prometheia-convert`,
+  `prometheia-catalog-subset`, `prometheia-spk-trim`, `prometheia-de-trim`,
+  `prometheia-info`, `prometheia-bench`; `prometheiad`, `prometheia-json`
+  and `prometheia-wire-client` ([docs/SERVER.md](docs/SERVER.md)). Thirty-nine
+  ctest tests (a local gate, `tools/gate.sh`), clean under
   ASan/UBSan/LeakSan.
 - **Hypothetical bodies** — bodies from polynomial orbital elements (the
   protocol's kind 4) and named ones (kind 3), with the Hamburg School's
@@ -168,6 +174,33 @@ releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list:
   request and error, joined to the client by request id, and never a
   birth date or place. [docs/SERVER.md](docs/SERVER.md), "Logging".
 
+Since 0.7.3 (unreleased; each item is in [CHANGELOG.md](CHANGELOG.md)):
+
+- **Segments and roots through the C API** — Chebyshev fits, root finding on
+  them (also for sums of up to eight terms), and the exact span each object
+  answers: [docs/C_API.md](docs/C_API.md), [docs/SEGMENTS.md](docs/SEGMENTS.md).
+  Month fits cost a fraction of what they did (measured in SEGMENTS.md, "Cost").
+- **Events and phenomena** — lunar and solar eclipses, rise, set and transit,
+  phases and magnitudes, and heliacal visibility:
+  [docs/ECLIPSES.md](docs/ECLIPSES.md),
+  [docs/SOLAR_ECLIPSES.md](docs/SOLAR_ECLIPSES.md),
+  [docs/PHENOMENA.md](docs/PHENOMENA.md), [docs/HELIACAL.md](docs/HELIACAL.md),
+  [docs/ENGINE.md](docs/ENGINE.md) ("Rise, set and transit").
+- **The object registry** — one naming scheme (`naif:`, `sb:`, `hyp:`,
+  `angle:`, ...) over planets, catalog bodies, stars and points, a catalog body
+  answering to its SPK-ID: [docs/REGISTRY.md](docs/REGISTRY.md).
+- **Corpus and threads** — a dataset's contexts share small-body windows,
+  records, nutation nodes and the name index: [docs/ENGINE.md](docs/ENGINE.md),
+  "Threads".
+- **Accuracy fixes** — Kepler's equation solved at every mean anomaly and
+  catalog bodies sampled through close encounters
+  ([docs/VALIDATION.md](docs/VALIDATION.md)); light deflection tapered inside
+  the solar disc; rates no longer jump at a TDB rounding step
+  ([docs/ENGINE.md](docs/ENGINE.md)).
+- **A fresher catalog** — `catalog-20261102`, current to 2026-11-03;
+  `sbdb_fetch.py --refresh-since` now brings every new body
+  ([docs/INGESTION.md](docs/INGESTION.md), "Freshness").
+
 Design rationale, evidence from the Swiss Ephemeris source, and the full
 decision record: [docs/DESIGN.md](docs/DESIGN.md). Roadmap: M0–M3 done
 (DE + SPK readers, time scales, frames); M4 done (engine, catalog overlay
@@ -201,12 +234,19 @@ no CMake: it compiles the files `embed/sources.txt` lists, or includes
 `embed/prometheia.mk` ([docs/EMBEDDING.md](docs/EMBEDDING.md), contract 1).
 
 Install (library, C and C++ headers, `ephem`, `prometheia-info`,
-`prometheia-convert`, and a relocatable pkg-config file):
+`prometheia-convert`, `prometheia-spk-trim`, `prometheia-de-trim`,
+`prometheia-catalog-subset`, `prometheiad`, `prometheia-wire-client`, and a
+relocatable pkg-config file):
 
 ```sh
 cmake --install build --prefix /usr/local
 cc -std=c99 app.c $(pkg-config --static --cflags --libs prometheia)
 ```
+
+`main` is the working branch: a single squashed root commit whose tree is the
+frozen `initial` branch at `431205a`. `initial` keeps the full bring-up
+history, the release tags (`v0.1.0` to `v0.7.3` and the catalog tags) and
+every commit hash the docs cite. Clone `main`; read history on `initial`.
 
 There is no hosted CI. Before committing, run the local gate —
 `tools/gate.sh` (clang-format 14 check, Release and ASan+UBSan builds, all
@@ -214,7 +254,8 @@ tests; `CLANG_FORMAT=/path/to/clang-format` to pick the binary).
 
 Tests use [doctest](https://github.com/doctest/doctest) 2.5.3, vendored
 under `third_party/` (MIT, test code only — the library itself depends
-only on zstd). Each suite is a doctest binary: `./build/test_engine
+only on zstd; `prometheiad` and the JSON tools use the other vendored code
+listed in [third_party/README.md](third_party/README.md)). Each suite is a doctest binary: `./build/test_engine
 -tc='engine_synthetic*'` runs matching cases, `-s` shows passing
 assertions.
 
@@ -234,8 +275,8 @@ effect.
 ## Cleanroom
 
 No Swiss Ephemeris code, headers, or tables were read or used; SWE is cited
-in the docs as observed behavior only, and M5 will verify against SWE
-output-only. All astronomy comes from published, citable sources (JPL DE
+in the docs as observed behavior only, and the M5 comparisons against SWE
+used its output only. All astronomy comes from published, citable sources (JPL DE
 documentation, IAU standards, published integration algorithms).
 
 Not affiliated with, endorsed by, or connected to NASA/JPL/Caltech, or to

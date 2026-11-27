@@ -71,7 +71,9 @@ parent has to do something new beyond compiling the list.
     Point `PROMETHEIA_ZSTD_CFLAGS` and `PROMETHEIA_ZSTD_LIBS` at it when it
     is off the default paths.
   - The C++ standard library and `libm`.
-  - No threads, sockets or other system libraries.
+  - No threads are started and no sockets are opened. Shared datasets lock
+    with `std::mutex` (`src/engine.cpp`).
+  - No other system libraries.
 - **Link:** with the C++ compiler driver, or add the C++ runtime yourself.
 - **Data is not in the checkout.** The ephemeris files are fetched and
   verified by `tools/fetch/de_fetch.py` (`--only de440|de441|sb441`,
@@ -138,9 +140,9 @@ assertions follow:
 
 The `numbers-differ` comparison runs eleven queries, 94 CSV lines. The
 queries cover planets, a span of instants, 1600 and 2400, a topocentric
-sidereal position, heliocentric, equatorial J2000, orbit points, every
-shipped hypothetical body, two stars, and three catalog bodies read
-through zstd.
+sidereal position, heliocentric, equatorial J2000, orbit points, a 1900
+instant on UT1 with a fixed ΔT, every shipped hypothetical body, two stars,
+and three catalog bodies read through zstd.
 
 Each assertion was shown to fire by a fault injected into the fragment:
 - passing the parent's `CXXFLAGS` through;

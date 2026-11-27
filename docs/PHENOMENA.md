@@ -50,7 +50,7 @@ magnitudes for The Astronomical Almanac*, Astronomy and Computing 25, 10–24
 | Earth | 5 | (for observers away from the Earth) |
 | Mars | 6, then 7 | ≤ 50°, then beyond |
 | Jupiter | 8, then 9 | ≤ 12°, then < 130° |
-| Saturn | 10 (globe and rings), then 12 (globe only) | ≤ 6.5°, then 6°–150° |
+| Saturn | 10 (globe and rings; only where the rings' effective inclination is ≤ 27°), then 12 (globe only) | ≤ 6.5°, then 6°–150° |
 | Uranus | 14, then 15 | ≤ 3.1°, then ≤ 154° |
 | Neptune | 16, then 17 | ≤ 1.9°, then ≤ 133° after 2000 |
 

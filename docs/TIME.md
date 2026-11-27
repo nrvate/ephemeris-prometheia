@@ -322,8 +322,11 @@ stale. The release procedure is in [INGESTION.md](INGESTION.md).
 ## Sources
 
 - USNO Circular 179 (Kaplan, "The IAU Resolutions on Astronomical
-  Reference Systems, Time Scales, and Earth Rotation Models") — TDB−TT
-  series; public-domain USNO publication.
+  Reference Systems, Time Scales, and Earth Rotation Models") — the
+  seven-term TDB−TT series used before 2026-09-29; public-domain USNO
+  publication.
+- ERFA v2.0.1 `dtdb.c` (BSD-3) — the 787 coefficients of the full series,
+  via `tools/gen/gen_tdb_series.py`.
 - USNO `maia.usno.navy.mil/ser7/tai-utc.dat` — leap-second table.
 - USNO `maia.usno.navy.mil/ser7/historic_deltat.data` and `deltat.data` —
   observed ΔT (public domain, US Government work).
