@@ -1,0 +1,13 @@
+# crosstest 2026-09-20T05:40:25Z
+# ours   prometheiad/0.8.0 dataset Prometheia 0.7.0, JPL DE440 binary/linux_p1550p2650.440/-#7ddcde20 prometheia ef8c32c
+# theirs astrolog-ephd/2.0 dataset astrolog-ephd/2.0/swiss 2.10.03-ts.14/files#a1e5f2aa astrolog 022b0a4+dirty binary built 2026-09-20T04:57:10Z
+# angles in arcsec; positions lon/lat or RA/Dec in degrees; docs/CROSS-TEST.md
+leg	epoch_tt	object	observer	frame	plane	mask	deltat	ours	theirs	anchor	anchor_source	sep_servers	sep_ours_anchor	sep_theirs_anchor	band	tier	verdict	note	req_ours	req_theirs
+arrival			helio vs geo	ICRF	equator	0	69.2				the same server's geocentric answer at the same instant		124984.487	124984.486	1	3	agree	an observer that never reached the computation would answer geocentrically		
+arrival			bary vs geo	ICRF	equator	0	69.2				the same server's geocentric answer at the same instant		124950.973	124950.973	1	3	agree	an observer that never reached the computation would answer geocentrically		
+arrival			centre Jupiter vs geo	ICRF	equator	0	69.2				the same server's geocentric answer at the same instant		530695.522	530695.521	1	3	agree	an observer that never reached the computation would answer geocentrically		
+arrival			centre Mars vs geo	ICRF	equator	0	69.2				the same server's geocentric answer at the same instant		83709.7053	83709.7051	1	3	agree	an observer that never reached the computation would answer geocentrically		
+arrival			centre Sun vs geo	ICRF	equator	0	69.2				the same server's geocentric answer at the same instant		124984.487	124984.486	1	3	agree	an observer that never reached the computation would answer geocentrically		
+arrival			bary vs helio	ICRF	equator	0	69.2				the same server's answer at the other observer		1581.18569	1581.18516	1	3	agree	these two observers are different places; equal answers mean one of them was not read		
+arrival			centre Jupiter vs centre Mars	ICRF	equator	0	69.2				the same server's answer at the other observer		206173.799	206173.799	1	3	agree	these two observers are different places; equal answers mean one of them was not read		
+arrival			centre Sun vs helio	ICRF	equator	0	69.2				the same server's answer at the other spelling of the same place		0	0	2.000e-04	3	agree	a heliocentric observer and an observer at the Sun's centre are the same place, and at mask 0 nothing separates them		

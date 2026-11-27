@@ -1,0 +1,814 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// Frame-transformation tests. Structure checks (orthogonality, known
+// argument values at J2000) run everywhere; the differential fixtures
+// compare our IAU 2006 + full IAU 2000A chain against values produced by
+// the locally installed Swiss Ephemeris (DE441-derived data) as an
+// output-only oracle. Expected numbers were generated once by querying
+// swe_calc with SEFLG_J2000|SEFLG_NONUT|SEFLG_TRUEPOS|SEFLG_NOABERR
+// (geometric J2000 mean ecliptic), the same minus SEFLG_J2000 (mean
+// ecliptic of date), and SEFLG_TRUEPOS|SEFLG_NOABERR alone (true
+// ecliptic of date). Measured agreement is 0.0005 arcsec: SWE's default
+// nutation is the 1 mas-class truncated series, we run the full
+// 1365-term IAU 2000A.
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <random>
+#include <thread>
+#include <vector>
+
+#include <prometheia/frames.hpp>
+
+#include <doctest/doctest.h>
+
+using namespace prometheia;
+using namespace prometheia::frames;
+
+namespace {
+
+constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
+constexpr double kRad2Deg = 180.0 / 3.14159265358979323846;
+
+bool near(double a, double b, double tol) {
+    return std::fabs(a - b) <= tol;
+}
+
+void vec_from_lonlat(double lon_deg, double lat_deg, double dist, double v[3]) {
+    const double lo = lon_deg * kDeg2Rad, la = lat_deg * kDeg2Rad;
+    const double cb = std::cos(la);
+    v[0] = dist * cb * std::cos(lo);
+    v[1] = dist * cb * std::sin(lo);
+    v[2] = dist * std::sin(la);
+}
+
+// The fixtures are geometric J2000 *mean ecliptic* longitudes/latitudes;
+// our matrices take ICRF (equatorial) vectors, so rotate about x by the
+// J2000 mean obliquity (frame bias, ~0.02", is far below test tolerance).
+void j2000_ecl_to_icrf(double v[3]) {
+    const double eps = mean_obliquity(2451545.0);
+    const double c = std::cos(eps), s = std::sin(eps);
+    const double y = v[1], z = v[2];
+    v[1] = c * y - s * z;
+    v[2] = s * y + c * z;
+}
+
+void lonlat_from_vec(const double v[3], double& lon_deg, double& lat_deg) {
+    lon_deg = std::atan2(v[1], v[0]) * kRad2Deg;
+    if (lon_deg < 0.0)
+        lon_deg += 360.0;
+    lat_deg = std::atan2(v[2], std::hypot(v[0], v[1])) * kRad2Deg;
+}
+
+void apply(const double m[9], const double v[3], double out[3]) {
+    for (int i = 0; i < 3; ++i) {
+        out[i] = m[3 * i] * v[0] + m[3 * i + 1] * v[1] + m[3 * i + 2] * v[2];
+    }
+}
+
+double lon_diff_deg(double a, double b) {
+    double d = a - b;
+    while (d > 180.0)
+        d -= 360.0;
+    while (d < -180.0)
+        d += 360.0;
+    return d;
+}
+
+bool orthogonal(const double m[9]) {
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            double dot = 0.0;
+            for (int k = 0; k < 3; ++k)
+                dot += m[3 * i + k] * m[3 * j + k];
+            if (!near(dot, i == j ? 1.0 : 0.0, 1e-12))
+                return false;
+        }
+    }
+    return true;
+}
+
+// Fixtures from the installed Swiss Ephemeris (see file comment).
+struct Fixture {
+    double jd_tt;
+    double lon_j2000, lat_j2000, dist; // geometric J2000 mean ecliptic
+    double lon_mean, lat_mean;         // mean ecliptic of date
+    double lon_true, lat_true;         // true ecliptic of date
+    const char* name;
+};
+
+constexpr Fixture kFixtures[] = {
+    {2451545.0, 280.37782479102, 0.00022732336, 0.983327677678, 280.37782479102, 0.00022732336,
+     280.37395492188, 0.00022732336, "SUN"},
+    {2451545.0, 223.31892706869, 5.17086922904, 0.002690202993, 223.31892706869, 5.17086922904,
+     223.31505719955, 5.17086922904, "MOON"},
+    {2461443.0, 317.08384623694, 0.00218856863, 0.986109860060, 317.46241481263, 0.00002427020,
+     317.46582559256, 0.00002427020, "SUN"},
+    {2461443.0, 315.26830270879, -0.44886547124, 0.002694159673, 315.64689276253, -0.45111732109,
+     315.65030354246, -0.45111732109, "MOON"},
+};
+
+} // namespace
+
+TEST_CASE("frames_fundamental_arguments_j2000") {
+    double phi[14];
+    fundamental_arguments(2451545.0, phi);
+    const double deg = 180.0 / 3.14159265358979323846;
+    // Delaunay arguments at J2000 (degrees): l, l', F, D, Omega.
+    CHECK(near(phi[9] * deg, 134.96340, 1e-4));
+    CHECK(near(phi[10] * deg, 357.52911, 1e-4));
+    CHECK(near(phi[11] * deg, 93.27209, 1e-4));
+    CHECK(near(phi[12] * deg, 297.85019, 1e-4));
+    CHECK(near(phi[13] * deg, 125.04452, 1e-4));
+    // Earth mean heliocentric longitude.
+    CHECK(near(phi[2] * deg, 100.46646, 1e-4));
+    // All within [0, 2pi).
+    for (int j = 0; j < 14; ++j) {
+        CHECK((phi[j] >= 0.0 && phi[j] < 2.0 * 3.14159265358979323846 + 1e-15));
+    }
+}
+
+TEST_CASE("frames_nutation_values") {
+    double dpsi, deps;
+    nutation(2451545.0, dpsi, deps);
+    // Full-series values at J2000; the SWE differential (true-minus-mean
+    // ecliptic longitude) at the same epoch is -13.9315".
+    CHECK(near(dpsi * kRad2Deg * 3600.0, -13.93200, 0.005));
+    CHECK(near(deps * kRad2Deg * 3600.0, -5.76940, 0.005));
+    // 2027 epoch: SWE differential is +12.27881".
+    nutation(2461443.0, dpsi, deps);
+    CHECK(near(dpsi * kRad2Deg * 3600.0, 12.27881, 0.005));
+    CHECK(std::fabs(deps * kRad2Deg * 3600.0) < 10.0);
+}
+
+TEST_CASE("frames_obliquity") {
+    // IAU 2006: 84381.406" at J2000 (swetest prints 23d26'21.4060").
+    CHECK(near(mean_obliquity(2451545.0), 84381.406 * kDeg2Rad / 3600.0, 1e-12));
+}
+
+// P * B and the mean obliquity from day nodes against the direct functions,
+// both models, near J2000 and at DE441's ends; an epoch on a node gets the
+// direct values; and the answer does not depend on what was asked before.
+TEST_CASE("frames_precession_interpolator") {
+    double b[9];
+    frame_bias_matrix(b);
+    const auto direct = [&](double t, PrecessionModel m, double pb[9], double& eps) {
+        double p[9];
+        mean_equator_of_date_matrix(t, m, p);
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c)
+                pb[3 * r + c] = p[3 * r] * b[c] + p[3 * r + 1] * b[3 + c] + p[3 * r + 2] * b[6 + c];
+        eps = mean_obliquity(t, m);
+    };
+    for (PrecessionModel m : {PrecessionModel::Vondrak2011, PrecessionModel::IAU2006}) {
+        PrecessionInterpolator pi;
+        double worst = 0.0, worst_eps = 0.0;
+        for (double base : {2451545.0, -3027215.5, 7930190.5}) {
+            for (int i = 0; i < 400; ++i) {
+                const double t = base + i * 0.137; // across 55 days, off and on nodes
+                double pb[9], eps, want[9], want_eps;
+                pi.at(t, m, pb, eps);
+                direct(t, m, want, want_eps);
+                for (int j = 0; j < 9; ++j)
+                    worst = std::max(worst, std::fabs(pb[j] - want[j]));
+                worst_eps = std::max(worst_eps, std::fabs(eps - want_eps));
+            }
+        }
+        CHECK(worst < 5e-15);     // measured 2e-15 (4e-10")
+        CHECK(worst_eps < 3e-15); // measured 1.4e-15 rad (3e-10")
+
+        // On a node: the direct values, exactly.
+        double pb[9], eps, want[9], want_eps;
+        pi.at(2451545.0, m, pb, eps);
+        direct(2451545.0, m, want, want_eps);
+        CHECK(std::equal(pb, pb + 9, want));
+        CHECK(eps == want_eps);
+
+        // History does not matter: a fresh interpolator gives the same bits.
+        PrecessionInterpolator fresh;
+        double again[9], again_eps;
+        pi.at(2378496.123, m, pb, eps);
+        fresh.at(2378496.123, m, again, again_eps);
+        CHECK(std::equal(pb, pb + 9, again));
+        CHECK(eps == again_eps);
+    }
+    // Far beyond every ephemeris, where IAU 2006's polynomial outruns day
+    // nodes: the direct values, and no node is made.
+    for (PrecessionModel m : {PrecessionModel::Vondrak2011, PrecessionModel::IAU2006}) {
+        PrecessionInterpolator far;
+        double pb[9], eps, want[9], want_eps;
+        far.at(2451545.0 + 5e7 + 0.37, m, pb, eps);
+        direct(2451545.0 + 5e7 + 0.37, m, want, want_eps);
+        CHECK(std::equal(pb, pb + 9, want));
+        CHECK(eps == want_eps);
+        CHECK(far.evaluations() == 0);
+    }
+    // Not a number: the direct functions decide, no node is made.
+    PrecessionInterpolator pi;
+    double pb[9], eps;
+    pi.at(NAN, PrecessionModel::Vondrak2011, pb, eps);
+    CHECK(pi.evaluations() == 0);
+    CHECK(std::isnan(eps));
+}
+
+TEST_CASE("frames_matrices_are_rotations") {
+    const double epochs[] = {2305424.5, 2415020.0, 2451545.0, 2461443.0, 2513392.5};
+    for (double jd : epochs) {
+        double m[9];
+        mean_equator_of_date_matrix(jd, m);
+        CHECK(orthogonal(m));
+        mean_ecliptic_of_date_matrix(jd, m);
+        CHECK(orthogonal(m));
+        true_equator_of_date_matrix(jd, m);
+        CHECK(orthogonal(m));
+        true_ecliptic_of_date_matrix(jd, m);
+        CHECK(orthogonal(m));
+    }
+    // Precession vanishes at J2000.
+    double p[9];
+    mean_equator_of_date_matrix(2451545.0, p);
+    for (int i = 0; i < 9; ++i) {
+        CHECK(near(p[i], (i == 0 || i == 4 || i == 8) ? 1.0 : 0.0, 1e-10));
+    }
+}
+
+TEST_CASE("frames_mean_chain_matches_swe") {
+    for (const Fixture& f : kFixtures) {
+        double v[3];
+        vec_from_lonlat(f.lon_j2000, f.lat_j2000, f.dist, v);
+        j2000_ecl_to_icrf(v);
+        double m[9];
+        mean_ecliptic_of_date_matrix(f.jd_tt, m);
+        double w[3];
+        apply(m, v, w);
+        double lon, lat;
+        lonlat_from_vec(w, lon, lat);
+        const double dlon = lon_diff_deg(lon, f.lon_mean) * 3600.0;
+        const double dlat = (lat - f.lat_mean) * 3600.0;
+        CHECK(std::fabs(dlon) < 0.01);
+        CHECK(std::fabs(dlat) < 0.01);
+        std::printf("  %s jd=%.0f mean: dlon=%+.5f\" dlat=%+.5f\"\n", f.name, f.jd_tt, dlon, dlat);
+    }
+}
+
+TEST_CASE("frames_true_chain_matches_swe") {
+    for (const Fixture& f : kFixtures) {
+        double v[3];
+        vec_from_lonlat(f.lon_j2000, f.lat_j2000, f.dist, v);
+        j2000_ecl_to_icrf(v);
+        double m[9];
+        true_ecliptic_of_date_matrix(f.jd_tt, m);
+        double w[3];
+        apply(m, v, w);
+        double lon, lat;
+        lonlat_from_vec(w, lon, lat);
+        const double dlon = lon_diff_deg(lon, f.lon_true) * 3600.0;
+        const double dlat = (lat - f.lat_true) * 3600.0;
+        CHECK(std::fabs(dlon) < 0.01);
+        CHECK(std::fabs(dlat) < 0.01);
+        std::printf("  %s jd=%.0f true: dlon=%+.5f\" dlat=%+.5f\"\n", f.name, f.jd_tt, dlon, dlat);
+    }
+}
+
+TEST_CASE("frames_nutation_shift_property") {
+    // Nutation shifts apparent longitudes by dpsi and leaves latitudes
+    // unchanged: the defining property of the true-ecliptic frame.
+    const double epochs[] = {2305424.5, 2451545.0, 2461443.0, 2513392.5};
+    for (double jd : epochs) {
+        double dpsi, deps;
+        nutation(jd, dpsi, deps);
+        const double v[3] = {0.3, -0.8, 0.52}; // arbitrary unit vector
+        double mm9[9], tm9[9], wm[3], wt[3];
+        mean_ecliptic_of_date_matrix(jd, mm9);
+        true_ecliptic_of_date_matrix(jd, tm9);
+        apply(mm9, v, wm);
+        apply(tm9, v, wt);
+        double lonm, latm, lont, latt;
+        lonlat_from_vec(wm, lonm, latm);
+        lonlat_from_vec(wt, lont, latt);
+        CHECK(near(lon_diff_deg(lont, lonm) * kDeg2Rad, dpsi, 1e-12));
+        CHECK(near(latt - latm, 0.0, 1e-9));
+    }
+}
+
+TEST_CASE("frames_sidereal_time") {
+    // ERA is a function of UT1 alone; at the J2000 instant, 0.779... turns.
+    const double era = earth_rotation_angle(2451545.0);
+    CHECK(near(era, 0.7790572732640 * 2.0 * 3.14159265358979323846, 1e-9));
+
+    // GAST fixture: swe_sidtime(jd_ut1 = 2461442.7978) = 16.22733953801
+    // hours (SWE returns hours) = 243.4100930715 deg. Measured agreement
+    // of the full IAU 2000A chain: 0.0004".
+    const double jd_ut1 = 2461442.7978;
+    const double jd_tt = jd_ut1 + 69.5 / 86400.0; // dT ~69 s, only T depends on it
+    const double gast_deg = gast_rad(jd_ut1, jd_tt) * kRad2Deg;
+    const double swe_deg = 16.22733953801 * 15.0;
+    CHECK(near(gast_deg, swe_deg, 0.01 / 3600.0));
+    std::printf("  GAST ours=%.7f deg, SWE=%.7f deg, diff=%+.4f\"\n", gast_deg, swe_deg,
+                (gast_deg - swe_deg) * 3600.0);
+
+    // Equation of the equinoxes is dominated by dpsi cos(eps).
+    double dpsi, deps;
+    nutation(jd_tt, dpsi, deps);
+    const double eq = equation_of_equinoxes_rad(jd_tt);
+    CHECK(near(eq, dpsi * std::cos(mean_obliquity(jd_tt)), 2.5e-6));
+}
+
+TEST_CASE("frames_observer_geocentric") {
+    // WGS84: equatorial radius 6378.137 km, polar 6356.752 km.
+    double out[3];
+    observer_geocentric(GeoSite{0.0, 0.0, 0.0}, 0.0, out);
+    CHECK(near(out[0], 6378.137, 1e-3));
+    CHECK(near(out[1], 0.0, 1e-9));
+    CHECK(near(out[2], 0.0, 1e-9));
+    // A quarter turn east puts the prime meridian on the +y axis.
+    observer_geocentric(GeoSite{0.0, 0.0, 0.0}, 3.14159265358979323846 / 2.0, out);
+    CHECK(near(out[0], 0.0, 1e-9));
+    CHECK(near(out[1], 6378.137, 1e-3));
+    // At the pole the geocentric distance is the polar radius.
+    observer_geocentric(GeoSite{0.0, 3.14159265358979323846 / 2.0, 0.0}, 0.0, out);
+    CHECK(near(out[0], 0.0, 1e-9));
+    CHECK(near(out[1], 0.0, 1e-9));
+    CHECK(near(out[2], 6356.752, 1e-3));
+    // Longitude rotates with the site, not the sidereal time.
+    observer_geocentric(GeoSite{3.14159265358979323846 / 2.0, 0.0, 0.0}, 0.0, out);
+    CHECK(near(out[0], 0.0, 1e-9));
+    CHECK(near(out[1], 6378.137, 1e-3));
+}
+
+namespace {
+
+// Largest angle (arcsec) between corresponding rows of two rotation
+// matrices: how far apart the two frames' axes are.
+double frame_offset_arcsec(const double a[9], const double b[9]) {
+    double worst = 0.0;
+    for (int r = 0; r < 3; ++r) {
+        const double* u = a + 3 * r;
+        const double* v = b + 3 * r;
+        const double c[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2],
+                             u[0] * v[1] - u[1] * v[0]};
+        const double s = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+        worst = std::max(worst, std::atan2(s, u[0] * v[0] + u[1] * v[1] + u[2] * v[2]));
+    }
+    return worst * 206264.80624709636;
+}
+
+} // namespace
+
+TEST_CASE("ltp_series_reduce_to_j2000") {
+    // Every Vondrak et al. (2011) series is constrained to IAU 2006 at J2000:
+    // P_A = Q_A = X_A = Y_A = p_A = 0 and epsilon_A = 84381.406". The
+    // polynomial constants cancel the periodic cosine amplitudes to the
+    // published 6-decimal rounding (1e-6") — which also pins the
+    // corrigendum's Q_A C7 = 198.296701 (the originally printed 198.296071
+    // leaves 0.0006").
+    constexpr double kJ2000 = 2451545.0;
+    const double eps0 = 84381.406 / 206264.80624709636;
+    double k[3], n[3];
+    ltp_ecliptic_pole(kJ2000, k);
+    ltp_equator_pole(kJ2000, n);
+    constexpr double kRoundingArcsec = 5e-6;
+    constexpr double kRoundingRad = kRoundingArcsec / 206264.80624709636;
+    CHECK(std::fabs(k[0]) < kRoundingRad);
+    CHECK(std::fabs(k[1] + std::sin(eps0)) < kRoundingRad);
+    CHECK(std::fabs(k[2] - std::cos(eps0)) < kRoundingRad);
+    CHECK(std::fabs(n[0]) < kRoundingRad);
+    CHECK(std::fabs(n[1]) < kRoundingRad);
+    CHECK(std::fabs(ltp_precession_in_longitude_deg(kJ2000)) * 3600.0 < kRoundingArcsec);
+    CHECK(std::fabs(ltp_obliquity_series(kJ2000) - eps0) * 206264.80624709636 < kRoundingArcsec);
+    CHECK(std::fabs(ltp_mean_obliquity(kJ2000) - eps0) * 206264.80624709636 < kRoundingArcsec);
+    double m[9];
+    ltp_mean_equator_of_date_matrix(kJ2000, m);
+    const double identity[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    CHECK(frame_offset_arcsec(m, identity) < kRoundingArcsec);
+}
+
+TEST_CASE("ltp_agrees_with_iau2006_near_j2000") {
+    // Within centuries of J2000 the long-term model reproduces IAU 2006
+    // (it was fitted with overwhelming weight there); it departs slowly
+    // beyond. Offsets printed for the record, gated loosely.
+    std::printf("  %8s %14s %14s %14s\n", "years", "matrix", "obliquity", "p_A");
+    for (double years :
+         {-1000.0, -500.0, -200.0, -100.0, -10.0, 10.0, 100.0, 200.0, 500.0, 1000.0}) {
+        const double jd = 2451545.0 + years * 365.25;
+        double a[9], b[9];
+        mean_equator_of_date_matrix(jd, a);
+        ltp_mean_equator_of_date_matrix(jd, b);
+        const double d_mat = frame_offset_arcsec(a, b);
+        const double d_eps = (ltp_mean_obliquity(jd) - mean_obliquity(jd)) * 206264.80624709636;
+        const double d_pa =
+            (ltp_precession_in_longitude_deg(jd) - precession_in_longitude_deg(jd)) * 3600.0;
+        std::printf("  %+8.0f %13.5f\" %13.5f\" %13.5f\"\n", years, d_mat, d_eps, d_pa);
+        const double gate =
+            std::fabs(years) <= 100.0 ? 0.002 : (std::fabs(years) <= 200.0 ? 0.01 : 1.0);
+        CHECK(d_mat < gate);
+        CHECK(std::fabs(d_eps) < gate);
+        CHECK(std::fabs(d_pa) < gate);
+    }
+}
+
+TEST_CASE("ltp_long_range_is_a_rotation") {
+    // Orthonormal across the model's +-200 millennia. The pole-angle
+    // obliquity (what the matrix implies, and what the engine uses) follows
+    // the separately fitted epsilon_A series to a few arcseconds within
+    // +-4000 years; beyond, the two published fits drift apart (hundreds of
+    // arcseconds at +-200 millennia), which is reported, not gated.
+    for (double cy : {-2000.0, -500.0, -130.0, -40.0, 40.0, 130.0, 500.0, 2000.0}) {
+        const double jd = 2451545.0 + cy * 36525.0;
+        double m[9];
+        ltp_mean_equator_of_date_matrix(jd, m);
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) {
+                const double dot =
+                    m[3 * i] * m[3 * j] + m[3 * i + 1] * m[3 * j + 1] + m[3 * i + 2] * m[3 * j + 2];
+                CHECK(std::fabs(dot - (i == j ? 1.0 : 0.0)) < 1e-14);
+            }
+        const double d = (ltp_mean_obliquity(jd) - ltp_obliquity_series(jd)) * 206264.80624709636;
+        std::printf("  T=%+6.0f cy: pole-angle obliquity - epsilon_A series %.3f\"\n", cy, d);
+        if (std::fabs(cy) <= 40.0)
+            CHECK(std::fabs(d) < 5.0);
+    }
+}
+
+TEST_CASE("swetest_mean_obliquity_is_the_epsilon_a_series") {
+    // Why our ecliptic of date differs from swetest's under the same
+    // precession model (docs/FRAMES.md): the mean obliquity swetest prints
+    // (-p0, the "Epsilon (t/m)" line's mean value; version 2.10.03-ts.14,
+    // DE440, input TT) is the separately fitted epsilon_A series to its
+    // 0.0001" print, while ours is the angle between the model's two poles.
+    // The two part by 4.7 mas at 1560 and 16.6 mas at 2640, which is the
+    // whole of the ecliptic-of-date residual against swetest there.
+    struct Row {
+        double jd_tt, mean_arcsec;
+    };
+    static const Row kSwe[] = {
+        {2290835.0, 84587.3147}, // 1560
+        {2341970.0, 84521.8610}, // 1700
+        {2415020.0, 84428.2406}, // 1900
+        {2488070.0, 84334.5711}, // 2100
+        {2597645.0, 84194.1835}, // 2400
+        {2685305.0, 84082.1644}, // 2640
+    };
+    double worst_series = 0.0, worst_angle = 0.0;
+    for (const Row& r : kSwe) {
+        worst_series =
+            std::max(worst_series,
+                     std::fabs(ltp_obliquity_series(r.jd_tt) * 206264.80624709636 - r.mean_arcsec));
+        worst_angle =
+            std::max(worst_angle,
+                     std::fabs(ltp_mean_obliquity(r.jd_tt) * 206264.80624709636 - r.mean_arcsec));
+    }
+    std::printf("  swetest mean obliquity: epsilon_A series %.5f\", pole angle %.5f\"\n",
+                worst_series, worst_angle);
+    CHECK(worst_series < 0.00006); // the print's half-unit
+    CHECK(worst_angle > 0.015);    // 2640: the pole angle is not what swetest prints
+}
+
+TEST_CASE("nutation_rates_and_taylor_step") {
+    // The analytic rates reproduce the series itself: the value equals
+    // nutation(), the first and second derivatives match central
+    // differences, and a second-order Taylor step from a node carries the
+    // series within 0.05 day to well under a microarcsecond. (The engine
+    // interpolates instead; nutation_interpolator below.)
+    const double kMuas = 1e-6 / 206264.80624709636;
+    double worst_step = 0.0, worst_d1 = 0.0, worst_d2 = 0.0;
+    for (int k = 0; k < 40; ++k) {
+        const double jd = 2378496.5 + k * 2711.37; // 1800 .. 2100
+        double n[6];
+        nutation_with_rates(jd, n);
+        double dpsi, deps;
+        nutation(jd, dpsi, deps);
+        CHECK(std::fabs(n[0] - dpsi) < 1e-15);
+        CHECK(std::fabs(n[1] - deps) < 1e-15);
+        const double h = 0.01;
+        double pp, pe, mp, me;
+        nutation(jd + h, pp, pe);
+        nutation(jd - h, mp, me);
+        worst_d1 = std::max(worst_d1, std::fabs((pp - mp) / (2 * h) - n[2]) / kMuas);
+        worst_d2 = std::max(worst_d2, std::fabs((pp - 2 * dpsi + mp) / (h * h) - n[4]) / kMuas);
+        for (double dt : {-0.05, -0.031, -0.01, 0.017, 0.05}) {
+            double ep, ee;
+            nutation(jd + dt, ep, ee);
+            const double tp = n[0] + dt * (n[2] + 0.5 * dt * n[4]);
+            const double te = n[1] + dt * (n[3] + 0.5 * dt * n[5]);
+            worst_step =
+                std::max({worst_step, std::fabs(tp - ep) / kMuas, std::fabs(te - ee) / kMuas});
+        }
+    }
+    std::printf("  Taylor step |dt| <= 0.05 d: %.4f uas; d1 vs central difference %.4f uas/d; "
+                "d2 %.2f uas/d^2\n",
+                worst_step, worst_d1, worst_d2);
+    CHECK(worst_step < 1.0);
+    CHECK(worst_d1 < 1.0);
+    CHECK(worst_d2 < 100.0);
+}
+
+TEST_CASE("nutation_interpolator") {
+    // Quintic Hermite from half-day nodes against the full series, 1800-2100,
+    // at node boundaries and between them: measured 0.004 uas.
+    const double kMuas = 1e-6 / 206264.80624709636;
+    NutationInterpolator interp;
+    double worst = 0.0;
+    for (int k = 0; k < 60; ++k) {
+        const double base = std::floor((2378496.5 + k * 1826.11) * 2.0) / 2.0;
+        for (double dt : {0.0, 0.03, 0.125, 0.25, 0.31, 0.4999}) {
+            double ip, ie, sp, se;
+            interp.at(base + dt, ip, ie);
+            nutation(base + dt, sp, se);
+            worst = std::max({worst, std::fabs(ip - sp) / kMuas, std::fabs(ie - se) / kMuas});
+        }
+    }
+    std::printf("  quintic Hermite, 0.5-day nodes: %.5f uas\n", worst);
+    CHECK(worst < 0.05);
+
+    // Values depend only on the epoch: a fresh interpolator, and one whose
+    // cache has seen other epochs, agree exactly.
+    NutationInterpolator fresh;
+    double a1, a2, b1, b2;
+    fresh.at(2461300.37, a1, a2);
+    interp.at(2461300.37, b1, b2);
+    CHECK(a1 == b1);
+    CHECK(a2 == b2);
+
+    // Sweeping one window twice sums the series once per node.
+    NutationInterpolator sweep;
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int r = 0; r < 240; ++r) {
+            double p, e;
+            sweep.at(2461300.5 + r / 24.0, p, e);
+        }
+    }
+    // Nodes 0 .. 20 over ten days, computed in pairs a lane each: the last
+    // pair also computes node 21. Once per node, and never again.
+    CHECK(sweep.evaluations() == 22);
+}
+
+// nutation() composes each term's sine and cosine from per-argument
+// multiples instead of calling libm twice a term. That is arithmetic
+// rearrangement, so it must agree with the printed form to roundoff, not to
+// a tolerance anyone had to choose.
+TEST_CASE("nutation_fast_form_matches_printed") {
+    double worst_psi = 0.0, worst_eps = 0.0, worst_rates = 0.0;
+    for (int i = 0; i < 300; ++i) {
+        const double jd = 2305448.0 + i * 1333.0; // 1600 through 2700
+        double fast_psi, fast_eps, ref_psi, ref_eps;
+        nutation(jd, fast_psi, fast_eps);
+        nutation_printed_form(jd, ref_psi, ref_eps);
+        worst_psi = std::max(worst_psi, std::fabs(fast_psi - ref_psi));
+        worst_eps = std::max(worst_eps, std::fabs(fast_eps - ref_eps));
+        double n[6];
+        nutation_with_rates(jd, n);
+        worst_rates = std::max(worst_rates, std::fabs(n[0] - ref_psi));
+        worst_rates = std::max(worst_rates, std::fabs(n[1] - ref_eps));
+    }
+    // 1e-18 rad is 2e-13 arcsec: five orders below the 0.004 uas the
+    // half-day interpolator already costs, and ten below anything observable.
+    CHECK(worst_psi < 1e-18);
+    CHECK(worst_eps < 1e-18);
+    CHECK(worst_rates < 1e-18);
+}
+
+// ---- The horizon -----------------------------------------------------------
+
+namespace {
+
+constexpr double kDegH = 3.14159265358979323846 / 180.0;
+
+double ang_arcsec(double a_deg, double b_deg) {
+    return std::fabs(std::remainder(a_deg - b_deg, 360.0)) * 3600.0;
+}
+
+} // namespace
+
+TEST_CASE("horizon_geometry_matches_erfa") {
+    // ERFA 2.0.1 hd2ae (pyerfa), as an output oracle: hour angle,
+    // declination and latitude to azimuth (north through east) and
+    // elevation, degrees.
+    struct Row {
+        double ha, dec, lat, az, el;
+    };
+    const Row rows[] = {
+        {0.0, 20.0, 47.0, 180.0, 63.0},
+        {30.0, -10.0, 47.0, 213.56265944233036, 27.042848048621817},
+        {-75.5, 45.0, -33.9, 44.95526858660017, -14.325809591930941},
+        {170.0, 80.0, 69.6, 356.5731694931562, 59.704280313523476},
+        {-120.0, -60.0, -80.0, 132.48580109582795, 54.04286272277319},
+        {5.0, 89.0, 10.0, 359.9112186114818, 10.996182587068775},
+        {200.0, 0.0, 0.0, 90.0, -70.00000000000001},
+        {-3.0, -23.4, 78.2, 177.18933428923185, -11.615044441649088},
+    };
+    double worst = 0.0, worst_back = 0.0;
+    for (const Row& r : rows) {
+        double az, el;
+        equatorial_to_horizontal(r.ha * kDegH, r.dec * kDegH, r.lat * kDegH, az, el);
+        CHECK(az >= 0.0);
+        CHECK(az < 2.0 * 3.14159265358979323846);
+        worst = std::max({worst, ang_arcsec(az / kDegH, r.az), ang_arcsec(el / kDegH, r.el)});
+        double ha, dec;
+        horizontal_to_equatorial(az, el, r.lat * kDegH, ha, dec);
+        // On the sky: an hour angle near the pole counts by cos(dec).
+        worst_back = std::max({worst_back, ang_arcsec(ha / kDegH, r.ha) * std::cos(r.dec * kDegH),
+                               ang_arcsec(dec / kDegH, r.dec)});
+    }
+    std::printf("  horizon vs ERFA hd2ae: worst %.2e\", round trip %.2e\"\n", worst, worst_back);
+    CHECK(worst < 1e-9);
+    CHECK(worst_back < 1e-9);
+}
+
+TEST_CASE("refraction_bennett") {
+    const Atmosphere air;
+    // Bennett's formula at standard air: 34' at the horizon, falling to
+    // under a minute at 45 deg; his correction leaves -0.88" at the zenith,
+    // within his stated 0.015'.
+    CHECK(std::fabs(refraction_from_apparent_deg(0.0, air) * 60.0 - 33.9676) < 1e-4);
+    CHECK(std::fabs(refraction_from_apparent_deg(10.0, air) * 60.0 - 5.2558) < 1e-4);
+    CHECK(std::fabs(refraction_from_apparent_deg(45.0, air) * 60.0 - 0.9533) < 1e-4);
+    CHECK(std::fabs(refraction_from_apparent_deg(90.0, air) * 3600.0) < 0.9);
+    // ERFA 2.0.1 refco(1013.25 hPa, 15 C, rh 0, 0.574 um) as an independent
+    // model where it holds, above 15 deg: A tan z + B tan^3 z of the observed
+    // zenith distance.
+    const double A = 0.0002770929978069813, B = -3.170665511804554e-07;
+    double worst = 0.0;
+    for (int q = 60; q <= 360; ++q) {
+        const double h = q / 4.0, t = std::tan((90.0 - h) * kDegH);
+        const double erfa = (A * t + B * t * t * t) / kDegH * 3600.0;
+        worst = std::max(worst, std::fabs(refraction_from_apparent_deg(h, air) * 3600.0 - erfa));
+    }
+    std::printf("  Bennett vs ERFA refco, 15-90 deg: worst %.3f\"\n", worst);
+    CHECK(worst < 2.0);
+    // Scaled by pressure and temperature; nothing in a vacuum.
+    const Atmosphere thin{506.625, 15.0}, cold{1013.25, -20.0}, none{0.0, 15.0};
+    CHECK(
+        std::fabs(refraction_from_apparent_deg(5.0, thin) / refraction_from_apparent_deg(5.0, air) -
+                  0.5) < 1e-12);
+    CHECK(refraction_from_apparent_deg(5.0, cold) > refraction_from_apparent_deg(5.0, air));
+    CHECK(refraction_from_apparent_deg(5.0, none) == 0.0);
+}
+
+TEST_CASE("refraction_round_trips_and_stops_at_the_dip") {
+    const Atmosphere air;
+    double worst = 0.0;
+    for (int q = -200; q <= 9000; ++q) {
+        const double t = q / 100.0;
+        const double r = refraction_from_true_deg(t, air);
+        if (r == 0.0)
+            continue;
+        const double apparent = t + r;
+        worst =
+            std::max(worst, std::fabs(apparent - refraction_from_apparent_deg(apparent, air) - t));
+    }
+    CHECK(worst * 3600.0 < 1e-9);
+    // No dip: refraction stops at the astronomical horizon, so a true
+    // altitude whose apparent one would be below 0 is not refracted.
+    CHECK(refraction_from_apparent_deg(-0.01, air) == 0.0);
+    CHECK(refraction_from_true_deg(-0.5, air) > 0.0); // 34' lifts it above 0
+    CHECK(refraction_from_true_deg(-0.6, air) == 0.0);
+    // From 100 m the sea horizon is 17.6' down, and refraction reaches it;
+    // below -1 deg nothing is refracted, whatever the height.
+    const double dip = horizon_dip_deg(100.0);
+    CHECK(std::fabs(dip * 60.0 - 17.6) < 1e-12);
+    CHECK(refraction_from_apparent_deg(-0.25, air, dip) > 0.0);
+    CHECK(refraction_from_apparent_deg(-0.3, air, dip) == 0.0);
+    CHECK(refraction_from_apparent_deg(-0.9, air, horizon_dip_deg(5000.0)) > 0.0);
+    CHECK(refraction_from_apparent_deg(-1.01, air, horizon_dip_deg(5000.0)) == 0.0);
+    CHECK(horizon_dip_deg(-3.0) == 0.0);
+}
+
+TEST_CASE("refraction_at_the_cutoff") {
+    // At the cutoff c (here the astronomical horizon, no dip) R is 34'. True
+    // altitudes from t* = c - R(c) up are refracted to c or above; those
+    // below t* are not refracted; apparent altitudes in [t*, c) are never
+    // produced. Pinned at c and t* +- 1e-6 deg.
+    const Atmosphere air;
+    const double c = 0.0, eps = 1e-6;
+    const double t_star = c - refraction_from_apparent_deg(c, air);
+    CHECK(t_star < -0.5);
+    CHECK(refraction_from_apparent_deg(c + eps, air) > 0.5);
+    CHECK(refraction_from_apparent_deg(c - eps, air) == 0.0);
+    const double above = t_star + eps, below = t_star - eps;
+    const double app_above = above + refraction_from_true_deg(above, air);
+    CHECK(app_above >= c);
+    CHECK(app_above < c + 1e-5);
+    CHECK(refraction_from_true_deg(below, air) == 0.0);
+    // Back from each: exact from the refracted side and from below t*.
+    CHECK(std::fabs(app_above - refraction_from_apparent_deg(app_above, air) - above) < 1e-12);
+    CHECK(below - refraction_from_apparent_deg(below, air) == below);
+    // An apparent altitude in the gap is read as unrefracted, R = 0, and
+    // does not come back to itself: no true altitude gives it.
+    const double gap = 0.5 * (t_star + c);
+    CHECK(refraction_from_apparent_deg(gap, air) == 0.0);
+    CHECK(gap + refraction_from_true_deg(gap, air) > c);
+}
+
+TEST_CASE("raman_ayanamsa_is_his_linear_rule") {
+    // Raman, Hindu Predictive Astrology (1938), App. A p. 445: the ayanamsha
+    // is (Y - 397) x 50 1/3", Y the Julian year (TT). The mean value is the
+    // formula's own, to 0.001", at 1912, 1938 and 2000; the true one adds the
+    // nutation in longitude, like every zodiac on the ecliptic of date.
+    for (double year : {1912.0, 1938.0, 2000.0}) {
+        const double jd = 2451545.0 + (year - 2000.0) * 365.25;
+        const auto a = ayanamsa(3, jd);
+        REQUIRE(a.has_value());
+        const double want_arcsec = (year - 397.0) * (151.0 / 3.0);
+        CHECK(std::fabs(a->mean_deg * 3600.0 - want_arcsec) < 0.001);
+        double dpsi, deps;
+        nutation(jd, dpsi, deps);
+        CHECK(std::fabs((a->true_deg - a->mean_deg) - dpsi * 180.0 / 3.14159265358979323846) <
+              1e-12);
+    }
+    // At J2000: 22 deg 24' 44.333" mean. The Swiss Ephemeris prints
+    // 22 deg 24' 24.92" there; the 19" is its definition against Raman's
+    // formula (docs/FRAMES.md, the maintainer's D2).
+    const auto j2000 = ayanamsa(3, 2451545.0);
+    REQUIRE(j2000.has_value());
+    CHECK(std::fabs(j2000->mean_deg * 3600.0 - (22.0 * 3600 + 24 * 60 + 44.3333333)) < 0.001);
+    const auto anchor = ayanamsa_anchor(3);
+    REQUIRE(anchor.has_value());
+    CHECK(anchor->mean0_deg == 0.0);
+    CHECK(anchor->rate_arcsec_per_year == 151.0 / 3.0);
+    CHECK(!ayanamsa(2, 2451545.0).has_value()); // De Luce: not served
+}
+
+// Nodes kept in a NutationNodeStore are the doubles a private interpolator
+// sums; a second interpolator on the store sums nothing the first has.
+TEST_CASE("nutation_nodes_shared_by_a_store") {
+    NutationNodeStore store;
+    NutationInterpolator first(&store), second(&store), alone;
+    std::vector<double> jds;
+    std::mt19937_64 rng(7);
+    for (int i = 0; i < 600; ++i) // both signs of the block seam and of zero
+        jds.push_back(std::uniform_real_distribution<double>(-3000.0, 2600000.0)(rng));
+    for (double jd : {-0.3, 0.0, 0.25, 511.9, 512.0, -511.9, -512.1})
+        jds.push_back(jd);
+    std::vector<double> want;
+    for (double jd : jds) {
+        double p, e;
+        first.at(jd, p, e);
+        want.push_back(p);
+        want.push_back(e);
+    }
+    CHECK(first.evaluations() > 0);
+    CHECK(store.bytes() > 0);
+    size_t i = 0;
+    for (double jd : jds) {
+        double p, e, ap, ae;
+        second.at(jd, p, e);
+        alone.at(jd, ap, ae);
+        CHECK(p == want[i]);
+        CHECK(e == want[i + 1]);
+        CHECK(ap == want[i]); // the private interpolator's, bit for bit
+        CHECK(ae == want[i + 1]);
+        i += 2;
+    }
+    CHECK(second.evaluations() == 0);
+    CHECK(alone.evaluations() > 0);
+    // And a sweep in either direction, which the pair logic walks.
+    NutationInterpolator walker(&store);
+    for (int r = 0; r < 480; ++r) {
+        double p, e, ap, ae;
+        walker.at(2461300.5 + 20.0 - r / 12.0, p, e);
+        alone.at(2461300.5 + 20.0 - r / 12.0, ap, ae);
+        CHECK(p == ap);
+        CHECK(e == ae);
+    }
+}
+
+// Threads filling and reading one store at once (TSan runs this): every
+// answer is the private interpolator's.
+TEST_CASE("nutation_store_concurrent") {
+    NutationNodeStore store;
+    constexpr int kThreads = 4;
+    std::vector<double> jds;
+    std::mt19937_64 rng(11);
+    for (int i = 0; i < 400; ++i)
+        jds.push_back(std::uniform_real_distribution<double>(2450000.0, 2450900.0)(rng));
+    std::vector<std::vector<double>> got(kThreads);
+    std::vector<std::thread> threads;
+    for (int k = 0; k < kThreads; ++k) {
+        threads.emplace_back([&, k] {
+            NutationInterpolator interp(&store);
+            std::vector<double> order = jds;
+            std::shuffle(order.begin(), order.end(), std::mt19937_64(uint64_t(k) + 1));
+            std::vector<double> out(jds.size() * 2);
+            for (double jd : order) {
+                double p, e;
+                interp.at(jd, p, e);
+                const size_t at = size_t(std::find(jds.begin(), jds.end(), jd) - jds.begin());
+                out[at * 2] = p;
+                out[at * 2 + 1] = e;
+            }
+            got[size_t(k)] = out;
+        });
+    }
+    for (std::thread& t : threads)
+        t.join();
+    NutationInterpolator alone;
+    for (size_t i = 0; i < jds.size(); ++i) {
+        double p, e;
+        alone.at(jds[i], p, e);
+        for (int k = 0; k < kThreads; ++k) {
+            CHECK(got[size_t(k)][i * 2] == p);
+            CHECK(got[size_t(k)][i * 2 + 1] == e);
+        }
+    }
+}

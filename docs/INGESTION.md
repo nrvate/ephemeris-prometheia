@@ -1,0 +1,535 @@
+# Ephemeris Prometheia — data ingestion
+
+**Status:** the M1 pipeline described here is implemented and verified on
+real data (first 100 numbered asteroids). Normative for everything that
+produces an `.epm` file. Companion documents: the container byte spec is
+[FORMAT.md](FORMAT.md); policy background is [DESIGN.md](DESIGN.md).
+
+## Principles
+
+1. **Open sources, no strings attached** ([DESIGN.md](DESIGN.md)
+   decision 5). The small-body catalog pipeline ingests from JPL/Caltech
+   public services: SBDB (orbit solutions), Horizons (validation
+   sampling), DE binaries (planetary truth, M3). These are US-government
+   work, so the *data* in a catalog is public domain regardless of the
+   code's GPL license. MPC data is excluded (attribution conditions).
+2. **One format encoder.** The Python fetcher never writes EPM1; it
+   produces a neutral intermediate (`sbdb-raw v1` TSV). Only the C++
+   converter encodes the container, so the byte format has exactly one
+   implementation and one spec.
+3. **Provenance all the way down.** Every stage records what it did, when,
+   and from where: per-page records in `manifest.json`, a flat
+   `provenance.txt` for the converter, and a CBOR metadata map inside every
+   `.epm`. A catalog built two years from now can be audited without
+   guessing.
+4. **Be a polite guest** — see Etiquette below. Binding policy, not
+   aspiration.
+
+## Pipeline
+
+```
+JPL SBDB Query API (HTTPS, JSON)
+        │  prometheia-fetch (tools/fetch/sbdb_fetch.py)
+        │  sequential GETs, 2 s spacing, resumable
+        ▼
+sbdb-raw v1:  part-<kind>-<limit_from>.tsv  +  manifest.json  +  provenance.txt
+        │  prometheia-convert (tools/convert/convert_main.cpp)
+        │  parse → convert units → sort by spkid → dedupe → validate
+        ▼
+catalog.epm   (EPM1 container)
+        │  prometheia-info (tools/info/info_main.cpp)
+        ▼
+inspection: counts, coverage, bytes/record, sample records
+```
+
+## Stage 1 — `prometheia-fetch` (sbdb-raw v1)
+
+### Request
+
+```
+GET https://ssd-api.jpl.nasa.gov/sbdb_query.api
+    ?fields=<20 fields, comma-joined>
+    &sb-kind=a            (or c for comets; one kind per query)
+    &limit=50000
+    &limit-from=<0|50000|100000|...>
+    &full-prec=1
+```
+
+Headers on the wire:
+
+```
+User-Agent: curl/8.5.0
+Accept-Encoding: identity
+Connection: close
+```
+
+- `full-prec=1` matters: without it SBDB trims numerics for display. The
+  catalog stores f64 elements, so we require full doubles (e.g. Ceres σₐ =
+  1.01×10⁻¹¹ AU survives; a display-trimmed value would be zero).
+- `Accept-Encoding: identity` is deliberate: no gzip CPU spent server-side.
+- Responses are checked for the embedded-error convention (`"code"` /
+  `"message"` in a 200 body) before being trusted.
+- Transport failures retry with 5/10/20/40 s backoff, 4 tries, then abort
+  the run (the manifest makes the abort resumable).
+
+### Fields requested (21, 22 from 2026-10-27)
+
+| SBDB field | meaning | unit as delivered |
+|---|---|---|
+| `spkid` | JPL SPK-ID — primary key of everything | integer |
+| `pdes` | primary designation ("1", "2003 SB220") | text |
+| `name` | proper name ("Ceres"), null for most | text |
+| `full_name` | the full designation, "523671 (2013 FZ27)" or "136199 Eris (2003 UB313)"; for a numbered asteroid the converter takes the text in the final parentheses as its principal provisional designation, a lookup alias (EPM1 1.2). Fetched from 2026-10-27. The query API has no `prov_des` field (it answers HTTP 400) | text |
+| `class` | SBDB orbit class (MBA, TNO, JFc, …) | text, coded into one byte (EPM1 1.2, `OrbitClass`); a class the table lacks stops the conversion by name |
+| `epoch` | epoch of the element set | JD, TDB |
+| `e` `a` | eccentricity; semimajor axis (negative when hyperbolic) | — ; AU |
+| `i` `om` `w` `ma` | inclination; ascending node; arg. of perihelion; mean anomaly | degrees |
+| `sigma_e` `sigma_a` `sigma_i` `sigma_om` `sigma_w` `sigma_ma` | 1-sigma of the elements | as the elements (angles in degrees; the converter stores radians) |
+| `H` `G` | absolute magnitude; slope parameter | mag ; — |
+| `diameter` | effective diameter, null for most | km |
+
+### sbdb-raw v1 (the intermediate)
+
+Per page, one file `part-<kind>-<limit_from:09d>.tsv`:
+
+- First line: `# fields: kind<TAB><field>...` — the kind column is
+  prepended by the fetcher (`a`/`c`), so downstream stages need no side
+  channel to know what a row is.
+- One body per line: `kind`, then the 20 fields, TAB-separated, in field
+  order. JSON `null` → empty cell. UTF-8. No quoting needed (SBDB text
+  fields contain no tabs or newlines; the converter rejects any it finds).
+- `manifest.json`: schema tag, base URL, fields, page size, and one record
+  per completed page (`kind`, `limit_from`, `count`,
+  `total_reported`, `file`, `fetched_at_utc`). Re-running the fetcher
+  skips completed pages — resume is free.
+- `provenance.txt`: flat `key=value` (`schema`, `source`, `url`,
+  `started_utc`, `finished_utc`, `fields`, `kinds`, `page_size`, `pages`,
+  `count`, `tool`) — deliberately trivial so the C++ converter can read it
+  without a JSON parser.
+
+### Etiquette (binding; full policy in DESIGN.md)
+
+Strictly sequential — one request in flight, no threads or pools. ≥2 s
+between pages (`--delay`), more for big pulls. A generic User-Agent, nothing that identifies us.
+Backoff-only retries. Development pulls stay tiny (`--page-size 100
+--max-pages 1`); a full-catalog pull (~34 asteroid pages + 1 comet page ≈
+350 MB, 5–10 min) is a deliberate, announced run, never a build side
+effect. If JPL publishes guidance that conflicts, their guidance wins.
+
+## Stage 2 — `prometheia-convert`
+
+Reads `provenance.txt`, every `part-*.tsv` shard (sorted, so page order is
+deterministic), and emits one EPM1 container.
+
+### Unit conversions (the only place units ever change)
+
+| field | conversion |
+|---|---|
+| `i`, `om`, `w`, `ma` | degrees → radians (× π/180); stored as f64 |
+| `a`, `e`, `epoch` | none (AU, dimensionless, JD TDB) |
+| `sigma_i`, `sigma_om`, `sigma_w`, `sigma_ma` | degrees → radians, then narrowed to f32 |
+| `H`, `G`, `diameter`, angular-free sigmas (`sigma_a`, `sigma_e`) | narrowed to f32 |
+
+f64 element precision is preserved bit-exactly through parsing
+(`strtod`); only sigmas and physicals are f32 in the record, which is
+comfortably beyond their observational accuracy.
+
+### Record flags derived from field presence
+
+| condition | EPM1 record flags |
+|---|---|
+| all six sigmas present and ≥ 0 (missing treated as 0) | `kSigmas` |
+| `H` or `G` present | `kHg` |
+| `diameter` present and > 0 | `kDiameter` |
+| `name` non-empty | `kHasName` (also derived by the writer) |
+
+### Validation and cleanup
+
+- Rows with missing/bad `spkid`, `epoch`, `a` or `e` are counted and
+  skipped, never silently dropped (count lands in metadata as
+  `rows_skipped`).
+- Rows sorted by `spkid`; duplicate spkids keep the first occurrence,
+  count in metadata as `spkid_dupes`.
+- The EPM1 writer re-validates every record (finiteness, `e ≠ 1`,
+  sign(a) consistent with e, ascending order) — the container never
+  stores what it would refuse to read.
+- Hyperbolic comets (`e > 1`, `a < 0`) are legal and expected; parabolic
+  (`e = 1`) is rejected (singular elements).
+
+### Metadata written into the catalog
+
+`format`, `generator`, `frame` (`ICRF-equinox-J2000`), `time_scale`
+(`TDB`), `elements` (order and unit note), `source`, `source_url`,
+`fetched_started_utc`, `fetched_finished_utc`, `sbdb_count` (what SBDB
+reported), `rows_skipped`, `spkid_dupes`. The engine treats metadata as
+descriptive; correctness never depends on it.
+
+### Reference build (100-body sample)
+
+```sh
+python3 tools/fetch/sbdb_fetch.py --out-dir sbdb-raw-100 --kinds a \
+        --page-size 100 --max-pages 1
+./build/prometheia-convert sbdb-raw-100 -o ceres-100.epm
+./build/prometheia-info ceres-100.epm --sample 4
+```
+
+Measured: 100 bodies, 9,919 bytes total (99 B/body is fixed-overhead
+dominated at this size; steady-state is ~25 B/record at 50k scale).
+
+## A catalog of named bodies
+
+A client that ships a few named bodies, as Astrolog does, cuts them from a
+full catalog rather than shipping 1.5 million:
+
+```sh
+./build/prometheia-catalog-subset sbdb-20261027.epm bodies.txt -o named.epm
+```
+
+- **Several catalogs stack** as the engine stacks them, the newest record
+  of a body winning whole, names included. A body renamed in an overlay
+  answers to its new name only. `--all` keeps every body, which is the
+  fold that brings a base up to date ("Freshness", tier 2a). Measured: a
+  cut of Geyagugv, Ceres, Chiron and Eris from base + refresh answers
+  bit-identically to loading the two catalogs directly.
+- **The list** has one body per line: its number or primary designation
+  as SBDB gives it (`1`, `2060`, `2002 AW197`) or its name (`Ceres`),
+  matched ASCII case-insensitively. `#` starts a comment. From a 1.2
+  catalog a line may also be a numbered body's old provisional
+  designation. Such a line is served, and named on stderr as `LIST:N:
+  '2015 RR245' -> 523794 (old designation)`, so a list made before a body
+  was numbered can record which body it got (asked for by Astrolog,
+  2026-10-27).
+- **Nothing is guessed.** A line that matches no body, or more than one,
+  stops the cut and is named with its line number. With `--skip-missing`,
+  such a line is named, marked `(skipped)` and left out, and the cut goes
+  on. That is for a list of thousands cut from a catalog that has moved.
+- **Each record is copied as the source has it.** The metadata is the
+  source's, plus `subset_of` and `subset_of_records`. A fold's
+  `fetched_finished_utc` is its newest input's, so it says how current the
+  data is. `sbdb_count` stays the base's. No time or tool version is
+  recorded, so the same catalog and list always give the same bytes, and a
+  shipped cut can be pinned.
+- **Measured (2026-10-25)** on `sbdb-full-20260916.epm`, with (1)–(29),
+  Chiron and twelve outer bodies (Pholus through Gonggong):
+  - 42 bodies came to 4,629 bytes in 1.2 s;
+  - ten of them at five epochs over 2026–2066, with the perturber kernel,
+    gave answers identical to the full catalog's;
+  - `test_catalog_subset` holds a cut to its source field by field.
+- **The perturber kernel** is still needed more than 100 years from the
+  elements' epoch, as for any catalog ("Asteroid perturber kernel", below).
+
+## Asteroid perturber kernel
+
+The small-body force model can include JPL's 16 most massive main-belt
+asteroids (docs/ENGINE.md, `add_perturbers`). Their trajectories come from
+JPL's SB441-N16 kernel, a US-government work:
+
+```sh
+# once, 646 MB, a single sequential download (announce it; see Etiquette),
+# then the DE440-span cut (41.8 MB, bit-identical inside it) made from it by
+# build/prometheia-spk-trim; both checked against pinned SHA-256s
+tools/fetch/de_fetch.py --dir ephe --only sb441
+tools/fetch/de_fetch.py --dir ephe --only sb441 --verify
+```
+
+Without a kernel a catalog body is served within 100 years of its element
+epoch; beyond, it needs one: the cut for 1550–2650, and the full kernel for
+DE441's span (docs/VALIDATION.md, "Small bodies").
+
+- The kernel carries no masses; the engine takes them from the DE file's
+  `MAnnnn` constants (DE440 carries all 16) or its built-in DE440 table.
+  JPL documents the set in IOM 392R-21-005 (Farnocchia 2021).
+- Releases ship the trimmed kernel as an asset beside the catalogs, with its
+  SHA-256 (the full kernel: 919d612c…fd90; the DE440-span cut:
+  e7b67e32…7f09). It changes only when JPL publishes a new perturber
+  set. Cuts made before 2026-09-29 read a31b839a…2376: the same records,
+  with a comment naming the trim tool's version, which it no longer
+  writes so that the cut can be pinned. `--verify` accepts both.
+
+## Orbit covariance: on demand
+
+The bulk SBDB query returns per-element sigmas only, and those are
+uncorrelated summaries that overstate sky-plane uncertainty 10–1000×
+(docs/VALIDATION.md). The full 6×6 covariance comes from the single-object
+API, one request per body (`sbdb.api?sstr=<des>&cov=mat&full-prec=1`) —
+at SBDB's polite pace far too slow for the whole catalog, so it is fetched
+for the bodies someone asks about:
+
+```sh
+python3 tools/fetch/sbdb_fetch.py --out-dir cov-raw --covariance 1 2 4 145451
+python3 tools/fetch/sbdb_fetch.py --out-dir cov-raw --covariance-file mine.txt
+./build/prometheia-convert cov-raw -o covariance-overlay.epm
+```
+
+- The shard `covariance.tsv` carries the standard 20 columns plus
+  `cov_epoch`, the cometary elements at that epoch (`cov_e`, `cov_q`,
+  `cov_tp`, `cov_om`, `cov_w`, `cov_i`; angles in degrees as delivered)
+  and the packed upper triangle `cov_00 … cov_55` in {e, q, tp, node,
+  peri, i}. Non-gravitational parameters beyond the six (comets) are
+  marginalized by dropping their rows and columns.
+- The converter stores angles in radians (squared terms scaled
+  accordingly) as the EPM1 `kCovariance` block. The overlay stacks on a
+  base catalog like any other (newest wins), so those bodies answer
+  `sigma_arcsec`; bodies without a covariance answer none.
+- Etiquette as for delta refetches: one request at a time, `--delay`
+  (2 s) between them, resumable through `manifest-covariance.json`.
+- **One body costs only itself** (since 2026-10-25; Astrolog found a run
+  dying at its first `A/` object):
+  - A covariance published but unusable is written as none, and the
+    manifest entry's `covariance_unusable` says why. Every `A/` object
+    is like this: JPL publishes its matrix and labels with an empty
+    element list, and its covariance epoch is not the orbit's, so there
+    is nothing to place the matrix on.
+  - A designation SBDB refuses (not found, ambiguous) is reported and
+    skipped, and the run exits 1 having written the rest.
+  - A transport failure still stops the run.
+  - `tools/check/fetchtest.py` (gate) holds all three against scripted
+    answers.
+- Proper names: `sbdb.api` has no bare name field; the row's `name` is
+  derived from `shortname` minus the designation ("1 Ceres" → "Ceres"),
+  matching the bulk query (this also fixed delta overlays, which carried
+  "1 Ceres").
+
+## Freshness: catalogs are stacked, not rebuilt
+
+Orbit solutions improve constantly, and unnumbered objects change most.
+Ingestion is therefore incremental by design: fetch a small, recent catalog
+(a day of SBDB updates, or the top-N brightest), and the engine overlays
+catalogs by priority — newer wins, older answers remain available beneath.
+No rebake of the 1.56M-object base catalog is ever required to correct one
+orbit. (Overlay mechanics land with the engine, M4.)
+
+## Freshness: catching orbit updates in hours or days
+
+SBDB is a **living database, not a release train**: JPL's orbit-determination
+pipelines fold in new astrometry continuously (observations flow
+observatory → MPC daily batches → JPL; solutions refresh within hours for
+active objects). SBDB has no change feed or webhook. It does filter on the
+orbit's solution date, which the 2026-09-16 reading of its documentation
+missed and Astrolog found on 2026-10-25: `sb-cdata` accepts
+`soln_date|GT|<date>`. Measured: 2,041 asteroids re-solved after
+2026-09-15; `name|DF` (has a name) gives 26,606; their `OR` gives 28,527,
+the sum less the overlap, so the server applies both. Only JPL's own orbits
+have a `soln_date`, and most new discoveries arrive with the MPC's, so
+`soln_date|ND` has to go with it (2a below). Freshness is still
+*our* mechanism, and the tiered machinery below is **implemented in
+`prometheia-fetch`**.
+
+**Three observing tiers, each sized to its patience:**
+
+1. **Hot subset (hourly, tiny):** the objects a deployment actually cares
+   about, swept by class with full precision — a few hundred KB per run.
+
+   ```sh
+   sbdb_fetch.py --out-dir hot-cen --kinds a --sb-class CEN,TJN
+   sbdb_fetch.py --out-dir hot-named --kinds a --fields <fields> --sb-class ...
+   ```
+
+2. **Delta sweep (daily):** a slim identity sweep of *all* bodies —
+   `kind,spkid,orbit_id` only, ~2 MB per 50k page — diffed against the
+   previous slim run. `orbit_id` is the orbit-solution identifier; a moved
+   value means a new solution for that body, and only those bodies are
+   re-fetched, one request each via the single-object endpoint
+   (capped by `--max-delta`; beyond the cap the tool demands a full pull).
+   Output is an **overlay catalog** in the standard 21-column layout, so
+   the unmodified converter turns it into a stackable `.epm`.
+
+   ```sh
+   sbdb_fetch.py --slim --out-dir slim-20260916 --page-size 200000
+   sbdb_fetch.py --slim --out-dir slim-20260917 --delta-prev slim-20260916 \
+                 --delta-out overlay-20260917
+   prometheia-convert overlay-20260917 -o sbdb-delta-20260917.epm
+   ```
+
+   Delta-run characteristics, measured on the smoke test: 1 slim sweep
+   (~32 pages at 200k/page) + 1 request per changed body. A quiet day
+   touches dozens of orbits; a busy one, a few thousand.
+
+   Format nuance learned in the smoke test: the query API reports
+   `orbit_id` as e.g. `48` / `JPL 74` while the single-object API reports
+   `74` — the diff compares sweep-to-sweep only, so the inconsistency
+   never crosses a comparison. The single-object `kind` is a subtype code
+   (`an`/`au`/`cn`/`cu` = numbered/unnumbered asteroid/comet); the
+   converter classifies by leading letter.
+
+2a. **Refresh since the base (any cadence, five requests):** one
+   full-precision sweep of every body re-solved since a date, OR with an
+   MPC orbit, OR named, OR numbered after the base's highest number. Every
+   body either has a `soln_date` or lacks one, so the first two terms
+   together cover every orbit: a date for JPL's, and `soln_date|ND` for all
+   of the MPC's, every time. A naming or renaming moves no orbit, so
+   neither the `orbit_id` diff nor a date filter alone would bring the
+   name; the `name|DF` term brings every named body every time.
+
+   ```sh
+   sbdb_fetch.py --out-dir sbdb-raw-refresh-20261102 \
+                 --refresh-since 2026-10-27 --numbered-after 895910 \
+                 --base-dir sbdb-raw-full-20261027
+   prometheia-convert sbdb-raw-refresh-20261102 -o sbdb-refresh-20261102.epm
+   # Fold it into the base: one up-to-date catalog, nothing to stack.
+   prometheia-catalog-subset sbdb-20261027.epm sbdb-refresh-20261102.epm \
+       --all -o sbdb-20261102.epm
+   ```
+
+   `--base-dir` (repeat it for a base plus earlier refreshes) checks the
+   sweep against SBDB's own totals, one small request per kind: live count
+   less base less new bodies. Above zero is bodies in neither, and the run
+   exits 1. Below zero is bodies gone from SBDB, which is reported. The two
+   can cancel, so a zero says the counts agree and no more.
+
+   **Measured 2026-11-02, against the 10-27 base:** 84,957 asteroids and
+   4,076 comets in 15 MB, three pages. Against SBDB's totals of 1,578,733
+   and 4,083, that is 1,024 and 1 new bodies, 0 unaccounted for: 89,033
+   rows kept 87,272, and the fold gave `sbdb-20261102.epm`, 1,581,053
+   records, 147,321,486 bytes, sha256 `dfe74e5f…a63b`. 360 orbits moved,
+   the same 360 with or without the MPC term, so none of them was the
+   MPC's. Ten bodies at three epochs (five of them new) answered
+   identically from it and from base + overlay. At 2026-11-03 Horizons
+   puts 2026 ED138 (`JPL#2`) 0.006″ away and 2020 HE221 (`E2026-UB1`, new)
+   0.016″ away. It is the release `catalog-20261102`.
+
+   **What the term fixed.** Until 2026-11-02 the sweep had no MPC term,
+   and this section said a refresh cost two requests. It found 22 of the
+   1,025 bodies new that week. Between the 09-16 base and the 10-27 pull,
+   its sweep had 394 of the 13,255 new bodies, though re-solved orbits were
+   caught: of 1,687 that moved, 7 were not selected, and the 5 of those
+   checked were solved on 10-26 or 10-27, after that sweep ran.
+
+   The fold keeps every body, the newest record of each. That is the data
+   brought up to date: the catalog consumers load and cut from, with no
+   overlay beside it. On 2026-10-25 it took 2.5 minutes and gave
+   `sbdb-20260916-refresh-20261025.epm`: 1,567,167 records, 136,742,821
+   bytes, sha256 `8a29feb9…a23f`. Ten bodies at three epochs answered
+   identically from it and from base + overlay loaded together. That
+   file replaced `sbdb-full-20260916.epm` on this machine. The 09-16
+   catalog can be rebuilt from `sbdb-raw-full/` with `prometheia-convert`,
+   and the overlay from `sbdb-raw-refresh-20261025/`. The next update is
+   a full pull (maintainer, 2026-10-25).
+   - **Superseded on 2026-10-27 by a full pull** (maintainer), the first
+     with `full_name` (`sbdb-raw-full-20261027/`, 33 requests). Converted,
+     it is `sbdb-20261027.epm`, EPM1 1.2: 1,580,028 records, 147,254,154
+     bytes (93.2 B/body), sha256 `1dd348aa…59919` beside it. 1,763 rows were
+     skipped, the same as the September base. 895,910 numbered bodies carry
+     their old provisional designation, and every record its orbit class.
+     The 2026-10-25 file was removed and can be rebuilt from its raw
+     directories. It is published as the release `catalog-20261027`
+     (tagged at `3ed2b9c`), and `tools/fetch/catalog_fetch.py --dir .`
+     fetches it and verifies it against its pin.
+
+   - `--numbered-after` is the base's highest asteroid number (895910 for
+     `sbdb-full-20260916`). Numbered asteroids are SPK-ID 20000000 + number,
+     so the range term catches a numbering whether or not the orbit was
+     re-solved. None had happened by 2026-11-02.
+   - The date is compared a day early, because SBDB keeps `soln_date` in
+     Pacific local time.
+   - Measured on 2026-10-25 against the 09-16 base: 28,527 asteroids and
+     3,969 comets in 10 s, two requests. The converter kept 30,840; the
+     skipped comets lack `a`/`e`, as in the base. The overlay is 2.95 MB.
+   - With it stacked on the base, 768325 answers to `Geyagugv` (named in
+     WGSBN Bulletin 6 #17, 2026-10-19), which the base alone does not.
+   - **MPC orbits** (`MPC:mpo`, orbit ids like `E2026U79`) have a null
+     `soln_date`: 57,995 asteroids on 2026-11-02, every one in every sweep.
+     Astrolog found 16 at condition code ≤ 4, among them 2014 FG62 and
+     2026 BY16.
+   - **Not caught:** deletions and merged designations. `--base-dir`
+     reports a net loss but cannot name the bodies. A body numbered after
+     the base also keeps its old provisional record in the base, under the
+     old SPK-ID, until the next base.
+
+3. **Consolidated base (weekly/monthly):** the full 33-page pull as the
+   authoritative base catalog; tiers 1–2 produce small overlay catalogs
+   that stack on top by priority until the next base.
+
+**Nightly releases — the noted idea (not built).** The pipeline is
+headless and resumable, so a scheduled job on our own machine (the project
+uses no hosted CI) could run tier 2 nightly and publish the overlay as a
+release asset (`sbdb-delta-YYYYMMDD.epm` + sha256), tier 3 weekly/monthly.
+Etiquette binds a scheduled job like any other runner:
+sequential, delay-bearing, announcing itself. Deliberately parked until
+someone actually wants the cadence.
+
+## Distribution: releases when the data changes
+
+SBDB orbit solutions change continuously, so catalogs are **published as
+tagged GitHub release assets, not repo-tree files**:
+
+- One asset per catalog build plus a `.sha256` sidecar (the swisseph-fork
+  release pattern: SHA256SUMS, nothing binary in the tree), each pinned in
+  `tools/fetch/catalog_fetch.py`: `sbdb-full-20260916.epm` on `v0.1.0`, and
+  since 2026-10-27 `sbdb-YYYYMMDD.epm` on a data-only tag
+  `catalog-YYYYMMDD`, a full pull or a refresh folded into one. Release assets allow 2 GB each; the full catalog
+  is 137 MB (`sbdb-full-20260916.epm`: 136,692,088 bytes, 1,566,773 records, 87.2
+  bytes each including the index, metadata and string pool; sha256
+  `35ae8b889a5646ad2481a8357ca09d818eff426a30cedee6f366dc2128d23ba4`).
+- Each release is immutable and pinned — downstreams can reproduce any
+  historical answer by pinning the tag. Provenance travels inside the
+  container's CBOR metadata (source, pull window, SBDB count).
+- The release cadence is "when the data changes" — typically after any
+  significant SBDB refresh worth adopting. A release is always produced by
+  the committed `sbdb_fetch.py` + `prometheia-convert` of its own tag, so
+  the pipeline that made a catalog ships with it.
+- The **only** data files in the repo tree are two small fixtures built
+  by this pipeline: `tests/data/sample-100.epm` (~10 KB, the first 100
+  numbered asteroids), so the tests exercise the reader against real JPL
+  full-precision data, not just synthetic records (its Ceres elements are
+  pinned in `test_catalog.cpp`); and `tests/data/covariance-7.epm` (~3 KB,
+  a covariance overlay for Ceres, Pallas, Vesta, Iris, Hygiea, Cybele and
+  145451 Rumina — the Horizons corpus bodies — from `sbdb_fetch.py
+  --covariance`). Rebuild them only when refreshing a fixture
+  intentionally.
+- The container is already chunked-zstd with its own index — **never**
+  re-bucket or re-compress catalogs for distribution; that would break
+  single-file random access and re-introduce the per-file juggling this
+  project exists to eliminate.
+
+## Release ingestion: Earth-orientation tables
+
+Two small tables that the library needs are compiled into the source
+rather than downloaded at run time, so they go stale between releases.
+Both are refreshed as a step of every release:
+
+- `src/delta_t_table.inc`: observed ΔT (TT − UT1) from USNO,
+  `historic_deltat.data` (1657–1972) and `deltat.data` (monthly, 1973
+  to the latest published month);
+- `src/leap_second_table.inc`: TAI − UTC leap seconds from USNO
+  `tai-utc.dat`.
+
+USNO data is US Government work and in the public domain, which meets
+the no-strings rule (DESIGN.md decision 5). Each generated file records
+the source URLs, their SHA-256 and the retrieval date.
+
+**Before tagging a release:**
+
+```sh
+tools/gen/gen_earth_orientation.py --fetch --raw-dir eop-raw   # 3 sequential requests
+cmake --build build -j && ctest --test-dir build              # tests pin historical values only
+git add src/delta_t_table.inc src/leap_second_table.inc
+git commit -m "data: refresh Delta T and leap seconds (USNO, through YYYY-MM)"
+```
+
+`--check` (without `--fetch`, against a fresh `eop-raw/`) exits 1 when
+the committed tables differ from the sources, so a release checklist can
+gate on it. The retrieval date alone never counts as a change.
+
+The fetch follows the same etiquette as SBDB: one request at a time, a
+3 s pause, a generic User-Agent, and backoff-only
+retries. `eop-raw/` is gitignored.
+
+**What a stale table costs:** ΔT beyond the last sample is extrapolated
+(TIME.md). Expect tenths of a second after a year and seconds after a
+decade. Each second of ΔT is 0.55″ of lunar longitude and 15″ of Earth
+rotation for UT inputs. A new leap second missing from the table makes
+UTC conversions after its date wrong by 1 s. IERS announces leap seconds
+about six months ahead in Bulletin C, so a release in that window should
+include it.
+
+## Future ingestion paths (tracked, not yet built)
+
+| milestone | ingestion | notes |
+|---|---|---|
+| M3 | JPL DE binary files (planetary + Moon truth) | own cleanroom reader of the documented public format; also validates everything else |
+| M5 (built) | Horizons observer tables + vectors → `tests/horizons_corpus.inc` | a verification fixture, refreshed deliberately — not part of release ingestion; see VALIDATION.md |
+| later | SBDB non-grav params `A1`/`A2`/`A3` | needed for long-arc comet integration |
+| later | SBDB `albedo`, `rot_per`, GM, taxonomy | physical-param extension of the record |
+| built (2026-10-27) | SBDB `prov_des`, a numbered body's principal provisional designation, as a lookup alias | in EPM1 1.2 and resolved by lookup (maintainer, 2026-10-27; deferred on 2026-10-25). Derived from SBDB's `full_name`, fetched from 2026-10-27, so a catalog carries it from the next full pull; until then `1998 SL92` does not find 887120, though the number does. Superseded designations (`2022 WX37`, now `2026 EU43`) are not in that field |
+| later | delta catalogs (SBDB change feeds are not offered — diff via `full-prec` re-pull of changed designations) | overlay strategy makes this cheap |

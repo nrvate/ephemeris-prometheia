@@ -1,0 +1,171 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// Reader for NAIF SPK ephemeris kernels (".bsp"), the Double precision
+// Array File (DAF) container JPL distributes its DE ephemerides in
+// (e.g. de440s.bsp), written from NAIF's public format documentation.
+//
+// Supported segment types: 2 (Chebyshev position; velocity by
+// differentiation) and 3 (Chebyshev position and velocity), the types
+// the planetary DE kernels use. Either byte order ("LTL-IEEE" or
+// "BIG-IEEE") is accepted.
+//
+// Units match prometheia::de: kilometres and km/day, time argument the
+// TDB Julian Date (SPK's native argument, TDB seconds past J2000, is
+// derived internally). Bodies use NAIF integer IDs (0 = solar-system
+// barycentre, 3 = Earth-Moon barycentre, 10 = Sun, 301 = Moon, 399 = Earth,
+// 199/299 = Mercury/Venus, 1..9 = planetary-system barycentres).
+//
+// An SpkFile holds no mutable state: the records it decodes go into the
+// caller's SpkCursor, so one open file serves several threads at once, each
+// with a cursor of its own.
+#ifndef PROMETHEIA_SPK_HPP
+#define PROMETHEIA_SPK_HPP
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "prometheia/error.hpp"
+#include "prometheia/io.hpp"
+
+namespace prometheia::spk {
+
+// NAIF IDs of the bodies in JPL's planetary kernels.
+namespace naif {
+constexpr int kSolarSystemBary = 0;
+constexpr int kMercuryBary = 1;
+constexpr int kVenusBary = 2;
+constexpr int kEarthMoonBary = 3;
+constexpr int kMarsBary = 4;
+constexpr int kJupiterBary = 5;
+constexpr int kSaturnBary = 6;
+constexpr int kUranusBary = 7;
+constexpr int kNeptuneBary = 8;
+constexpr int kPlutoBary = 9;
+constexpr int kSun = 10;
+constexpr int kMercury = 199;
+constexpr int kVenus = 299;
+constexpr int kMoon = 301;
+constexpr int kEarth = 399;
+} // namespace naif
+
+// One SPK segment: its summary plus the type-2/3 directory trailer.
+struct Segment {
+    std::string name;      // segment identifier (up to 40 characters)
+    double start_et = 0.0; // coverage, TDB seconds past J2000
+    double end_et = 0.0;
+    int target = 0;          // NAIF ID
+    int center = 0;          // NAIF ID
+    int frame = 0;           // 1 = J2000 (ICRF for DE kernels)
+    int type = 0;            // 2 or 3 (others are listed but not evaluable)
+    uint64_t begin_word = 0; // 1-based DAF word addresses
+    uint64_t end_word = 0;
+    // Type 2/3 directory (from the last four words of the segment).
+    double init_et = 0.0;    // start of the first record
+    double interval_s = 0.0; // record length, seconds
+    int record_words = 0;    // words per record
+    uint64_t record_count = 0;
+    int degree = 0; // Chebyshev degree per component
+};
+
+// A reader's scratch: the last record read of each segment, for one
+// thread. An SpkFile holds no mutable state, so one file serves any number
+// of cursors at once; a cursor follows one file (reset it before using
+// another). It sizes itself to the file on first use.
+struct SpkCursor {
+    std::vector<uint64_t> index;              // per segment: the record held, or none
+    std::vector<std::vector<double>> records; // per segment: its words
+};
+
+class SpkFile {
+public:
+    SpkFile() = default;
+
+    // Opens a DAF/SPK file and reads every segment summary. Segment data
+    // is decoded lazily.
+    static Result<SpkFile> open(const std::string& path);
+
+    const std::vector<Segment>& segments() const { return segments_; }
+    const std::string& internal_name() const { return internal_name_; }
+    bool byte_swapped() const { return swap_; }
+
+    // TDB seconds past J2000 <-> TDB Julian Date.
+    static double et_from_jd(double jd_tdb) { return (jd_tdb - 2451545.0) * 86400.0; }
+
+    // State of a segment's target relative to its center, km and km/day.
+    // The forms without a cursor read into one of their own each call.
+    Result<void> segment_state(size_t segment, double jd_tdb, double out[6]) const {
+        return segment_state_et(segment, et_from_jd(jd_tdb), out);
+    }
+    Result<void> segment_state_et(size_t segment, double et, double out[6],
+                                  SpkCursor& cursor) const;
+    Result<void> segment_state_et(size_t segment, double et, double out[6]) const;
+
+    // State of target relative to center (km, km/day), chaining segments
+    // through their common ancestor in the segment tree. Where several
+    // segments cover the same body and epoch, the one later in the file
+    // wins (the SPK precedence rule). The _et form takes TDB seconds past
+    // J2000 directly: a JD double near the present only resolves ~40 us,
+    // which matters at exact segment boundaries.
+    Result<void> state(int target, int center, double jd_tdb, double out[6],
+                       SpkCursor& cursor) const {
+        return state_et(target, center, et_from_jd(jd_tdb), out, cursor);
+    }
+    Result<void> state(int target, int center, double jd_tdb, double out[6]) const {
+        return state_et(target, center, et_from_jd(jd_tdb), out);
+    }
+    Result<void> state_et(int target, int center, double et, double out[6],
+                          SpkCursor& cursor) const;
+    Result<void> state_et(int target, int center, double et, double out[6]) const;
+
+    // The raw words of `count` consecutive records of a type 2/3 segment,
+    // starting at record `first` (0-based), in native byte order.
+    Result<std::vector<double>> segment_records(size_t segment, uint64_t first,
+                                                uint64_t count) const;
+
+    // The DAF comment area as text (NAIF's NUL line separators as newlines,
+    // up to the EOT terminator); empty when the file has none.
+    Result<std::string> comments() const;
+
+private:
+    // Segment giving `body` relative to its parent at et, or -1.
+    long find_segment(int body, double et) const;
+    Result<void> state_to_root(int body, double et, std::vector<int>& chain,
+                               std::vector<double>& states, SpkCursor& cursor) const;
+    Result<void> read_words(uint64_t first_word, size_t count, std::vector<double>& out) const;
+
+    std::vector<Segment> segments_;
+    std::string internal_name_;
+    std::string path_;
+    bool swap_ = false;
+    int32_t forward_ = 0;       // first summary record: comments fill records 2 .. forward_ - 1
+    io::RandomAccessFile file_; // positional reads: no shared file position
+};
+
+// A type 2/3 segment to write: the summary and the raw records
+// (record_words words each: MID, RADIUS, then the Chebyshev coefficients).
+struct WriteSegment {
+    std::string name; // up to 40 characters
+    int target = 0, center = 0, frame = 1, type = 2;
+    double start_et = 0.0, end_et = 0.0;    // coverage
+    double init_et = 0.0, interval_s = 0.0; // first record start, record length
+    int record_words = 0;
+    std::vector<double> records; // record_count * record_words words
+};
+
+// Writes a little-endian DAF/SPK file holding the given type 2/3 segments,
+// with `comments` (newline-separated text, may be empty) in the comment
+// area. Readable by SpkFile and by NAIF's toolkit.
+Result<void> write_spk(const std::string& path, const std::string& internal_name,
+                       const std::string& comments, const std::vector<WriteSegment>& segments);
+
+// The type 2/3 segments of `file` cut down to whole records covering the TDB
+// seconds [et0, et1]; segments outside the span are dropped. The kept
+// records are copied verbatim, so states inside the span are bit-identical.
+// Segments of other types that overlap the span are an error.
+Result<std::vector<WriteSegment>> trim_segments(const SpkFile& file, double et0, double et1);
+
+} // namespace prometheia::spk
+
+#endif // PROMETHEIA_SPK_HPP

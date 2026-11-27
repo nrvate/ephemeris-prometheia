@@ -1,0 +1,4842 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// prometheia::Engine: ephemeris sources, the apparent-place pipeline and
+// frame output. See include/prometheia/engine.hpp and docs/ENGINE.md.
+#include "prometheia/engine.hpp"
+#include "prometheia/stars.hpp"
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <deque>
+#include <fstream>
+#include <ios>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "natural_apsides.hpp"
+#include "prometheia/apparent.hpp"
+#include "prometheia/catalog.hpp"
+#include "prometheia/de.hpp"
+#include "prometheia/elements.hpp"
+#include "prometheia/forces.hpp"
+#include "prometheia/hypotheticals.hpp"
+#include "prometheia/kepler.hpp"
+#include "prometheia/memo.hpp"
+#include "prometheia/phenomena.hpp"
+#include "prometheia/registry.hpp" // registry::fold, for the folded name index
+#include "prometheia/spk.hpp"
+
+namespace prometheia {
+
+namespace natural_apsides {
+#include "natural_apsides.inc"
+} // namespace natural_apsides
+namespace {
+
+constexpr double kAuKm = 149597870.7; // IAU 2012 Resolution B2 (exact)
+// Obliquity defining JPL's J2000 ecliptic frame (SBDB elements, Horizons,
+// SPICE ECLIPJ2000): the IAU 1976 value, applied to the ICRF without bias.
+constexpr double kJplEclipticObliquityArcsec = 84381.448;
+constexpr double kRad2Deg = 180.0 / 3.14159265358979323846;
+constexpr double kTwoPi = 6.283185307179586476925286766559;
+constexpr double kJ2000 = 2451545.0;
+constexpr double kB1950 = 2433282.42345905; // Besselian B1950.0, TT
+constexpr double kJ1900 = 2415020.0;
+// Earth rotation rate in rad per UT1 day (the ERA rate, Circular 179).
+constexpr double kEarthRotationRadPerDay = kTwoPi * 1.00273781191135448;
+// SBDB SPK-IDs of numbered asteroids are 20000000 + number; older NAIF
+// kernels (JPL's SB441-N16) use 2000000 + number.
+constexpr long kSpkidNumberedBase = 20000000;
+constexpr long kOldSpkidNumberedBase = 2000000;
+// Central-difference half step for rates (days): 1/4096 (21 s), exact in
+// binary. Measured against a five-point difference of positions (ENGINE.md,
+// "Rates"): the three-point truncation, h^2 f'''/6, is set by a topocentric
+// Moon's diurnal parallax and was 2.6e-5 deg/day at 1e-3; here 2.9e-6.
+// Smaller steps lose to roundoff (4.7e-6 at 1/8192).
+constexpr double kSpeedStepDays = 1.0 / 4096.0;
+
+// ---------------------------------------------------------------------------
+// Zodiacs defined at the instant (docs/FRAMES.md, "Zodiacs defined at the
+// instant"). Definitions from the Swiss Ephemeris general documentation
+// (Astrodienst, published; tools/fetch/stars_fetch.py, swisseph-doc),
+// sections 2.8.7-2.8.9 and 2.8.12 items 4-5: the anchor's TRUE position (no
+// aberration, no deflection) held at a fixed longitude on the true ecliptic
+// of date; longitude, not polar, except Wilhelm's, which is polar by
+// definition. Data, each from a pinned source in the same fetch tool:
+// - the four stars: this catalog (Hipparcos new reduction), by HR number;
+// - Sgr A*: SIMBAD's ICRS position (Petrov et al. 2011, VLBI), with the
+//   apparent motion of Reid & Brunthaler 2020 (ApJ 892, 39): -6.411 mas/yr
+//   along the Galactic plane, -0.219 mas/yr toward the pole;
+// - the galactic poles in ICRS from Liu, Zhu & Zhang 2011 (A&A 526, A16):
+//   the IAU 1958 pole carried into the ICRS (their eq. 19) and the pole of
+//   the system centred on Sgr A* (their eq. 22), which is the "true/modern"
+//   one: it moves the galactic node by the 3'11" the documentation quotes.
+enum class ZodiacAnchor {
+    Star,                // a catalog star at `at_deg`
+    GalacticCentre,      // Sgr A* at `at_deg`
+    GalacticCentrePolar, // the ecliptic point on Sgr A*'s hour circle at `at_deg`
+    GalacticNode,        // the galactic equator's node near 0° Capricorn at `at_deg`
+};
+
+struct InstantZodiac {
+    SiderealMode mode;
+    ZodiacAnchor anchor;
+    int hr;           // ZodiacAnchor::Star
+    bool modern_pole; // ZodiacAnchor::GalacticNode: Liu et al.'s eq. 22 pole
+    double at_deg;    // the anchor's sidereal longitude
+};
+
+constexpr double kMula = 246.0 + 40.0 / 60.0; // the middle of the nakshatra Mula
+// Gil Brand: the golden section of the 90° from 0° Scorpio to 0° Aquarius,
+// the shorter part from 0° Scorpio (the documentation: "very close to the
+// ayanamsha of B.V. Raman", which the other section is not).
+constexpr double kGilBrand = 210.0 + 90.0 * 0.38196601125010515;
+
+constexpr InstantZodiac kInstantZodiacs[] = {
+    {SiderealMode::GalacticCentre0Sag, ZodiacAnchor::GalacticCentre, 0, false, 240.0},
+    {SiderealMode::TrueCitra, ZodiacAnchor::Star, 5056, false, 180.0},
+    {SiderealMode::TrueRevati, ZodiacAnchor::Star, 361, false, 359.0 + 50.0 / 60.0},
+    {SiderealMode::TruePushya, ZodiacAnchor::Star, 3461, false, 106.0},
+    {SiderealMode::GalacticCentreGilBrand, ZodiacAnchor::GalacticCentre, 0, false, kGilBrand},
+    {SiderealMode::GalacticEquatorIau1958, ZodiacAnchor::GalacticNode, 0, false, 240.0},
+    {SiderealMode::GalacticEquatorTrue, ZodiacAnchor::GalacticNode, 0, true, 240.0},
+    {SiderealMode::GalacticEquatorMula, ZodiacAnchor::GalacticNode, 0, true, kMula},
+    {SiderealMode::TrueMula, ZodiacAnchor::Star, 6527, false, 240.0},
+    {SiderealMode::GalacticCentreMulaWilhelm, ZodiacAnchor::GalacticCentrePolar, 0, false, kMula},
+    {SiderealMode::GalacticCentreCochrane, ZodiacAnchor::GalacticCentre, 0, false, 270.0},
+};
+
+const InstantZodiac* instant_zodiac(SiderealMode mode) {
+    for (const InstantZodiac& z : kInstantZodiacs) {
+        if (z.mode == mode)
+            return &z;
+    }
+    return nullptr;
+}
+
+// Sgr A* (SIMBAD, ICRS; epoch taken as J2000.0) and its apparent motion.
+constexpr double kSgrARaDeg = 266.41681662499997, kSgrADecDeg = -29.00782497222222;
+constexpr double kSgrAMuLMasYr = -6.411, kSgrAMuBMasYr = -0.219;
+// North galactic poles in the ICRS (Liu, Zhu & Zhang 2011, eqs. 19 and 22).
+constexpr double kPoleIau1958RaDeg = 192.859477875, kPoleIau1958DecDeg = 27.128252416667;
+constexpr double kPoleModernRaDeg = 192.902979992083, kPoleModernDecDeg = 27.103109214444;
+
+// ---------------------------------------------------------------------------
+// Binary stars whose companion bends the bright star's path (STARS.md,
+// "Binary stars"). The catalog's straight line is Hipparcos's, a few years'
+// motion that carries the orbit's velocity at its epoch; over centuries the
+// orbit's curvature takes the star arcseconds from it (FK5: alpha Cen A 28.6",
+// Sirius 2.3", Procyon 1.5"). Relative orbits from the Sixth Catalog of Orbits
+// of Visual Binary Stars (USNO; tools/fetch/stars_fetch.py, orb6), masses from
+// the orbits' own papers (the same tool's arxiv-* sources).
+// What the catalog's straight line describes, from its Hipparcos solution
+// type (I/311): the system's barycentre, where the published catalog fitted
+// the orbit ("orbital binary", old-reduction type 4); or the star itself at
+// the catalog epoch, orbital velocity included (an ordinary 5-parameter
+// solution of one component).
+// A secondary is placed from its primary's model plus the relative orbit, so
+// the two stars keep the orbit's separation exactly: two independent
+// component solutions do not (alpha Cen A and B's disagree by more than a
+// second of arc in ten years), and the primary's solution is the better one
+// (alpha Cen A's proper motion to 3-4 mas/yr, B's 20-26; FK5 holds A's
+// implied barycentre to 0.72" over two centuries). The secondary's own
+// catalog line then gives only its distance.
+enum class BinaryLine { Barycentre, Component, Secondary };
+
+struct BinaryOrbit {
+    int hip; // the catalog star this bends
+    BinaryLine line;
+    int partner_hip;  // BinaryLine::Secondary: the primary
+    double fraction;  // its share of the relative orbit: -M_B/M for a primary,
+                      // +M_A/M for the secondary (the orbit is B about A)
+    double period_yr; // P
+    double a_arcsec;  // semi-major axis of the relative orbit
+    double i_deg, node_deg, omega_deg, e;
+    double t_peri_yr; // periastron, Besselian year
+};
+
+constexpr BinaryOrbit kBinaryOrbits[] = {
+    // Sirius A (Bond et al. 2017: 2.063 and 1.018 Msun).
+    {32349, BinaryLine::Barycentre, 0, -1.018 / (2.063 + 1.018), 50.1284, 7.4957, 136.336, 45.400,
+     149.161, 0.59142, 1994.5715},
+    // Procyon A (Bond et al. 2015: 1.478 and 0.592 Msun).
+    {37279, BinaryLine::Barycentre, 0, -0.592 / (1.478 + 0.592), 40.840, 4.3075, 31.408, 100.683,
+     89.23, 0.39785, 1968.076},
+    // alpha Cen A and B (Akeson et al. 2021, Table 8: the orbit, and the mass
+    // fraction m_A / (m_A + m_B) = 0.54266 fitted with it).
+    {71683, BinaryLine::Component, 0, -(1.0 - 0.54266), 79.762, 17.4930, 79.2430, 205.073, 231.519,
+     0.51947, 1955.564},
+    {71681, BinaryLine::Secondary, 71683, 0.54266, 79.762, 17.4930, 79.2430, 205.073, 231.519,
+     0.51947, 1955.564},
+};
+
+const BinaryOrbit* binary_orbit(int hip) {
+    for (const BinaryOrbit& b : kBinaryOrbits) {
+        if (b.hip == hip)
+            return &b;
+    }
+    return nullptr;
+}
+
+// The star's offset from its system's barycentre at jd, arcsec toward east
+// (RA x cos Dec) and north: the relative orbit (Thiele-Innes; position angle
+// from north through east) scaled by the star's share.
+void binary_offset(const BinaryOrbit& b, double jd, double& east, double& north) {
+    constexpr double kRad = 3.14159265358979323846 / 180.0;
+    const double t_peri_jd = 2415020.31352 + (b.t_peri_yr - 1900.0) * 365.242198781;
+    const double mean = kTwoPi * (jd - t_peri_jd) / (b.period_yr * 365.25);
+    double ecc = mean; // Kepler's equation, Newton's method
+    for (int k = 0; k < 30; ++k) {
+        const double d = (ecc - b.e * std::sin(ecc) - mean) / (1.0 - b.e * std::cos(ecc));
+        ecc -= d;
+        if (std::fabs(d) < 1e-15)
+            break;
+    }
+    const double x = std::cos(ecc) - b.e, y = std::sqrt(1.0 - b.e * b.e) * std::sin(ecc);
+    const double cw = std::cos(b.omega_deg * kRad), sw = std::sin(b.omega_deg * kRad);
+    const double cn = std::cos(b.node_deg * kRad), sn = std::sin(b.node_deg * kRad);
+    const double ci = std::cos(b.i_deg * kRad);
+    const double A = b.a_arcsec * (cw * cn - sw * sn * ci),
+                 B = b.a_arcsec * (cw * sn + sw * cn * ci);
+    const double F = b.a_arcsec * (-sw * cn - cw * sn * ci),
+                 G = b.a_arcsec * (-sw * sn + cw * cn * ci);
+    north = b.fraction * (A * x + F * y);
+    east = b.fraction * (B * x + G * y);
+}
+
+void unit_radec(double ra_deg, double dec_deg, double u[3]) {
+    const double a = ra_deg / kRad2Deg, d = dec_deg / kRad2Deg;
+    u[0] = std::cos(d) * std::cos(a);
+    u[1] = std::cos(d) * std::sin(a);
+    u[2] = std::sin(d);
+}
+
+// ---------------------------------------------------------------------------
+// Ephemeris sources: barycentric ICRF states in km and km/day.
+
+// What reading the files costs a caller in memory: the record each file
+// last decoded, per source slot (Source::slot) and per catalog. The files
+// hold none of it, so sources and catalogs are read-only once loaded and
+// any number of scratches can read them at once, one per thread.
+struct ReadScratch {
+    struct SourceCursors {
+        de::DeCursor de;
+        spk::SpkCursor spk;
+    };
+    std::vector<SourceCursors> sources;       // by Source::slot
+    std::vector<catalog::ChunkCursor> chunks; // by catalog, parallel to Impl::catalogs
+
+    SourceCursors& source(size_t slot) {
+        if (slot >= sources.size())
+            sources.resize(slot + 1);
+        return sources[slot];
+    }
+    catalog::ChunkCursor& chunk(size_t catalog) {
+        if (catalog >= chunks.size())
+            chunks.resize(catalog + 1);
+        return chunks[catalog];
+    }
+};
+
+class Source {
+public:
+    virtual ~Source() = default;
+    virtual Result<void> barycentric(int id, double jd_tdb, double out[6],
+                                     ReadScratch& scratch) const = 0;
+    // Best-known GM of a perturbing mass (AU^3/day^2): published by the
+    // ephemeris when it carries the constant, absent otherwise (the
+    // caller falls back to the DE440 values in forces.hpp).
+    virtual std::optional<double> gm_au3(int) const { return std::nullopt; }
+    // Whether an instant lies in this source's span (a DE file's header
+    // says; an SPK kernel is asked and answers with a coverage error).
+    virtual bool covers(double) const { return true; }
+    // The span covers() answers true over (JD, TDB), for reporting.
+    virtual std::pair<double, double> span() const {
+        return {-std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+    }
+    std::string description;
+    int denum = 0;
+    size_t slot = 0; // this file's cursors in a ReadScratch; the engine numbers its files
+};
+
+double gm_or_builtin(const Source* s, int id) {
+    if (auto g = s->gm_au3(id))
+        return *g;
+    switch (id) {
+    case 10:
+        return gm::kSun;
+    case 1:
+    case 199:
+        return gm::kMercury;
+    case 2:
+    case 299:
+        return gm::kVenus;
+    case 3:
+        return gm::kEarthMoonBary;
+    case 399:
+        return gm::kEarth;
+    case 301:
+        return gm::kMoon;
+    case 4:
+        return gm::kMars;
+    case 5:
+        return gm::kJupiter;
+    case 6:
+        return gm::kSaturn;
+    case 7:
+        return gm::kUranus;
+    case 8:
+        return gm::kNeptune;
+    case 9:
+        return gm::kPluto;
+    }
+    if (id > kSpkidNumberedBase && id < kSpkidNumberedBase + 1000000)
+        return gm::asteroid(int(id - kSpkidNumberedBase));
+    return 0.0;
+}
+
+// Mean elements of the planets, fitted to DE440 (tools/gen/gen_mean_elements.cpp).
+struct MeanElementsFit {
+    int id;
+    double a[3], h[3], k[3], p[3], q[3]; // quadratics in T; see the table header
+    double rms[5];
+};
+#include "mean_elements.inc"
+// The fit's span (the table header): nothing outside it is answered.
+constexpr double kMeanElementsFromJd = 2287188.5, kMeanElementsToJd = 2688975.5;
+
+// How far from its element epoch a catalog body is integrated without an
+// asteroid perturber kernel: 100 Julian years (docs/VALIDATION.md), plus a
+// day, so that the limit applies to the instant asked for and not to the
+// light-time-retarded instant evaluated (under 0.6 day even at 100 AU).
+constexpr double kNoPerturberSpanDays = 100.0 * 365.25 + 1.0;
+
+// The Moon's mean orbit: node and perigee from the fundamental arguments;
+// inclination, eccentricity and semi-major axis as constants (the published
+// mean values of the lunar orbit).
+constexpr double kMoonMeanInclinationDeg = 5.1453964;
+constexpr double kMoonMeanEccentricity = 0.0549006;
+constexpr double kMoonMeanDistanceKm = 384399.0;
+
+// What a v4 source-table entry names as the model (Provenance::model).
+constexpr std::string_view kPlanetMeanModel = "mean elements: DE440 secular fit, 1550-2650";
+constexpr std::string_view kMoonMeanModel = "Moon: Simon et al. 1994";
+constexpr std::string_view kNaturalApsisModel =
+    "natural apsides: DE440 passages, harmonic deviation model";
+
+class DeSource final : public Source {
+public:
+    explicit DeSource(de::DeFile f) : file_(std::move(f)) {
+        denum = file_.header().denum;
+        description = "JPL DE" + std::to_string(denum) + " binary";
+    }
+
+    bool covers(double jd_tdb) const override {
+        return jd_tdb >= file_.header().start_jed && jd_tdb <= file_.header().end_jed;
+    }
+    std::pair<double, double> span() const override {
+        return {file_.header().start_jed, file_.header().end_jed};
+    }
+
+    Result<void> barycentric(int id, double jd_tdb, double out[6],
+                             ReadScratch& scratch) const override {
+        using T = de::Target;
+        T target;
+        switch (id) {
+        case 0:
+            for (int i = 0; i < 6; ++i)
+                out[i] = 0.0;
+            return {};
+        case 1:
+        case 199:
+            target = T::Mercury;
+            break;
+        case 2:
+        case 299:
+            target = T::Venus;
+            break;
+        case 3:
+            target = T::EarthMoonBary;
+            break;
+        case 399:
+            target = T::Earth;
+            break;
+        case 301:
+            target = T::Moon;
+            break;
+        case 10:
+            target = T::Sun;
+            break;
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+        case 8:
+        case 9:
+            target = static_cast<T>(id);
+            break;
+        default:
+            return make_error(ErrorCode::NotFound,
+                              "body " + std::to_string(id) + " is not in " + description);
+        }
+        return file_.relative_state(target, T::SolarSystemBary, jd_tdb, out,
+                                    scratch.source(slot).de);
+    }
+
+    // DE headers publish GMs in AU^3/day^2 (GM1..GM9, GMB, GMS; older
+    // files may carry only some of them). Earth and Moon come from the
+    // GMB/EMRAT split.
+    std::optional<double> gm_au3(int id) const override {
+        const de::Header& h = file_.header();
+        auto c = [&](const char* name) -> std::optional<double> { return file_.constant(name); };
+        switch (id) {
+        case 10:
+            return c("GMS");
+        case 1:
+        case 199:
+            return c("GM1");
+        case 2:
+        case 299:
+            return c("GM2");
+        case 3:
+            return c("GMB");
+        case 399: {
+            auto gmb = c("GMB");
+            if (!gmb || !(h.emrat > 0.0))
+                return std::nullopt;
+            return *gmb * h.emrat / (1.0 + h.emrat);
+        }
+        case 301: {
+            auto gmb = c("GMB");
+            if (!gmb || !(h.emrat > 0.0))
+                return std::nullopt;
+            return *gmb / (1.0 + h.emrat);
+        }
+        case 4:
+            return c("GM4");
+        case 5:
+            return c("GM5");
+        case 6:
+            return c("GM6");
+        case 7:
+            return c("GM7");
+        case 8:
+            return c("GM8");
+        case 9:
+            return c("GM9");
+        }
+        // Asteroid masses the DE integration used: MA0001, MA0002, ...
+        if (id > kSpkidNumberedBase && id < kSpkidNumberedBase + 10000) {
+            char name[8];
+            std::snprintf(name, sizeof name, "MA%04d", int(id - kSpkidNumberedBase));
+            return c(name);
+        }
+        return std::nullopt;
+    }
+
+private:
+    de::DeFile file_;
+};
+
+class SpkSource final : public Source {
+public:
+    explicit SpkSource(spk::SpkFile f) : file_(std::move(f)) {
+        description = "NAIF SPK kernel";
+        if (!file_.internal_name().empty())
+            description += " (" + file_.internal_name() + ")";
+        // The span any segment covers: an instant outside it is answered by
+        // no body here, so a chain's provenance must not name this file.
+        for (const auto& seg : file_.segments()) {
+            first_et_ = std::min(first_et_, seg.start_et);
+            last_et_ = std::max(last_et_, seg.end_et);
+        }
+    }
+
+    bool covers(double jd_tdb) const override {
+        const double et = (jd_tdb - 2451545.0) * 86400.0;
+        return et >= first_et_ && et <= last_et_;
+    }
+    std::pair<double, double> span() const override {
+        return {2451545.0 + first_et_ / 86400.0, 2451545.0 + last_et_ / 86400.0};
+    }
+
+    Result<void> barycentric(int id, double jd_tdb, double out[6],
+                             ReadScratch& scratch) const override {
+        if (id == 0) {
+            for (int i = 0; i < 6; ++i)
+                out[i] = 0.0;
+            return {};
+        }
+        return file_.state(id, 0, jd_tdb, out, scratch.source(slot).spk);
+    }
+
+private:
+    spk::SpkFile file_;
+    double first_et_ = std::numeric_limits<double>::infinity();
+    double last_et_ = -std::numeric_limits<double>::infinity();
+};
+
+// The engine's planetary ephemeris: one file, or several in order (Engine::
+// add_ephemeris). A read goes to the first member whose span holds the
+// instant and falls through only on a coverage error, so DE440 then DE441
+// answers from DE440 inside 1550-2650 and from DE441 outside. The GM
+// constants are the first member's.
+class ChainSource final : public Source {
+public:
+    void add(std::unique_ptr<Source> s) {
+        members_.push_back(std::move(s));
+        denum = members_.front()->denum;
+        description = members_.front()->description;
+        for (size_t i = 1; i < members_.size(); ++i)
+            description += ", then " + members_[i]->description + " outside it";
+    }
+
+    Result<void> barycentric(int id, double jd_tdb, double out[6],
+                             ReadScratch& scratch) const override {
+        bool tried = false;
+        Result<void> last;
+        for (const auto& m : members_) {
+            if (!m->covers(jd_tdb))
+                continue;
+            tried = true;
+            last = m->barycentric(id, jd_tdb, out, scratch);
+            if (last || last.error().code != ErrorCode::CoverageError)
+                return last;
+        }
+        return tried ? last : members_.front()->barycentric(id, jd_tdb, out, scratch);
+    }
+
+    std::optional<double> gm_au3(int id) const override { return members_.front()->gm_au3(id); }
+
+    bool covers(double jd_tdb) const override {
+        for (const auto& m : members_)
+            if (m->covers(jd_tdb))
+                return true;
+        return false;
+    }
+
+    // The span the chain answers without a gap: the first member's, grown
+    // by every member that meets it (DE440 then DE441 is DE441's span; DE440
+    // then a cut of DE441 ending at 1550 is 1000-2650).
+    std::pair<double, double> span() const override {
+        auto [lo, hi] = members_.front()->span();
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (const auto& m : members_) {
+                const auto [a, b] = m->span();
+                if (a <= hi && b >= lo && (a < lo || b > hi)) {
+                    lo = std::min(lo, a);
+                    hi = std::max(hi, b);
+                    grew = true;
+                }
+            }
+        }
+        return {lo, hi};
+    }
+
+    const std::vector<std::unique_ptr<Source>>& members() const { return members_; }
+
+    // The member that answers at this instant, for provenance.
+    const Source& at(double jd_tdb) const {
+        for (const auto& m : members_)
+            if (m->covers(jd_tdb))
+                return *m;
+        return *members_.front();
+    }
+
+private:
+    std::vector<std::unique_ptr<Source>> members_;
+};
+
+// Asteroid perturber kernel (JPL SB441-N16 and similar): heliocentric SPK
+// segments for numbered asteroids under old-style ids (2000000 + number),
+// answered under the SBDB SPK-ID (20000000 + number) as barycentric states
+// by adding the main ephemeris's Sun.
+class AsteroidSource final : public Source {
+public:
+    AsteroidSource(spk::SpkFile f, const Source* main) : file_(std::move(f)), main_(main) {
+        description = "asteroid perturbers";
+        if (!file_.internal_name().empty())
+            description += " (" + file_.internal_name() + ")";
+        for (const spk::Segment& seg : file_.segments()) {
+            const long num = long(seg.target) - kOldSpkidNumberedBase;
+            if (seg.center == body::kSun && num > 0 && num < 1000000 &&
+                std::find(bodies_.begin(), bodies_.end(), int(kSpkidNumberedBase + num)) ==
+                    bodies_.end())
+                bodies_.push_back(int(kSpkidNumberedBase + num));
+            first_et_ = std::min(first_et_, seg.start_et);
+            last_et_ = std::max(last_et_, seg.end_et);
+        }
+    }
+
+    std::pair<double, double> span() const override {
+        return {2451545.0 + first_et_ / 86400.0, 2451545.0 + last_et_ / 86400.0};
+    }
+
+    // SBDB SPK-IDs of the bodies the kernel carries.
+    const std::vector<int>& bodies() const { return bodies_; }
+
+    bool has(int id) const {
+        return std::find(bodies_.begin(), bodies_.end(), id) != bodies_.end();
+    }
+
+    Result<void> barycentric(int id, double jd_tdb, double out[6],
+                             ReadScratch& scratch) const override {
+        if (!has(id))
+            return make_error(ErrorCode::NotFound,
+                              "body " + std::to_string(id) + " is not in " + description);
+        const int kid = int(id - kSpkidNumberedBase + kOldSpkidNumberedBase);
+        if (auto r = file_.state(kid, body::kSun, jd_tdb, out, scratch.source(slot).spk); !r) {
+            if (r.error().code != ErrorCode::CoverageError)
+                return r;
+            // Say what the kernel covers, not which of its bodies ran out:
+            // the small-body integration needs every mass at every step.
+            const auto [a, b] = span();
+            char buf[200];
+            std::snprintf(buf, sizeof buf,
+                          "the small-body integration needs JD %.1f, outside the asteroid "
+                          "perturber kernel's span, JD %.1f to %.1f (years %.0f to %.0f)",
+                          jd_tdb, a, b, 2000.0 + (a - 2451545.0) / 365.25,
+                          2000.0 + (b - 2451545.0) / 365.25);
+            return make_error(ErrorCode::CoverageError, buf);
+        }
+        double sun[6];
+        if (auto r = main_->barycentric(body::kSun, jd_tdb, sun, scratch); !r)
+            return r;
+        for (int i = 0; i < 6; ++i)
+            out[i] += sun[i];
+        return {};
+    }
+
+    std::optional<double> gm_au3(int id) const override { return main_->gm_au3(id); }
+
+private:
+    spk::SpkFile file_;
+    const Source* main_;
+    std::vector<int> bodies_;
+    double first_et_ = std::numeric_limits<double>::infinity();
+    double last_et_ = -std::numeric_limits<double>::infinity();
+};
+
+// ---------------------------------------------------------------------------
+// Small matrix helpers (row-major, r_out = M r_in), matching frames.cpp.
+
+void rot1(double a, double m[9]) {
+    const double c = std::cos(a), s = std::sin(a);
+    const double r[9] = {1, 0, 0, 0, c, s, 0, -s, c};
+    std::memcpy(m, r, sizeof r);
+}
+void rot3(double a, double m[9]) {
+    const double c = std::cos(a), s = std::sin(a);
+    const double r[9] = {c, s, 0, -s, c, 0, 0, 0, 1};
+    std::memcpy(m, r, sizeof r);
+}
+void matmul(const double a[9], const double b[9], double out[9]) {
+    double t[9];
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            t[3 * i + j] = a[3 * i] * b[j] + a[3 * i + 1] * b[3 + j] + a[3 * i + 2] * b[6 + j];
+    std::memcpy(out, t, sizeof t);
+}
+void apply(const double m[9], const double v[3], double out[3]) {
+    const double x = v[0], y = v[1], z = v[2];
+    out[0] = m[0] * x + m[1] * y + m[2] * z;
+    out[1] = m[3] * x + m[4] * y + m[5] * z;
+    out[2] = m[6] * x + m[7] * y + m[8] * z;
+}
+void apply_transpose(const double m[9], const double v[3], double out[3]) {
+    const double x = v[0], y = v[1], z = v[2];
+    out[0] = m[0] * x + m[3] * y + m[6] * z;
+    out[1] = m[1] * x + m[4] * y + m[7] * z;
+    out[2] = m[2] * x + m[5] * y + m[8] * z;
+}
+
+// Everything frame-related that depends only on the TT epoch.
+struct EpochFrames {
+    double jd_tt = NAN;
+    frames::PrecessionModel model = frames::PrecessionModel::IAU2006;
+    bool have_nutation = false;
+    double pb[9];  // P * B: ICRF -> mean equator of date
+    double npb[9]; // N * P * B: ICRF -> true equator of date
+    double eps_mean = 0.0;
+    double dpsi = 0.0, deps = 0.0;
+};
+
+// ---------------------------------------------------------------------------
+// Small bodies: the barycentric force model fed from the ephemeris.
+
+// For a rare path that would keep its hot caller from being inlined.
+#if defined(__GNUC__) || defined(__clang__)
+#define PROMETHEIA_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define PROMETHEIA_NOINLINE __declspec(noinline)
+#else
+#define PROMETHEIA_NOINLINE
+#endif
+
+// The point masses that perturb (and attract) a catalog body. Mars..
+// Pluto are system barycentres — exactly where DE puts the mass, since
+// its GMs are system GMs; Earth and Moon are split from the EMB by
+// EMRAT. Bodies the opened ephemeris does not carry are skipped, which
+// is how the synthetic test kernels (three bodies) work; a DE file has
+// them all.
+constexpr int kPerturberIds[] = {10, 199, 299, 399, 301, 4, 5, 6, 7, 8, 9};
+
+// Samples the ephemeris onto per-body cubic-Hermite tables, in blocks of
+// kBlockDays, extending coverage lazily as integration windows march.
+// With kBlockSamples per block the Hermite interpolation error of even
+// Mercury (~2600 km) enters the asteroid's acceleration at the 1e-15
+// level of the Sun's — orders below every tolerance the engine works to.
+//
+// Every sample sits on one fixed grid, J2000 + j·h with h = kBlockDays /
+// kBlockSamples (a dyadic step, so every epoch is exact), cut to the
+// files' span with a sample exactly at each edge; block b holds j =
+// 128b .. 128(b + 1). Which masses act is probed once, at a fixed epoch.
+// So a table's values, and every answer integrated through it, do not
+// depend on which body or instant the engine met first. (They did until
+// 2026-10-27: the blocks were anchored at the first instant asked for,
+// and Eros moved by up to 159 m with the order of requests.)
+//
+// The blocks belong to the corpus (PerturberBlocks), and every engine on it
+// reads them: a block is sampled once, by whichever engine first needs it,
+// and never changes after. Each engine keeps the run of blocks it has
+// reached (PerturberSet), so its coverage, and so its answers, are what
+// they would be with blocks of its own.
+class PerturberBlocks {
+public:
+    static constexpr double kBlockDays = 365.25;
+    static constexpr int kBlockSamples = 128;
+    static constexpr double kGridEpoch = 2451545.0;                 // J2000 TDB
+    static constexpr double kGridStep = kBlockDays / kBlockSamples; // 1461/512 d, exact
+
+    static double grid_time(long j) { return kGridEpoch + double(j) * kGridStep; }
+
+    // The masses that act, in table order, and where their states come from.
+    struct Members {
+        std::vector<int> ids;
+        std::vector<const Source*> sources;
+        std::vector<double> mus;
+        long sun_index = -1;
+    };
+
+    // One grid block: rows of members().ids.size() samples, ascending epochs,
+    // both ends included, from `first` to `last`.
+    struct Block {
+        std::vector<TrajSample> samples;
+        size_t rows = 0;
+        double first = 0.0, last = 0.0;
+    };
+
+    // The planetary ephemeris, and the asteroid masses of a perturber kernel
+    // (after the Sun and planets). Only while the corpus is not frozen, so
+    // with no engine reading; every block built so far is dropped.
+    void attach(const Source* s) { source_ = s; }
+    void attach_asteroids(const Source* s, std::vector<int> ids) {
+        asteroid_source_ = s;
+        asteroid_ids_ = std::move(ids);
+        std::lock_guard<std::mutex> hold(m_);
+        built_.store(false, std::memory_order_relaxed);
+        members_ = Members{};
+        blocks_.clear();
+    }
+
+    // The span the tables can reach: the planetary ephemeris's, narrowed to
+    // the asteroid kernel's when one is attached. Blocks stop at its ends,
+    // and the engine gives small-body memos the same limits.
+    std::pair<double, double> span() const {
+        auto [lo, hi] = source_->span();
+        if (asteroid_source_) {
+            const auto [a, b] = asteroid_source_->span();
+            lo = std::max(lo, a);
+            hi = std::min(hi, b);
+        }
+        return {lo, hi};
+    }
+
+    // Probed once, at J2000 when the span holds it, else at the span's
+    // middle: never at the instant that happened to come first. No mass at
+    // all is an error, and is probed again next time.
+    Result<const Members*> members(ReadScratch& scratch) {
+        if (built_.load(std::memory_order_acquire))
+            return &members_;
+        std::lock_guard<std::mutex> hold(m_);
+        if (built_.load(std::memory_order_relaxed))
+            return &members_;
+        const auto [span_lo, span_hi] = span();
+        const double probe =
+            span_lo < kGridEpoch && kGridEpoch < span_hi ? kGridEpoch : 0.5 * (span_lo + span_hi);
+        Members m;
+        for (int id : kPerturberIds) {
+            double st[6];
+            if (source_->barycentric(id, probe, st, scratch).ok()) {
+                if (id == body::kSun)
+                    m.sun_index = long(m.ids.size());
+                m.ids.push_back(id);
+                m.sources.push_back(source_);
+                m.mus.push_back(gm_or_builtin(source_, id));
+            }
+        }
+        if (asteroid_source_ && m.sun_index >= 0) {
+            for (int id : asteroid_ids_) {
+                double st[6];
+                const double mu = gm_or_builtin(asteroid_source_, id);
+                if (mu > 0.0 && asteroid_source_->barycentric(id, probe, st, scratch).ok()) {
+                    m.ids.push_back(id);
+                    m.sources.push_back(asteroid_source_);
+                    m.mus.push_back(mu);
+                }
+            }
+        }
+        if (m.ids.empty())
+            return make_error(ErrorCode::CoverageError,
+                              "the ephemeris carries none of the perturbing masses at JD " +
+                                  std::to_string(probe) + " (outside its coverage?)");
+        members_ = std::move(m);
+        built_.store(true, std::memory_order_release);
+        return &members_;
+    }
+
+    // Grid block b, cut to the span, sampled on first use through the
+    // caller's scratch. It is sampled outside the lock; two engines that
+    // sample the same block at once get the same values, and the first kept
+    // serves both. A coverage error when the block lies outside the span.
+    Result<std::shared_ptr<const Block>> block(long b, const Members& m, ReadScratch& scratch) {
+        const auto [span_lo, span_hi] = span();
+        const int n = kBlockSamples;
+        const double a = grid_time(b * n), z = grid_time((b + 1) * n);
+        if (!(z > span_lo && a < span_hi)) {
+            char buf[200];
+            std::snprintf(buf, sizeof buf,
+                          "a catalog body is integrated only where the planetary ephemeris and "
+                          "perturbers reach: JD %.1f .. %.1f TDB",
+                          span_lo, span_hi);
+            return make_error(ErrorCode::CoverageError, buf);
+        }
+        {
+            std::lock_guard<std::mutex> hold(m_);
+            if (auto it = blocks_.find(b); it != blocks_.end())
+                return it->second;
+        }
+        std::vector<double> times;
+        times.reserve(size_t(n) + 3);
+        if (a < span_lo)
+            times.push_back(span_lo);
+        for (int i = 0; i <= n; ++i) {
+            const double tt = grid_time(b * n + i);
+            if (tt >= span_lo && tt <= span_hi)
+                times.push_back(tt);
+        }
+        if (z > span_hi && times.back() < span_hi)
+            times.push_back(span_hi);
+        const size_t nb = m.ids.size();
+        // samples[i * nb + k]: sample i of body k. Epochs outer, bodies
+        // inner: the ephemeris keeps one record (every body, 32 days in
+        // DE440) decoded, so this reads each record once where bodies-outer
+        // read the block's dozen records once per body.
+        auto blk = std::make_shared<Block>();
+        blk->samples.resize(times.size() * nb);
+        blk->rows = times.size();
+        blk->first = times.front();
+        blk->last = times.back();
+        for (size_t i = 0; i < times.size(); ++i) {
+            for (size_t k = 0; k < nb; ++k) {
+                double st[6];
+                auto r = m.sources[k]->barycentric(m.ids[k], times[i], st, scratch);
+                if (!r)
+                    return r.error();
+                TrajSample& p = blk->samples[i * nb + k];
+                p.t = times[i];
+                p.px = st[0] / kAuKm;
+                p.py = st[1] / kAuKm;
+                p.pz = st[2] / kAuKm;
+                p.vx = st[3] / kAuKm;
+                p.vy = st[4] / kAuKm;
+                p.vz = st[5] / kAuKm;
+            }
+        }
+        std::lock_guard<std::mutex> hold(m_);
+        return blocks_.try_emplace(b, std::move(blk)).first->second;
+    }
+
+private:
+    const Source* source_ = nullptr;
+    const Source* asteroid_source_ = nullptr;
+    std::vector<int> asteroid_ids_;
+    std::mutex m_; // guards the members' build and the block map
+    std::atomic<bool> built_{false};
+    Members members_;
+    std::unordered_map<long, std::shared_ptr<const Block>> blocks_;
+};
+
+// One engine's view of the corpus's perturber tables: the run of blocks it
+// has reached, lo_block_ .. hi_block_, and its own failure state.
+class PerturberSet final : public PerturberStates {
+public:
+    using Block = PerturberBlocks::Block;
+
+    // The corpus's tables, and the scratch every block is read through.
+    // Forgets the blocks reached so far.
+    void attach(PerturberBlocks* store, ReadScratch* scratch) {
+        store_ = store;
+        scratch_ = scratch;
+        reset();
+    }
+
+    void reset() {
+        ok_ = true;
+        error_.clear();
+        error_code_ = ErrorCode::Ok;
+        members_ = nullptr;
+        blocks_.clear();
+        current_ = nullptr;
+        lo_ = hi_ = 0.0;
+    }
+
+    std::pair<double, double> span() const { return store_->span(); }
+
+    // Ends a failure once the engine has refused the request that met it
+    // and dropped what that request integrated. The tables themselves are
+    // whole: a block is kept only after all its samples are read.
+    void clear_failure() {
+        if (ok_)
+            return;
+        if (!members_) {
+            reset();
+            return;
+        }
+        ok_ = true;
+        error_.clear();
+        error_code_ = ErrorCode::Ok;
+    }
+
+    // PerturberStates. ensure() reaches the first block on first use and
+    // then extends coverage. A failure (no masses at all, or an instant
+    // past the span) makes every state read zero until clear_failure(): the
+    // engine checks ok() after each integration, refuses that request,
+    // discards the trajectory it touched and clears the failure
+    // (2026-10-25: it used to stay for the engine's life, so one request
+    // near 1550 broke every catalog body for every later one).
+    void ensure(double t) override {
+        if (!ok_)
+            return;
+        if (!members_) {
+            build(t);
+            if (!ok_)
+                return;
+        }
+        while (ok_ && t > hi_)
+            extend(true);
+        while (ok_ && t < lo_)
+            extend(false);
+    }
+
+    void state(size_t i, double t, double out[6]) override {
+        if (!ok_ || i >= count() || blocks_.empty()) {
+            for (int k = 0; k < 6; ++k)
+                out[k] = 0.0;
+            return;
+        }
+        const Row r = locate(t);
+        if (r.clamped)
+            copy_sample(r.a[i], out);
+        else
+            r.weights.apply(r.a[i], r.b[i], out);
+    }
+
+    // One interval lookup and one set of Hermite weights serve every mass:
+    // all tables share their sample epochs, stored row by row.
+    void states(double t, double* out) override {
+        const size_t n = count();
+        if (!ok_ || n == 0 || blocks_.empty()) {
+            for (size_t k = 0; k < 6 * n; ++k)
+                out[k] = 0.0;
+            return;
+        }
+        const Row r = locate(t);
+        for (size_t i = 0; i < n; ++i) {
+            if (r.clamped)
+                copy_sample(r.a[i], out + 6 * i);
+            else
+                r.weights.apply(r.a[i], r.b[i], out + 6 * i);
+        }
+    }
+
+    // Positions of every mass, and a velocity for one: the force model uses
+    // velocities only for the Sun's relativistic term, and interpolating
+    // them for all eleven was half of a small body's integration
+    // (2026-09-19). The same weights as states(), so the same values.
+    void positions(double t, double* out, long with_velocity) override {
+        const size_t n = count();
+        if (!ok_ || n == 0 || blocks_.empty()) {
+            for (size_t k = 0; k < 6 * n; ++k)
+                out[k] = 0.0;
+            return;
+        }
+        const Row r = locate(t);
+        for (size_t i = 0; i < n; ++i) {
+            if (r.clamped)
+                copy_sample(r.a[i], out + 6 * i);
+            else if (long(i) == with_velocity)
+                r.weights.apply(r.a[i], r.b[i], out + 6 * i);
+            else
+                r.weights.apply_position(r.a[i], r.b[i], out + 6 * i);
+        }
+    }
+
+    size_t count() const override { return members_ ? members_->ids.size() : 0; }
+    const double* mus() const override { return members_ ? members_->mus.data() : nullptr; }
+    bool ok() const override { return ok_; }
+    long sun_index() const override { return members_ ? members_->sun_index : -1; }
+    long index_of(long id) const override {
+        for (size_t i = 0; i < count(); ++i)
+            if (members_->ids[i] == id)
+                return long(i);
+        return -1;
+    }
+
+private:
+    static constexpr double kBlockDays = PerturberBlocks::kBlockDays;
+    static constexpr double kGridEpoch = PerturberBlocks::kGridEpoch;
+    static constexpr double kGridStep = PerturberBlocks::kGridStep;
+
+    void fail(ErrorCode code, std::string msg) {
+        if (ok_) {
+            ok_ = false;
+            error_code_ = code;
+            error_ = std::move(msg);
+        }
+    }
+
+    void build(double t) {
+        auto m = store_->members(*scratch_);
+        if (!m) {
+            fail(m.error().code, m.error().message);
+            return;
+        }
+        members_ = m.value();
+        // The first block is the one holding t; at a block's start that is
+        // also the block before, which is the one inside the span at its end.
+        const double span_hi = span().second;
+        long b = long(std::floor((t - kGridEpoch) / kBlockDays));
+        if (PerturberBlocks::grid_time(b * PerturberBlocks::kBlockSamples) >= span_hi)
+            --b;
+        lo_block_ = hi_block_ = b;
+        add_block(b, true);
+    }
+
+    // Grows coverage by one block in the given direction: the grid block
+    // after the last one held, or before the first.
+    void extend(bool forward) {
+        if (forward) {
+            if (add_block(hi_block_ + 1, true))
+                ++hi_block_;
+        } else if (add_block(lo_block_ - 1, false)) {
+            --lo_block_;
+        }
+    }
+
+    // Takes grid block b from the corpus's tables and joins it to the run:
+    // at the end when forward, else in front. False, with the failure set,
+    // when the block lies outside the span or a read fails.
+    bool add_block(long b, bool forward) {
+        auto blk = store_->block(b, *members_, *scratch_);
+        if (!blk) {
+            fail(blk.error().code, blk.error().message);
+            return false;
+        }
+        if (forward)
+            blocks_.push_back(std::move(blk).value());
+        else
+            blocks_.push_front(std::move(blk).value());
+        lo_ = blocks_.front()->first;
+        hi_ = blocks_.back()->last;
+        return true;
+    }
+
+    // Cubic Hermite weights for one epoch within [ta, tb].
+    struct Hermite {
+        double dt = 0, h00 = 0, h10 = 0, h01 = 0, h11 = 0, d00 = 0, d10 = 0, d01 = 0, d11 = 0;
+        Hermite() = default;
+        Hermite(double ta, double tb, double t) {
+            dt = tb - ta;
+            const double u = (t - ta) / dt;
+            const double u2 = u * u, u3 = u2 * u;
+            h00 = 2 * u3 - 3 * u2 + 1;
+            h10 = u3 - 2 * u2 + u;
+            h01 = -2 * u3 + 3 * u2;
+            h11 = u3 - u2;
+            d00 = (6 * u2 - 6 * u) / dt;
+            d10 = 3 * u2 - 4 * u + 1;
+            d01 = (-6 * u2 + 6 * u) / dt;
+            d11 = 3 * u2 - 2 * u;
+        }
+        void apply_position(const TrajSample& a, const TrajSample& b, double out[3]) const {
+            out[0] = h00 * a.px + h10 * dt * a.vx + h01 * b.px + h11 * dt * b.vx;
+            out[1] = h00 * a.py + h10 * dt * a.vy + h01 * b.py + h11 * dt * b.vy;
+            out[2] = h00 * a.pz + h10 * dt * a.vz + h01 * b.pz + h11 * dt * b.vz;
+        }
+        void apply(const TrajSample& a, const TrajSample& b, double out[6]) const {
+            out[0] = h00 * a.px + h10 * dt * a.vx + h01 * b.px + h11 * dt * b.vx;
+            out[1] = h00 * a.py + h10 * dt * a.vy + h01 * b.py + h11 * dt * b.vy;
+            out[2] = h00 * a.pz + h10 * dt * a.vz + h01 * b.pz + h11 * dt * b.vz;
+            out[3] = d00 * a.px + d10 * a.vx + d01 * b.px + d11 * b.vx;
+            out[4] = d00 * a.py + d10 * a.vy + d01 * b.py + d11 * b.vy;
+            out[5] = d00 * a.pz + d10 * a.vz + d01 * b.pz + d11 * b.vz;
+        }
+    };
+
+    // Where t falls: a clamped row outside the coverage (the first or last
+    // sample, as before), else the block holding it, the interval [lo, lo +
+    // 1] in that block, and its weights. Blocks and their rows are uniformly
+    // spaced, so each index is computed and then nudged past any rounding at
+    // the seams. Two blocks share the sample at their seam, and an instant
+    // on a sample is that sample exactly from either side (the weights are
+    // 0 and 1), so which block answers a seam does not change the answer.
+    // The block last used is tried first: an integration steps through one
+    // block for many calls (searching the run every call cost 14% of a
+    // catalog body, 2026-10-28).
+    struct Row {
+        const TrajSample* a = nullptr; // the row at or before t, every mass
+        const TrajSample* b = nullptr; // the row after it
+        bool clamped = false;          // answer row a as it is
+        Hermite weights;
+    };
+    Row locate(double t) const {
+        if (t <= lo_ || t >= hi_ || !current_ || t < current_->first || t > current_->last)
+            return locate_elsewhere(t);
+        return within(*current_, t);
+    }
+
+    // The rarer cases, kept out of locate() so that it inlines: an instant
+    // outside the coverage, or in another block than the last one.
+    PROMETHEIA_NOINLINE Row locate_elsewhere(double t) const {
+        Row r;
+        if (t <= lo_) {
+            r.a = blocks_.front()->samples.data();
+            r.clamped = true;
+            return r;
+        }
+        if (t >= hi_) {
+            const Block& last = *blocks_.back();
+            r.a = last.samples.data() + (last.rows - 1) * count();
+            r.clamped = true;
+            return r;
+        }
+        const long b =
+            std::clamp(long(std::floor((t - kGridEpoch) / kBlockDays)), lo_block_, hi_block_);
+        size_t bi = size_t(b - lo_block_);
+        while (bi > 0 && blocks_[bi]->first > t)
+            --bi;
+        while (bi + 1 < blocks_.size() && blocks_[bi]->last < t)
+            ++bi;
+        current_ = blocks_[bi].get();
+        return within(*current_, t);
+    }
+
+    // The interval of blk holding t, which lies in [blk.first, blk.last].
+    Row within(const Block& blk, double t) const {
+        const size_t nb = count(), nr = blk.rows;
+        if (nr < 2) {
+            Row r;
+            r.a = blk.samples.data();
+            r.clamped = true;
+            return r;
+        }
+        const auto row_time = [&](size_t row) { return blk.samples[row * nb].t; };
+        const double k = std::floor((t - row_time(0)) / kGridStep);
+        size_t lo = k <= 0.0 ? 0 : std::min(size_t(k), nr - 2);
+        while (lo > 0 && row_time(lo) > t)
+            --lo;
+        while (lo + 2 < nr && row_time(lo + 1) <= t)
+            ++lo;
+        // Made whole, not assigned into a zeroed Row: zeroing it first was
+        // a seventh of locate() (2026-10-28).
+        const TrajSample* a = blk.samples.data() + lo * nb;
+        return Row{a, a + nb, false, Hermite(row_time(lo), row_time(lo + 1), t)};
+    }
+
+    static void copy_sample(const TrajSample& p, double out[6]) {
+        out[0] = p.px;
+        out[1] = p.py;
+        out[2] = p.pz;
+        out[3] = p.vx;
+        out[4] = p.vy;
+        out[5] = p.vz;
+    }
+
+    PerturberBlocks* store_ = nullptr;
+    ReadScratch* scratch_ = nullptr;
+    bool ok_ = true;
+    std::string error_;
+    ErrorCode error_code_ = ErrorCode::Ok;
+    const PerturberBlocks::Members* members_ = nullptr; // the corpus's, once probed
+    double lo_ = 0.0, hi_ = 0.0;                        // first and last sample epochs reached
+    long lo_block_ = 0, hi_block_ = 0;                  // grid blocks reached, inclusive
+    std::deque<std::shared_ptr<const Block>> blocks_;
+    mutable const Block* current_ = nullptr; // the block locate() last answered from
+
+public:
+    const std::string& error() const { return error_; }
+    ErrorCode error_code() const { return error_code_; }
+};
+
+// ---------------------------------------------------------------------------
+// Small-body uncertainty: element sigmas -> position covariance.
+
+// The record's 1-sigma element uncertainties, propagated to a 3x3
+// barycentric position covariance by central finite differences of the
+// integrated trajectory: element k stepped by h_k, both perturbed states
+// carried in their own windowed memos so repeated queries amortize the
+// extra integrations. Element uncertainties are uncorrelated (the catalog
+// stores one sigma per element), so the covariance is the sum of rank-one
+// terms sigma_k^2 c_k c_k^T with c_k = dr/d(element_k).
+// JPL cometary elements {e, q [AU], tp [JD TDB], node, peri, i [rad]} at TDB
+// JD t -> osculating Elements {a, e, i, node, argp, M}: a = q / (1 - e)
+// (negative when hyperbolic), M = n (t - tp) with n = sqrt(mu / |a|^3).
+std::optional<Elements> cometary_to_elements(double mu, const double c[6], double t) {
+    const double e = c[0], q = c[1];
+    if (!(q > 0.0) || !(e >= 0.0) || e == 1.0 || !std::isfinite(c[2]))
+        return std::nullopt;
+    const double a = q / (1.0 - e);
+    const double n = std::sqrt(mu / std::fabs(a * a * a));
+    double m = n * (t - c[2]);
+    if (e < 1.0)
+        m = std::remainder(m, 2.0 * 3.14159265358979323846);
+    return Elements{a, e, c[5], c[3], c[4], m};
+}
+
+// Eigen-decomposition of a real symmetric n x n matrix (n <= 6) by cyclic
+// Jacobi rotations: a is destroyed; values w[k] with unit eigenvectors in
+// the columns of v (v[i][k]).
+void symmetric_eigen(double a[6][6], int n, double w[6], double v[6][6]) {
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            v[i][j] = i == j ? 1.0 : 0.0;
+    for (int sweep = 0; sweep < 60; ++sweep) {
+        double off = 0.0;
+        for (int i = 0; i < n; ++i)
+            for (int j = i + 1; j < n; ++j)
+                off += a[i][j] * a[i][j];
+        if (off < 1e-30)
+            break;
+        for (int p = 0; p < n; ++p) {
+            for (int q = p + 1; q < n; ++q) {
+                if (a[p][q] == 0.0)
+                    continue;
+                const double theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+                const double t = (theta >= 0.0 ? 1.0 : -1.0) /
+                                 (std::fabs(theta) + std::sqrt(theta * theta + 1.0));
+                const double c = 1.0 / std::sqrt(t * t + 1.0), s = t * c;
+                for (int k = 0; k < n; ++k) {
+                    const double akp = a[k][p], akq = a[k][q];
+                    a[k][p] = c * akp - s * akq;
+                    a[k][q] = s * akp + c * akq;
+                }
+                for (int k = 0; k < n; ++k) {
+                    const double apk = a[p][k], aqk = a[q][k];
+                    a[p][k] = c * apk - s * aqk;
+                    a[q][k] = s * apk + c * aqk;
+                }
+                for (int k = 0; k < n; ++k) {
+                    const double vkp = v[k][p], vkq = v[k][q];
+                    v[k][p] = c * vkp - s * vkq;
+                    v[k][q] = s * vkp + c * vkq;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < n; ++i)
+        w[i] = a[i][i];
+}
+
+class SigmaTracks {
+public:
+    struct Column {
+        double sigma; // 1-sigma along the column's direction (unit scale)
+        double h;     // finite-difference step taken along it
+        std::unique_ptr<WindowMemo<BarycentricForce>> plus, minus;
+    };
+
+    SigmaTracks(std::unique_ptr<BarycentricForce> force, std::vector<Column> columns)
+        : force_(std::move(force)), columns_(std::move(columns)) {}
+
+    bool empty() const { return columns_.empty(); }
+
+    // Symmetric 3x3 position covariance at TDB JD t, packed xx, xy, xz,
+    // yy, yz, zz, in AU^2. False when any perturbed track failed to
+    // reach t (non-finite state, or coverage that never got there).
+    bool covariance_at(double t, double cov[6]) const {
+        for (int i = 0; i < 6; ++i)
+            cov[i] = 0.0;
+        for (const Column& c : columns_) {
+            const State sp = c.plus->at(t);
+            const State sm = c.minus->at(t);
+            if (!std::isfinite(sp.pos.x) || !std::isfinite(sm.pos.x))
+                return false;
+            if (t < c.plus->coverage_lo() || t > c.plus->coverage_hi() ||
+                t < c.minus->coverage_lo() || t > c.minus->coverage_hi())
+                return false;
+            const double d[3] = {(sp.pos.x - sm.pos.x) / (2.0 * c.h),
+                                 (sp.pos.y - sm.pos.y) / (2.0 * c.h),
+                                 (sp.pos.z - sm.pos.z) / (2.0 * c.h)};
+            const double w = c.sigma * c.sigma;
+            cov[0] += w * d[0] * d[0];
+            cov[1] += w * d[0] * d[1];
+            cov[2] += w * d[0] * d[2];
+            cov[3] += w * d[1] * d[1];
+            cov[4] += w * d[1] * d[2];
+            cov[5] += w * d[2] * d[2];
+        }
+        return true;
+    }
+
+private:
+    std::unique_ptr<BarycentricForce> force_; // the columns' memos integrate with it
+    std::vector<Column> columns_;
+};
+
+} // namespace
+
+namespace {
+
+// The free helpers the name indexes and lookup() share.
+std::string fold_lower(std::string_view s) {
+    std::string key(s);
+    for (char& c : key)
+        if (c >= 'A' && c <= 'Z')
+            c += 'a' - 'A';
+    return key;
+}
+
+uint64_t fnv1a(std::string_view lower) {
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : lower) {
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+// fnv1a(fold_lower(s)), without the copy.
+uint64_t fnv1a_lower(std::string_view s) {
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : s) {
+        h ^= c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+} // namespace
+
+// What a Corpus holds. Written only by Corpus::open and add_*, before the
+// Corpus is frozen; afterwards every member is read-only but the name indexes
+// and the distinct-body count, which are built on first use under `lazy`.
+// A natural lunar apsis passage (Engine::Impl::natural_apsis).
+struct ApsisPassage {
+    double t;   // TDB
+    double res; // rad: longitude less mean apse and model
+    double lat; // rad
+    double r;   // km
+};
+using ApsisBlock = std::array<std::vector<ApsisPassage>, 2>; // [0] perigees, [1] apogees
+
+// The small-body windows every engine on a corpus has integrated, each kept
+// once (docs/ENGINE.md, "Threads"). A window is a function of the body and
+// the corpus, so an engine that finds one here is spared the integration and
+// gets the same doubles; two that race both integrate, and the first kept
+// stands. The lock covers the map alone: nothing is integrated under it, and
+// a position inside a body's coverage never comes here.
+//
+// Windows otherwise accumulate for the life of the corpus, so past the limit
+// the map is dropped whole, as record_cache is; what is dropped is integrated
+// again if asked for. A year of one body is 7 KB.
+class WindowStore {
+public:
+    std::shared_ptr<const WindowShare::Window> find(uint64_t key, bool forward, size_t index) {
+        std::lock_guard<std::mutex> hold(lock_);
+        const auto it = windows_.find(pack(key, forward, index));
+        return it == windows_.end() ? nullptr : it->second;
+    }
+
+    void keep(uint64_t key, bool forward, size_t index, WindowShare::Window samples) {
+        const size_t bytes = samples.size() * sizeof(TrajSample);
+        auto w = std::make_shared<const WindowShare::Window>(std::move(samples));
+        Map dropped; // freed after the lock is let go
+        std::lock_guard<std::mutex> hold(lock_);
+        if (bytes_ + bytes > kMaxBytes) {
+            dropped.swap(windows_);
+            bytes_ = 0;
+        }
+        if (windows_.emplace(pack(key, forward, index), std::move(w)).second)
+            bytes_ += bytes;
+    }
+
+    void clear() {
+        Map dropped;
+        std::lock_guard<std::mutex> hold(lock_);
+        dropped.swap(windows_);
+        bytes_ = 0;
+    }
+
+    size_t size() {
+        std::lock_guard<std::mutex> hold(lock_);
+        return windows_.size();
+    }
+
+private:
+    using Map = std::unordered_map<uint64_t, std::shared_ptr<const WindowShare::Window>>;
+    static constexpr size_t kMaxBytes = size_t(256) << 20;
+
+    // A key is 37 bits (an SPK-ID, and five for its track); 2^20 windows
+    // would be a million years.
+    static uint64_t pack(uint64_t key, bool forward, size_t index) {
+        return key << 21 | uint64_t(index) << 1 | uint64_t(forward);
+    }
+
+    std::mutex lock_;
+    Map windows_;
+    size_t bytes_ = 0;
+};
+
+// The catalog records engines have decoded, each decoded once. Finding a
+// record walks its chunk from the start, after decompressing it, which is
+// most of what a body costs an engine that finds its windows kept. The newest
+// catalog's record stands for a body; adding a catalog drops the lot.
+class RecordStore {
+public:
+    using Entry = std::pair<catalog::Record, size_t>; // and its catalog
+
+    std::optional<Entry> find(uint64_t id) {
+        std::lock_guard<std::mutex> hold(lock_);
+        const auto it = records_.find(id);
+        if (it == records_.end())
+            return std::nullopt;
+        return it->second;
+    }
+
+    void keep(uint64_t id, const Entry& entry) {
+        std::lock_guard<std::mutex> hold(lock_);
+        if (records_.size() >= kMaxRecords)
+            records_.clear();
+        records_.emplace(id, entry);
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> hold(lock_);
+        records_.clear();
+    }
+
+private:
+    static constexpr size_t kMaxRecords = size_t(1) << 16;
+    std::mutex lock_;
+    std::unordered_map<uint64_t, Entry> records_;
+};
+
+// An engine's way into its corpus's windows. A window that ran on a failed
+// perturber read is never kept: the states it saw were zeros, and the engine
+// refuses the request that met it.
+class EngineWindows final : public WindowShare {
+public:
+    EngineWindows(WindowStore& store, const PerturberSet& perturbers)
+        : store_(store), perturbers_(perturbers) {}
+
+    std::shared_ptr<const Window> find(uint64_t key, bool forward, size_t index) override {
+        return store_.find(key, forward, index);
+    }
+
+    void keep(uint64_t key, bool forward, size_t index, Window samples) override {
+        ++integrated_;
+        if (perturbers_.ok())
+            store_.keep(key, forward, index, std::move(samples));
+    }
+
+    uint64_t integrated() const { return integrated_; }
+
+private:
+    WindowStore& store_;
+    const PerturberSet& perturbers_;
+    uint64_t integrated_ = 0;
+};
+
+// The track a memo's windows are kept under: 0 a body's own, the rest the
+// perturbed tracks behind sigma_arcsec.
+uint64_t window_key(int id, int track) {
+    return uint64_t(id) << 5 | uint64_t(track);
+}
+
+struct Corpus::Data {
+    std::unique_ptr<Source> source; // always a ChainSource (chain, below)
+    ChainSource* chain = nullptr;
+    size_t next_slot = 0;                      // Source::slot of the next file opened
+    std::unique_ptr<AsteroidSource> asteroids; // optional asteroid perturber kernel
+    std::vector<int> asteroid_masses;          // its bodies with a known mass
+    std::string perturber_note;                // appended when asteroid perturbers are loaded
+    double bias[9] = {};
+    double eps_j2000 = 0.0;
+
+    // Named hypothetical bodies: every definition ever added (a deque, so the
+    // set names answers point at stay put), the current one per token, and
+    // the order tokens were first defined in.
+    std::deque<hypotheticals::Body> hypothetical_bodies;
+    std::unordered_map<std::string, const hypotheticals::Body*> hypothetical_by_token;
+    std::vector<std::string> hypothetical_order;
+
+    // Catalog stars by HR number (zodiac anchors) and by HIP number (a
+    // binary's partner): the first star carrying each, built once.
+    std::unordered_map<int, size_t> star_by_hr, star_by_hip;
+
+    // EPM1 catalogs, newest wins, with the paths add_catalog() was given.
+    std::vector<std::unique_ptr<catalog::Reader>> catalogs;
+    std::vector<std::string> catalog_paths;
+    std::string overlay_source; // provenance for catalog bodies
+
+    std::atomic<bool> frozen{false};
+
+    // Per catalog (parallel to `catalogs`), built together on the first
+    // lookup of either, in one pass over the catalog's names:
+    // - `entries`, sorted (FNV-1a hash of the lowercased designation or
+    //   name, SPK-ID) pairs. A hash hit is confirmed against the record's own
+    //   names, so collisions cannot answer a wrong body. ~16 bytes per name
+    //   instead of a string map (1.57M bodies: ~50 MB and ~0.5 s, was ~250
+    //   MB and ~1.4 s).
+    // - `folded`, the proper names folded by registry::fold, with their
+    //   SPK-IDs, sorted and unique: the registry's index for names typed
+    //   with accents or punctuation, and for prefixes. Kept here, not per
+    //   Registry, so the engines on a frozen corpus build it once.
+    // A deque: an index stays put while a later catalog's is appended.
+    struct NameIndex {
+        std::atomic<bool> built{false};
+        std::vector<std::pair<uint64_t, uint64_t>> entries;
+        std::vector<std::pair<std::string, uint64_t>> folded;
+    };
+    std::deque<NameIndex> name_indexes;
+    std::optional<uint64_t> distinct_bodies; // catalog_bodies(), until add_catalog()
+    std::mutex lazy;                         // guards building either
+
+    // The tables a catalog body is integrated through, sampled once for
+    // every engine on the corpus.
+    PerturberBlocks perturber_blocks;
+
+    // The small-body windows integrated so far, for every engine on the
+    // corpus, dropped when any file is added, and the records they start
+    // from, dropped when a catalog is.
+    WindowStore small_body_windows;
+    RecordStore small_body_records;
+
+    // The nutation nodes every engine on the corpus has summed, each kept
+    // once; a node is a function of its index alone, so nothing here goes
+    // stale and nothing drops when a file is added.
+    frames::NutationNodeStore nutation_nodes;
+
+    // The Moon's apsis passages by block (Engine::Impl::ensure_apsides),
+    // each block scanned once for every engine; dropped when an ephemeris is
+    // added.
+    std::unordered_map<long, std::shared_ptr<const ApsisBlock>> apsis_blocks;
+    std::mutex apsis_lock; // guards apsis_blocks
+
+    // Block k, scanned by `scan` on first use. The scan runs outside the
+    // lock; two engines that scan the same block at once find the same
+    // passages, and the first kept serves both. The pointer is for reading
+    // at once: a block lives until an ephemeris is added.
+    template <typename Scan>
+    Result<const ApsisBlock*> apsis_block(long k, Scan&& scan) {
+        {
+            std::lock_guard<std::mutex> hold(apsis_lock);
+            if (auto it = apsis_blocks.find(k); it != apsis_blocks.end())
+                return it->second.get();
+        }
+        auto found = std::make_shared<ApsisBlock>();
+        if (auto r = scan(*found); !r)
+            return r.error();
+        std::lock_guard<std::mutex> hold(apsis_lock);
+        return apsis_blocks.try_emplace(k, std::move(found)).first->second.get();
+    }
+
+    Data() {
+        frames::frame_bias_matrix(bias);
+        eps_j2000 = frames::mean_obliquity(kJ2000);
+        for (size_t i = 0; i < stars::count(); ++i) {
+            star_by_hr.try_emplace(stars::at(i).hr, i);
+            star_by_hip.try_emplace(stars::at(i).hip, i);
+        }
+    }
+
+    std::unique_ptr<Source> number(std::unique_ptr<Source> s) {
+        s->slot = next_slot++;
+        return s;
+    }
+
+    void define_hypotheticals(std::vector<hypotheticals::Body> bodies) {
+        for (hypotheticals::Body& b : bodies) {
+            const hypotheticals::Body& kept = hypothetical_bodies.emplace_back(std::move(b));
+            auto [it, fresh] = hypothetical_by_token.try_emplace(kept.token, &kept);
+            if (fresh)
+                hypothetical_order.push_back(kept.token);
+            else
+                it->second = &kept;
+        }
+    }
+
+    // Provenance of catalog answers: the ephemeris, the catalog stack (newest
+    // first) and, when loaded, the asteroid perturbers.
+    void refresh_overlay_source() {
+        if (catalogs.empty()) {
+            overlay_source.clear();
+            return;
+        }
+        std::string counts;
+        for (size_t i = catalogs.size(); i-- > 0;) {
+            if (!counts.empty())
+                counts += ", ";
+            counts += std::to_string(catalogs[i]->record_count());
+        }
+        overlay_source =
+            source->description + " + EPM1 catalog(s) [" + counts + " bodies]" + perturber_note;
+    }
+
+    // Catalog i's name indexes, built on first use: any thread may ask.
+    Result<const NameIndex*> name_index(size_t i) {
+        NameIndex& idx = name_indexes[i];
+        if (!idx.built.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> hold(lazy);
+            if (!idx.built.load(std::memory_order_relaxed)) {
+                std::vector<std::pair<uint64_t, uint64_t>> entries;
+                std::vector<std::pair<std::string, uint64_t>> folded;
+                entries.reserve(size_t(catalogs[i]->record_count()) + 1024);
+                auto fe = catalogs[i]->for_each_name([&](uint64_t spkid, const catalog::Names& n) {
+                    if (!n.pdes.empty())
+                        entries.emplace_back(fnv1a_lower(n.pdes), spkid);
+                    if (!n.name.empty()) {
+                        entries.emplace_back(fnv1a_lower(n.name), spkid);
+                        folded.emplace_back(registry::fold(n.name), spkid);
+                    }
+                    if (!n.prov_des.empty()) // a numbered body's old designation (1.2)
+                        entries.emplace_back(fnv1a_lower(n.prov_des), spkid);
+                });
+                if (!fe)
+                    return fe.error();
+                std::sort(entries.begin(), entries.end());
+                std::sort(folded.begin(), folded.end());
+                folded.erase(std::unique(folded.begin(), folded.end()), folded.end());
+                folded.shrink_to_fit();
+                idx.entries = std::move(entries);
+                idx.folded = std::move(folded);
+                idx.built.store(true, std::memory_order_release);
+            }
+        }
+        return &idx;
+    }
+};
+
+// Where a body's state came from, for provenance and uncertainty.
+enum Origin { kFromEphemeris = 0, kFromCatalog = 1 };
+
+// One integrated catalog body: its own force model (which leaves the body
+// itself out when it is one of the perturbing masses) and trajectory memo.
+struct SmallBody {
+    std::unique_ptr<BarycentricForce> force;
+    std::unique_ptr<WindowMemo<BarycentricForce>> memo;
+};
+
+struct Engine::Impl {
+    // The loaded data, which other engines may share (a frozen Corpus); the
+    // references name its parts as the engine always has, read-only.
+    std::shared_ptr<Corpus> corpus_owner;
+    Corpus::Data& corpus;
+    const std::unique_ptr<Source>& source; // always a ChainSource (chain, below)
+    ChainSource* const& chain;
+    const std::unique_ptr<AsteroidSource>& asteroids; // optional asteroid perturber kernel
+    const double (&bias)[9];
+    const double& eps_j2000;
+    const std::vector<std::unique_ptr<catalog::Reader>>& catalogs;
+    const std::string& overlay_source_; // provenance for catalog bodies
+    const std::unordered_map<std::string, const hypotheticals::Body*>& hypothetical_by_token;
+    const std::vector<std::string>& hypothetical_order;
+    // Every file read goes through this one scratch (and the perturber
+    // tables through a pointer to it), so the sources and catalogs
+    // themselves hold no mutable state.
+    ReadScratch scratch;
+
+    Impl(std::shared_ptr<Corpus> owner, Corpus::Data& d)
+        : corpus_owner(std::move(owner)), corpus(d), source(d.source), chain(d.chain),
+          asteroids(d.asteroids), bias(d.bias), eps_j2000(d.eps_j2000), catalogs(d.catalogs),
+          overlay_source_(d.overlay_source), hypothetical_by_token(d.hypothetical_by_token),
+          hypothetical_order(d.hypothetical_order) {
+        attach_perturbers();
+    }
+
+    // The perturber tables read the corpus's planetary ephemeris and, when it
+    // has one, its asteroid kernel; again after an add_* changes either.
+    void attach_perturbers() { perturbers.attach(&corpus.perturber_blocks, &scratch); }
+
+    // The element frame's rotation for the fixed equinoxes, kept apart from
+    // the three-slot date cache, which a light-time solve and its rate
+    // stencil already fill.
+    double element_frame_jd = NAN;
+    Precession element_frame_model = Precession::IAU2006;
+    double element_frame[9] = {};
+    const time::DeltaTModel* delta_t = nullptr;
+    time::ObservedDeltaT default_delta_t;
+    EpochFrames cache[3];
+    int cache_next = 0;
+
+    // Small-body overlay: the corpus's catalogs, newest wins. Positions are
+    // integrated on demand from the catalog's osculating elements with
+    // the barycentric force model and memoized per body, per engine, from
+    // windows the corpus keeps for all of them.
+    PerturberSet perturbers;
+    EngineWindows windows{corpus.small_body_windows, perturbers};
+    std::unordered_map<uint64_t, SmallBody> small_bodies;
+    // Decoding a catalog record walks its chunk from the start, so a body
+    // asked for repeatedly — which is every body in a chart — would pay that
+    // walk on every single position. The bodies in play are few; the whole
+    // cache is dropped rather than evicted once it outgrows any working set a
+    // client plausibly has. Each entry keeps which catalog it came from, so a
+    // hit decodes nothing (until 2026-09-19 a hit looked the record up again
+    // to find its catalog: half of a small body's cost).
+    std::unordered_map<uint64_t, std::pair<catalog::Record, size_t>> record_cache;
+    static constexpr size_t kRecordCacheMax = 4096;
+    std::unordered_map<uint64_t, std::unique_ptr<SigmaTracks>> sigma_tracks;
+
+    static std::string lowercase(std::string_view s) { return fold_lower(s); }
+    static uint64_t name_hash(std::string_view lower) { return fnv1a(lower); }
+
+    double delta_t_seconds(double jd_tt) const {
+        return (delta_t ? delta_t : &default_delta_t)->delta_t_seconds(jd_tt);
+    }
+
+    const EpochFrames& frames_at(double jd_tt, bool need_nutation, Precession precession) {
+        const auto model = frames::PrecessionModel(int(precession));
+        for (EpochFrames& f : cache) {
+            if (f.jd_tt == jd_tt && f.model == model) {
+                if (need_nutation && !f.have_nutation)
+                    add_nutation(f);
+                return f;
+            }
+        }
+        EpochFrames& f = cache[cache_next];
+        cache_next = (cache_next + 1) % 3;
+        f.jd_tt = jd_tt;
+        f.model = model;
+        f.have_nutation = false;
+        precession_nodes.at(jd_tt, model, f.pb, f.eps_mean);
+        if (need_nutation)
+            add_nutation(f);
+        return f;
+    }
+
+    // P * B and the mean obliquity interpolated from day nodes
+    // (frames::PrecessionInterpolator, within 2e-15 of the direct values): a
+    // fit samples a new epoch on every call, and the direct series cost 0.64
+    // us an epoch against 0.024.
+    frames::PrecessionInterpolator precession_nodes;
+    // Nutation interpolated from half-day nodes (frames::NutationInterpolator,
+    // 0.004 uas): the value depends only on the epoch. The node cache is
+    // shared by every body and every rate stencil this engine evaluates, and
+    // behind it the corpus keeps each node once for every engine and thread.
+    frames::NutationInterpolator nutation{&corpus.nutation_nodes};
+    // TDB-TT from one-day nodes (time::TdbInterpolator, docs/TIME.md): the
+    // full series costs ~12 us and a calc converts several instants. Within
+    // 1.55 us of all 787 terms, below what a JD double holds.
+    time::TdbInterpolator tdb;
+
+    void add_nutation(EpochFrames& f) {
+        nutation.at(f.jd_tt, f.dpsi, f.deps);
+        // N = R1(-(eps + deps)) R3(-dpsi) R1(eps), docs/FRAMES.md.
+        double a[9], b[9], c[9], n[9];
+        rot1(-(f.eps_mean + f.deps), a);
+        rot3(-f.dpsi, b);
+        rot1(f.eps_mean, c);
+        matmul(a, b, n);
+        matmul(n, c, n);
+        matmul(n, f.pb, f.npb);
+        f.have_nutation = true;
+    }
+
+    // The last few observer and Sun states, keyed exactly: a request of many
+    // bodies at one instant (and its rate stencil) reads the ephemeris for
+    // them once. Three entries cover t - h, t, t + h.
+    struct ObserverMemo {
+        bool valid = false;
+        double jd_tt = 0.0;
+        Center center = Center::Geocentric;
+        Precession precession = Precession::IAU2006;
+        frames::GeoSite site{};
+        int center_body = 0;
+        double delta_t = 0.0; // topocentric: the UT1 the site was rotated with
+        double state[6];
+    };
+    ObserverMemo observer_memo[3];
+    int observer_memo_next = 0;
+    struct SunMemo {
+        double jd_tdb = NAN;
+        double state[6];
+    };
+    SunMemo sun_memo[3];
+    int sun_memo_next = 0;
+
+    void forget_observers() {
+        for (ObserverMemo& m : observer_memo)
+            m.valid = false;
+    }
+
+    Result<void> sun_at(double jd_tdb, double out[6]) {
+        for (const SunMemo& m : sun_memo) {
+            if (m.jd_tdb == jd_tdb) {
+                std::memcpy(out, m.state, sizeof m.state);
+                return {};
+            }
+        }
+        auto r = source->barycentric(body::kSun, jd_tdb, out, scratch);
+        if (!r)
+            return r;
+        SunMemo& m = sun_memo[sun_memo_next];
+        sun_memo_next = (sun_memo_next + 1) % 3;
+        m.jd_tdb = jd_tdb;
+        std::memcpy(m.state, out, sizeof m.state);
+        return {};
+    }
+
+    Result<void> observer(const CalcOptions& o, double jd_tt, double jd_tdb, double out[6]) {
+        const bool topo = o.center == Center::Topocentric;
+        // A Delta T model (the C interface's callback, say) may change its
+        // answer between calls, so a topocentric entry is keyed on it too.
+        const double dt = topo ? delta_t_seconds(jd_tt) : 0.0;
+        for (const ObserverMemo& m : observer_memo) {
+            if (m.valid && m.jd_tt == jd_tt && m.center == o.center &&
+                (o.center != Center::Body || m.center_body == o.center_body) &&
+                (!topo || (m.precession == o.precession && m.site.lon_rad == o.site.lon_rad &&
+                           m.site.lat_rad == o.site.lat_rad && m.site.height_m == o.site.height_m &&
+                           m.delta_t == dt))) {
+                std::memcpy(out, m.state, sizeof m.state);
+                return {};
+            }
+        }
+        auto r = observer_uncached(o, jd_tt, jd_tdb, out);
+        if (!r)
+            return r;
+        ObserverMemo& m = observer_memo[observer_memo_next];
+        observer_memo_next = (observer_memo_next + 1) % 3;
+        m.valid = true;
+        m.jd_tt = jd_tt;
+        m.center = o.center;
+        m.precession = o.precession;
+        m.site = o.site;
+        m.center_body = o.center_body;
+        m.delta_t = dt;
+        std::memcpy(m.state, out, sizeof m.state);
+        return {};
+    }
+
+    // Observer barycentric state (km, km/day) at the given epoch.
+    Result<void> observer_uncached(const CalcOptions& o, double jd_tt, double jd_tdb,
+                                   double out[6]) {
+        switch (o.center) {
+        case Center::Barycentric:
+            for (int i = 0; i < 6; ++i)
+                out[i] = 0.0;
+            return {};
+        case Center::Heliocentric:
+            return sun_at(jd_tdb, out);
+        case Center::Geocentric:
+            return source->barycentric(body::kEarth, jd_tdb, out, scratch);
+        case Center::Body:
+            return body_barycentric(o.center_body, jd_tdb, out, nullptr);
+        case Center::Topocentric: {
+            // A site the geodetic formulas can place: finite, and above the
+            // Earth's centre along its vertical (the WGS84 polar radius). The
+            // protocol bounds a site's latitude and longitude but not its
+            // height, so this is the only check a height gets.
+            if (!std::isfinite(o.site.lon_rad) || !std::isfinite(o.site.lat_rad) ||
+                !std::isfinite(o.site.height_m) || o.site.height_m <= -6356752.0)
+                return make_error(ErrorCode::ArgumentError,
+                                  "a topocentric site must be finite and above the Earth's centre");
+            auto r = source->barycentric(body::kEarth, jd_tdb, out, scratch);
+            if (!r)
+                return r;
+            const EpochFrames& f = frames_at(jd_tt, true, o.precession);
+            const double jd_ut1 = jd_tt - delta_t_seconds(jd_tt) / 86400.0;
+            const double gast = frames::gast_rad(jd_ut1, jd_tt, f.dpsi, f.eps_mean);
+            double site[3];
+            frames::observer_geocentric(o.site, gast, site);
+            // Site velocity in the true-of-date frame: omega x r about z
+            // (per TT day; the UT1/TT rate difference is ~1e-8).
+            const double vsite[3] = {-kEarthRotationRadPerDay * site[1],
+                                     kEarthRotationRadPerDay * site[0], 0.0};
+            double p[3], v[3];
+            apply_transpose(f.npb, site, p);
+            apply_transpose(f.npb, vsite, v);
+            for (int i = 0; i < 3; ++i) {
+                out[i] += p[i];
+                out[3 + i] += v[i];
+            }
+            return {};
+        }
+        }
+        return make_error(ErrorCode::ArgumentError, "unknown center");
+    }
+
+    // Body state dispatch: the planetary ephemeris first; a body it does
+    // not know is looked up in the catalog overlay (small bodies, by
+    // SPK-ID). out is barycentric km, km/day either way.
+    Result<void> body_barycentric(int id, double jd_tdb, double out[6], int* origin) {
+        auto r = source->barycentric(id, jd_tdb, out, scratch);
+        if (r.ok()) {
+            if (origin)
+                *origin = kFromEphemeris;
+            return r;
+        }
+        if (r.error().code != ErrorCode::NotFound)
+            return r;
+        if (origin)
+            *origin = kFromCatalog;
+        return small_body_state(id, jd_tdb, out);
+    }
+
+    // A force model for integrating body `id`: every mass but the body.
+    std::unique_ptr<BarycentricForce> force_for(int id) {
+        auto f = std::make_unique<BarycentricForce>();
+        f->perturbers = &perturbers;
+        f->exclude_id = id;
+        return f;
+    }
+
+    // Newest-catalog-wins record lookup for a body the planetary
+    // ephemeris does not carry. Engaged only after it returned NotFound.
+    // The pair's second is the catalog the record came from (its name pool
+    // goes with it).
+    Result<std::optional<std::pair<catalog::Record, size_t>>> find_record_at(int id) {
+        if (auto hit = record_cache.find(uint64_t(id)); hit != record_cache.end())
+            return std::optional<std::pair<catalog::Record, size_t>>(hit->second);
+        const auto remember = [&](const std::pair<catalog::Record, size_t>& entry) {
+            if (record_cache.size() >= kRecordCacheMax)
+                record_cache.clear();
+            record_cache[uint64_t(id)] = entry;
+        };
+        if (auto kept = corpus.small_body_records.find(uint64_t(id))) {
+            remember(*kept);
+            return std::optional<std::pair<catalog::Record, size_t>>(*kept);
+        }
+        for (size_t i = catalogs.size(); i-- > 0;) {
+            auto rr = catalogs[i]->lookup(uint64_t(id), scratch.chunk(i));
+            if (rr.ok()) {
+                const std::pair<catalog::Record, size_t> entry{rr.value(), i};
+                remember(entry);
+                corpus.small_body_records.keep(uint64_t(id), entry);
+                return std::optional<std::pair<catalog::Record, size_t>>(entry);
+            }
+            if (rr.error().code != ErrorCode::NotFound)
+                return rr.error();
+        }
+        return std::optional<std::pair<catalog::Record, size_t>>();
+    }
+
+    Result<std::optional<catalog::Record>> find_record(int id) {
+        auto r = find_record_at(id);
+        if (!r.ok()) {
+            return r.error();
+        }
+        if (!r.value()) {
+            return std::optional<catalog::Record>();
+        }
+        return std::optional<catalog::Record>(r.value()->first);
+    }
+
+    Result<void> small_body_state(int id, double jd_tdb, double out[6]) {
+        auto recr = find_record(id);
+        if (!recr.ok())
+            return recr.error();
+        if (!recr.value())
+            return make_error(ErrorCode::NotFound, "body " + std::to_string(id) +
+                                                       " is in neither " + source->description +
+                                                       " nor the loaded catalog(s)");
+        const catalog::Record& rec = *recr.value();
+        // Without JPL's 16 asteroid perturbers the integration drifts: 8.7"
+        // at 100 years from the element epoch, 75" at 400, arcminutes over
+        // millennia (docs/VALIDATION.md, "Small bodies"). Past 100 years it
+        // is refused, and the kernel extends it (maintainer, 2026-09-29).
+        if (!asteroids && std::fabs(jd_tdb - rec.epoch_jtdb) > kNoPerturberSpanDays) {
+            char buf[320];
+            std::snprintf(buf, sizeof buf,
+                          "without an asteroid perturber kernel a catalog body is served within "
+                          "100 years of its element epoch (JD %.1f); load one (add_perturbers, "
+                          "--perturbers; tools/fetch/de_fetch.py --only sb441 provisions it)",
+                          rec.epoch_jtdb);
+            return make_error(ErrorCode::CoverageError, buf);
+        }
+
+        auto& slot = small_bodies[uint64_t(id)];
+        if (!slot.memo) {
+            auto built = build_small_body(rec);
+            if (!built)
+                return built.error();
+            slot = std::move(built).value();
+        }
+        const State s = slot.memo->at(jd_tdb);
+        if (!perturbers.ok()) {
+            // This request is refused, and nothing it integrated is kept: the
+            // window that met the failure ran on zeroed perturber states.
+            Error e = make_error(perturbers.error_code(), perturbers.error());
+            perturbers.clear_failure();
+            small_bodies.erase(uint64_t(id));
+            sigma_tracks.erase(uint64_t(id));
+            return e;
+        }
+        if (jd_tdb < slot.memo->coverage_lo() || jd_tdb > slot.memo->coverage_hi()) {
+            const auto [lo, hi] = perturbers.span();
+            char buf[200];
+            std::snprintf(buf, sizeof buf,
+                          "JD %.6f TDB: a catalog body is integrated only where the planetary "
+                          "ephemeris and perturbers reach, JD %.1f .. %.1f",
+                          jd_tdb, lo, hi);
+            return make_error(ErrorCode::CoverageError, buf);
+        }
+        if (!std::isfinite(s.pos.x) || !std::isfinite(s.vel.x))
+            return make_error(ErrorCode::ArgumentError,
+                              "integration failed for body " + std::to_string(id));
+        const double p[3] = {s.pos.x, s.pos.y, s.pos.z};
+        const double v[3] = {s.vel.x, s.vel.y, s.vel.z};
+        for (int i = 0; i < 3; ++i) {
+            out[i] = p[i] * kAuKm;
+            out[3 + i] = v[i] * kAuKm;
+        }
+        return {};
+    }
+
+    // Elements (heliocentric, ecliptic and equinox of J2000, at a TDB
+    // epoch) -> ICRF barycentric seed state (AU, AU/day): elements ->
+    // heliocentric Cartesian in JPL's J2000 ecliptic, rotated to ICRF, then
+    // translated by the Sun's barycentric state at the epoch. JPL's
+    // ecliptic (SBDB elements, Horizons, SPICE ECLIPJ2000) is the ICRF
+    // rotated about x by the IAU 1976 obliquity 84381.448" with no frame
+    // bias -- not the IAU 2006 mean ecliptic our J2000 output uses; the
+    // difference (0.042" plus the 23 mas bias) is ~50 km at 2.7 AU.
+    Result<State> seed_from_elements(const Elements& el, double epoch_jtdb) {
+        const double mu_sun = gm_or_builtin(source.get(), body::kSun);
+        auto st = elements_to_state(mu_sun, el);
+        if (!st)
+            return st.error();
+        const State helio = st.value();
+
+        double m[9];
+        rot1(kJplEclipticObliquityArcsec / 206264.80624709636, m);
+        double r[3] = {helio.pos.x, helio.pos.y, helio.pos.z};
+        double rv[3] = {helio.vel.x, helio.vel.y, helio.vel.z};
+        double p[3], v[3];
+        apply_transpose(m, r, p);
+        apply_transpose(m, rv, v);
+
+        double sun[6];
+        auto rs = source->barycentric(body::kSun, epoch_jtdb, sun, scratch);
+        if (!rs)
+            return rs.error();
+
+        State seed;
+        seed.pos = Vec3(p[0] + sun[0] / kAuKm, p[1] + sun[1] / kAuKm, p[2] + sun[2] / kAuKm);
+        seed.vel = Vec3(v[0] + sun[3] / kAuKm, v[1] + sun[4] / kAuKm, v[2] + sun[5] / kAuKm);
+        return seed;
+    }
+
+    // The memo that integrates one catalog body, seeded at the record's
+    // epoch (TDB) from the record's osculating elements.
+    Result<SmallBody> build_small_body(const catalog::Record& rec) {
+        const Elements el{rec.a_au,     rec.e,        rec.inc_rad,
+                          rec.node_rad, rec.argp_rad, rec.mean_anom_rad};
+        auto seed = seed_from_elements(el, rec.epoch_jtdb);
+        if (!seed)
+            return seed.error();
+        SmallBody b;
+        b.force = force_for(int(rec.spkid));
+        b.memo = std::make_unique<WindowMemo<BarycentricForce>>(b.force.get(), IntegrateOptions{});
+        b.memo->set_share(&windows, window_key(int(rec.spkid), 0));
+        b.memo->set_seed(seed.value(), rec.epoch_jtdb);
+        const auto [lo, hi] = perturbers.span();
+        b.memo->set_limits(lo, hi);
+        return b;
+    }
+
+    // The perturbed trajectories behind sigma_arcsec, built lazily on the
+    // first query that needs them, from the record's full covariance C (at
+    // its own epoch, in cometary elements). C is scaled to a correlation
+    // matrix (element variances span ~1e-23 to ~1e-2), decomposed into
+    // principal axes, and each axis with a positive eigenvalue becomes one
+    // column: seeds at the nominal cometary elements +- s * v_k, where v_k
+    // is the axis scaled to one sigma, integrated in their own memos. The
+    // columns' outer products sum to J C J^T (J = d position / d elements)
+    // exactly in the linear regime. The step s is 1 (the one-sigma point),
+    // raised when that moves the seed by less than kMinSeedStepAu (double
+    // and integrator noise) and lowered to keep e on its side of 0 and 1
+    // and q positive.
+    Result<std::unique_ptr<SigmaTracks>> build_sigma_tracks(const catalog::Record& rec) {
+        static constexpr double kMinSeedStepAu = 1e-7;
+        std::vector<SigmaTracks::Column> columns;
+        auto track_force = force_for(int(rec.spkid));
+        const double mu = gm_or_builtin(source.get(), body::kSun);
+        const double t0 = rec.cov_epoch_jtdb;
+        const double* x0 = rec.cov_elements;
+        auto nominal = cometary_to_elements(mu, x0, t0);
+        if (!nominal)
+            return make_error(ErrorCode::ArgumentError, "invalid covariance elements");
+        auto nominal_state = elements_to_state(mu, *nominal);
+        if (!nominal_state)
+            return nominal_state.error();
+
+        double d[6], r[6][6], w[6], axes[6][6];
+        for (int i = 0; i < 6; ++i)
+            d[i] = std::sqrt(std::max(0.0, rec.covariance[catalog::packed_index(i, i)]));
+        for (int i = 0; i < 6; ++i)
+            for (int j = 0; j < 6; ++j)
+                r[i][j] = d[i] > 0.0 && d[j] > 0.0
+                              ? rec.covariance[catalog::packed_index(i, j)] / (d[i] * d[j])
+                              : 0.0;
+        symmetric_eigen(r, 6, w, axes);
+        const double w_max = std::max({w[0], w[1], w[2], w[3], w[4], w[5], 0.0});
+
+        for (int k = 0; k < 6; ++k) {
+            if (!(w[k] > 1e-14 * w_max))
+                continue;
+            double v[6];
+            for (int i = 0; i < 6; ++i)
+                v[i] = d[i] * axes[i][k] * std::sqrt(w[k]);
+
+            // Seed displacement of the one-sigma point (two-body, at t0).
+            double s = 1.0;
+            {
+                double x[6];
+                for (int i = 0; i < 6; ++i)
+                    x[i] = x0[i] + v[i];
+                auto el = cometary_to_elements(mu, x, t0);
+                auto st = el ? elements_to_state(mu, *el) : Result<State>(State{});
+                if (el && st.ok()) {
+                    const Vec3 dr = st.value().pos - nominal_state.value().pos;
+                    const double moved = std::sqrt(dr.x * dr.x + dr.y * dr.y + dr.z * dr.z);
+                    if (moved > 0.0 && moved < kMinSeedStepAu)
+                        s = kMinSeedStepAu / moved;
+                }
+            }
+            const double e0 = x0[0], q0 = x0[1];
+            if (v[0] != 0.0)
+                s = std::min(s, 0.5 * (e0 < 1.0 ? std::min(e0, 1.0 - e0) : e0 - 1.0) /
+                                    std::fabs(v[0]));
+            if (v[1] != 0.0)
+                s = std::min(s, 0.5 * q0 / std::fabs(v[1]));
+            if (!(s > 0.0))
+                continue; // degenerate (e.g. an exact circle with variance in e)
+
+            SigmaTracks::Column col;
+            col.sigma = 1.0;
+            col.h = s;
+            for (int sign : {+1, -1}) {
+                double x[6];
+                for (int i = 0; i < 6; ++i)
+                    x[i] = x0[i] + sign * s * v[i];
+                auto el = cometary_to_elements(mu, x, t0);
+                if (!el)
+                    return make_error(ErrorCode::ArgumentError,
+                                      "covariance step left the element domain");
+                auto seed = seed_from_elements(*el, t0);
+                if (!seed)
+                    return seed.error();
+                auto memo = std::make_unique<WindowMemo<BarycentricForce>>(track_force.get(),
+                                                                           IntegrateOptions{});
+                memo->set_share(&windows, window_key(int(rec.spkid), 1 + 2 * k + (sign < 0)));
+                memo->set_seed(seed.value(), t0);
+                const auto [lo, hi] = perturbers.span();
+                memo->set_limits(lo, hi);
+                (sign > 0 ? col.plus : col.minus) = std::move(memo);
+            }
+            columns.push_back(std::move(col));
+        }
+        return std::make_unique<SigmaTracks>(std::move(track_force), std::move(columns));
+    }
+
+    // 1-sigma sky-plane uncertainty of a catalog body (arcsec), or
+    // nullopt when the record carries no covariance or the perturbed
+    // tracks failed to reach the epoch; exactly zero for an all-zero
+    // covariance. The barycentric position covariance at the retarded epoch is
+    // projected on the plane perpendicular to the observer->body line;
+    // the square root of the larger eigenvalue of the projected 2x2
+    // covariance, divided by the observer->body distance, is the
+    // 1-sigma uncertainty of the body's direction. Eigenvalues are
+    // invariant under the (orthogonal) frame rotations, so the output
+    // frame and the light-optics corrections never enter; the observer is
+    // treated as exact.
+    std::optional<double> sigma_arcsec(int id, const CalcOptions& o, double jd_tt, double tau) {
+        auto recr = find_record(id);
+        if (!recr.ok() || !recr.value())
+            return std::nullopt;
+        const catalog::Record rec = *recr.value();
+        if (!rec.has(catalog::RecordFlags::kCovariance))
+            return std::nullopt; // element sigmas alone are uncorrelated: no calibrated answer
+
+        auto& tracks = sigma_tracks[uint64_t(id)];
+        if (!tracks) {
+            auto built = build_sigma_tracks(rec);
+            if (!built.ok())
+                return std::nullopt;
+            tracks = std::move(built).value();
+        }
+        if (tracks->empty())
+            return 0.0; // covariance present but zero
+
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
+        const double t_ret = jd_tdb - tau;
+        double cov[6];
+        const bool reached = tracks->covariance_at(t_ret, cov);
+        if (!perturbers.ok()) {
+            perturbers.clear_failure(); // as for the body itself, above
+            sigma_tracks.erase(uint64_t(id));
+            return std::nullopt;
+        }
+        if (!reached)
+            return std::nullopt;
+
+        // Line of sight and distance, ICRF (the covariance's frame).
+        double body[6], obs[6];
+        if (!body_barycentric(id, t_ret, body, nullptr).ok())
+            return std::nullopt;
+        if (!observer(o, jd_tt, jd_tdb, obs).ok())
+            return std::nullopt;
+        double u[3] = {0.0, 0.0, 0.0};
+        for (int i = 0; i < 3; ++i)
+            u[i] = (body[i] - obs[i]) / kAuKm;
+        const double d = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+        if (!(d > 0.0) || !std::isfinite(d))
+            return std::nullopt;
+        for (double& x : u)
+            x /= d;
+
+        // Tangent-plane basis: the coordinate axis least aligned with the
+        // line of sight, made orthogonal to it.
+        const double au[3] = {std::fabs(u[0]), std::fabs(u[1]), std::fabs(u[2])};
+        double axis[3] = {0.0, 0.0, 0.0};
+        axis[au[0] <= au[1] && au[0] <= au[2] ? 0 : (au[1] <= au[2] ? 1 : 2)] = 1.0;
+        double e1[3] = {u[1] * axis[2] - u[2] * axis[1], u[2] * axis[0] - u[0] * axis[2],
+                        u[0] * axis[1] - u[1] * axis[0]};
+        const double n1 = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+        if (!(n1 > 0.0))
+            return std::nullopt;
+        for (double& x : e1)
+            x /= n1;
+        const double e2[3] = {u[1] * e1[2] - u[2] * e1[1], u[2] * e1[0] - u[0] * e1[2],
+                              u[0] * e1[1] - u[1] * e1[0]};
+
+        // Bilinear form of the packed covariance, then the larger
+        // eigenvalue of the 2x2 projection.
+        auto q = [&](const double a[3], const double b[3]) {
+            return cov[0] * a[0] * b[0] + cov[3] * a[1] * b[1] + cov[5] * a[2] * b[2] +
+                   cov[1] * (a[0] * b[1] + a[1] * b[0]) + cov[2] * (a[0] * b[2] + a[2] * b[0]) +
+                   cov[4] * (a[1] * b[2] + a[2] * b[1]);
+        };
+        const double A = q(e1, e1), B = q(e1, e2), C = q(e2, e2);
+        const double disc = std::sqrt(std::max(0.0, (A - C) * (A - C) + 4.0 * B * B));
+        const double lambda = 0.5 * (A + C + disc);
+        return std::sqrt(std::max(lambda, 0.0)) / d * kRad2Deg * 3600.0;
+    }
+
+    // The sidereal zodiac's longitude shift (degrees) for the output
+    // frame at jd_tt: the true ayanamsha in the true ecliptic of date,
+    // the mean ayanamsha in the mean frames, and for the fixed frames
+    // (J2000, ICRF) the zero point's fixed longitude on the mean
+    // ecliptic of J2000. Error for an unknown mode or a non-finite
+    // user anchor.
+    Result<double> sidereal_shift(const CalcOptions& o, double jd_tt) {
+        if (o.sidereal_plane != SiderealPlane::EclipticOfDate) {
+            // A fixed plane: the zero point does not move, and the value
+            // reported is the anchor's A0 (protocol v4 3.5a); for a zodiac
+            // defined at the instant, its mean ayanamsha then.
+            auto a = sidereal_anchor(o, jd_tt);
+            if (!a)
+                return a.error();
+            return a.value().mean0_deg;
+        }
+        const auto model = frames::PrecessionModel(int(o.precession));
+        std::optional<frames::Ayanamsa> aya;
+        if (const InstantZodiac* z = instant_zodiac(o.sidereal)) {
+            // The J2000 and ICRF frames: the zero point's longitude on the
+            // mean ecliptic of J2000, which is the mean ayanamsha there (3.5a:
+            // "the constant A(J2000.0) mean").
+            const bool fixed_frame = o.frame == Frame::J2000 || o.frame == Frame::ICRF;
+            auto a = instant_ayanamsa(*z, fixed_frame ? kJ2000 : jd_tt, o.precession);
+            if (!a)
+                return a.error();
+            if (fixed_frame)
+                return a.value().mean_deg;
+            aya = a.value();
+        } else {
+            // An anchored zodiac: frames::ayanamsa_anchored's arithmetic, with
+            // the nutation in longitude from the epoch cache (interpolated,
+            // 0.004 uas from the full series) rather than the full series on
+            // every call, which cost ~60 us a position (three calls with rates).
+            auto a = sidereal_anchor(o, jd_tt);
+            if (!a)
+                return a.error();
+            const double mean = frames::anchored_mean_deg(a.value(), jd_tt, model);
+            const double dpsi = o.frame == Frame::TrueOfDate
+                                    ? frames_at(jd_tt, true, o.precession).dpsi * kRad2Deg
+                                    : 0.0;
+            aya = frames::Ayanamsa{mean, mean + dpsi};
+        }
+        switch (o.frame) {
+        case Frame::TrueOfDate:
+            return aya->true_deg;
+        case Frame::MeanOfDate:
+            return aya->mean_deg;
+        case Frame::J2000:
+        case Frame::ICRF:
+            // The zodiac's zero point has a fixed longitude on the mean
+            // ecliptic of J2000: the ayanamsha less the precession
+            // accumulated since J2000.
+            return aya->mean_deg - frames::precession_in_longitude_deg(jd_tt, model);
+        }
+        return make_error(ErrorCode::ArgumentError, "unknown frame");
+    }
+
+    // A catalog star's index by HIP number (the first star carrying it).
+    Result<size_t> star_by_hip(int hip) const {
+        if (auto it = corpus.star_by_hip.find(hip); it != corpus.star_by_hip.end())
+            return it->second;
+        return make_error(ErrorCode::NotFound, "no catalog star HIP " + std::to_string(hip));
+    }
+
+    // A catalog star's index by HR number (the first star carrying it).
+    Result<size_t> star_by_hr(int hr) const {
+        if (auto it = corpus.star_by_hr.find(hr); it != corpus.star_by_hr.end())
+            return it->second;
+        return make_error(ErrorCode::NotFound, "no catalog star HR " + std::to_string(hr));
+    }
+
+    // Sgr A* as a catalog object: SIMBAD's ICRS place, and the apparent motion
+    // Reid & Brunthaler measured in galactic coordinates turned into proper
+    // motion in RA and Dec about the IAU 1958 pole (theirs is measured in the
+    // standard galactic system). No parallax: the motion is an angle a year.
+    static stars::Object galactic_centre() {
+        double u[3], p[3];
+        unit_radec(kSgrARaDeg, kSgrADecDeg, u);
+        unit_radec(kPoleIau1958RaDeg, kPoleIau1958DecDeg, p);
+        // e_b: toward the pole across the line of sight; e_l = e_b x u, the
+        // direction of increasing galactic longitude (x to the centre, z to
+        // the pole, y = z x x).
+        const double pu = p[0] * u[0] + p[1] * u[1] + p[2] * u[2];
+        double eb[3] = {p[0] - pu * u[0], p[1] - pu * u[1], p[2] - pu * u[2]};
+        const double nb = std::sqrt(eb[0] * eb[0] + eb[1] * eb[1] + eb[2] * eb[2]);
+        for (double& x : eb)
+            x /= nb;
+        const double el[3] = {eb[1] * u[2] - eb[2] * u[1], eb[2] * u[0] - eb[0] * u[2],
+                              eb[0] * u[1] - eb[1] * u[0]};
+        double mu[3];
+        for (int i = 0; i < 3; ++i)
+            mu[i] = kSgrAMuLMasYr * el[i] + kSgrAMuBMasYr * eb[i];
+        const double a = kSgrARaDeg / kRad2Deg, d = kSgrADecDeg / kRad2Deg;
+        const double east[3] = {-std::sin(a), std::cos(a), 0.0};
+        const double north[3] = {-std::sin(d) * std::cos(a), -std::sin(d) * std::sin(a),
+                                 std::cos(d)};
+        stars::Object gc;
+        gc.ra_deg = kSgrARaDeg;
+        gc.dec_deg = kSgrADecDeg;
+        gc.epoch_jyear = 2000.0;
+        gc.pm_ra_mas_yr = mu[0] * east[0] + mu[1] * east[1] + mu[2] * east[2];
+        gc.pm_dec_mas_yr = mu[0] * north[0] + mu[1] * north[1] + mu[2] * north[2];
+        return gc;
+    }
+
+    // The ayanamsha of a zodiac defined at the instant, true and mean
+    // (degrees): the anchor's longitude on the true ecliptic and equinox of
+    // date less the longitude the zodiac gives it; the mean value is that less
+    // the nutation in longitude, as for the anchored modes.
+    Result<frames::Ayanamsa> instant_ayanamsa(const InstantZodiac& z, double jd_tt,
+                                              Precession precession) {
+        const EpochFrames& f = frames_at(jd_tt, true, precession);
+        // ICRF to the true ecliptic and equinox of date, as to_output builds it.
+        double e[9], a[9], b[9];
+        rot3(-f.dpsi, a);
+        rot1(f.eps_mean, b);
+        matmul(a, b, e);
+        matmul(e, f.pb, e);
+        double lon = 0.0; // radians
+        if (z.anchor == ZodiacAnchor::GalacticNode) {
+            // The node lies on both great circles, so it is perpendicular to
+            // both poles: n = k x p in ecliptic coordinates, k the ecliptic
+            // pole. Of n and -n, the one near 0° Capricorn (the documentation:
+            // "at present ... near 0 Capricorn").
+            double p[3], v[3];
+            if (z.modern_pole)
+                unit_radec(kPoleModernRaDeg, kPoleModernDecDeg, p);
+            else
+                unit_radec(kPoleIau1958RaDeg, kPoleIau1958DecDeg, p);
+            apply(e, p, v);
+            lon = std::atan2(v[0], -v[1]);
+            if (lon < 0.0)
+                lon += kTwoPi;
+            if (lon < kTwoPi / 2.0)
+                lon += kTwoPi / 2.0;
+        } else {
+            double pos[3];
+            const double jd_tdb = tdb.tdb_from_tt(jd_tt);
+            if (z.anchor == ZodiacAnchor::Star) {
+                auto idx = star_by_hr(z.hr);
+                if (!idx)
+                    return idx.error();
+                star_barycentric_km(stars::at(idx.value()), jd_tdb, pos);
+            } else {
+                star_barycentric_km(galactic_centre(), jd_tdb, pos);
+            }
+            if (z.anchor == ZodiacAnchor::GalacticCentrePolar) {
+                // The ecliptic point on the anchor's hour circle, through the
+                // MEAN pole of date: the same right ascension on the mean
+                // equator, tan(lon) = tan(ra) / cos(eps) on the ecliptic with
+                // the mean equinox, then the equinox slides by dpsi like every
+                // other zodiac's. The true pole would carry its nutation into
+                // the zero point itself (~0.6", an 18.6-year wobble), where
+                // 3.5a's true ayanamsha is the mean one plus dpsi and nothing
+                // else.
+                double q[3];
+                apply(f.pb, pos, q);
+                const double ra = std::atan2(q[1], q[0]);
+                lon = std::atan2(std::sin(ra), std::cos(f.eps_mean) * std::cos(ra)) + f.dpsi;
+            } else {
+                double v[3];
+                apply(e, pos, v);
+                lon = std::atan2(v[1], v[0]);
+            }
+        }
+        double aya = std::fmod(lon * kRad2Deg - z.at_deg, 360.0);
+        if (aya > 180.0)
+            aya -= 360.0;
+        else if (aya <= -180.0)
+            aya += 360.0;
+        return frames::Ayanamsa{aya - f.dpsi * kRad2Deg, aya};
+    }
+
+    // The zodiac's zero point: its anchor epoch t0 (TT) and MEAN ayanamsha
+    // A0 there, for the user anchor or a published mode. A zodiac defined at
+    // the instant has no t0: on the invariable plane its zero point is the
+    // one of the instant asked (t0 = jd_tt), and the ecliptic of the anchor
+    // epoch, which needs a t0 of the zodiac's own, is refused.
+    Result<frames::AyanamsaAnchor> sidereal_anchor(const CalcOptions& o, double jd_tt) {
+        if (const InstantZodiac* z = instant_zodiac(o.sidereal)) {
+            if (o.sidereal_plane == SiderealPlane::EclipticOfAnchor)
+                return make_error(ErrorCode::ArgumentError,
+                                  "a zodiac defined at the instant has no anchor epoch, so no "
+                                  "ecliptic of the anchor epoch");
+            auto a = instant_ayanamsa(*z, jd_tt, o.precession);
+            if (!a)
+                return a.error();
+            return frames::AyanamsaAnchor{jd_tt, a.value().mean_deg};
+        }
+        if (o.sidereal == SiderealMode::User) {
+            if (!std::isfinite(o.sidereal_epoch_jtdb) || !std::isfinite(o.sidereal_ayanamsa_deg))
+                return make_error(ErrorCode::ArgumentError, "sidereal User anchor is not finite");
+            return frames::AyanamsaAnchor{o.sidereal_epoch_jtdb, o.sidereal_ayanamsa_deg};
+        }
+        auto a = frames::ayanamsa_anchor(int(o.sidereal));
+        if (!a)
+            return make_error(ErrorCode::ArgumentError, "unknown sidereal mode");
+        return *a;
+    }
+
+    // ICRF to a fixed sidereal plane with the longitude zero at the zodiac's
+    // zero point (SiderealPlane::EclipticOfAnchor or ::Invariable).
+    Result<void> fixed_sidereal_matrix(const CalcOptions& o, double jd_tt, double m[9]) {
+        auto a = sidereal_anchor(o, jd_tt);
+        if (!a)
+            return a.error();
+        const double a0 = a.value().mean0_deg / kRad2Deg;
+        // ICRF to the mean ecliptic and equinox of t0.
+        const EpochFrames& f0 = frames_at(a.value().t0_jtdb, false, o.precession);
+        double ecl0[9];
+        rot1(f0.eps_mean, ecl0);
+        matmul(ecl0, f0.pb, ecl0);
+        if (o.sidereal_plane == SiderealPlane::EclipticOfAnchor) {
+            // Longitude counted from A0 on that ecliptic: rot3(A0) moves
+            // longitudes by -A0.
+            double r[9];
+            rot3(a0, r);
+            matmul(r, ecl0, m);
+            return {};
+        }
+        // The invariable plane: rows x, y, n with n the pole and x its
+        // ascending node on the ICRF equator (any in-plane x would do: the
+        // zero point below fixes the longitude origin).
+        const double* n = frames::kInvariablePoleIcrf;
+        double x[3] = {-n[1], n[0], 0.0}; // k x n
+        const double xn = std::sqrt(x[0] * x[0] + x[1] * x[1]);
+        x[0] /= xn;
+        x[1] /= xn;
+        const double y[3] = {n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2],
+                             n[0] * x[1] - n[1] * x[0]};
+        const double inv[9] = {x[0], x[1], x[2], y[0], y[1], y[2], n[0], n[1], n[2]};
+        // The zero point: longitude A0 on the ecliptic of t0, carried into
+        // ICRF, then projected onto the plane; its in-plane angle is theta0.
+        const double z_ecl[3] = {std::cos(a0), std::sin(a0), 0.0};
+        double z_icrf[3], z_inv[3];
+        apply_transpose(ecl0, z_ecl, z_icrf);
+        apply(inv, z_icrf, z_inv);
+        const double theta0 = std::atan2(z_inv[1], z_inv[0]);
+        double r[9];
+        rot3(theta0, r);
+        matmul(r, inv, m);
+        return {};
+    }
+
+    // Body barycentric position at jd_tdb - tau. The subtraction is done
+    // with its exact rounding error recovered (TwoSum) and applied through
+    // the velocity: a JD double near the present only resolves ~40 us,
+    // which would otherwise put ~1 m of noise into every retarded position.
+    Result<void> retarded(int id, double jd_tdb, double tau, double out[6], int* origin) {
+        const double s = jd_tdb - tau;
+        const double bp = s - jd_tdb;
+        const double err = (jd_tdb - (s - bp)) + (-tau - bp);
+        auto r = body_barycentric(id, s, out, origin);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] += out[3 + i] * err;
+        return {};
+    }
+
+    // Observer->body vector in the output frame (km), for one TT epoch.
+    // `tau` on entry is a starting guess for the light time (0 when none);
+    // the solution does not depend on it beyond the 1e-15-day tolerance.
+    Result<void> vector_at(int id, double jd_tt, const CalcOptions& o, double out[3], double& tau,
+                           int& origin) {
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
+        double obs[6];
+        auto r = observer(o, jd_tt, jd_tdb, obs);
+        if (!r)
+            return r;
+
+        double tgt[6];
+        double p[3];
+        if (!o.light_time || !(tau >= 0.0 && tau < 1.0))
+            tau = 0.0;
+        r = retarded(id, jd_tdb, tau, tgt, &origin);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            p[i] = tgt[i] - obs[i];
+        if (o.light_time) {
+            // Newton's method on f(tau) = |p(tau)| - c tau, with p's rate
+            // from the body's velocity: quadratic convergence, two or three
+            // ephemeris reads from a cold start and one or two from a
+            // nearby epoch's tau.
+            for (int it = 0; it < 12; ++it) {
+                const double d = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+                const double dp = -(p[0] * tgt[3] + p[1] * tgt[4] + p[2] * tgt[5]) / d;
+                const double step =
+                    (d - apparent::kLightKmPerDay * tau) / (apparent::kLightKmPerDay - dp);
+                tau += step;
+                r = retarded(id, jd_tdb, tau, tgt, nullptr);
+                if (!r)
+                    return r;
+                for (int i = 0; i < 3; ++i)
+                    p[i] = tgt[i] - obs[i];
+                if (std::fabs(step) < 1e-15)
+                    break;
+            }
+        }
+
+        // Deflection is honoured for every observer that is not the Sun
+        // itself (3.5a): the barycentre sits ~0.005 AU from the Sun's
+        // centre, close enough to deflect, and it is applied there.
+        const bool observer_is_sun = o.center == Center::Heliocentric ||
+                                     (o.center == Center::Body && o.center_body == body::kSun);
+        if (o.deflection && !observer_is_sun && id != body::kSun) {
+            double sun[6];
+            r = sun_at(jd_tdb, sun);
+            if (!r)
+                return r;
+            const double sun_to_body[3] = {tgt[0] - sun[0], tgt[1] - sun[1], tgt[2] - sun[2]};
+            const double sun_to_obs[3] = {obs[0] - sun[0], obs[1] - sun[1], obs[2] - sun[2]};
+            apparent::light_deflection(p, sun_to_body, sun_to_obs, apparent::kSunGmOverC2Km,
+                                       apparent::kSunRadiusKm, p);
+        }
+        if (o.aberration)
+            apparent::aberration(p, obs + 3, p);
+
+        return to_output(jd_tt, o, p, out);
+    }
+
+    // The ecliptic an orbit point is defined on: the mean ecliptic of date,
+    // whatever the output frame, as a rotation from ICRF. Protocol v4
+    // 3.5a (the 2026-09-18 amendment): a frame gives the coordinates a point
+    // is expressed in and does not change which point it is, so a node asked
+    // in J2000 or ICRF is the node of date, rotated.
+    void orbit_ecliptic(double jd_tt, const CalcOptions& o, double m[9]) {
+        const EpochFrames& f = frames_at(jd_tt, false, o.precession);
+        double e[9];
+        rot1(f.eps_mean, e);
+        matmul(e, f.pb, m);
+    }
+
+    // Barycentric position (km, ICRF) of a node or apsis of body `id`. `dt`
+    // (days) is a correction to the instant, applied through the focus's
+    // velocity: the rounding error of a retarded time, which a JD double
+    // cannot hold (computed_point_vector_at).
+    Result<void> orbit_point(int id, OrbitPoint point, OrbitElements elements, double jd_tt,
+                             double jd_tdb, const CalcOptions& o, double out[3], double dt = 0.0) {
+        if (id == body::kSun && elements != OrbitElements::Interpolated)
+            return sun_orbit_point(point, elements, jd_tt, jd_tdb, o, out, dt);
+        if (elements == OrbitElements::Mean)
+            return mean_orbit_point(id, point, jd_tt, jd_tdb, o, out, dt);
+        if (elements == OrbitElements::Interpolated)
+            return natural_apsis(id, point, jd_tdb, out, dt);
+        if (id == body::kSolarSystemBary)
+            return make_error(ErrorCode::ArgumentError, "the barycentre has no orbit");
+        const int center = id == body::kMoon ? body::kEarth : body::kSun;
+        double b[6], c[6];
+        auto r = body_barycentric(id, jd_tdb, b, nullptr);
+        if (!r)
+            return r;
+        r = center == body::kSun ? sun_at(jd_tdb, c)
+                                 : source->barycentric(center, jd_tdb, c, scratch);
+        if (!r)
+            return r;
+        const double au3 = kAuKm * kAuKm * kAuKm;
+        const double mu =
+            (gm_or_builtin(source.get(), center) + gm_or_builtin(source.get(), id)) * au3;
+        double m[9];
+        orbit_ecliptic(jd_tt, o, m);
+        double rel[3], vel[3], x[3], v[3];
+        for (int i = 0; i < 3; ++i) {
+            rel[i] = b[i] - c[i];
+            vel[i] = b[3 + i] - c[3 + i];
+        }
+        apply(m, rel, x);
+        apply(m, vel, v);
+        const double h[3] = {x[1] * v[2] - x[2] * v[1], x[2] * v[0] - x[0] * v[2],
+                             x[0] * v[1] - x[1] * v[0]};
+        const double h2 = h[0] * h[0] + h[1] * h[1] + h[2] * h[2];
+        const double rn = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+        if (!(mu > 0.0) || !(h2 > 0.0) || !(rn > 0.0))
+            return make_error(ErrorCode::ArgumentError, "no orbit (degenerate state)");
+        const double vxh[3] = {v[1] * h[2] - v[2] * h[1], v[2] * h[0] - v[0] * h[2],
+                               v[0] * h[1] - v[1] * h[0]};
+        double ev[3];
+        for (int i = 0; i < 3; ++i)
+            ev[i] = vxh[i] / mu - x[i] / rn;
+        const double semi_latus = h2 / mu;
+        double hi[3], ei[3], rel_point[3];
+        apply_transpose(m, h, hi);
+        apply_transpose(m, ev, ei);
+        r = conic_point(hi, ei, semi_latus, point, m, rel_point);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = c[i] + c[3 + i] * dt + rel_point[i];
+        return {};
+    }
+
+    // The Sun's orbit about the Earth: the Earth's orbit about the Sun (mean
+    // elements: the Earth-Moon barycentre's fit, as for the Earth), reflected
+    // through the focus. The relative position is negated, so each apsis is
+    // the Earth's at the same distance and the nodes trade places (the Sun
+    // goes north where the Earth goes south). The focus is the geocentre, as
+    // for the Moon, so geocentrically and geometrically the point is the
+    // Earth's heliocentric one turned through 180 degrees.
+    Result<void> sun_orbit_point(OrbitPoint point, OrbitElements elements, double jd_tt,
+                                 double jd_tdb, const CalcOptions& o, double out[3], double dt) {
+        const OrbitPoint mirrored = point == OrbitPoint::AscendingNode ? OrbitPoint::DescendingNode
+                                    : point == OrbitPoint::DescendingNode
+                                        ? OrbitPoint::AscendingNode
+                                        : point;
+        double earth_point[3], sun[6], earth[6];
+        auto r = orbit_point(body::kEarth, mirrored, elements, jd_tt, jd_tdb, o, earth_point, dt);
+        if (!r)
+            return r;
+        r = sun_at(jd_tdb, sun);
+        if (!r)
+            return r;
+        r = source->barycentric(body::kEarth, jd_tdb, earth, scratch);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = earth[i] + earth[3 + i] * dt - (earth_point[i] - sun[i] - sun[3 + i] * dt);
+        return {};
+    }
+
+    // A node or apsis of the conic with angular momentum direction hi and
+    // eccentricity vector ei (both ICRF) and semi-latus rectum semi_latus
+    // (km), on the ecliptic m (a rotation from ICRF); out is relative to the
+    // conic's focus, ICRF km.
+    Result<void> conic_point(const double hi[3], const double ei[3], double semi_latus,
+                             OrbitPoint point, const double m[9], double out[3]) {
+        double h[3], ev[3];
+        apply(m, hi, h);
+        apply(m, ei, ev);
+        const double h2 = h[0] * h[0] + h[1] * h[1] + h[2] * h[2];
+        double u[3] = {0.0, 0.0, 0.0};
+        switch (point) {
+        case OrbitPoint::AscendingNode:
+        case OrbitPoint::DescendingNode: {
+            // The node line: z x h, toward the ascending node.
+            const double nn = std::hypot(h[0], h[1]);
+            if (!(nn > 1e-12 * std::sqrt(h2)))
+                return make_error(ErrorCode::ArgumentError,
+                                  "the orbit lies in the ecliptic: nodes are undefined");
+            const double sign = point == OrbitPoint::AscendingNode ? 1.0 : -1.0;
+            u[0] = -sign * h[1] / nn;
+            u[1] = sign * h[0] / nn;
+            u[2] = 0.0;
+            break;
+        }
+        case OrbitPoint::Perihelion:
+        case OrbitPoint::Aphelion: {
+            const double e = std::sqrt(ev[0] * ev[0] + ev[1] * ev[1] + ev[2] * ev[2]);
+            if (!(e > 1e-12))
+                return make_error(ErrorCode::ArgumentError,
+                                  "the orbit is circular: apsides are undefined");
+            if (point == OrbitPoint::Aphelion && !(e < 1.0))
+                return make_error(ErrorCode::ArgumentError,
+                                  "the orbit is open: the aphelion is undefined");
+            const double sign = point == OrbitPoint::Perihelion ? 1.0 : -1.0;
+            for (int i = 0; i < 3; ++i)
+                u[i] = sign * ev[i] / e;
+            break;
+        }
+        }
+        // r = p / (1 + e cos nu), with e cos nu = e . u along direction u.
+        const double denom = 1.0 + (ev[0] * u[0] + ev[1] * u[1] + ev[2] * u[2]);
+        if (!(denom > 1e-12))
+            return make_error(ErrorCode::ArgumentError, "the open orbit does not reach this node");
+        const double dist = semi_latus / denom;
+        const double pe[3] = {dist * u[0], dist * u[1], dist * u[2]};
+        apply_transpose(m, pe, out);
+        return {};
+    }
+
+    // Orbit normal and eccentricity vector, in the elements' own ecliptic
+    // frame, from e, the longitude of perihelion, sin i and the node.
+    static void mean_conic(double e, double varpi, double sin_i, double node, double normal[3],
+                           double ev[3]) {
+        const double cos_i = std::sqrt(std::max(0.0, 1.0 - sin_i * sin_i));
+        const double w = varpi - node;
+        const double cn = std::cos(node), sn = std::sin(node), cw = std::cos(w), sw = std::sin(w);
+        normal[0] = sin_i * sn;
+        normal[1] = -sin_i * cn;
+        normal[2] = cos_i;
+        ev[0] = e * (cn * cw - sn * sw * cos_i);
+        ev[1] = e * (sn * cw + cn * sw * cos_i);
+        ev[2] = e * sw * sin_i;
+    }
+
+    Result<void> mean_orbit_point(int id, OrbitPoint point, double jd_tt, double jd_tdb,
+                                  const CalcOptions& o, double out[3], double dt = 0.0) {
+        double m[9];
+        orbit_ecliptic(jd_tt, o, m);
+        double normal[3], ev[3], hi[3], ei[3], rel[3], focus[6];
+        double semi_latus = 0.0;
+        if (id == body::kMoon) {
+            double phi[14];
+            frames::fundamental_arguments(jd_tt, phi);
+            const double node = phi[13];                     // Omega
+            const double varpi = phi[11] + phi[13] - phi[9]; // L - l, with L = F + Omega
+            const double e = kMoonMeanEccentricity;
+            mean_conic(e, varpi, std::sin(kMoonMeanInclinationDeg / kRad2Deg), node, normal, ev);
+            semi_latus = kMoonMeanDistanceKm * (1.0 - e * e);
+            // Referred to the mean ecliptic and equinox of date.
+            const EpochFrames& f = frames_at(jd_tt, false, o.precession);
+            double date[9], e1[9];
+            rot1(f.eps_mean, e1);
+            matmul(e1, f.pb, date);
+            apply_transpose(date, normal, hi);
+            apply_transpose(date, ev, ei);
+            auto r = source->barycentric(body::kEarth, jd_tdb, focus, scratch);
+            if (!r)
+                return r;
+        } else {
+            int key = id;
+            if (id == 1 || id == 2)
+                key = id * 100 + 99;
+            else if (id == body::kEarth)
+                key = body::kEarthMoonBary;
+            else if (id >= 499 && id <= 999 && id % 100 == 99)
+                key = id / 100;
+            const MeanElementsFit* fit = nullptr;
+            for (const MeanElementsFit& f : kMeanElements)
+                if (f.id == key)
+                    fit = &f;
+            if (!fit)
+                return make_error(ErrorCode::NotFound,
+                                  "mean elements exist for the Moon and the major planets only");
+            // Quadratics in T fitted over 1550-2650: outside it they would
+            // be extrapolated, which is an answer nothing measured.
+            if (jd_tdb < kMeanElementsFromJd || jd_tdb > kMeanElementsToJd)
+                return make_error(ErrorCode::CoverageError,
+                                  "outside the span the planets' mean elements are fitted "
+                                  "over (DE440, 1550-2650)");
+            const double T = (jd_tdb - kJ2000) / 36525.0;
+            const auto poly = [T](const double c[3]) { return c[0] + T * (c[1] + T * c[2]); };
+            const double a = poly(fit->a), hh = poly(fit->h), kk = poly(fit->k);
+            const double pp = poly(fit->p), qq = poly(fit->q);
+            const double e = std::hypot(hh, kk);
+            const double sin_i = std::min(1.0, std::hypot(pp, qq));
+            mean_conic(e, std::atan2(hh, kk), sin_i, std::atan2(pp, qq), normal, ev);
+            semi_latus = a * (1.0 - e * e) * kAuKm;
+            // Referred to the J2000 ecliptic of the fit.
+            double j2000[9], e1[9];
+            rot1(eps_j2000, e1);
+            matmul(e1, bias, j2000);
+            apply_transpose(j2000, normal, hi);
+            apply_transpose(j2000, ev, ei);
+            auto r = sun_at(jd_tdb, focus);
+            if (!r)
+                return r;
+        }
+        auto r = conic_point(hi, ei, semi_latus, point, m, rel);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = focus[i] + focus[3 + i] * dt + rel[i];
+        return {};
+    }
+
+    // The natural lunar apogee and perigee (docs/ORBIT-POINTS.md, "The natural
+    // apsides"): the published definition is an interpolation between the
+    // Moon's actual passages through apogee and perigee. A passage is a zero of
+    // r.v, the geometric Earth-Moon distance at a maximum (apogee) or minimum
+    // (perigee); the Moon's geocentric place there, in the mean ecliptic of
+    // J2000, is a node. Longitude is the mean apse plus the deviation model
+    // (natural_apsides.hpp: a function of the Sun's elongation from the mean
+    // apse, fitted to every passage in DE440) plus the residual at the nodes,
+    // interpolated; latitude and distance are interpolated directly. The
+    // interpolation is a cubic Hermite whose slopes at each node are those of
+    // the quartic through it and its two neighbours on each side, so the curve
+    // and its rate are continuous.
+    std::vector<ApsisPassage> apsis_passages[2]; // [0] perigees, [1] apogees
+    // Passages are scanned in fixed blocks of kApsisBlockDays on a grid of
+    // TDB, and every block scanned is kept (the ephemeris's whole span is a
+    // few thousand blocks, about a megabyte), by the corpus for every engine
+    // on it. So each block is scanned once, and a passage's time does not
+    // depend on which instant was
+    // asked first: until 2026-09-19 the scan started 100 days before
+    // whatever instant came first, which moved the passages' last bits, and
+    // was rescanned whenever an instant fell more than a year away.
+    static constexpr double kApsisBlockDays = 50.0;
+    long apsis_k_lo = 1, apsis_k_hi = 0; // the blocks apsis_passages holds
+
+    // The Moon relative to the Earth, geometric: ICRF km, km/day.
+    Result<void> moon_geocentric(double t, double s[6]) {
+        double m[6], e[6];
+        auto r = source->barycentric(body::kMoon, t, m, scratch);
+        if (!r)
+            return r;
+        r = source->barycentric(body::kEarth, t, e, scratch);
+        if (!r)
+            return r;
+        for (int i = 0; i < 6; ++i)
+            s[i] = m[i] - e[i];
+        return {};
+    }
+
+    Result<double> moon_radial(double t) {
+        double s[6];
+        auto r = moon_geocentric(t, s);
+        if (!r)
+            return r.error();
+        return s[0] * s[3] + s[1] * s[4] + s[2] * s[5];
+    }
+
+    // Every apsis passage in [a, b] (TDB): r.v sampled daily (the passages are
+    // ~14 days apart), each sign change refined by the Illinois method to
+    // 1e-9 day.
+    // The passages in [a, b], in time order, into out. A sample outside the
+    // ephemeris ends the scan: the block keeps what lies inside, and the
+    // interpolation's own check refuses an instant without enough of them.
+    Result<void> scan_apsides(double a, double b, std::array<std::vector<ApsisPassage>, 2>& out) {
+        auto fa = moon_radial(a);
+        if (!fa)
+            return {};
+        double ta = a, ya = fa.value();
+        while (ta < b) {
+            const double tb = std::min(ta + 1.0, b);
+            auto fb = moon_radial(tb);
+            if (!fb)
+                return {};
+            const double yb = fb.value();
+            if ((ya > 0.0) != (yb > 0.0)) {
+                double lo = ta, hi = tb, flo = ya, fhi = yb;
+                int side = 0;
+                for (int it = 0; it < 200 && hi - lo > 1e-9; ++it) {
+                    const double t = (lo * fhi - hi * flo) / (fhi - flo);
+                    auto ft = moon_radial(t);
+                    if (!ft)
+                        return ft.error();
+                    if ((ft.value() > 0.0) == (flo > 0.0)) {
+                        lo = t;
+                        flo = ft.value();
+                        if (side == -1)
+                            fhi /= 2.0;
+                        side = -1;
+                    } else {
+                        hi = t;
+                        fhi = ft.value();
+                        if (side == 1)
+                            flo /= 2.0;
+                        side = 1;
+                    }
+                }
+                const double t = 0.5 * (lo + hi);
+                double s[6];
+                auto r = moon_geocentric(t, s);
+                if (!r)
+                    return r;
+                double m[9], e1[9], v[3];
+                rot1(eps_j2000, e1);
+                matmul(e1, bias, m);
+                apply(m, s, v);
+                const double rr = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                // r.v falling through zero is a maximum of the distance.
+                const bool apogee = ya > 0.0;
+                double lon_model = 0.0;
+                r = apsis_model(t, apogee, lon_model);
+                if (!r)
+                    return r;
+                out[apogee].push_back({t,
+                                       std::remainder(std::atan2(v[1], v[0]) - lon_model, kTwoPi),
+                                       std::asin(v[2] / rr), rr});
+            }
+            ta = tb;
+            ya = yb;
+        }
+        return {};
+    }
+
+    // Mean apse plus the deviation model at t (TDB), mean ecliptic of J2000.
+    Result<void> apsis_model(double t, bool apogee, double& lon) {
+        double sun[6], earth[6];
+        auto r = sun_at(t, sun);
+        if (!r)
+            return r;
+        r = source->barycentric(body::kEarth, t, earth, scratch);
+        if (!r)
+            return r;
+        double g[3], m[9], e1[9], v[3];
+        for (int i = 0; i < 3; ++i)
+            g[i] = sun[i] - earth[i];
+        rot1(eps_j2000, e1);
+        matmul(e1, bias, m);
+        apply(m, g, v);
+        const double ref = natural_apsides::mean_apse(t, apogee);
+        lon = ref + natural_apsides::model(apogee ? natural_apsides::kApogeeModel
+                                                  : natural_apsides::kPerigeeModel,
+                                           std::remainder(std::atan2(v[1], v[0]) - ref, kTwoPi));
+        return {};
+    }
+
+    // Passages covering [t - 100 d, t + 100 d]: at least three of each kind on
+    // each side of t. A nearby request extends the span scanned; a far one
+    // starts it again.
+    Result<void> ensure_apsides(double t) {
+        const long k_lo = long(std::floor((t - 100.0) / kApsisBlockDays));
+        const long k_hi = long(std::floor((t + 100.0) / kApsisBlockDays));
+        if (k_lo == apsis_k_lo && k_hi == apsis_k_hi)
+            return {};
+        apsis_passages[0].clear();
+        apsis_passages[1].clear();
+        apsis_k_lo = 1;
+        apsis_k_hi = 0;
+        for (long k = k_lo; k <= k_hi; ++k) {
+            auto blk = corpus.apsis_block(k, [&](ApsisBlock& found) {
+                const double a = double(k) * kApsisBlockDays;
+                return scan_apsides(a, a + kApsisBlockDays, found);
+            });
+            if (!blk)
+                return blk.error();
+            const ApsisBlock& found = *blk.value();
+            for (int i = 0; i < 2; ++i)
+                apsis_passages[i].insert(apsis_passages[i].end(), found[size_t(i)].begin(),
+                                         found[size_t(i)].end());
+        }
+        // A passage on a seam between two blocks is found by both.
+        for (auto& v : apsis_passages)
+            v.erase(std::unique(v.begin(), v.end(),
+                                [](const ApsisPassage& x, const ApsisPassage& y) {
+                                    return std::fabs(x.t - y.t) < 1e-6;
+                                }),
+                    v.end());
+        apsis_k_lo = k_lo;
+        apsis_k_hi = k_hi;
+        return {};
+    }
+
+    Result<void> natural_apsis(int id, OrbitPoint point, double jd_tdb, double out[3], double dt) {
+        if (id != body::kMoon || (point != OrbitPoint::Perihelion && point != OrbitPoint::Aphelion))
+            return make_error(ErrorCode::ArgumentError,
+                              "the interpolated method is defined for the Moon's apogee and "
+                              "perigee only");
+        auto r = ensure_apsides(jd_tdb);
+        if (!r)
+            return r;
+        const std::vector<ApsisPassage>& v = apsis_passages[point == OrbitPoint::Aphelion];
+        const auto it = std::upper_bound(v.begin(), v.end(), jd_tdb,
+                                         [](double t, const ApsisPassage& p) { return t < p.t; });
+        const long k = long(it - v.begin()) - 1; // v[k].t <= jd_tdb < v[k+1].t
+        if (k < 2 || k + 3 >= long(v.size()))
+            return make_error(ErrorCode::CoverageError,
+                              "too near the ephemeris's coverage limits: the interpolation "
+                              "needs three apsis passages on each side");
+        // Nodes k-2 .. k+3.
+        double x[6], y[3][6];
+        for (int j = 0; j < 6; ++j) {
+            const ApsisPassage& p = v[size_t(k - 2 + j)];
+            x[j] = p.t;
+            y[0][j] = p.res;
+            y[1][j] = p.lat;
+            y[2][j] = p.r;
+        }
+        // The slope at x[m] of the quartic through x[m-2] .. x[m+2].
+        const auto slope = [&](const double* yy, int m) {
+            double d = 0.0;
+            for (int j = m - 2; j <= m + 2; ++j) {
+                double lj = 0.0;
+                if (j == m) {
+                    for (int i = m - 2; i <= m + 2; ++i)
+                        if (i != m)
+                            lj += 1.0 / (x[m] - x[i]);
+                } else {
+                    double num = 1.0, den = 1.0;
+                    for (int i = m - 2; i <= m + 2; ++i) {
+                        if (i != j && i != m)
+                            num *= x[m] - x[i];
+                        if (i != j)
+                            den *= x[j] - x[i];
+                    }
+                    lj = num / den;
+                }
+                d += yy[j] * lj;
+            }
+            return d;
+        };
+        const double h = x[3] - x[2], s = (jd_tdb - x[2]) / h;
+        const double h00 = (2.0 * s - 3.0) * s * s + 1.0, h10 = ((s - 2.0) * s + 1.0) * s;
+        const double h01 = (3.0 - 2.0 * s) * s * s, h11 = (s - 1.0) * s * s;
+        double q[3];
+        for (int c = 0; c < 3; ++c)
+            q[c] =
+                h00 * y[c][2] + h10 * h * slope(y[c], 2) + h01 * y[c][3] + h11 * h * slope(y[c], 3);
+        double lon_model = 0.0;
+        r = apsis_model(jd_tdb, point == OrbitPoint::Aphelion, lon_model);
+        if (!r)
+            return r;
+        const double lon = lon_model + q[0];
+        const double ecl[3] = {q[2] * std::cos(q[1]) * std::cos(lon),
+                               q[2] * std::cos(q[1]) * std::sin(lon), q[2] * std::sin(q[1])};
+        double m[9], e1[9], rel[3], earth[6];
+        rot1(eps_j2000, e1);
+        matmul(e1, bias, m);
+        apply_transpose(m, ecl, rel);
+        r = source->barycentric(body::kEarth, jd_tdb, earth, scratch);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = earth[i] + earth[3 + i] * dt + rel[i];
+        return {};
+    }
+
+    // Observer -> a point that is computed rather than read from the
+    // ephemeris -- an orbit point, a body from elements -- in the output
+    // frame (km), with the corrections a body gets. `at(tt, tdb, dt, pt)`
+    // gives the point's barycentric ICRF position (km) at the instant tdb + dt
+    // (tt for what moves slowly: frames, mean elements). jd_tdb - tau is
+    // rounded to a JD double (~40 us near the present), and dt carries the
+    // exact rounding error back, as retarded() does for a body. Without it a Moon point, whose
+    // focus is the Earth at 30 km/s, jittered by ~1 m: 0.6 mas topocentric, where tau varies with
+    // the site.
+    template <class PointFn>
+    Result<void> computed_point_vector_at(double jd_tt, const CalcOptions& o, PointFn&& at,
+                                          bool point_is_sun, double out[3], double& tau) {
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
+        double obs[6], pt[3];
+        auto r = observer(o, jd_tt, jd_tdb, obs);
+        if (!r)
+            return r;
+        if (!o.light_time || !(tau >= 0.0 && tau < 1.0))
+            tau = 0.0;
+        // jd_tdb - tau, with its rounding error recovered (TwoSum).
+        const auto retarded_at = [&](double t_lt, double pt_out[3]) {
+            const double s = jd_tdb - t_lt;
+            const double bp = s - jd_tdb;
+            const double err = (jd_tdb - (s - bp)) + (-t_lt - bp);
+            return at(jd_tt - t_lt, s, err, pt_out);
+        };
+        r = retarded_at(tau, pt);
+        if (!r)
+            return r;
+        double p[3];
+        for (int i = 0; i < 3; ++i)
+            p[i] = pt[i] - obs[i];
+        if (o.light_time) {
+            // These points move slowly against light -- an orbit point with
+            // its orbit's precession, a hypothetical planet on a period of
+            // centuries -- so the light-time equation contracts by the
+            // point's radial speed over c each pass, and a fixed-point
+            // iteration needs no derivative where a body uses Newton's
+            // method. Three passes are already at roundoff; the loop stops
+            // on the step.
+            for (int it = 0; it < 8; ++it) {
+                const double d = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+                const double next = d / apparent::kLightKmPerDay;
+                const double step = next - tau;
+                tau = next;
+                r = retarded_at(tau, pt);
+                if (!r)
+                    return r;
+                for (int i = 0; i < 3; ++i)
+                    p[i] = pt[i] - obs[i];
+                if (std::fabs(step) < 1e-15)
+                    break;
+            }
+        }
+        // Deflection is honoured for every observer that is not the Sun
+        // itself (3.5a): the barycentre sits ~0.005 AU from the Sun's
+        // centre, close enough to deflect, and it is applied there.
+        const bool observer_is_sun = o.center == Center::Heliocentric ||
+                                     (o.center == Center::Body && o.center_body == body::kSun);
+        if (o.deflection && !observer_is_sun && !point_is_sun) {
+            double sun[6];
+            r = sun_at(tdb.tdb_from_tt(jd_tt - tau), sun);
+            if (!r)
+                return r;
+            const double sun_to_point[3] = {pt[0] - sun[0], pt[1] - sun[1], pt[2] - sun[2]};
+            const double sun_to_obs[3] = {obs[0] - sun[0], obs[1] - sun[1], obs[2] - sun[2]};
+            apparent::light_deflection(p, sun_to_point, sun_to_obs, apparent::kSunGmOverC2Km,
+                                       apparent::kSunRadiusKm, p);
+        }
+        if (o.aberration)
+            apparent::aberration(p, obs + 3, p);
+        return to_output(jd_tt, o, p, out);
+    }
+
+    // Observer -> orbit point vector in the output frame (km). A node exists
+    // to be compared against apparent body positions, so it gets the
+    // corrections they get. The observer-velocity term is the large one --
+    // 21 arcsec on Jupiter's node against 0.005 arcsec of light time; see
+    // docs/ORBIT-POINTS.md.
+    Result<void> orbit_point_vector_at(int id, OrbitPoint point, OrbitElements elements,
+                                       double jd_tt, const CalcOptions& o, double out[3],
+                                       double& tau) {
+        return computed_point_vector_at(
+            jd_tt, o,
+            [&](double t, double t_tdb, double dt, double pt[3]) {
+                return orbit_point(id, point, elements, t, t_tdb, o, pt, dt);
+            },
+            id == body::kSun, out, tau);
+    }
+
+    // ICRF -> the mean ecliptic and equinox of an epoch.
+    static void ecliptic_of(const EpochFrames& f, double out[9]) {
+        double e1[9];
+        rot1(f.eps_mean, e1);
+        matmul(e1, f.pb, out);
+    }
+
+    // A body from polynomial elements (v4 kind 4): its barycentric ICRF
+    // position (km) at jd_tt. docs/HYPOTHETICALS.md has the conventions.
+    Result<void> elements_point(const PolynomialElements& el, double jd_tt, const CalcOptions& o,
+                                double out[3]) {
+        const double T = (jd_tt - el.epoch_jd_tt) / 36525.0;
+        const auto poly = [&](const double c[5]) { return elements::evaluate(c, el.n_terms, T); };
+        Elements ke;
+        ke.a = poly(el.semi_major_axis);
+        ke.e = poly(el.eccentricity);
+        if (!(ke.a > 0.0) || !(ke.e >= 0.0 && ke.e < 1.0))
+            return make_error(ErrorCode::ArgumentError,
+                              "the elements do not describe a bound orbit at this instant");
+        ke.argp = poly(el.arg_perihelion) / kRad2Deg;
+        ke.node = poly(el.ascending_node) / kRad2Deg;
+        ke.inc = poly(el.inclination) / kRad2Deg;
+        ke.mean_anom = std::fmod(elements::mean_anomaly_deg(el, jd_tt), 360.0) / kRad2Deg;
+        // Only the position is used, which does not depend on mu; the rates
+        // are those of the returned position, as for any body.
+        auto state = elements_to_state(elements::kGaussK * elements::kGaussK, ke);
+        if (!state)
+            return state.error();
+        const Vec3& q = state.value().pos;
+        const double ecl[3] = {q.x * kAuKm, q.y * kAuKm, q.z * kAuKm};
+
+        // The elements' plane is the mean ecliptic and equinox of their
+        // equinox epoch; the engine's own precession carries it to the ICRF.
+        double eq = kJ2000;
+        switch (el.equinox) {
+        case ElementEquinox::J2000:
+            eq = kJ2000;
+            break;
+        case ElementEquinox::B1950:
+            eq = kB1950;
+            break;
+        case ElementEquinox::J1900:
+            eq = kJ1900;
+            break;
+        case ElementEquinox::OfDate:
+            eq = jd_tt;
+            break;
+        case ElementEquinox::Explicit:
+            eq = el.equinox_jd_tt;
+            break;
+        }
+        double date_frame[9], rel[3];
+        const double* to_ecliptic = element_frame;
+        if (el.equinox == ElementEquinox::OfDate) {
+            ecliptic_of(frames_at(eq, false, o.precession), date_frame);
+            to_ecliptic = date_frame;
+        } else if (!(element_frame_jd == eq && element_frame_model == o.precession)) {
+            ecliptic_of(frames_at(eq, false, o.precession), element_frame);
+            element_frame_jd = eq;
+            element_frame_model = o.precession;
+        }
+        apply_transpose(to_ecliptic, ecl, rel);
+
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
+        double centre[6];
+        auto r = el.origin == ElementOrigin::Earth
+                     ? source->barycentric(body::kEarth, jd_tdb, centre, scratch)
+                     : sun_at(jd_tdb, centre);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            out[i] = centre[i] + rel[i];
+        return {};
+    }
+
+    Result<void> elements_vector_at(const PolynomialElements& el, double jd_tt,
+                                    const CalcOptions& o, double out[3], double& tau) {
+        return computed_point_vector_at(
+            jd_tt, o,
+            // The rounding error is dropped: an element body's focus is the
+            // Sun (~0.01 km/s), and its own motion over ~40 us is under a
+            // metre at planetary distances.
+            [&](double t, double, double, double pt[3]) { return elements_point(el, t, o, pt); },
+            false, out, tau);
+    }
+
+    // Observer -> catalog object vector in the output frame (km).
+    // A catalog star's straight line: its barycentric position (km, ICRF) at
+    // jd_tdb, its place at the catalog epoch moved by its space velocity, which
+    // is the proper motion across the line of sight at the parallax distance
+    // and the radial velocity along it (only with a parallax: without a
+    // distance a velocity along the line of sight has no meaning).
+    // `vel`, when given, receives the line's velocity (km/day), which is
+    // constant.
+    static void star_line_km(const stars::Object& star, double jd_tdb, double pos[3],
+                             double* vel = nullptr) {
+        const double a = star.ra_deg / kRad2Deg, d = star.dec_deg / kRad2Deg;
+        const double ca = std::cos(a), sa = std::sin(a), cd = std::cos(d), sd = std::sin(d);
+        const double u[3] = {cd * ca, cd * sa, sd};
+        const double east[3] = {-sa, ca, 0.0};
+        const double north[3] = {-sd * ca, -sd * sa, cd};
+        constexpr double kMasPerRad = 206264806.24709636;
+        const bool has_parallax = star.parallax_mas > 0.0;
+        const double dist_au = has_parallax ? kMasPerRad / star.parallax_mas : kStarNoParallaxAu;
+        const double pm_a = star.pm_ra_mas_yr / kMasPerRad / 365.25; // rad/day
+        const double pm_d = star.pm_dec_mas_yr / kMasPerRad / 365.25;
+        const double rv = has_parallax ? star.rv_km_s * 86400.0 / kAuKm : 0.0; // AU/day
+        const double dt = jd_tdb - (kJ2000 + (star.epoch_jyear - 2000.0) * 365.25);
+        for (int i = 0; i < 3; ++i) {
+            const double v = dist_au * (pm_a * east[i] + pm_d * north[i]) + rv * u[i];
+            pos[i] = (dist_au * u[i] + v * dt) * kAuKm;
+            if (vel)
+                vel[i] = v * kAuKm;
+        }
+    }
+
+    // A catalog star's barycentric position (km, ICRF) at jd_tdb: its straight
+    // line, and for a binary the orbit the line misses (kBinaryOrbits):
+    // - a barycentre line misses all of the star's offset;
+    // - a component's line holds the offset and its rate at the catalog epoch,
+    //   so only the rest is added;
+    // - a secondary is its primary's position plus the relative orbit, at its
+    //   own catalog distance.
+    void star_barycentric_km(const stars::Object& star, double jd_tdb, double pos[3]) {
+        star_line_km(star, jd_tdb, pos);
+        const BinaryOrbit* b = star.hip ? binary_orbit(star.hip) : nullptr;
+        if (!b)
+            return;
+        const double r = std::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
+        double e1, n1; // arcsec
+        if (b->line == BinaryLine::Secondary) {
+            auto primary = star_by_hip(b->partner_hip);
+            const BinaryOrbit* pb = primary ? binary_orbit(b->partner_hip) : nullptr;
+            if (!pb)
+                return;
+            star_barycentric_km(stars::at(primary.value()), jd_tdb,
+                                pos); // the primary, orbit included
+            const double pr = std::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
+            for (int i = 0; i < 3; ++i)
+                pos[i] *= r / pr; // at this star's distance
+            // The relative orbit: this star's offset less the primary's.
+            double es, ns, ep, np;
+            binary_offset(*b, jd_tdb, es, ns);
+            binary_offset(*pb, jd_tdb, ep, np);
+            e1 = es - ep;
+            n1 = ns - np;
+        } else {
+            binary_offset(*b, jd_tdb, e1, n1);
+            if (b->line == BinaryLine::Component) {
+                const double epoch_jd = kJ2000 + (star.epoch_jyear - 2000.0) * 365.25;
+                double e0, n0, ep, np, em, nm;
+                binary_offset(*b, epoch_jd, e0, n0);
+                binary_offset(*b, epoch_jd + 1.0, ep, np);
+                binary_offset(*b, epoch_jd - 1.0, em, nm);
+                const double dt = jd_tdb - epoch_jd;
+                e1 -= e0 + (ep - em) / 2.0 * dt;
+                n1 -= n0 + (np - nm) / 2.0 * dt;
+            }
+        }
+        // East and north at the date, at the line's direction (the primary's,
+        // for a secondary): position angles are measured from the north of
+        // the date, and the catalog's own ephemeris agrees only in this
+        // plane (STARS.md, "Binary stars"). The catalog position's plane
+        // would turn the orbit by the proper motion's d(RA) sin(Dec): 0.065
+        // deg for alpha Cen by 2025.
+        const double a = std::atan2(pos[1], pos[0]);
+        const double d = std::atan2(pos[2], std::sqrt(pos[0] * pos[0] + pos[1] * pos[1]));
+        const double east[3] = {-std::sin(a), std::cos(a), 0.0};
+        const double north[3] = {-std::sin(d) * std::cos(a), -std::sin(d) * std::sin(a),
+                                 std::cos(d)};
+        for (int i = 0; i < 3; ++i)
+            pos[i] += r * (e1 * east[i] + n1 * north[i]) / 206264.80624709636;
+    }
+
+    Result<void> star_vector_at(const stars::Object& star, double jd_tt, const CalcOptions& o,
+                                double out[3]) {
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
+        double obs[6];
+        auto r = observer(o, jd_tt, jd_tdb, obs);
+        if (!r)
+            return r;
+        double pos[3];
+        star_barycentric_km(star, jd_tdb, pos);
+        double p[3] = {pos[0] - obs[0], pos[1] - obs[1], pos[2] - obs[2]};
+        // Deflection is honoured for every observer that is not the Sun
+        // itself (3.5a): the barycentre sits ~0.005 AU from the Sun's
+        // centre, close enough to deflect, and it is applied there.
+        const bool observer_is_sun = o.center == Center::Heliocentric ||
+                                     (o.center == Center::Body && o.center_body == body::kSun);
+        if (o.deflection && !observer_is_sun) {
+            double sun[6];
+            r = sun_at(jd_tdb, sun);
+            if (!r)
+                return r;
+            const double sun_to_body[3] = {pos[0] - sun[0], pos[1] - sun[1], pos[2] - sun[2]};
+            const double sun_to_obs[3] = {obs[0] - sun[0], obs[1] - sun[1], obs[2] - sun[2]};
+            apparent::light_deflection(p, sun_to_body, sun_to_obs, apparent::kSunGmOverC2Km,
+                                       apparent::kSunRadiusKm, p);
+        }
+        if (o.aberration)
+            apparent::aberration(p, obs + 3, p);
+        return to_output(jd_tt, o, p, out);
+    }
+
+    // A catalog star's distance rate (AU/day) in closed form. The reported
+    // distance is |star - observer|, since deflection, aberration and the
+    // output rotation all keep a vector's length, so its rate is that
+    // vector's direction dotted with the star's velocity less the
+    // observer's. The central difference in position() cannot give it: the
+    // positions it subtracts are 1e5..1e10 AU long, and one ulp of them over
+    // its 2/4096-day stencil was 2.3e-5 AU/day at Polaris (ENGINE.md,
+    // "Rates"). The line's velocity is exact; a binary's orbit offset
+    // (kBinaryOrbits) is differenced over +-1 day, where its decades-long
+    // period leaves no truncation worth the name.
+    Result<void> star_distance_rate(const stars::Object& star, double jd_tt, const CalcOptions& o,
+                                    double& rate_au_day) {
+        const double jd_tdb = tdb.tdb_from_tt(jd_tt);
+        double obs[6];
+        auto r = observer(o, jd_tt, jd_tdb, obs);
+        if (!r)
+            return r;
+        double pos[3], line[3], vel[3];
+        star_line_km(star, jd_tdb, line, vel);
+        star_barycentric_km(star, jd_tdb, pos);
+        if (star.hip && binary_orbit(star.hip)) {
+            double sp[3], lp[3], sm[3], lm[3];
+            star_barycentric_km(star, jd_tdb + 1.0, sp);
+            star_line_km(star, jd_tdb + 1.0, lp);
+            star_barycentric_km(star, jd_tdb - 1.0, sm);
+            star_line_km(star, jd_tdb - 1.0, lm);
+            for (int i = 0; i < 3; ++i)
+                vel[i] += ((sp[i] - lp[i]) - (sm[i] - lm[i])) / 2.0;
+        }
+        const double g[3] = {pos[0] - obs[0], pos[1] - obs[1], pos[2] - obs[2]};
+        const double gn = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+        double dot = 0.0;
+        for (int i = 0; i < 3; ++i)
+            dot += g[i] / gn * (vel[i] - obs[3 + i]);
+        rate_au_day = dot / kAuKm;
+        // As position(): never a success with a non-finite answer.
+        if (!std::isfinite(rate_au_day))
+            return make_error(ErrorCode::ArgumentError,
+                              "numerical failure: the answer is not finite");
+        return {};
+    }
+
+    // Replaces the radial part of a position's velocity with `rate_au_day`,
+    // leaving its transverse part, and so the angular rates, as they were.
+    static void set_distance_rate(Position& pos, double rate_au_day) {
+        const double* x = pos.xyz_au;
+        const double rn = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+        if (!(rn > 0.0))
+            return;
+        double radial = 0.0;
+        for (int i = 0; i < 3; ++i)
+            radial += pos.vel_au_day[i] * x[i] / rn;
+        for (int i = 0; i < 3; ++i)
+            pos.vel_au_day[i] += (rate_au_day - radial) * x[i] / rn;
+        pos.dist_speed = rate_au_day;
+    }
+
+    // Spherical coordinates and rates from a vector and its central
+    // difference; vec(jd, out, tau) fills one output-frame vector (km).
+    template <typename VectorFn>
+    Result<void> position(double jd_tt, const CalcOptions& o, double& tau, VectorFn&& vec,
+                          Position& pos) {
+        double v[3];
+        auto r = vec(jd_tt, v, tau);
+        if (!r)
+            return r;
+        for (int i = 0; i < 3; ++i)
+            pos.xyz_au[i] = v[i] / kAuKm;
+        if (o.speed) {
+            const double tp = jd_tt + kSpeedStepDays, tm = jd_tt - kSpeedStepDays;
+            // Hold the TDB offset fixed across the stencil: re-rounding it
+            // at each point puts a 40 us step of TDB into the difference
+            // about once in 4,300 instants (docs/ENGINE.md, "Rates"). The
+            // stencil then differences over equal spans of TDB and TT, so
+            // the result is per TDB day; the factor makes it per TT day.
+            time::TdbInterpolator::Pin pin(tdb, jd_tt);
+            const double per_tt = 1.0 + tdb.tdb_minus_tt_rate(jd_tt) / 86400.0;
+            // The stencil starts its light-time solve from the centre's tau.
+            double vp[3], vm[3], tau_p = tau, tau_m = tau;
+            r = vec(tp, vp, tau_p);
+            if (!r)
+                return r;
+            r = vec(tm, vm, tau_m);
+            if (!r)
+                return r;
+            const double span = (tp - tm) * kAuKm; // actual, rounded, step
+            for (int i = 0; i < 3; ++i)
+                pos.vel_au_day[i] = (vp[i] - vm[i]) / span * per_tt;
+        }
+        const double* x = pos.xyz_au;
+        const double* dx = pos.vel_au_day;
+        const double rho2 = x[0] * x[0] + x[1] * x[1];
+        const double r2 = rho2 + x[2] * x[2];
+        const double rho = std::sqrt(rho2), rr = std::sqrt(r2);
+        double lon = std::atan2(x[1], x[0]) * kRad2Deg;
+        if (lon < 0.0)
+            lon += 360.0;
+        if (lon >= 360.0)
+            lon -= 360.0;
+        pos.lon_deg = lon;
+        pos.lat_deg = std::atan2(x[2], rho) * kRad2Deg;
+        pos.dist_au = rr;
+        if (o.speed && rho > 0.0) {
+            pos.lon_speed = (x[0] * dx[1] - x[1] * dx[0]) / rho2 * kRad2Deg;
+            pos.lat_speed =
+                (dx[2] * rho2 - x[2] * (x[0] * dx[0] + x[1] * dx[1])) / (r2 * rho) * kRad2Deg;
+            pos.dist_speed = (x[0] * dx[0] + x[1] * dx[1] + x[2] * dx[2]) / rr;
+        }
+        // Never a success with a non-finite answer, whatever produced it: an
+        // input the checks above missed arrives here as NaN or infinity, and a
+        // caller must see an error, not coordinates (the speeds block above
+        // skips on NaN, which would leave rates of 0 beside a NaN position).
+        bool finite =
+            std::isfinite(pos.lon_deg) && std::isfinite(pos.lat_deg) && std::isfinite(pos.dist_au);
+        for (int i = 0; i < 3; ++i)
+            finite = finite && std::isfinite(x[i]) && (!o.speed || std::isfinite(dx[i]));
+        if (!finite || (o.speed && !(std::isfinite(pos.lon_speed) && std::isfinite(pos.lat_speed) &&
+                                     std::isfinite(pos.dist_speed))))
+            return make_error(ErrorCode::ArgumentError,
+                              "numerical failure: the answer is not finite");
+        return {};
+    }
+
+    double ut1_to_tt(double jd_ut1) const {
+        // Delta T is a function of TT; one fixed-point pass is ample
+        // (dDeltaT/dt is ~1e-8, so the argument error is sub-microsecond).
+        const double jd_tt = jd_ut1 + delta_t_seconds(jd_ut1) / 86400.0;
+        return jd_ut1 + delta_t_seconds(jd_tt) / 86400.0;
+    }
+
+    // The rotation from ICRF into the requested output frame and zodiac:
+    // what to_output applies (Engine::output_rotation).
+    Result<void> output_matrix(double jd_tt, const CalcOptions& o, double m[9]) {
+        if (o.sidereal != SiderealMode::Tropical &&
+            o.sidereal_plane != SiderealPlane::EclipticOfDate) {
+            if (o.coords != Coords::Ecliptic)
+                return make_error(ErrorCode::ArgumentError,
+                                  "a fixed sidereal plane needs ecliptic coordinates");
+            return fixed_sidereal_matrix(o, jd_tt, m);
+        }
+        const bool need_nut = o.frame == Frame::TrueOfDate;
+        static constexpr double kIdentity[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        std::memcpy(m, kIdentity, sizeof kIdentity);
+        switch (o.frame) {
+        case Frame::ICRF:
+            if (o.coords == Coords::Ecliptic) {
+                rot1(eps_j2000, m);
+            }
+            break;
+        case Frame::J2000:
+            if (o.coords == Coords::Ecliptic) {
+                rot1(eps_j2000, m);
+                matmul(m, bias, m);
+            } else {
+                std::memcpy(m, bias, 9 * sizeof(double));
+            }
+            break;
+        case Frame::MeanOfDate: {
+            const EpochFrames& f = frames_at(jd_tt, need_nut, o.precession);
+            if (o.coords == Coords::Ecliptic) {
+                rot1(f.eps_mean, m);
+                matmul(m, f.pb, m);
+            } else {
+                std::memcpy(m, f.pb, 9 * sizeof(double));
+            }
+            break;
+        }
+        case Frame::TrueOfDate: {
+            const EpochFrames& f = frames_at(jd_tt, need_nut, o.precession);
+            if (o.coords == Coords::Ecliptic) {
+                // The ecliptic does not nutate; the equinox slides by dpsi.
+                double a[9], b[9];
+                rot3(-f.dpsi, a);
+                rot1(f.eps_mean, b);
+                matmul(a, b, m);
+                matmul(m, f.pb, m);
+            } else {
+                std::memcpy(m, f.npb, 9 * sizeof(double));
+            }
+            break;
+        }
+        }
+        // Sidereal zodiac: rotate the output ecliptic's longitude zero
+        // point west by the ayanamsha (equatorial output: the same
+        // rotation about the ecliptic pole, expressed through the
+        // frame's ecliptic-to-equator obliquity).
+        if (o.sidereal != SiderealMode::Tropical) {
+            auto s = sidereal_shift(o, jd_tt);
+            if (!s)
+                return s.error();
+            double a[9], t[9];
+            // rot3(theta) moves longitudes by -theta, so a positive
+            // ayanamsha rotates the zero point west as required.
+            rot3(s.value() / kRad2Deg, a);
+            if (o.coords == Coords::Ecliptic) {
+                matmul(a, m, m);
+            } else {
+                double eps = 0.0;
+                switch (o.frame) {
+                case Frame::TrueOfDate: {
+                    const EpochFrames& f = frames_at(jd_tt, true, o.precession);
+                    eps = f.eps_mean + f.deps;
+                    break;
+                }
+                case Frame::MeanOfDate:
+                    eps = frames_at(jd_tt, false, o.precession).eps_mean;
+                    break;
+                case Frame::J2000:
+                case Frame::ICRF:
+                    eps = eps_j2000;
+                    break;
+                }
+                double b[9];
+                rot1(eps, b);
+                matmul(a, b, t);
+                rot1(-eps, b);
+                matmul(b, t, t);
+                matmul(t, m, m);
+            }
+        }
+        return {};
+    }
+
+    // An ICRF vector (km) into the requested output frame and zodiac.
+    Result<void> to_output(double jd_tt, const CalcOptions& o, const double p[3], double out[3]) {
+        double m[9];
+        auto r = output_matrix(jd_tt, o, m);
+        if (!r)
+            return r;
+        apply(m, p, out);
+        return {};
+    }
+};
+
+Engine::Engine() = default;
+Engine::~Engine() = default;
+Engine::Engine(Engine&&) noexcept = default;
+Engine& Engine::operator=(Engine&&) noexcept = default;
+
+// A JPL DE binary or a DAF/SPK kernel, detected by content.
+Result<std::unique_ptr<Source>> open_ephemeris_source(const std::string& path) {
+    char magic[8] = {};
+    {
+        auto f = io::RandomAccessFile::open(path); // the readers' own open: wide on Windows
+        if (!f.ok())
+            return f.error();
+        if (auto r = f.value().read_at(0, magic, sizeof magic); !r.ok())
+            return r.error();
+    }
+    if (std::memcmp(magic, "DAF/SPK ", 8) == 0) {
+        auto s = spk::SpkFile::open(path);
+        if (!s)
+            return s.error();
+        return std::unique_ptr<Source>(std::make_unique<SpkSource>(std::move(s).value()));
+    }
+    auto d = de::DeFile::open(path);
+    if (!d)
+        return d.error();
+    return std::unique_ptr<Source>(std::make_unique<DeSource>(std::move(d).value()));
+}
+
+Result<void> Engine::add_ephemeris(const std::string& path) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (auto r = impl_->corpus_owner->add_ephemeris(path); !r)
+        return r;
+    // Anything computed from the ephemeris may have stopped at the old span's
+    // edge: small-body tracks, and the natural apsides' passage blocks, which
+    // are kept even when a scan ran off the file (and would keep refusing an
+    // instant the new file covers).
+    impl_->small_bodies.clear();
+    impl_->record_cache.clear();
+    impl_->sigma_tracks.clear();
+    impl_->apsis_k_lo = 1;
+    impl_->apsis_k_hi = 0;
+    impl_->forget_observers();
+    return {};
+}
+
+Corpus::Corpus() : d_(std::make_unique<Data>()) {}
+Corpus::~Corpus() = default;
+
+void Corpus::freeze() {
+    d_->frozen.store(true, std::memory_order_release);
+}
+
+bool Corpus::frozen() const {
+    return d_->frozen.load(std::memory_order_acquire);
+}
+
+namespace {
+Error frozen_error() {
+    return make_error(ErrorCode::ArgumentError,
+                      "the corpus is frozen: add files to it before freezing it");
+}
+} // namespace
+
+Result<std::shared_ptr<Corpus>> Corpus::open(const std::string& path) {
+    auto src = open_ephemeris_source(path);
+    if (!src)
+        return src.error();
+    std::shared_ptr<Corpus> c(new Corpus);
+    Data& d = *c->d_;
+    auto chain = std::make_unique<ChainSource>();
+    chain->add(d.number(std::move(src).value()));
+    d.chain = chain.get();
+    d.source = std::move(chain);
+    d.perturber_blocks.attach(d.source.get());
+    auto shipped = hypotheticals::parse(hypotheticals::shipped(), "data/hypotheticals.jsonl");
+    if (!shipped)
+        return shipped.error(); // a build defect: the file is checked by the tests
+    d.define_hypotheticals(std::move(shipped).value());
+    return c;
+}
+
+Result<void> Corpus::add_ephemeris(const std::string& path) {
+    if (frozen())
+        return frozen_error();
+    auto src = open_ephemeris_source(path);
+    if (!src)
+        return src.error();
+    d_->chain->add(d_->number(std::move(src).value()));
+    d_->refresh_overlay_source();
+    // A passage scan may have stopped at the old span's edge, and its block
+    // would keep refusing an instant the new file covers.
+    d_->apsis_blocks.clear();
+    d_->small_body_windows.clear();
+    return {};
+}
+
+Result<void> Corpus::add_catalog(const std::string& path) {
+    if (frozen())
+        return frozen_error();
+    auto r = catalog::Reader::open(path);
+    if (!r)
+        return r.error();
+    // CRC-verify the whole container before the corpus owns it, so a
+    // corrupt file fails add_catalog cleanly. The CRC covers each chunk's
+    // raw bytes, so decoding the records adds nothing to the check (it was
+    // 40% of loading, 2026-09-19). The name index is built on the first
+    // lookup().
+    auto fe = r.value().verify();
+    if (!fe)
+        return fe.error();
+    d_->catalogs.push_back(std::make_unique<catalog::Reader>(std::move(r).value()));
+    d_->catalog_paths.push_back(path);
+    d_->distinct_bodies.reset();
+    d_->name_indexes.emplace_back();
+    d_->refresh_overlay_source();
+    d_->small_body_windows.clear(); // a newer catalog may revise any body's elements
+    d_->small_body_records.clear();
+    return {};
+}
+
+Result<void> Corpus::add_perturbers(const std::string& path) {
+    if (frozen())
+        return frozen_error();
+    auto f = spk::SpkFile::open(path);
+    if (!f)
+        return f.error();
+    auto src = std::make_unique<AsteroidSource>(std::move(f).value(), d_->source.get());
+    if (src->bodies().empty())
+        return make_error(ErrorCode::FormatError,
+                          path + " carries no heliocentric numbered-asteroid segments");
+    std::vector<int> massive;
+    for (int id : src->bodies())
+        if (gm_or_builtin(src.get(), id) > 0.0)
+            massive.push_back(id);
+    if (massive.empty())
+        return make_error(ErrorCode::FormatError,
+                          path + ": no body with a known mass (DE MAnnnn constant or built-in)");
+    // Numbered only now, so that a refused file leaves the corpus as it was.
+    src->slot = d_->next_slot++;
+    d_->perturber_note = " + " + std::to_string(massive.size()) + " " + src->description;
+    d_->asteroids = std::move(src);
+    d_->asteroid_masses = std::move(massive);
+    d_->perturber_blocks.attach_asteroids(d_->asteroids.get(), d_->asteroid_masses);
+    d_->small_body_windows.clear(); // integrated without these masses
+    d_->refresh_overlay_source();
+    return {};
+}
+
+Result<void> Corpus::add_hypotheticals(const std::string& path) {
+    if (frozen())
+        return frozen_error();
+    std::ifstream f(io::native_path(path), std::ios::binary);
+    if (!f)
+        return make_error(ErrorCode::IoError, "cannot open " + path);
+    const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    auto bodies = hypotheticals::parse(text, path);
+    if (!bodies)
+        return bodies.error();
+    d_->define_hypotheticals(std::move(bodies).value());
+    return {};
+}
+
+Result<Engine> Engine::open(const std::string& path) {
+    auto c = Corpus::open(path);
+    if (!c)
+        return c.error();
+    std::shared_ptr<Corpus> corpus = std::move(c).value();
+    Corpus::Data& d = *corpus->d_;
+    Engine e;
+    e.impl_ = std::make_unique<Impl>(std::move(corpus), d);
+    return e;
+}
+
+Result<Engine> Engine::open_context(std::shared_ptr<const Corpus> corpus) {
+    if (!corpus)
+        return make_error(ErrorCode::ArgumentError, "no corpus");
+    if (!corpus->frozen())
+        return make_error(ErrorCode::ArgumentError,
+                          "the corpus is not frozen: freeze it before engines share it");
+    // Frozen, it refuses every add_*: the engine only reads it.
+    std::shared_ptr<Corpus> owner = std::const_pointer_cast<Corpus>(std::move(corpus));
+    Corpus::Data& d = *owner->d_;
+    Engine e;
+    e.impl_ = std::make_unique<Impl>(std::move(owner), d);
+    return e;
+}
+
+std::shared_ptr<const Corpus> Engine::corpus() const {
+    return impl_ ? impl_->corpus_owner : nullptr;
+}
+
+Result<CalcResult> Engine::calc(int id, double jd_tt, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite time");
+    if ((o.center == Center::Geocentric || o.center == Center::Topocentric) && id == body::kEarth)
+        return make_error(ErrorCode::ArgumentError, "body is the observer (Earth)");
+    if (o.center == Center::Heliocentric && id == body::kSun)
+        return make_error(ErrorCode::ArgumentError, "body is the observer (Sun)");
+    if (o.center == Center::Barycentric && id == body::kSolarSystemBary)
+        return make_error(ErrorCode::ArgumentError, "body is the observer (barycentre)");
+    if (o.center == Center::Body && id == o.center_body)
+        return make_error(ErrorCode::ArgumentError, "body is the observer (center body)");
+
+    CalcResult res;
+    double tau = 0.0;
+    int origin = kFromEphemeris;
+    bool first = true;
+    auto r = impl_->position(
+        jd_tt, o, tau,
+        [&](double jd, double out[3], double& t) -> Result<void> {
+            int stencil_origin;
+            auto v = impl_->vector_at(id, jd, o, out, t, first ? origin : stencil_origin);
+            first = false;
+            return v;
+        },
+        res.pos);
+    if (!r)
+        return r.error();
+
+    const Source& answered = impl_->chain->at(impl_->tdb.tdb_from_tt(jd_tt));
+    res.provenance.source = origin == kFromCatalog && !impl_->overlay_source_.empty()
+                                ? std::string_view(impl_->overlay_source_)
+                                : std::string_view(answered.description);
+    res.provenance.denum = answered.denum;
+    res.provenance.precession = o.precession;
+    res.provenance.light_time_days = tau;
+    if (o.sidereal != SiderealMode::Tropical) {
+        auto s = impl_->sidereal_shift(o, jd_tt);
+        if (!s)
+            return s.error();
+        res.ayanamsa_deg = s.value();
+    }
+    if (origin != kFromEphemeris && o.sigma)
+        res.sigma_arcsec = impl_->sigma_arcsec(id, o, jd_tt, tau);
+    return res;
+}
+
+Result<void> Engine::add_catalog(const std::string& path) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (auto r = impl_->corpus_owner->add_catalog(path); !r)
+        return r;
+    // A newer catalog may carry revised elements for bodies already
+    // integrated: drop the memoized trajectories and uncertainty tracks,
+    // they rebuild lazily.
+    impl_->small_bodies.clear();
+    impl_->record_cache.clear();
+    impl_->sigma_tracks.clear();
+    impl_->forget_observers(); // an observer may be one of those bodies
+    return {};
+}
+
+Result<void> Engine::add_perturbers(const std::string& path) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (auto r = impl_->corpus_owner->add_perturbers(path); !r)
+        return r;
+    impl_->attach_perturbers();
+    // Every trajectory integrated so far lacked these masses, and so did
+    // any observer placed on one.
+    impl_->small_bodies.clear();
+    impl_->record_cache.clear();
+    impl_->sigma_tracks.clear();
+    impl_->forget_observers();
+    return {};
+}
+
+void Engine::release_small_bodies() {
+    if (!impl_)
+        return;
+    impl_->small_bodies.clear();
+    impl_->record_cache.clear();
+    impl_->sigma_tracks.clear();
+}
+
+Result<int> Engine::lookup(std::string_view name) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    const std::string key = Impl::lowercase(name);
+    // A number names its body by itself, so a numbered body needs no name
+    // index, which costs half a second to build over a full catalog. Every
+    // numbered body of SBDB sits at this SPK-ID, and no name or provisional
+    // designation is all digits (1.58M bodies, 2026-11-01). A body elsewhere
+    // is found through the index, as a designation is.
+    if (key.size() <= 7 &&
+        std::all_of(key.begin(), key.end(), [](char c) { return c >= '0' && c <= '9'; }) &&
+        !key.empty()) {
+        const int spkid = int(kSpkidNumberedBase + std::stol(key));
+        auto r = impl_->find_record_at(spkid);
+        if (!r.ok())
+            return r.error();
+        if (r.value()) {
+            const auto& [rec, i] = *r.value();
+            if (catalog::record_names(impl_->catalogs[i]->name_pool(), rec).pdes == key)
+                return spkid;
+        }
+    }
+    const uint64_t h = Impl::name_hash(key);
+    // Newest catalog first; within one catalog the highest SPK-ID carrying
+    // the name wins (as a later record would have overwritten it).
+    for (size_t i = impl_->catalogs.size(); i-- > 0;) {
+        auto index = impl_->corpus.name_index(i);
+        if (!index)
+            return index.error();
+        const auto& entries = index.value()->entries;
+        auto lo = std::lower_bound(entries.begin(), entries.end(), std::make_pair(h, uint64_t(0)));
+        uint64_t best = 0;
+        for (auto it = lo; it != entries.end() && it->first == h; ++it) {
+            auto rec = impl_->catalogs[i]->lookup(it->second, impl_->scratch.chunk(i));
+            if (!rec)
+                return rec.error();
+            const catalog::Names n =
+                catalog::record_names(impl_->catalogs[i]->name_pool(), rec.value());
+            if (Impl::lowercase(n.pdes) == key ||
+                (!n.name.empty() && Impl::lowercase(n.name) == key) ||
+                (!n.prov_des.empty() && Impl::lowercase(n.prov_des) == key))
+                best = std::max(best, it->second);
+        }
+        if (best != 0)
+            return int(best);
+    }
+    return make_error(ErrorCode::NotFound, "no loaded catalog answers '" + key + "'");
+}
+
+Result<Engine::BodyNames> Engine::names(int spkid) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    auto r = impl_->find_record_at(spkid);
+    if (!r.ok())
+        return r.error();
+    if (!r.value())
+        return make_error(ErrorCode::NotFound,
+                          "no loaded catalog carries body " + std::to_string(spkid));
+    const auto [rec, catalog_i] = r.value().value();
+    const catalog::Names n = catalog::record_names(impl_->catalogs[catalog_i]->name_pool(), rec);
+    BodyNames out;
+    out.designation = n.pdes;
+    out.name = n.name;
+    out.provisional_designation = n.prov_des;
+    return out;
+}
+
+Result<CalcResult> Engine::calc_ut(int id, double jd_ut1, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc(id, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+Result<CalcResult> Engine::calc_orbit_point(int id, OrbitPoint point, OrbitElements elements,
+                                            double jd_tt, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite time");
+    if (int(point) < 0 || int(point) > int(OrbitPoint::Aphelion) || int(elements) < 0 ||
+        int(elements) > int(OrbitElements::Interpolated))
+        return make_error(ErrorCode::ArgumentError, "unknown orbit point or elements");
+    CalcResult res;
+    double tau = 0.0;
+    auto r = impl_->position(
+        jd_tt, o, tau,
+        [&](double jd, double out[3], double& t) {
+            return impl_->orbit_point_vector_at(id, point, elements, jd, o, out, t);
+        },
+        res.pos);
+    if (!r)
+        return r.error();
+    const Source& answered = impl_->chain->at(impl_->tdb.tdb_from_tt(jd_tt));
+    res.provenance.source = answered.description;
+    res.provenance.denum = answered.denum;
+    res.provenance.precession = o.precession;
+    res.provenance.light_time_days = tau;
+    if (elements == OrbitElements::Mean)
+        res.provenance.model = id == body::kMoon ? kMoonMeanModel : kPlanetMeanModel;
+    else if (elements == OrbitElements::Interpolated)
+        res.provenance.model = kNaturalApsisModel;
+    if (o.sidereal != SiderealMode::Tropical) {
+        auto s = impl_->sidereal_shift(o, jd_tt);
+        if (!s)
+            return s.error();
+        res.ayanamsa_deg = s.value();
+    }
+    return res;
+}
+
+Result<CalcResult> Engine::calc_elements(const PolynomialElements& el, double jd_tt,
+                                         const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite time");
+    if (el.n_terms < 1 || el.n_terms > 5)
+        return make_error(ErrorCode::ArgumentError, "elements take 1 to 5 polynomial terms");
+    if (int(el.equinox) < 0 || int(el.equinox) > int(ElementEquinox::Explicit) ||
+        int(el.origin) < 0 || int(el.origin) > int(ElementOrigin::Earth))
+        return make_error(ErrorCode::ArgumentError, "unknown element equinox or centre");
+    if (!std::isfinite(el.epoch_jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite element epoch");
+    // The protocol's canonical encoding (A.16): an explicit equinox names a
+    // date, and no other equinox carries one. Enforced here too, so that a
+    // caller who leaves the field uninitialised finds out from the engine and
+    // not from the wire.
+    if (el.equinox == ElementEquinox::Explicit
+            ? !(std::isfinite(el.equinox_jd_tt) && el.equinox_jd_tt != 0.0)
+            : el.equinox_jd_tt != 0.0)
+        return make_error(ErrorCode::ArgumentError,
+                          "equinox_jd_tt is a finite date for an explicit equinox, else zero");
+    CalcResult res;
+    double tau = 0.0;
+    auto r = impl_->position(
+        jd_tt, o, tau,
+        [&](double jd, double out[3], double& t) {
+            return impl_->elements_vector_at(el, jd, o, out, t);
+        },
+        res.pos);
+    if (!r)
+        return r.error();
+    res.provenance.source = "two-body orbital elements";
+    res.provenance.precession = o.precession;
+    res.provenance.light_time_days = tau;
+    if (o.sidereal != SiderealMode::Tropical) {
+        auto s = impl_->sidereal_shift(o, jd_tt);
+        if (!s)
+            return s.error();
+        res.ayanamsa_deg = s.value();
+    }
+    return res;
+}
+
+Result<CalcResult> Engine::calc_elements_ut(const PolynomialElements& el, double jd_ut1,
+                                            const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc_elements(el, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+Result<void> Engine::add_hypotheticals(const std::string& path) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return impl_->corpus_owner->add_hypotheticals(path);
+}
+
+std::vector<std::string> Engine::hypothetical_tokens() const {
+    return impl_ ? impl_->hypothetical_order : std::vector<std::string>{};
+}
+
+const hypotheticals::Body* Engine::hypothetical(std::string_view token) const {
+    if (!impl_)
+        return nullptr;
+    std::string key(token);
+    for (char& c : key)
+        if (c >= 'A' && c <= 'Z')
+            c = char(c - 'A' + 'a');
+    auto it = impl_->hypothetical_by_token.find(key);
+    return it == impl_->hypothetical_by_token.end() ? nullptr : it->second;
+}
+
+Result<CalcResult> Engine::calc_hypothetical(std::string_view token, double jd_tt,
+                                             const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    const hypotheticals::Body* b = hypothetical(token);
+    if (!b)
+        return make_error(ErrorCode::NotFound,
+                          "hypothetical body \"" + std::string(token) + "\" is not defined");
+    auto r = calc_elements(b->elements, jd_tt, o);
+    if (!r)
+        return r;
+    r.value().provenance.source = b->set;
+    return r;
+}
+
+Result<CalcResult> Engine::calc_hypothetical_ut(std::string_view token, double jd_ut1,
+                                                const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc_hypothetical(token, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+Result<CalcResult> Engine::calc_star(size_t star_index, double jd_tt, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "non-finite time");
+    if (star_index >= stars::count())
+        return make_error(ErrorCode::NotFound, "no catalog star " + std::to_string(star_index));
+    const stars::Object& star = stars::at(star_index);
+    CalcResult res;
+    double tau = 0.0;
+    auto r = impl_->position(
+        jd_tt, o, tau,
+        [&](double jd, double out[3], double&) { return impl_->star_vector_at(star, jd, o, out); },
+        res.pos);
+    if (!r)
+        return r.error();
+    if (o.speed) {
+        double rate = 0.0;
+        r = impl_->star_distance_rate(star, jd_tt, o, rate);
+        if (!r)
+            return r.error();
+        Impl::set_distance_rate(res.pos, rate);
+    }
+    static constexpr std::string_view kSources[] = {
+        "Hipparcos new reduction (van Leeuwen 2007)", "Yale Bright Star Catalogue (1991)",
+        "SIMBAD (CDS)", "NGC 2000.0 (Sinnott 1988), NASA HEASARC"};
+    res.provenance.source = kSources[int(star.astrometry)];
+    res.provenance.precession = o.precession;
+    if (o.sidereal != SiderealMode::Tropical) {
+        auto s = impl_->sidereal_shift(o, jd_tt);
+        if (!s)
+            return s.error();
+        res.ayanamsa_deg = s.value();
+    }
+    return res;
+}
+
+Result<CalcResult> Engine::calc_star_ut(size_t star_index, double jd_ut1, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc_star(star_index, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+Result<Engine::HouseResult> Engine::houses_at(houses::System system, double jd_tt, double jd_ut1,
+                                              const frames::GeoSite& site, const CalcOptions& o) {
+    Impl& impl = *impl_;
+    if (!std::isfinite(jd_tt) || !std::isfinite(jd_ut1) || std::fabs(jd_tt) > 1e8)
+        return make_error(ErrorCode::ArgumentError, "houses need a finite Julian date");
+    if (o.frame != Frame::TrueOfDate)
+        return make_error(ErrorCode::ArgumentError,
+                          "houses are served on the true ecliptic and equinox of date only");
+    const bool sidereal = o.sidereal != SiderealMode::Tropical;
+    if (sidereal && o.sidereal_plane != SiderealPlane::EclipticOfDate)
+        return make_error(ErrorCode::ArgumentError,
+                          "sidereal houses are served on the ecliptic of date only");
+    const auto& f = impl.frames_at(jd_tt, true, o.precession);
+    const double gast = frames::gast_rad(jd_ut1, jd_tt, f.dpsi, f.eps_mean);
+    auto h = houses::compute(system, gast + site.lon_rad, f.eps_mean + f.deps, site.lat_rad);
+    if (!h)
+        return h.error();
+    Engine::HouseResult r;
+    r.houses = h.value();
+    r.jd_tt = jd_tt;
+    r.jd_ut1 = jd_ut1;
+    r.obliquity_deg = (f.eps_mean + f.deps) * kRad2Deg;
+    r.precession = o.precession;
+    if (sidereal) {
+        auto shift = impl.sidereal_shift(o, jd_tt);
+        if (!shift)
+            return shift.error();
+        const double a = shift.value();
+        auto sid = [a](double d) {
+            d = std::fmod(d - a, 360.0);
+            if (d < 0.0)
+                d += 360.0;
+            return d >= 360.0 ? 0.0 : d;
+        };
+        houses::Angles& g = r.houses.angles;
+        g.asc_deg = sid(g.asc_deg);
+        g.mc_deg = sid(g.mc_deg);
+        g.vertex_deg = sid(g.vertex_deg);
+        g.equatorial_asc_deg = sid(g.equatorial_asc_deg);
+        for (int k = 0; k < 12; ++k)
+            r.houses.cusp_deg[k] =
+                system == houses::System::WholeSign
+                    ? std::fmod(std::floor(g.asc_deg / 30.0) * 30.0 + 30.0 * k, 360.0)
+                    : sid(r.houses.cusp_deg[k]);
+        r.ayanamsa_deg = a;
+    }
+    return r;
+}
+
+Result<Engine::HouseResult> Engine::houses(houses::System system, double jd_tt,
+                                           const frames::GeoSite& site, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return houses_at(system, jd_tt, jd_tt - impl_->delta_t_seconds(jd_tt) / 86400.0, site, o);
+}
+
+Result<Engine::HouseResult> Engine::houses_ut(houses::System system, double jd_ut1,
+                                              const frames::GeoSite& site, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return houses_at(system, impl_->ut1_to_tt(jd_ut1), jd_ut1, site, o);
+}
+
+Result<double> Engine::sidereal_time_ut(double jd_ut1, bool apparent, Precession precession) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_ut1) || std::fabs(jd_ut1) > 1e8)
+        return make_error(ErrorCode::ArgumentError, "sidereal time needs a finite Julian date");
+    const double jd_tt = impl_->ut1_to_tt(jd_ut1);
+    double st = frames::gmst_rad(jd_ut1, jd_tt);
+    if (apparent) {
+        const auto& f = impl_->frames_at(jd_tt, true, precession);
+        st = frames::gast_rad(jd_ut1, jd_tt, f.dpsi, f.eps_mean);
+    }
+    double d = std::fmod(st * kRad2Deg, 360.0);
+    if (d < 0.0)
+        d += 360.0;
+    return d >= 360.0 ? 0.0 : d;
+}
+
+Result<double> Engine::obliquity(double jd_tt, bool true_obliquity, Precession precession) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt) || std::fabs(jd_tt) > 1e8)
+        return make_error(ErrorCode::ArgumentError, "the obliquity needs a finite Julian date");
+    const auto& f = impl_->frames_at(jd_tt, true_obliquity, precession);
+    return (true_obliquity ? f.eps_mean + f.deps : f.eps_mean) * kRad2Deg;
+}
+
+namespace {
+
+double wrap360(double d) {
+    d = std::fmod(d, 360.0);
+    if (d < 0.0)
+        d += 360.0;
+    return d >= 360.0 ? 0.0 : d;
+}
+
+std::optional<Error> horizon_site(const frames::GeoSite& site) {
+    if (!std::isfinite(site.lon_rad) || !std::isfinite(site.lat_rad) ||
+        !std::isfinite(site.height_m) || std::fabs(site.lat_rad * kRad2Deg) > 90.0)
+        return Error{ErrorCode::ArgumentError,
+                     "a horizon needs a finite site, its latitude within -90..90 degrees"};
+    return std::nullopt;
+}
+
+} // namespace
+
+Result<Engine::Horizontal> Engine::horizontal_ut(double jd_ut1, const frames::GeoSite& site,
+                                                 double ra_deg, double dec_deg,
+                                                 const frames::Atmosphere* atm,
+                                                 Precession precession) {
+    if (auto e = horizon_site(site))
+        return *e;
+    if (!std::isfinite(ra_deg) || !std::isfinite(dec_deg) || std::fabs(dec_deg) > 90.0)
+        return make_error(ErrorCode::ArgumentError,
+                          "a horizon needs a finite direction, its declination within -90..90");
+    auto gast = sidereal_time_ut(jd_ut1, true, precession);
+    if (!gast)
+        return gast.error();
+    Horizontal h;
+    h.hour_angle_deg = wrap360(gast.value() + site.lon_rad * kRad2Deg - ra_deg);
+    double az = 0.0, alt = 0.0;
+    frames::equatorial_to_horizontal(h.hour_angle_deg / kRad2Deg, dec_deg / kRad2Deg, site.lat_rad,
+                                     az, alt);
+    h.azimuth_deg = az * kRad2Deg;
+    h.altitude_deg = alt * kRad2Deg;
+    h.apparent_altitude_deg =
+        atm ? h.altitude_deg + frames::refraction_from_true_deg(
+                                   h.altitude_deg, *atm, frames::horizon_dip_deg(site.height_m))
+            : h.altitude_deg;
+    return h;
+}
+
+Result<Engine::Equatorial>
+Engine::equatorial_from_horizontal_ut(double jd_ut1, const frames::GeoSite& site,
+                                      double azimuth_deg, double altitude_deg, bool apparent,
+                                      const frames::Atmosphere* atm, Precession precession) {
+    if (auto e = horizon_site(site))
+        return *e;
+    if (!std::isfinite(azimuth_deg) || !std::isfinite(altitude_deg) ||
+        std::fabs(altitude_deg) > 90.0)
+        return make_error(ErrorCode::ArgumentError,
+                          "a horizon direction needs a finite azimuth and an altitude within "
+                          "-90..90");
+    auto gast = sidereal_time_ut(jd_ut1, true, precession);
+    if (!gast)
+        return gast.error();
+    const double alt = apparent && atm ? altitude_deg - frames::refraction_from_apparent_deg(
+                                                            altitude_deg, *atm,
+                                                            frames::horizon_dip_deg(site.height_m))
+                                       : altitude_deg;
+    double ha = 0.0, dec = 0.0;
+    frames::horizontal_to_equatorial(azimuth_deg / kRad2Deg, alt / kRad2Deg, site.lat_rad, ha, dec);
+    Equatorial q;
+    q.ra_deg = wrap360(gast.value() + site.lon_rad * kRad2Deg - ha * kRad2Deg);
+    q.dec_deg = dec * kRad2Deg;
+    return q;
+}
+
+Result<Engine::Phenomena> Engine::phenomena_ut(const ObjectRef& object, double jd_ut1,
+                                               const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return phenomena(object, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+Result<void> Engine::output_rotation(const CalcOptions& opts, double jd_tt, double m[9]) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (!std::isfinite(jd_tt))
+        return make_error(ErrorCode::ArgumentError, "the instant must be finite");
+    return impl_->output_matrix(jd_tt, opts, m);
+}
+
+Result<CalcResult> Engine::calc_object(const ObjectRef& object, double jd_tt,
+                                       const CalcOptions& o) {
+    switch (object.kind) {
+    case ObjectRef::Kind::Star:
+        if (object.id < 0)
+            return make_error(ErrorCode::ArgumentError, "a star index is 0 or more");
+        return calc_star(size_t(object.id), jd_tt, o);
+    case ObjectRef::Kind::Hypothetical:
+        return calc_hypothetical(object.token, jd_tt, o);
+    case ObjectRef::Kind::OrbitPoint:
+        return calc_orbit_point(int(object.id), object.point, object.method, jd_tt, o);
+    case ObjectRef::Kind::Body:
+        break;
+    }
+    return calc(int(object.id), jd_tt, o);
+}
+
+Result<CalcResult> Engine::calc_object_ut(const ObjectRef& object, double jd_ut1,
+                                          const CalcOptions& o) {
+    switch (object.kind) {
+    case ObjectRef::Kind::Star:
+        if (object.id < 0)
+            return make_error(ErrorCode::ArgumentError, "a star index is 0 or more");
+        return calc_star_ut(size_t(object.id), jd_ut1, o);
+    case ObjectRef::Kind::Hypothetical:
+        return calc_hypothetical_ut(object.token, jd_ut1, o);
+    case ObjectRef::Kind::OrbitPoint:
+        return calc_orbit_point_ut(int(object.id), object.point, object.method, jd_ut1, o);
+    case ObjectRef::Kind::Body:
+        break;
+    }
+    return calc_ut(int(object.id), jd_ut1, o);
+}
+
+Result<Engine::EventResult> Engine::rise_set_ut(const ObjectRef& object, Event event,
+                                                double jd_ut1_start, const frames::GeoSite& site,
+                                                const RiseSetOptions& ro) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (auto e = horizon_site(site))
+        return *e;
+    if (!std::isfinite(jd_ut1_start) || std::fabs(jd_ut1_start) > 1e8)
+        return make_error(ErrorCode::ArgumentError, "an event search needs a finite start");
+    if (!(ro.window_days > 0.0) || ro.window_days > 3660.0)
+        return make_error(ErrorCode::ArgumentError,
+                          "an event search needs a window of more than 0 and at most 3660 days");
+    if (ro.limb < -1 || ro.limb > 1)
+        return make_error(ErrorCode::ArgumentError, "the limb is +1 upper, 0 centre or -1 lower");
+    if (!std::isfinite(ro.dip_height_m) || ro.dip_height_m < 0.0)
+        return make_error(ErrorCode::ArgumentError, "the dip height is 0 m or more");
+    CalcOptions o;
+    // An orbit point is a direction, not a place with a body in it: it is
+    // seen from the Earth's centre, with no site parallax. A lunar point's
+    // would be up to a degree (its distance is the Moon's), moving its rise
+    // by minutes; astromcp measured 233 s on the true node (2026-10-28).
+    o.center =
+        object.kind == ObjectRef::Kind::OrbitPoint ? Center::Geocentric : Center::Topocentric;
+    o.site = site;
+    o.frame = Frame::TrueOfDate;
+    o.coords = Coords::Equatorial;
+    o.precession = ro.precession;
+    o.speed = false;
+    o.sigma = false;
+    auto position = [&](double jd) { return calc_object_ut(object, jd, o); };
+    const double radius =
+        object.kind == ObjectRef::Kind::Body ? phenomena::mean_radius_km(object.id) : 0.0;
+    const double dip = frames::horizon_dip_deg(ro.dip_height_m);
+    const double h0 =
+        -dip -
+        (ro.refraction ? frames::refraction_from_apparent_deg(-dip, ro.atmosphere, dip) : 0.0);
+    const bool transit = event == Event::UpperTransit || event == Event::LowerTransit;
+    // One position answers both questions at an instant: the local
+    // apparent hour angle, in [0, 360), and g, the limb's true altitude less
+    // h0, whose upward (rise) or downward (set) zero is the event.
+    std::optional<Error> failure;
+    struct Sample {
+        double ha = 0.0, g = 0.0;
+    };
+    auto at = [&](double jd) -> Sample {
+        auto p = position(jd);
+        if (!p) {
+            failure = p.error();
+            return {};
+        }
+        auto st = sidereal_time_ut(jd, true, ro.precession);
+        if (!st) {
+            failure = st.error();
+            return {};
+        }
+        const double ra = p.value().pos.lon_deg, dec = p.value().pos.lat_deg;
+        double ha = std::fmod(st.value() + site.lon_rad * kRad2Deg - ra, 360.0);
+        if (ha < 0.0)
+            ha += 360.0;
+        double az = 0.0, alt = 0.0;
+        frames::equatorial_to_horizontal(ha / kRad2Deg, dec / kRad2Deg, site.lat_rad, az, alt);
+        double sd = 0.0;
+        if (radius > 0.0) {
+            const double d_km = p.value().pos.dist_au * kAuKm;
+            sd = d_km > radius ? std::asin(radius / d_km) * kRad2Deg : 90.0;
+        }
+        return {ha, alt * kRad2Deg + ro.limb * sd - h0};
+    };
+    // The zero of f between a and b, where f(a) and f(b) lie on opposite
+    // sides of it (`past` says which side a value is on: b's), to a bracket
+    // under tol: Illinois' regula falsi, with a bisection whenever a step
+    // fails to halve the bracket. `last` is the sample of the last point
+    // tried, which lies within tol of the zero.
+    auto solve = [&](auto&& f, auto&& past, double a, double fa, double b, double fb, double tol,
+                     Sample* last) -> double {
+        int side = 0;
+        double width = std::fabs(b - a);
+        bool bisect = false;
+        for (int k = 0; k < 200 && std::fabs(b - a) > tol; ++k) {
+            double c = bisect ? 0.5 * (a + b) : (a * fb - b * fa) / (fb - fa);
+            const double inner = 0.25 * tol, lo = std::min(a, b) + inner,
+                         hi = std::max(a, b) - inner;
+            if (!(c >= lo))
+                c = lo;
+            if (!(c <= hi))
+                c = hi;
+            Sample s;
+            const double fc = f(c, s);
+            if (failure)
+                return 0.0;
+            if (last)
+                *last = s;
+            if (past(fc)) {
+                b = c;
+                fb = fc;
+                if (side == -1)
+                    fa *= 0.5;
+                side = -1;
+            } else {
+                a = c;
+                fa = fc;
+                if (side == 1)
+                    fb *= 0.5;
+                side = 1;
+            }
+            const double w = std::fabs(b - a);
+            bisect = w > 0.5 * width;
+            width = w;
+        }
+        return 0.5 * (a + b);
+    };
+    // The first transit strictly after t (before it, dir < 0): the hour
+    // angle's next crossing of 0 or 180 deg. It advances monotonically,
+    // about 361 deg a day (the Moon's 346), so the crossing is predicted from
+    // that rate, stepped to by half hours if the prediction falls short, and
+    // solved for to tol.
+    struct Transit {
+        double jd = 0.0;
+        bool upper = false;
+        Sample near; // at a point within tol of jd
+    };
+    // Transits are half a day apart; stepping this far past one before
+    // asking for the next keeps a root solved a hair short of its crossing
+    // from being found again.
+    constexpr double kPastTransit = 0.01;
+    auto next_transit = [&](double t, double dir, double tol) -> Transit {
+        const Sample s0 = at(t);
+        if (failure)
+            return {};
+        const double target = dir > 0.0 ? (std::floor(s0.ha / 180.0) + 1.0) * 180.0
+                                        : (std::ceil(s0.ha / 180.0) - 1.0) * 180.0;
+        const double target_mod = std::fmod(target + 360.0, 360.0);
+        // How far the hour angle is past the target, in (-180, 180].
+        auto f = [&](double x, Sample& s) {
+            s = at(x);
+            return std::remainder(s.ha - target_mod, 360.0);
+        };
+        const auto past = [&](double v) { return dir > 0.0 ? v >= 0.0 : v < 0.0; };
+        const double fa = s0.ha - target; // [-180, 0) ahead, (0, 180] behind
+        double b = t + dir * (std::fabs(fa) / 360.9856 * 1.05 + 1e-6);
+        Sample sb;
+        double fb = f(b, sb);
+        for (int k = 0; k < 96 && !failure && !past(fb); ++k) {
+            b += dir / 48.0;
+            fb = f(b, sb);
+        }
+        if (failure)
+            return {};
+        Transit tr;
+        tr.upper = target_mod == 0.0;
+        tr.near = sb;
+        tr.jd = solve(f, past, t, fa, b, fb, tol, &tr.near);
+        return tr;
+    };
+    const double dir = ro.backward ? -1.0 : 1.0;
+    const double lo = ro.backward ? jd_ut1_start - ro.window_days : jd_ut1_start;
+    const double hi = ro.backward ? jd_ut1_start : jd_ut1_start + ro.window_days;
+    auto in_window = [&](double t) {
+        return ro.backward ? (t < jd_ut1_start && t >= lo) : (t > jd_ut1_start && t <= hi);
+    };
+    if (transit) {
+        // Transits in the search's direction from the start, until one of
+        // the kind asked for, to under 0.0001 s.
+        const bool want_upper = event == Event::UpperTransit;
+        double t = jd_ut1_start;
+        for (int k = 0; k < 4; ++k) {
+            const Transit tr = next_transit(t, dir, 1e-9);
+            if (failure)
+                return *failure;
+            if (!in_window(tr.jd))
+                break;
+            if (tr.upper == want_upper)
+                return EventResult{tr.jd, Outcome::Found};
+            t = tr.jd + dir * kPastTransit;
+        }
+        return EventResult{std::nan(""), Outcome::NotInWindow};
+    }
+    // The altitude's extremum near a transit: golden-section search over two
+    // hours either side, a maximum at an upper transit, a minimum at a lower
+    // one. The declination drifts between transits, the Moon's most.
+    struct Extremum {
+        double jd, g;
+    };
+    auto extremum = [&](const Transit& tr) -> Extremum {
+        const double sign = tr.upper ? 1.0 : -1.0;
+        auto gs = [&](double x) { return sign * at(x).g; };
+        double a = tr.jd - 2.0 / 24.0, b = tr.jd + 2.0 / 24.0;
+        const double r = 0.6180339887498949;
+        double c = b - r * (b - a), d = a + r * (b - a);
+        double gc = gs(c), gd = gs(d);
+        for (int k = 0; k < 40 && b - a > 1e-7; ++k) {
+            if (gc > gd) {
+                b = d;
+                d = c;
+                gd = gc;
+                c = b - r * (b - a);
+                gc = gs(c);
+            } else {
+                a = c;
+                c = d;
+                gc = gd;
+                d = a + r * (b - a);
+                gd = gs(d);
+            }
+        }
+        const double t = 0.5 * (a + b);
+        return {t, at(t).g};
+    };
+    // A rise lies between a lower transit and the next upper one, where g
+    // climbs from its minimum to its maximum; a set between an upper and the
+    // next lower. Each is there exactly when the minimum is at most 0 and the
+    // maximum above it, however briefly: a Sun that clears the horizon for a
+    // minute is found (the Astrolog side's review, 2026-10-27). The sample
+    // near a transit settles that without the extremum whenever it can: g
+    // there at most 0 near a lower transit puts the minimum at most 0, and
+    // above 0 near an upper one puts the maximum above, and the sample then
+    // bounds the zero as the extremum would. Otherwise the extremum is
+    // found. So the search walks the transits from the start, pair by pair,
+    // and stops at the first event.
+    const bool upward = event == Event::Rise;
+    // A bracket end at a transit: the instant and g there, and whether g is
+    // on the side the event leaves (minimum at most 0 for a rise's lower
+    // transit, maximum above 0 for its upper one; the reverse for a set).
+    struct End {
+        double jd, g;
+        bool ok;
+    };
+    auto end_at = [&](const Transit& tr) -> End {
+        // Below for a rise's start (a lower transit), above for its end.
+        const bool want_above = tr.upper;
+        const auto good = [&](double g) { return want_above ? g > 0.0 : g <= 0.0; };
+        if (good(tr.near.g))
+            return {tr.jd, tr.near.g, true};
+        const Extremum x = extremum(tr);
+        return {x.jd, x.g, good(x.g)};
+    };
+    auto g_of = [&](double x, Sample& s) {
+        s = at(x);
+        return s.g;
+    };
+    const auto past_zero = [&](double v) { return upward ? v > 0.0 : v <= 0.0; };
+    // Rough transits do to walk by; the event itself is solved to under
+    // 0.0001 s, like a transit asked for. The walk starts two transits
+    // behind the start: near a graze the extremum can lie past its
+    // transit, and the event between them past the start.
+    constexpr double kWalkTol = 1e-5;
+    Transit x = next_transit(jd_ut1_start, -dir, kWalkTol);
+    if (!failure)
+        x = next_transit(x.jd - dir * kPastTransit, -dir, kWalkTol);
+    if (failure)
+        return *failure;
+    for (int k = 0; k < 2 * 7400; ++k) {
+        const Transit y = next_transit(x.jd + dir * kPastTransit, dir, kWalkTol);
+        if (failure)
+            return *failure;
+        const Transit& early = dir > 0.0 ? x : y;
+        const Transit& late = dir > 0.0 ? y : x;
+        if (dir > 0.0 ? early.jd > hi + 0.5 : late.jd < lo - 0.5)
+            break;
+        // A rise runs from a lower transit to an upper; a set the reverse.
+        if (early.upper != upward && late.upper == upward) {
+            const End a = end_at(early), b = end_at(late);
+            if (failure)
+                return *failure;
+            if (a.ok && b.ok) {
+                const double t = solve(g_of, past_zero, a.jd, a.g, b.jd, b.g, 1e-9, nullptr);
+                if (failure)
+                    return *failure;
+                if (in_window(t))
+                    return EventResult{t, Outcome::Found};
+            }
+        }
+        x = y;
+    }
+    // None in the window. Above or below throughout is read from the
+    // window's own extrema and its two ends, never from a neighbouring
+    // day's.
+    bool any_above = false, any_below = false;
+    for (double t : {lo, hi}) {
+        const double gt = at(t).g;
+        if (failure)
+            return *failure;
+        (gt > 0.0 ? any_above : any_below) = true;
+    }
+    Transit tr = next_transit(lo - 1.0, 1.0, 1e-9);
+    for (int k = 0; k < 2 * 7400 && !failure && tr.jd <= hi + 1.0; ++k) {
+        const Extremum xm = extremum(tr);
+        if (failure)
+            return *failure;
+        if (xm.jd >= lo && xm.jd <= hi)
+            (xm.g > 0.0 ? any_above : any_below) = true;
+        tr = next_transit(tr.jd + kPastTransit, 1.0, 1e-9);
+    }
+    if (failure)
+        return *failure;
+    return EventResult{std::nan(""), any_above && !any_below   ? Outcome::AlwaysAbove
+                                     : any_below && !any_above ? Outcome::AlwaysBelow
+                                                               : Outcome::NotInWindow};
+}
+
+Result<CalcResult> Engine::calc_orbit_point_ut(int id, OrbitPoint point, OrbitElements elements,
+                                               double jd_ut1, const CalcOptions& o) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    return calc_orbit_point(id, point, elements, impl_->ut1_to_tt(jd_ut1), o);
+}
+
+void Engine::set_delta_t_model(const time::DeltaTModel* model) {
+    if (impl_) {
+        impl_->forget_observers(); // topocentric sites rotate with UT1
+        impl_->delta_t = model;
+    }
+}
+
+double Engine::delta_t_seconds(double jd_tt) const {
+    return impl_ ? impl_->delta_t_seconds(jd_tt) : 0.0;
+}
+
+std::string_view Engine::source() const {
+    return impl_ ? std::string_view(impl_->source->description) : std::string_view();
+}
+
+std::vector<Engine::EphemerisSpan> Engine::ephemeris_spans() const {
+    std::vector<EphemerisSpan> out;
+    if (!impl_ || !impl_->chain)
+        return out;
+    for (const auto& m : impl_->chain->members()) {
+        const auto [a, b] = m->span();
+        out.push_back({m->description, a, b});
+    }
+    return out;
+}
+
+std::vector<Engine::CatalogInfo> Engine::catalogs() const {
+    std::vector<CatalogInfo> out;
+    if (!impl_)
+        return out;
+    for (size_t i = 0; i < impl_->catalogs.size(); ++i)
+        out.push_back({impl_->corpus.catalog_paths[i], impl_->catalogs[i]->record_count()});
+    return out;
+}
+
+Result<uint64_t> Engine::catalog_bodies() const {
+    if (!impl_ || impl_->catalogs.empty())
+        return uint64_t{0};
+    if (impl_->catalogs.size() == 1)
+        return impl_->catalogs.front()->record_count(); // the writer keeps SPK-IDs unique
+    // Counted once, under the corpus's lock: any engine reading it may ask.
+    Corpus::Data& d = impl_->corpus;
+    std::lock_guard<std::mutex> hold(d.lazy);
+    if (d.distinct_bodies)
+        return *d.distinct_bodies;
+    std::vector<uint64_t> ids;
+    for (const auto& c : impl_->catalogs) {
+        ids.reserve(ids.size() + size_t(c->record_count()));
+        auto each =
+            c->for_each_name([&](uint64_t spkid, const catalog::Names&) { ids.push_back(spkid); });
+        if (!each)
+            return each.error();
+    }
+    std::sort(ids.begin(), ids.end());
+    d.distinct_bodies = uint64_t(std::unique(ids.begin(), ids.end()) - ids.begin());
+    return *d.distinct_bodies;
+}
+
+uint64_t Engine::small_body_windows_integrated() const {
+    return impl_ ? impl_->windows.integrated() : 0;
+}
+
+uint64_t Engine::small_body_segments_refined(int spkid) const {
+    if (!impl_)
+        return 0;
+    const auto it = impl_->small_bodies.find(uint64_t(spkid));
+    return it == impl_->small_bodies.end() ? 0 : it->second.memo->stats().segments_refined;
+}
+
+size_t Engine::small_body_windows_kept() const {
+    return impl_ ? impl_->corpus.small_body_windows.size() : 0;
+}
+
+Result<std::pair<double, double>> Engine::catalog_state_span(int spkid) {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    // A body the planetary files answer is never integrated (body_barycentric).
+    const auto [slo, shi] = impl_->source->span();
+    double probe[6];
+    auto direct = impl_->source->barycentric(spkid, 0.5 * (slo + shi), probe, impl_->scratch);
+    if (direct.ok() || direct.error().code != ErrorCode::NotFound)
+        return make_error(ErrorCode::NotFound, "body " + std::to_string(spkid) +
+                                                   " is answered by the planetary ephemeris");
+    auto r = impl_->find_record_at(spkid);
+    if (!r.ok())
+        return r.error();
+    if (!r.value())
+        return make_error(ErrorCode::NotFound,
+                          "no loaded catalog carries body " + std::to_string(spkid));
+    // The limits small_body_state and the memo apply.
+    auto [lo, hi] = impl_->perturbers.span();
+    if (!impl_->asteroids) {
+        const double epoch = r.value()->first.epoch_jtdb;
+        lo = std::max(lo, epoch - kNoPerturberSpanDays);
+        hi = std::min(hi, epoch + kNoPerturberSpanDays);
+    }
+    return std::make_pair(lo, hi);
+}
+
+Result<Engine::CatalogBody> Engine::catalog_body(int spkid) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    auto r = impl_->find_record_at(spkid);
+    if (!r.ok())
+        return r.error();
+    if (!r.value())
+        return make_error(ErrorCode::NotFound,
+                          "no loaded catalog carries body " + std::to_string(spkid));
+    const auto& [rec, catalog_i] = r.value().value();
+    const catalog::Names n = catalog::record_names(impl_->catalogs[catalog_i]->name_pool(), rec);
+    return CatalogBody{rec,
+                       BodyNames{std::string(n.pdes), std::string(n.name), std::string(n.prov_des)},
+                       catalog_i};
+}
+
+Result<void> Engine::for_each_catalog_record(
+    const std::function<void(size_t, const catalog::Record&, const catalog::Names&)>& fn) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    for (size_t i = 0; i < impl_->catalogs.size(); ++i) {
+        auto each = impl_->catalogs[i]->for_each(
+            [&](const catalog::Record& r, const catalog::Names& n) { fn(i, r, n); });
+        if (!each)
+            return each.error();
+    }
+    return {};
+}
+
+Result<const std::vector<std::pair<std::string, uint64_t>>*>
+Engine::catalog_folded_names(size_t catalog) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (catalog >= impl_->catalogs.size())
+        return make_error(ErrorCode::ArgumentError, "no such catalog");
+    auto index = impl_->corpus.name_index(catalog);
+    if (!index)
+        return index.error();
+    return &index.value()->folded;
+}
+
+Result<void> Engine::for_each_catalog_name(
+    const std::function<void(size_t, uint64_t, const catalog::Names&)>& fn) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    for (size_t i = 0; i < impl_->catalogs.size(); ++i) {
+        auto each = impl_->catalogs[i]->for_each_name(
+            [&](uint64_t spkid, const catalog::Names& n) { fn(i, spkid, n); });
+        if (!each)
+            return each.error();
+    }
+    return {};
+}
+
+Result<double> Engine::orbit_point_mean_motion_deg_day(int id, OrbitPoint point) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    const bool node = point == OrbitPoint::AscendingNode || point == OrbitPoint::DescendingNode;
+    const auto unwrap = [](double d) { return d - kTwoPi * std::round(d / kTwoPi); };
+    if (id == body::kMoon) {
+        // Omega for the nodes, varpi = L - l for the apsides; both from the
+        // mean equinox of date, which general precession (phi[8]) fixes.
+        double lo[14], hi[14];
+        frames::fundamental_arguments(kJ2000 - 0.5, lo);
+        frames::fundamental_arguments(kJ2000 + 0.5, hi);
+        const double d = node ? unwrap(hi[13] - lo[13])
+                              : unwrap((hi[11] + hi[13] - hi[9]) - (lo[11] + lo[13] - lo[9]));
+        return (d - unwrap(hi[8] - lo[8])) * kRad2Deg;
+    }
+    int key = id;
+    if (id == body::kSun || id == body::kEarth)
+        key = body::kEarthMoonBary;
+    else if (id == 1 || id == 2)
+        key = id * 100 + 99;
+    else if (id >= 499 && id <= 999 && id % 100 == 99)
+        key = id / 100;
+    for (const MeanElementsFit& f : kMeanElements) {
+        if (f.id != key)
+            continue;
+        // The angle atan2(x, y) of a pair of quadratics in T, differentiated
+        // at T = 0: (y x' - x y') / (x^2 + y^2) per Julian century, on the
+        // J2000 ecliptic the fit is referred to.
+        const double* x = node ? f.p : f.h;
+        const double* y = node ? f.q : f.k;
+        const double rate = (y[0] * x[1] - x[0] * y[1]) / (x[0] * x[0] + y[0] * y[0]);
+        return rate / 36525.0 * kRad2Deg;
+    }
+    return make_error(ErrorCode::NotFound,
+                      "mean elements exist for the Moon and the major planets only");
+}
+
+Result<double> Engine::mean_motion_deg_day(int id) const {
+    if (!impl_)
+        return make_error(ErrorCode::ArgumentError, "engine is not open");
+    if (id == body::kMoon) {
+        // The mean longitude L = F + Omega is counted from the mean equinox
+        // of date; general precession (phi[8]) takes it back to a fixed one.
+        double lo[14], hi[14];
+        frames::fundamental_arguments(kJ2000 - 0.5, lo);
+        frames::fundamental_arguments(kJ2000 + 0.5, hi);
+        const auto unwrap = [](double d) { return d - kTwoPi * std::round(d / kTwoPi); };
+        const double rate = unwrap((hi[11] + hi[13]) - (lo[11] + lo[13])) - unwrap(hi[8] - lo[8]);
+        return rate * kRad2Deg;
+    }
+    int key = id;
+    if (id == body::kSun || id == body::kEarth)
+        key = body::kEarthMoonBary;
+    else if (id == 1 || id == 2)
+        key = id * 100 + 99;
+    else if (id >= 499 && id <= 999 && id % 100 == 99)
+        key = id / 100;
+    for (const MeanElementsFit& f : kMeanElements) {
+        if (f.id != key)
+            continue;
+        const double a = f.a[0];
+        const double mu = gm_or_builtin(impl_->source.get(), body::kSun) +
+                          gm_or_builtin(impl_->source.get(), key); // AU^3/day^2
+        return std::sqrt(mu / (a * a * a)) * kRad2Deg;
+    }
+    return make_error(ErrorCode::NotFound,
+                      "mean elements exist for the Moon and the major planets only");
+}
+
+} // namespace prometheia

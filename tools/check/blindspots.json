@@ -1,0 +1,354 @@
+{
+  "apparent": {
+    "blind": [
+      "--bary",
+      "--center",
+      "--corrections",
+      "--helio",
+      "--obj (probe)",
+      "--topo",
+      "--corrections=5~1",
+      "--corrections=5~4",
+      "--corrections=7~2"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--jd",
+      "--corrections=7~1",
+      "--corrections=7~4"
+    ]
+  },
+  "arrival": {
+    "blind": [
+      "--corrections",
+      "--eq",
+      "--icrs",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--bary",
+      "--center",
+      "--columns",
+      "--deltat",
+      "--helio",
+      "--jd",
+      "--topo"
+    ]
+  },
+  "bary": {
+    "blind": [
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--bary",
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd"
+    ]
+  },
+  "deflection": {
+    "blind": [
+      "--center",
+      "--eq",
+      "--icrs",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--jd",
+      "--corrections=1~1",
+      "--corrections=3~1",
+      "--corrections=3~2"
+    ]
+  },
+  "deflection-geo": {
+    "blind": [
+      "--count",
+      "--eq",
+      "--icrs",
+      "--obj (probe)",
+      "--step"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--jd",
+      "--corrections=1~1",
+      "--corrections=3~1",
+      "--corrections=3~2"
+    ]
+  },
+  "deflection-topo": {
+    "blind": [
+      "--count",
+      "--eq",
+      "--icrs",
+      "--obj (probe)",
+      "--step"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--jd",
+      "--topo",
+      "--corrections=1~1",
+      "--corrections=3~1",
+      "--corrections=3~2"
+    ]
+  },
+  "hamburg": {
+    "blind": [
+      "--corrections",
+      "--helio",
+      "--j2000",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--hyp",
+      "--jd"
+    ]
+  },
+  "helio": {
+    "blind": [
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--eq",
+      "--helio",
+      "--icrs",
+      "--jd",
+      "--corrections=1~1"
+    ]
+  },
+  "horizons": {
+    "blind": [
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--corrections=1~1"
+    ]
+  },
+  "hypotheticals": {
+    "blind": [
+      "--corrections",
+      "--obj (probe)",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--hyp",
+      "--jd"
+    ]
+  },
+  "points": {
+    "blind": [
+      "--bary",
+      "--center",
+      "--count",
+      "--helio",
+      "--j2000",
+      "--obj (probe)",
+      "--step",
+      "--corrections=1~1"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--jd",
+      "--node"
+    ]
+  },
+  "rates": {
+    "blind": [
+      "--corrections",
+      "--eq",
+      "--helio",
+      "--icrs",
+      "--j2000",
+      "--obj (probe)",
+      "--sid",
+      "--topo",
+      "--corrections=1~1",
+      "--corrections=7~2"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--count",
+      "--deltat",
+      "--jd",
+      "--node",
+      "--star",
+      "--step",
+      "--corrections=7~1",
+      "--corrections=7~4"
+    ]
+  },
+  "same": {
+    "blind": [
+      "--corrections",
+      "--eq",
+      "--icrs",
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--jd"
+    ]
+  },
+  "sidereal": {
+    "blind": [
+      "--corrections",
+      "--obj (probe)",
+      "--sid-plane",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--jd",
+      "--node",
+      "--sid"
+    ]
+  },
+  "sidinstant": {
+    "blind": [
+      "--corrections",
+      "--obj (probe)",
+      "--sid",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--jd"
+    ]
+  },
+  "sidsweep": {
+    "blind": [
+      "--corrections",
+      "--obj (probe)",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--jd",
+      "--sid",
+      "--sid-plane",
+      "--sidu"
+    ]
+  },
+  "stars": {
+    "blind": [
+      "--corrections",
+      "--eq",
+      "--icrs",
+      "--obj (probe)",
+      "--sid",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--deltat",
+      "--jd",
+      "--star"
+    ]
+  },
+  "surfaces": {
+    "blind": [
+      "--bary",
+      "--center",
+      "--jd",
+      "--obj (probe)",
+      "--topo"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--helio",
+      "--node",
+      "--corrections=1~1",
+      "--corrections=2~2",
+      "--corrections=3~1",
+      "--corrections=3~2",
+      "--corrections=4~4",
+      "--corrections=5~1",
+      "--corrections=5~4",
+      "--corrections=6~2",
+      "--corrections=6~4",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
+    ]
+  },
+  "topo": {
+    "blind": [
+      "--obj (probe)"
+    ],
+    "control": "green",
+    "seen": [
+      "--columns",
+      "--corrections",
+      "--deltat",
+      "--eq",
+      "--icrs",
+      "--jd",
+      "--topo",
+      "--corrections=1~1",
+      "--corrections=7~1",
+      "--corrections=7~2",
+      "--corrections=7~4"
+    ]
+  }
+}

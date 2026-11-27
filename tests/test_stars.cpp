@@ -1,0 +1,370 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// The fixed-star catalog: lookup, designations, constellations (always), and
+// apparent places against ERFA (tests/star_fixtures.inc; needs DE440, SKIPs
+// without it).
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <tuple>
+#include <unistd.h>
+
+#include <prometheia/engine.hpp>
+#include <prometheia/stars.hpp>
+
+#include "synthetic_spk.hpp"
+#include <doctest/doctest.h>
+
+using namespace prometheia;
+
+namespace {
+
+struct StarFixture {
+    const char* label;
+    const char* lookup;
+    double jd_tt;
+    double ra, dec, lon, lat; // apparent, true of date
+    double ara, adec;         // astrometric, ICRS
+};
+
+#include "star_fixtures.inc"
+
+size_t must_find(const char* q) {
+    auto r = stars::find(q);
+    REQUIRE_MESSAGE(r.ok(), q);
+    return r.value();
+}
+
+// The position angle of 2 seen from 1, degrees east of north [0, 360).
+double pa_deg(double ra1, double dec1, double ra2, double dec2) {
+    const double k = 3.14159265358979323846 / 180.0;
+    const double y = std::sin((ra2 - ra1) * k) * std::cos(dec2 * k);
+    const double x = std::cos(dec1 * k) * std::sin(dec2 * k) -
+                     std::sin(dec1 * k) * std::cos(dec2 * k) * std::cos((ra2 - ra1) * k);
+    const double pa = std::atan2(y, x) / k;
+    return pa < 0.0 ? pa + 360.0 : pa;
+}
+
+// A position angle in the frame of the equinox of 2000 (the ICRF, near
+// enough), carried to the equinox of `years` later: the precession of
+// position angle, 20.04"/yr x sin(RA) sec(Dec). The Sixth Catalog prints its
+// ephemeris at the equinox of date, and its nodes refer to 2000.
+double pa_of_date(double pa2000, double ra, double dec, double years) {
+    const double k = 3.14159265358979323846 / 180.0;
+    return pa2000 + 20.04 / 3600.0 * std::sin(ra * k) / std::cos(dec * k) * years;
+}
+
+// The difference of two angles in degrees, in (-180, 180].
+double dangle(double a, double b) {
+    return std::remainder(a - b, 360.0);
+}
+
+double sep_mas(double ra1, double dec1, double ra2, double dec2) {
+    const double k = 3.14159265358979323846 / 180.0;
+    const double a[3] = {std::cos(dec1 * k) * std::cos(ra1 * k),
+                         std::cos(dec1 * k) * std::sin(ra1 * k), std::sin(dec1 * k)};
+    const double b[3] = {std::cos(dec2 * k) * std::cos(ra2 * k),
+                         std::cos(dec2 * k) * std::sin(ra2 * k), std::sin(dec2 * k)};
+    const double c[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+                         a[0] * b[1] - a[1] * b[0]};
+    const double s = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+    const double d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    return std::atan2(s, d) / k * 3.6e6;
+}
+
+} // namespace
+
+TEST_CASE("stars_catalog_contents") {
+    CHECK(stars::count() > 9200);
+    const stars::Object& acrab = stars::at(must_find("Acrab"));
+    CHECK(acrab.hr == 5984);
+    CHECK(acrab.hd == 144217);
+    CHECK(acrab.hip == 78820);
+    CHECK(acrab.bayer == 2);
+    CHECK(acrab.bayer_index == 1);
+    CHECK(acrab.constellation == "Sco");
+    CHECK(acrab.astrometry == stars::Astrometry::Hipparcos);
+    CHECK(acrab.epoch_jyear == 1991.25);
+    CHECK(acrab.names.size() >= 2);
+    CHECK(acrab.names[0] == "Acrab");
+    CHECK(acrab.name() == "Acrab");
+    CHECK(acrab.bayer_designation() == "β¹ Sco");
+    CHECK(acrab.bayer_designation_long() == "Beta1 Scorpii");
+    CHECK(acrab.flamsteed_designation() == "8 Sco");
+    const auto d = acrab.designations();
+    CHECK(std::find(d.begin(), d.end(), "HIP 78820") != d.end());
+
+    const stars::Object& m31 = stars::at(must_find("M 31"));
+    CHECK(m31.kind == stars::Kind::Galaxy);
+    CHECK(m31.constellation == "And");
+    CHECK(std::isnan(m31.vmag));
+    CHECK(m31.name() == "M 31");
+    CHECK(stars::at(must_find("M 45")).kind == stars::Kind::OpenCluster);
+    CHECK(stars::at(must_find("M 40")).kind == stars::Kind::DoubleStar);
+    for (int n = 1; n <= 110; ++n) {
+        CHECK(stars::find("M" + std::to_string(n)).ok());
+    }
+    // The Double Cluster, which the Messier list lacks, from NGC 2000.0:
+    // RA 02h19.0m and 02h22.4m, Dec +57 09' and +57 07', 30' across.
+    for (const auto& [ngc, ra, dec] :
+         {std::tuple{869, 34.75, 57.15}, {884, 35.6, 57.0 + 7.0 / 60}}) {
+        const std::string designation = "NGC " + std::to_string(ngc);
+        const stars::Object& c = stars::at(must_find(designation.c_str()));
+        CHECK(c.ngc == ngc);
+        CHECK(c.messier == 0);
+        CHECK(c.kind == stars::Kind::OpenCluster);
+        CHECK(c.astrometry == stars::Astrometry::Ngc2000);
+        CHECK(c.constellation == "Per");
+        CHECK(c.name() == designation);
+        CHECK(c.size_arcmin == 30.0);
+        CHECK(std::fabs(c.ra_deg - ra) < 1e-9);
+        CHECK(std::fabs(c.dec_deg - dec) < 1e-9);
+        CHECK(stars::find("ngc" + std::to_string(ngc)).value() == c.index);
+    }
+    CHECK(stars::constellations().size() == 88);
+    CHECK(stars::greek_letter_name(24) == "omega");
+    CHECK(stars::greek_letter_symbol(2) == "β");
+}
+
+TEST_CASE("stars_lookup_forms") {
+    const size_t acrab = must_find("Acrab");
+    for (const char* q :
+         {"acrab", "GRAFFIAS", "Elacrab", "HR 5984", "hr5984", "HD 144217", "HIP 78820", "β¹ Sco",
+          "bet1 Sco", "Beta1 Scorpii", "8 Sco", "8 Scorpii", "Beta Scorpii", "bet Sco", "β Sco"}) {
+        auto r = stars::find(q);
+        CHECK_MESSAGE((r.ok() && r.value() == acrab), q);
+    }
+    // Without the superscript both components answer, as aliases, brighter first.
+    const auto both = stars::lookup("Beta Sco");
+    REQUIRE(both.size() == 2);
+    CHECK(both[0].index == acrab);
+    CHECK(both[0].quality == stars::MatchQuality::Alias);
+    CHECK(stars::find("beta2 Sco").value() != acrab);
+    // Greek letters, accents and spacing.
+    CHECK(stars::find("α CMa").value() == must_find("Sirius"));
+    CHECK(stars::find("ALPHA canis majoris").value() == must_find("Sirius"));
+    CHECK(stars::find("Zuben Elgenubi").value() == must_find("Zubenelgenubi"));
+    CHECK(stars::find("Messier 44").value() == must_find("Praesepe"));
+    CHECK(stars::at(must_find("Regulus")).iau_name);
+    CHECK(!stars::at(must_find("M 44")).iau_name);
+    CHECK(stars::at(must_find("Altarf")).iau_name); // names[0] is the IAU "Tarf"
+    // Allen (1899): Al Tarf, "the End", for beta Cancri.
+    CHECK(stars::find("Altarf").value() == must_find("bet Cnc"));
+    CHECK(stars::find("Tarf").value() == must_find("Altarf"));
+    CHECK(stars::find("alf Psc").value() == must_find("Alrescha"));
+    CHECK(stars::find("Cynosura").value() == must_find("Polaris"));
+    // Prefix lookups add names that start with the query.
+    const auto alg = stars::lookup("Alg", 20, true);
+    CHECK(alg.size() >= 4);
+    for (const auto& m : alg)
+        CHECK(m.quality == stars::MatchQuality::Prefix);
+    CHECK(stars::lookup("Al", 20, true).empty()); // prefixes need 3 letters
+    // Misses and ambiguity.
+    CHECK(stars::find("Vulcan").error().code == ErrorCode::NotFound);
+    CHECK(stars::lookup("").empty());
+}
+
+TEST_CASE("stars_constellation_boundaries") {
+    // The examples of the boundary data's ReadMe (Roman 1987), given at
+    // equinox B1875 there; here as ICRS directions a few arcminutes away,
+    // well inside each region.
+    CHECK(stars::constellation_at(9.0 * 15.0, 65.0) == "UMa");
+    CHECK(stars::constellation_at(23.5 * 15.0, -20.0) == "Aqr");
+    CHECK(stars::constellation_at(5.12 * 15.0, 9.12) == "Ori");
+    CHECK(stars::constellation_at(0.0, 90.0) == "UMi");
+    CHECK(stars::constellation_at(0.0, -90.0) == "Oct");
+    // Every designated Bright Star Catalogue star lies in its designation's
+    // constellation (the 1930 boundaries were drawn around them; the few
+    // stars left outside, like 10 UMa in Lyn, carry no designation there).
+    int designated = 0, agree = 0;
+    for (size_t i = 0; i < stars::count(); ++i) {
+        const stars::Object& o = stars::at(i);
+        if (!o.hr || !(o.bayer || o.flamsteed))
+            continue;
+        ++designated;
+        agree += stars::constellation_at(o.ra_deg, o.dec_deg) == o.constellation;
+    }
+    CHECK(designated > 3000);
+    CHECK(agree == designated);
+}
+
+TEST_CASE("stars_apparent_place_vs_erfa") {
+    const char* env = std::getenv("PROMETHEIA_DE440");
+    const std::string de =
+        (env && *env) ? env : std::string(PROMETHEIA_SOURCE_DIR) + "/ephe/linux_p1550p2650.440";
+    if (access(de.c_str(), F_OK) != 0) {
+        std::printf("  SKIP: %s not present\n", de.c_str());
+        return;
+    }
+    auto e = Engine::open(de);
+    REQUIRE(e.ok());
+    double worst_app = 0.0, worst_ecl = 0.0, worst_astro = 0.0;
+    std::string worst_label;
+    for (const StarFixture& f : kStarFixtures) {
+        const size_t i = must_find(f.lookup);
+        CalcOptions eq;
+        eq.coords = Coords::Equatorial;
+        const auto a = e.value().calc_star(i, f.jd_tt, eq);
+        REQUIRE(a.ok());
+        const auto l = e.value().calc_star(i, f.jd_tt, CalcOptions{});
+        REQUIRE(l.ok());
+        CalcOptions astro = CalcOptions::astrometric();
+        astro.frame = Frame::ICRF;
+        astro.coords = Coords::Equatorial;
+        const auto s = e.value().calc_star(i, f.jd_tt, astro);
+        REQUIRE(s.ok());
+        const double da = sep_mas(a.value().pos.lon_deg, a.value().pos.lat_deg, f.ra, f.dec);
+        const double dl = sep_mas(l.value().pos.lon_deg, l.value().pos.lat_deg, f.lon, f.lat);
+        const double ds = sep_mas(s.value().pos.lon_deg, s.value().pos.lat_deg, f.ara, f.adec);
+        if (da > worst_app)
+            worst_label = std::string(f.label) + " " + std::to_string(f.jd_tt);
+        worst_app = std::max(worst_app, da);
+        worst_ecl = std::max(worst_ecl, dl);
+        worst_astro = std::max(worst_astro, ds);
+    }
+    std::printf("  vs ERFA: apparent %.3f mas (%s), ecliptic %.3f mas, astrometric %.3f mas\n",
+                worst_app, worst_label.c_str(), worst_ecl, worst_astro);
+    CHECK(worst_app < 1.0);
+    CHECK(worst_ecl < 1.0);
+    CHECK(worst_astro < 1.0);
+}
+
+// Binary stars (STARS.md, "Binary stars"): the orbit on top of the straight
+// line. Barycentric, geometric, ICRF: no ephemeris is needed, so the synthetic
+// kernel serves.
+TEST_CASE("stars_binary_orbits") {
+    synth::TempFile tf("stars-binary");
+    Engine e = synth::open_synthetic(tf);
+    CalcOptions o = CalcOptions::geometric();
+    o.center = Center::Barycentric;
+    o.frame = Frame::ICRF;
+    o.coords = Coords::Equatorial;
+    const auto radec = [&](size_t star, double jd) {
+        auto r = e.calc_star(star, jd, o);
+        REQUIRE(r.ok());
+        return std::pair{r.value().pos.lon_deg, r.value().pos.lat_deg};
+    };
+    const size_t a = must_find("HR 5459"), b = must_find("HR 5460"), sirius = must_find("Sirius");
+
+    // alpha Cen A is a component solution: at its catalog epoch the orbit adds
+    // nothing, so it sits exactly at its catalog place.
+    const stars::Object& ao = stars::at(a);
+    const double t0 = 2451545.0 + (ao.epoch_jyear - 2000.0) * 365.25;
+    const auto [ra0, dec0] = radec(a, t0);
+    CHECK(sep_mas(ra0, dec0, ao.ra_deg, ao.dec_deg) < 1e-3);
+
+    // alpha Cen B is placed from A by the relative orbit: B - A is the orbit's
+    // separation, against the Sixth Catalog's own published ephemeris
+    // (stars-raw/orb6ephem.txt, 2025.0-2029.0, Besselian; mas precision).
+    // Both coordinates: the separation, and the position angle, which the
+    // catalog prints at the equinox of date (0.1 deg; the precession of
+    // position angle is -0.18 deg here by 2025, so a frame slip shows).
+    const double published[] = {8.737, 9.294, 9.765, 10.121, 10.329};
+    const double published_pa[] = {9.2, 11.9, 14.3, 16.5, 18.6};
+    for (int k = 0; k < 5; ++k) {
+        const double jd = 2415020.31352 + (125.0 + k) * 365.242198781;
+        const auto [ra_a, dec_a] = radec(a, jd);
+        const auto [ra_b, dec_b] = radec(b, jd);
+        INFO("year ", 2025 + k);
+        CHECK(std::fabs(sep_mas(ra_a, dec_a, ra_b, dec_b) / 1000.0 - published[k]) < 0.002);
+        const double pa =
+            pa_of_date(pa_deg(ra_a, dec_a, ra_b, dec_b), ra_a, dec_a, (jd - 2451545.0) / 365.25);
+        CHECK(std::fabs(dangle(pa, published_pa[k])) < 0.06);
+    }
+
+    // Direction from data no orbit code touches: Hipparcos measured A and B
+    // at the same epoch, so their catalog places give B - A at 1991.25
+    // directly. The orbit's B - A must agree in east and north separately
+    // (measured 73 and 28 mas apart); a flipped sign or a wrong sense of the
+    // node misses by 22-31". Suggested by the Astrolog session.
+    {
+        const stars::Object& bo = stars::at(b);
+        const double k = 3.14159265358979323846 / 180.0;
+        const auto tangent = [&](double ra0, double dec0, double ra, double dec) {
+            const double den = std::sin(dec * k) * std::sin(dec0 * k) +
+                               std::cos(dec * k) * std::cos(dec0 * k) * std::cos((ra - ra0) * k);
+            return std::pair{std::cos(dec * k) * std::sin((ra - ra0) * k) / den / k * 3600.0,
+                             (std::sin(dec * k) * std::cos(dec0 * k) -
+                              std::cos(dec * k) * std::sin(dec0 * k) * std::cos((ra - ra0) * k)) /
+                                 den / k * 3600.0};
+        };
+        REQUIRE(bo.epoch_jyear == ao.epoch_jyear);
+        const auto [ce, cn] = tangent(ao.ra_deg, ao.dec_deg, bo.ra_deg, bo.dec_deg);
+        const auto [rb, db] = radec(b, t0);
+        const auto [oe, on] = tangent(ra0, dec0, rb, db);
+        CHECK(std::fabs(oe - ce) < 0.1);
+        CHECK(std::fabs(on - cn) < 0.1);
+    }
+
+    // Sirius's catalog line is its barycentre's (a Hipparcos orbital
+    // solution), so the star sits off it by A's share of the orbit: 1.018 /
+    // 3.081 of the published 11.256" in 2025.0.
+    const stars::Object& so = stars::at(sirius);
+    const double jd = 2415020.31352 + 125.0 * 365.242198781;
+    const double years = (jd - (2451545.0 + (so.epoch_jyear - 2000.0) * 365.25)) / 365.25;
+    const double line_ra =
+        so.ra_deg + so.pm_ra_mas_yr * years / 3.6e6 / std::cos(so.dec_deg * 3.14159265358979 / 180);
+    const double line_dec = so.dec_deg + so.pm_dec_mas_yr * years / 3.6e6;
+    const auto [sra, sdec] = radec(sirius, jd);
+    CHECK(std::fabs(sep_mas(sra, sdec, line_ra, line_dec) / 1000.0 - 11.256 * 1.018 / 3.081) <
+          0.01);
+    // A is opposite B: its position angle from the barycentre is the
+    // catalog's 59.0 deg (of date) turned half a circle.
+    const double spa = pa_of_date(pa_deg(line_ra, line_dec, sra, sdec), line_ra, line_dec,
+                                  (jd - 2451545.0) / 365.25);
+    CHECK(std::fabs(dangle(spa, 59.0 + 180.0)) < 0.06);
+}
+
+// A star's distance rate is computed in closed form (ENGINE.md, "Rates"):
+// differencing positions 1e5..1e10 AU long over the 42-second stencil missed
+// by one f64 ulp of the position, 2.3e-5 AU/day at Polaris. The oracle is a
+// five-point difference of the reported distances, whose own floor is
+// ~18 ulp(r) / 12h; the rate must sit within a few of those floors. The step
+// is 1/8 day geocentrically and 1/64 topocentrically, where the site's
+// diurnal motion would otherwise put ~3e-6 AU/day of truncation in it.
+// Binaries (Sirius, alpha Cen A and B) take their orbit's rate too.
+TEST_CASE("stars_distance_rate_matches_differenced_distance") {
+    synth::TempFile tf("stars-rate");
+    Engine e = synth::open_synthetic(tf);
+    CalcOptions geo;
+    CalcOptions topo;
+    topo.center = Center::Topocentric;
+    topo.site = {-78.47 * 3.14159265358979323846 / 180.0, -0.18 * 3.14159265358979323846 / 180.0,
+                 2850.0};
+    const char* names[] = {"Polaris", "Vega", "Sirius", "HR 5459", "HR 5460", "Aldebaran"};
+    const double jd = 2451545.25;
+    for (const CalcOptions* o : {&geo, &topo}) {
+        const double h = o == &topo ? 1.0 / 64.0 : 1.0 / 8.0;
+        for (const char* name : names) {
+            const size_t i = must_find(name);
+            const auto dist = [&](double t) {
+                auto r = e.calc_star(i, t, *o);
+                REQUIRE(r.ok());
+                return r.value().pos.dist_au;
+            };
+            auto c = e.calc_star(i, jd, *o);
+            REQUIRE(c.ok());
+            const Position& p = c.value().pos;
+            const double diff =
+                (dist(jd - 2 * h) - 8 * dist(jd - h) + 8 * dist(jd + h) - dist(jd + 2 * h)) /
+                (12 * h);
+            const double floor = 18 * std::nextafter(p.dist_au, 1e300) - 18 * p.dist_au;
+            const std::string label =
+                std::string(name) + (o == &topo ? " topocentric" : " geocentric");
+            INFO(label);
+            CHECK(std::fabs(p.dist_speed - diff) < 4 * floor / (12 * h) + 1e-9);
+            // The vector agrees with the columns: its radial part is the
+            // distance rate, and the angular rates still follow from it.
+            const double* x = p.xyz_au;
+            const double* v = p.vel_au_day;
+            const double r2 = x[0] * x[0] + x[1] * x[1];
+            const double vn = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            CHECK(std::fabs((x[0] * v[0] + x[1] * v[1] + x[2] * v[2]) / p.dist_au - p.dist_speed) <
+                  1e-12 * vn); // rounding of a dot product scales with |v|, not its radial part
+            const double lon_speed = (x[0] * v[1] - x[1] * v[0]) / r2 * 57.29577951308232;
+            CHECK(std::fabs(lon_speed - p.lon_speed) < 1e-12 * std::fabs(p.lon_speed) + 1e-15);
+        }
+    }
+}

@@ -1,0 +1,57 @@
+# Third-party code
+
+Vendored verbatim; the one local change is the uSockets patch below. Each
+directory keeps its upstream license.
+
+| directory | what | version | license | source |
+|-----------|------|---------|---------|--------|
+| `ephproto/` | Astrolog's ephemeris protocol (version 3) — historical; deleted 2026-09-17 when prometheiad moved to version 4 | | | |
+| `ephproto/v4/` | Astrolog's ephemeris protocol **version 4** (`ephproto.h`, the byte-level authority prometheiad speaks) + its generated `registries.json` | Astrolog `qt` commit `6235abd`, the houses drop (header sha256 `85d21bc8…`: object kind 6 "house point" (`u8 system`, `u8 point`), extra columns 4 ARMC and 5 true obliquity, per-object error 9 "undefined here", WELCOME 0x0015 house systems served and 0x0016 sidereal-time model, and the object-list precheck at 6 bytes an object (was 8, which refused several one-character names); `registries.json` `9845fef7…`, 25 registries with A.22 house systems and A.23 house points. Verified 2026-09-29: set-sha256 `38f7e09d4b25fc2c12c05ac0bab0d2716e30feec111157137cc6bcbbdbc6ecab` over 124 fixtures, 124/124 through the vendored codec and through the independent reader (taught kind 6, the two columns and the two TLVs from §3's text), `JUDGEMENTS.tsv` 7/7; the numeric rows `ephsrv/houses-rows.tsv` (their `513437f`, rows-sha256 `855a7342…` over the data rows, 2,244 rows) agree with our `houses::compute` to 0.000002″ with no refusal disagreement (docs/HOUSES.md). Before, `7957abb`, the coverage drop (header sha256 `91c2fa6a…`: `Capabilities::coverage` encodes and decodes A.3 0x000A; one new malformed fixture, `welcome_coverage_short`. Verified 2026-09-29: set-sha256 `1df64f69af50b3ab8dfcc9fd90bbab6dfcd4e247f7626fe2be8fc0321c1f1c73` over 110 fixtures, 110/110 through the vendored codec and the independent reader, `JUDGEMENTS.tsv` 7/7. Before, `7cbf0d8`, the site drop, header `b6cb5742…`, unchanged at `4844fac`); `registries.json` from `8e74027` (`5fed5d64…`: A.3 tag 10's payload string only — coverage (0x000A) defined: one entry per ephemeris in consulting order, span in TDB, routing only — vendored 2026-09-29; before, `b6f1387`, `f7a12c75…`: A.20's two token notes only — "(the default)" moves from `iau2006` to `vondrak2011`, as §3.5a now reads — vendored 2026-09-29; before, `5f11726`, `ad449ae6…`: two payload strings only — A.3 tag 19 now reads the rate bound as §3.5a defines it, |distance-rate error| / max(1 AU, r); tag 20's kinds cite A.12 — vendored 2026-09-29; before, unchanged since `eed6429`, `84104b8b…`) | GPL-2.0 (Astrolog, `license.htm` in its tree) | the site drop: a site height at or below the WGS-84 polar radius (−6356752 m) is malformed, no upper bound (from Prometheia's fuzzer finding, docs/SERVER.md "Fuzzing"). Verified 2026-09-29: set-sha256 `07438c7fa6121d3ce558616a9c83f70d5d90b726a42b6d029e9eb91daedd9929` over 109 fixtures, 109/109 through the vendored codec and through the independent reader (taught the rule from the header, which §3's text does not yet state), `JUDGEMENTS.tsv` 7/7. Vendored 11 days late: nothing ran the drift check (docs/SERVER.md "Is every check run by something?"). Previously `114f2a5`, the floats drop: DATA values finite or the canonical NaN, a failed row NaN in every column, `0x7FC00000` the canonical NaN at f32 (found by Prometheia's codec fuzzer, docs/SERVER.md "Fuzzing"). Verified 2026-09-18: set-sha256 `cdbd7438570f29ce6ec1d947e7a4210cd3931f413c653801033f14a42df5aef6` over the 105 conformance fixtures, 105/105 through the vendored codec and 105/105 through the independent reader (`tools/check/ephproto4_fixtures.py`, taught the rule from the spec text), `JUDGEMENTS.tsv` 7/7. Previously ephv4 `eed6429` (set `d904e358…`, 99/99), and before it `0fbc863` (set `1c934c7d…`, 91/91) |
+| `nlohmann/json.hpp` | JSON for Modern C++ (Niels Lohmann), the single header: the JSON and MCP tools only (`prometheia_json`), never `prometheiad` or the engine | release v3.11.3, `https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp`, sha256 `9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6` | MIT | unmodified |
+| `uWebSockets/` | WebSocket server library, prometheiad's transport (`src/` and `LICENSE` only) | v20.80.0, commit `3ffd6f44c9c3c92c96345d9f96bd01ba9c025ab5` | Apache-2.0 (`uWebSockets/LICENSE`) | https://github.com/uNetworking/uWebSockets |
+| `uSockets/` | its event-loop and socket layer (`src/` and `LICENSE` only), with `uSockets-write2.patch` applied | commit `86097c490263ab662d62e8e7b541390bdec7d149`, the one v20.80.0 pins | Apache-2.0 (`uSockets/LICENSE`) | https://github.com/uNetworking/uSockets |
+| `doctest/` | single-header C++ test framework (test code only; not linked into `libprometheia`) | 2.5.3 | MIT (`doctest/LICENSE.txt`) | https://github.com/doctest/doctest, tag `v2.5.3`, `doctest/doctest.h` |
+
+To verify: `sha256sum third_party/doctest/*`.
+
+```
+cfd518a3ef90f67e1f3ba514df23fb3627437de1a2feeba78cf5062a40021421  doctest/doctest.h
+0fe0b331fa1513dcce8604ff1fa925f32d1cea17d8aeb1c2471fad40d291adc5  doctest/LICENSE.txt
+85d21bc8b5ecf6f461dc8b4783ac6bf8a0fca2b300c8a1684a3bcb316b9da4c8  ephproto/v4/ephproto.h
+9845fef7f63de175ddc6cd40a7dd6607380a031efeb48e03b73bfe5c83d12efd  ephproto/v4/registries.json
+121ab3c6f9bed858b3f8aa949843f8e045850680054ca11aa184e289b58b3e63  ephproto/v4/elements/FIXTURE.tsv
+```
+
+`ephproto/v4/elements/FIXTURE.tsv` is the numeric fixture of "the kind-4
+elements rule" (Astrolog `ephv4` `176e333`; generated by their
+`tools/kind4-fixture.sh` at `20dd09c`, delivered at
+`/nvm/work/ephv4-drop-elements/`). It holds numbers only: the Astrolog
+implementation's answers for four invented element sets, whose inputs live on
+this side in our own format (`tests/data/kind4-cases.jsonl`).
+`ephproto4_kind4_elements_fixture` pins its digest and holds the engine to it,
+within the one known difference the drop documents. The generator's input file
+in the drop directory is in Swiss's element-file format, and this side
+deliberately does not read it.
+
+The v4 pair came from Astrolog's corrApplied drop (`ephv4` commit `0fbc863`,
+delivered at `/nvm/work/ephv4-drop/` with `DROP.md` as its manifest). The
+`registries.json` is generated data: Astrolog's `make check` diffs their
+codec's constants against it by name, and the v4 session must do the same on
+this side. Until the migration's delete step, `$PROMETHEIA_ASTROLOG` for the
+pinned-header test names an `ephv4` checkout (`/nvm/work/ephv4`), not the
+main tree — the v3 header then diverges by design, and the v4 pair is the
+one that must match.
+
+The two network libraries match Astrolog's vendored copies of the same
+commits (`ephsrv/uWebSockets`, `ephsrv/uSockets`), including the patch:
+`us_socket_write2` did not set `last_write_failed` on a partial write, so a
+partial write from inside the writable callback had its writable poll turned
+back off and the buffered tail was never sent. Astrolog found and fixed it
+(its review item S2). Built without zlib (`UWS_NO_ZLIB`), and with OpenSSL
+(`LIBUS_USE_OPENSSL`, `src/crypto/`) when CMake finds it, else without TLS
+(`LIBUS_NO_SSL`). Checksum of the two trees, file by file in sorted order
+(run in `third_party/`: `find uWebSockets uSockets -type f | sort | xargs sha256sum | sha256sum`):
+`4e1b8459c1df6348203d7d650ab64fb12c31d1240b22877e5fd8899432cb03cc`.
+
+To update doctest, fetch the same two files from the new release tag, replace them, and
+update the table and checksums.

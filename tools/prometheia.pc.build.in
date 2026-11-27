@@ -1,0 +1,13 @@
+# Uninstalled build-tree copy: absolute paths to this build, so
+# PKG_CONFIG_PATH=<build> pkg-config prometheia links the library and
+# headers as they sit there. The installed copy comes from
+# prometheia.pc.in and is relocatable instead.
+libdir=@CMAKE_CURRENT_BINARY_DIR@
+includedir=@CMAKE_CURRENT_SOURCE_DIR@/include
+
+Name: prometheia
+Description: Ephemeris Prometheia: cleanroom solar-system ephemeris (C++20 library with a C interface)
+Version: @PROJECT_VERSION@
+Requires: libzstd
+Libs: -L${libdir} -lprometheia -lstdc++ -lm
+Cflags: -I${includedir}

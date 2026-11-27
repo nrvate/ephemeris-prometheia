@@ -1,0 +1,345 @@
+# Time scales
+
+`prometheia::time` (in `include/prometheia/time.hpp`, `src/time.cpp`)
+covers calendar↔JD, UTC↔TAI↔TT↔TDB, and Delta T (TT−UT1). The ephemeris
+side of the house (DE files, EPM1 epochs, the integrator) runs in TDB
+JD; the engine layer converts at its boundary.
+
+## Calendar
+
+Proleptic Gregorian, JD runs noon-to-noon. The civil-date arithmetic is
+Howard Hinnant's published branch-free algorithms (`days_from_civil` /
+`civil_from_days`, the family behind C++ `std::chrono`), which are exact
+over ±328,000 years — round-trip tested over 1500–2300 in `test_time`,
+plus fixed anchors: J2000 noon = 2451545.0, the DE200 start epoch
+1599-12-09 = 2305424.5, 1972-01-01 = 2441317.5. There is no 1582
+calendar gap in our convention (proleptic Gregorian throughout).
+
+Earlier prototyping with the classic Meeus formulas showed their
+well-known calculator artifacts outside the modern era (a floor/trunc
+ambiguity that misplaces dates by one day in some years); Hinnant's
+algorithms were adopted instead after cross-verifying the two
+implementations against each other and against `datetime`-derived
+anchors.
+
+## UTC / TAI / TT
+
+- **TT = TAI + 32.184 s** exactly (by definition of TT).
+- **TAI−UTC** comes from a built-in table of the USNO `tai-utc.dat`
+  integer-leap entries, 1972-01-01 (10 s) through 2017-01-01 (37 s),
+  generated into `src/leap_second_table.inc` and refreshed at each
+  release with the ΔT table (below). The
+  table is keyed by the calendar month of the UTC day, which makes the
+  leap second 23:59:60 belong to the day that contains it, under the
+  offset still in effect.
+- **After the table, the last offset holds for ever**: no further leap
+  seconds are assumed (maintainer, 2026-09-29). That matches the 2022
+  CGPM resolution to relax the |UT1−UTC| ≤ 0.9 s bound from 2035, which
+  is what civil time is expected to do over the coming century. It puts a
+  future UTC clock this far from Earth rotation, by the ΔT model: UT1−UTC
+  ≈ 0 s in 2030, −11 s in 2050, −134 s in 2100 (0.56° on the chart angles),
+  −373 s in 2200 and −73 min by 3000. Centuries ahead, what a clock time
+  will mean is not known. `prometheia-json` gives `ut1_minus_utc_s` on
+  every UTC row so the drift is never silent.
+- The 1961–1972 linear-drift era of UTC is rejected with a clear error;
+  supply JD(TT) directly for those epochs.
+- `utc_to_tt` / `tt_to_utc` round-trip every monthly sample from 1972 to
+  2099 and keep consecutive UTC labels — including the `:60` label —
+  exactly 1 s apart in TT.
+- Leap labeling: during the inserted second, the nominal UTC rendering
+  lands in [0 s, 1 s) of the *next* day, which `tt_to_utc` relabels as
+  23:59:60.x of the leap day. The comparison instants are kept in the TT
+  domain (no intermediate subtraction) so the exact-midnight case is
+  exact.
+
+**Precision note:** a JD double quantizes at ~40 µs near the present
+epoch (ulp ≈ 4.7e-10 day at JD 2.46e6). `tt_to_utc` snaps rendered
+seconds to 0.1 ms and rolls overflow; tests use tolerances above the
+quantization floor. This is inherent to JD-as-double, not to UTC.
+
+## TDB
+
+`tdb_minus_tt` is the **full Fairhead & Bretagnon (1990) series** at the
+geocentre, 787 terms in five powers of time plus the adjustment to JPL
+planetary masses (since 2026-09-29, the maintainer's decision; before, the
+seven-term series of USNO Circular 179, eq. 2.6). The coefficients come from
+ERFA v2.0.1's `dtdb.c` (BSD-3), by `tools/gen/gen_tdb_series.py`, pinned by
+sha256. The evaluation is our own, and it matches pyerfa's `dtdb` to
+rounding (`time_tdb_tt_is_the_full_series`). ERFA states ±3 ns against
+time ephemerides integrated on DE405 over 1950–2050. The J2000 value is
+−99.3 µs. `tt_from_tdb` inverts it by evaluating at the TDB argument,
+which is exact to nanoseconds.
+
+The full series costs ~12 µs, and a calc converts several instants, so
+the engine keeps a `TdbInterpolator`. It uses nodes one day apart holding
+the value and rate of the 136 terms that can move TDB−TT by 0.1 µs
+anywhere in DE441's span, with a cubic Hermite polynomial between two
+nodes. Measured every 2.4 days, that is within **1.55 µs of all 787 terms
+over −13000..17000** (0.94 µs over 1550–2650). A JD held as a double
+quantizes an instant to 10–80 µs across that span, so the rest cannot
+reach an answer. Before and after, µs per call (`prometheia-engine-bench`,
+DE440): planets apparent 5.40 → 4.04, Moon mean node and apogee 18.6 →
+21.7, natural apogee 28.5 → 37.5. The full series called directly each
+time was 56, 101 and 130. `prometheiad`'s latency on fresh 50-row requests
+is unchanged within run-to-run noise.
+
+A JD double also quantizes the *result*: `tdb_from_tt` rounds to the
+double grid (40 µs near the present), and the rounding steps once each
+time TDB−TT crosses a boundary, about 160 times a year, moving the Moon
+3–4 cm. A rate stencil that converted each of its points separately read
+that step as velocity. `TdbInterpolator::Pin` holds the offset of the
+stencil's centre, so that inside it `tdb_from_tt(t) = tdb_c + (t − tt_c)`
+exactly, and `tdb_minus_tt_rate` gives the interpolant's derivative
+(seconds per day) for the TDB-to-TT conversion of the resulting rate
+(docs/ENGINE.md, "Rates").
+
+**Against Horizons and the full series (measured 2026-09-29).** Horizons'
+own TT↔TDB is the one-term formula of JPL's SPICE leap-seconds kernel,
+K sin E with E = M + EB sin M (K 1.657 ms, EB 0.01671). It matches that
+formula to ≤ 6 µs at eight epochs from −3000 to 9000. That was read off
+two geocentric Moon vector tables asked at the same numbers as TT and as
+TDB (`tools/fetch/horizons_fetch.py`, `tdbtt-moon-*`), which resolves it to
+0.2 ns. Near the present it is 17–27 µs from the full Fairhead–Bretagnon
+series (pyerfa `dtdb`, 787 terms), since it has no lunar or planetary
+terms. Ours is 3.5 µs from the full series at J2000.
+
+Far from J2000 the physics decides. The annual term scales with Earth's
+eccentricity, 1.657 ms × e/e₀. The amplitude of each model, in ms:
+
+| year | Horizons | ours | full series | 1.657 × e/e₀ |
+|---|---:|---:|---:|---:|
+| −3000 | 1.657 | 1.929 | 1.844 | 1.835–1.865 |
+| 5000 | 1.657 | 1.562 | 1.524 | 1.521–1.532 |
+| 9000 | 1.657 | 1.499 | 1.289 | 1.305–1.365 |
+
+(The range is e from a linear and from a quadratic secular fit.) The full
+series follows the eccentricity. Horizons' holds it at today's value, and
+the seven-term series, with its single T term, lies between: at year 9000
+it was 0.2 ms from the full series, 0.1 mas on the Moon. The full series
+stays physically sane across all of DE441's span. Its amplitude is within
+~5% of the eccentricity scaling at ±15 millennia (1.909 ms at −13000,
+0.796 ms at 17000), which is why it was adopted. Against Horizons, which
+converts with its one-term formula, answers far from J2000 therefore
+differ by Horizons' time argument, 0.3 ms at 9000. `test_horizons` grades
+its DE441-era rows on Horizons' own TDB for that reason.
+
+## Delta T (TT − UT1)
+
+`DeltaTModel` is a virtual interface with three built-in implementations.
+
+### Default: `ObservedDeltaT`
+
+Observed ΔT from the **US Naval Observatory** series, compiled into the
+library as `src/delta_t_table.inc` (1272 samples as of the 2026-09-16
+refresh):
+
+- `historic_deltat.data`: half-yearly values 1657.0–1972.5, each with the
+  USNO's stated uncertainty (±12 s in 1657, ±1.9 s in 1800, ±0.07 s in
+  1900, 1 ms from the 1950s);
+- `deltat.data`: monthly values from 1973-02-01 to the latest published
+  month (2026-04-01 at this refresh).
+
+The two series agree to < 0.05 s where they overlap (1973–1984; the
+generator enforces it). Values between samples are linear interpolation,
+which is accurate to milliseconds at these spacings.
+
+Outside the table:
+
+- **Before 1657:** the Stephenson–Morrison–Hohenkerk spline (below),
+  plus an offset that makes it meet the first observation (+6.48 s: the
+  USNO table has 44.0 s at 1657.0, the spline 37.52 s) and fades linearly
+  to zero over the preceding century. `ObservedDeltaT(Early::kEspenakMeeus)`
+  uses the Espenak–Meeus polynomials there instead (offset +3.7 s),
+  evaluated at a continuous decimal year; they have their own 0.25 s seam
+  at 1600.0 between two published segments, inside that blend.
+- **After the last sample:** a least-squares trend over the table's last
+  two years, blended by a smoothstep over the following century into
+  the Morrison & Stephenson (2004) long-term parabola
+  ΔT = −20 + 32u² s, u = (year − 1820)/100. The join is continuous in
+  value. The near term stays close to the recent trend (69.12 s in
+  2026-09, 69.2 s in 2030), and the far future follows tidal braking
+  (203 s in 2100, the parabola from 2126). Predictions degrade with
+  distance: expect tenths of a second within a year of the table's end
+  and seconds within a decade. That drift is why the table is refreshed
+  at every release ([INGESTION.md](INGESTION.md)).
+
+Comparison at the engine fixture epochs:
+
+| epoch | observed model | Espenak–Meeus | Swiss Ephemeris |
+|-------|---------------:|--------------:|----------------:|
+| 1800-01-01 | 12.60 s (USNO ±1.9) | 13.71 s | 18.90 s |
+| J2000 | 63.829 s | 63.874 s | 63.829 s |
+| 2026-09-16 | 69.117 s | 75.511 s | 68.822 s |
+| 2100-01-01 | 202.8 s | 202.8 s | 93.2 s |
+
+In the modern era the observed model and SWE agree to the millisecond at
+J2000. The Espenak–Meeus 2005–2050 segment runs 6.4 s high in 2026,
+which is 3.5″ of lunar longitude and about 96″ of Earth rotation for
+anything computed from UT. Before about 1955 the published
+reconstructions disagree by several seconds (1800: USNO 12.6 ± 1.9 s,
+Espenak–Meeus 13.7 s, SWE 18.9 s); USNO's own stated uncertainty is the
+honest bound. Any future value is a model choice.
+
+### `EspenakMeeusDeltaT`
+
+The **Espenak–Meeus piecewise polynomial set** (NASA Five Millennium
+Canon dataset, `eclipse.gsfc.nasa.gov/SEhelp/deltatpoly2004.html`),
+covering −500 to +2150 with parabolic extrapolation outside. It is kept
+for reproducing results computed with it. Its decimal year has monthly
+granularity (`year + (month−0.5)/12`), so ΔT steps by ~0.03 s per month
+by construction, and segment boundaries (e.g. 1986.0, 2005.0) have
+genuine jumps of ~2 s. Inversion (`jd_tt_from_ut1`) is therefore
+ill-defined within ~ΔT of those steps.
+
+### `StephensonMorrisonHohenkerkDeltaT`
+
+The modern reconstruction of Earth rotation from ancient and medieval
+eclipses and telescopic lunar occultations: the cubic spline of
+Stephenson, Morrison & Hohenkerk (2016), in its **v. 2020 coefficients**
+from the addendum by Morrison, Stephenson, Hohenkerk & Zawilski (2021).
+It is the pre-1657 branch of `ObservedDeltaT`, and usable on its own.
+
+- **Data:** Table S15 v. 2020, 58 cubic segments from −720.0 to 2019.0,
+  compiled in as `src/delta_t_smh_table.inc`. ΔT = a₀ + a₁t + a₂t² + a₃t³
+  with t = (Y − Kᵢ)/(Kᵢ₊₁ − Kᵢ), Y a continuous decimal Julian year
+  (2000 + (JD − 2451545)/365.25).
+- **Outside the spline:** the paper's long-term parabola (eq. 4.1)
+  ΔT = −320.0 + 32.5 u² s, u = (Y − 1825)/100, shifted by a constant so
+  the value is continuous: −358.4 s before −720, +267.0 s after 2019. The
+  parabola's slope differs from the spline's by 0.4 s/yr at −720 and
+  1 s/yr at 2019. After 2019 the standalone model is a rough tidal trend
+  (111 s in 2050); `ObservedDeltaT` never uses that side.
+- **Continuity:** the published knots agree to their 3-decimal rounding
+  (the generator enforces ≤ 0.01 s).
+- **Against Espenak–Meeus:** −254 s at −720, −265 s at −500, −143 s at
+  year 0, +76 s at 1000, +94 s at 1500, −6 s at 1650, −0.07 s at 2000.
+  Hundreds of seconds is ~0.1° of Earth rotation, which is what the
+  2016 analysis corrected with new eclipse data.
+
+**Licence.** Both papers and the figshare supplement (item 13885863)
+are CC BY 4.0: free to use with credit, which this section, the header
+comment and the generated table give. The HM Nautical Almanac Office's
+web copies of the same tables are Crown copyright and are not used.
+
+### Delta T takes no state from the ephemeris, deliberately
+
+`DeltaTModel::delta_t_seconds(jd_tt)` is a pure function of the instant.
+No branch of it reads an open ephemeris, a DE header constant or a tidal
+acceleration; the tables are compiled in (`src/delta_t_table.inc`), the
+long-term parabola is a published constant, and the only `static` in the
+path is the default model instance. Opening or closing an ephemeris
+therefore cannot change a Delta T, and the order in which a caller asks for
+one relative to its first position does not matter.
+
+That is worth stating because the alternative is a real and subtle trap,
+reported to us in 2026-09 from the Astrolog side against a different
+library: there, Delta T drew its tidal acceleration from the currently
+open ephemeris file, setting the ephemeris path implicitly closed it, and
+until a file was open again the constant fell back to a default for a
+different DE. Asking for Delta T *before* the first position then used a
+lunar tidal acceleration of −25.80″/cy² where the loaded file's was
+−25.936″/cy². Those are accelerations, not times: the 0.136″/cy² between
+them reaches Delta T through a tidal correction that grows as the square of
+the distance from the mid-twentieth century, and at 1900 it comes to
+0.037 s. Every body was then wrong by its own motion over those 0.037 s.
+Nothing about it looks like a bug at the call site.
+
+The rule this repository keeps, then: **if a future model wants a constant
+that lives in a DE header, it takes it as a constructor argument and the
+caller owns the lifetime.** It must not reach for whatever file happens to
+be open, because that reintroduces an order dependence the API currently
+does not have. The server relies on this — it installs a request's Delta T
+model per compute slice and restores the default with an RAII guard, so a
+model never outlives the request that asked for it.
+
+### Which lunar tidal acceleration the tables assume
+
+A ΔT reconstruction from lunar observations is tied to the lunar ephemeris
+it was reduced with, through that ephemeris's tidal acceleration ṅ (its
+secular acceleration in mean longitude). Using it with a Moon of a
+different ṅ calls for the correction ΔT′ = ΔT − 0.91072 (ṅ − ṅ₀) T² s, T in
+centuries from 1955.0. That is the form of the NASA Five Millennium Canon
+pages, `eclipse.gsfc.nasa.gov/LEcat5/secular.html`; 0.91072 = 1/(2 ×
+0.549″/s). We apply none. What each branch is tied to, checked 2026-10-25
+after Astrolog found their server route stating a ΔT for DE431's −25.80″/cy²
+while their library route used −25.936 (0.0375 s at 1900; the client's
+choice, not the server's):
+
+- **Stephenson, Morrison & Hohenkerk (2016), before 1657:** "The values of
+  ΔT derived in this paper should be used in conjunction with the lunar
+  ephemeris JPL DE430, or with other ephemerides in which the tidal
+  acceleration is close to the value of −25.82″ cy⁻² implicit in the JPL
+  ephemeris" (§3a). Folkner et al. (2014, IPN 42-196) give that value:
+  −25.82 ± 0.03″/cy² for DE430 and −25.80 for DE431. The 2021 addendum's ṅ
+  has not been read here.
+- **USNO, 1657 onward:** the page cites McCarthy & Babcock (1986) and
+  states no ṅ. That the series sits on the −26.0″/cy² scale of earlier
+  occultation reductions is an inference from secondary sources, not
+  confirmed.
+- **DE440 and DE441:** no primary source states a ṅ. Park et al. (2021,
+  AJ 161:105) call the tidal acceleration implicit in the force model, and
+  the DE header carries the dissipation parameters (`K2M`, `TAUM`), not ṅ.
+  The −25.936″/cy² sometimes quoted for DE440 has no primary origin we
+  could find. The two files' Moons also differ:
+
+  | year | DE441 − DE440, lunar longitude |
+  |---|---:|
+  | 1550 | +0.434″ |
+  | 1800 | +0.024″ |
+  | 1900 | +0.0024″ |
+  | 2000 | +0.0004″ |
+  | 2100 | +0.005″ |
+  | 2650 | +0.050″ |
+
+  Over 1900–2100 that is a parabola with Δṅ ≈ +0.0073″/cy² (rms
+  0.0002″). Over the whole span it is not.
+
+What follows, as estimates:
+- If the USNO branch is on −26.0 and DE440's Moon is near DE430's −25.82,
+  then from 1657 to 1955 our UT answers carry the Moon about ½ Δṅ T² off.
+  That is −1.5 s of ΔT (0.8″ of lunar longitude) at 1657, −0.39 s at 1800
+  and −0.05 s at 1900. USNO's own stated uncertainty there is larger:
+  ±12 s at 1657 and ±1.9 s at 1800.
+- The spline branch is consistent with DE430 by its authors' statement.
+- Nothing is changed until the USNO series' ṅ is sourced. The decision is
+  open, and the protocol's proposed lunar-tidal TLV (absent when unknown)
+  would carry the same unknown.
+
+### Refreshing the tables
+
+`tools/gen/gen_smh_delta_t.py` builds `src/delta_t_smh_table.inc` from
+the supplement zip (`https://ndownloader.figshare.com/files/26513569`,
+sha256 `1a649a16…cf37`, checked). It is a fixed publication, not part of
+release ingestion; rerun it only if the authors publish a new version.
+
+`tools/gen/gen_earth_orientation.py` regenerates `src/delta_t_table.inc`
+and `src/leap_second_table.inc` from USNO's files. It records each
+source's URL and SHA-256 and validates the data: dates ascending, no
+jumps over 2 s, overlap agreement, and leap seconds a +1 s sequence from
+1972-01-01 at 10 s. `--check` reports whether the committed tables are
+stale. The release procedure is in [INGESTION.md](INGESTION.md).
+
+## Sources
+
+- USNO Circular 179 (Kaplan, "The IAU Resolutions on Astronomical
+  Reference Systems, Time Scales, and Earth Rotation Models") — TDB−TT
+  series; public-domain USNO publication.
+- USNO `maia.usno.navy.mil/ser7/tai-utc.dat` — leap-second table.
+- USNO `maia.usno.navy.mil/ser7/historic_deltat.data` and `deltat.data` —
+  observed ΔT (public domain, US Government work).
+- F. R. Stephenson, L. V. Morrison & C. Y. Hohenkerk (2016),
+  "Measurement of the Earth's rotation: 720 BC to AD 2015", Proc. R. Soc.
+  A 472: 20160404, https://doi.org/10.1098/rspa.2016.0404 (CC BY 4.0) —
+  the spline and the long-term parabola.
+- L. V. Morrison, F. R. Stephenson, C. Y. Hohenkerk & M. Zawilski (2021),
+  "Addendum 2020 to 'Measurement of the Earth's rotation: 720 BC to AD
+  2015'", Proc. R. Soc. A 477: 20200776,
+  https://doi.org/10.1098/rspa.2020.0776; supplementary Table S15 v. 2020,
+  figshare 10.6084/m9.figshare.c.5300925 (CC BY 4.0) — the coefficients.
+- Morrison & Stephenson (2004), J. Hist. Astron. 35, 327 — the long-term
+  ΔT parabola −20 + 32u².
+- NASA `eclipse.gsfc.nasa.gov/SEhelp/deltatpoly2004.html` — Espenak–Meeus
+  polynomials (public-domain NASA publication).
+- Howard Hinnant's chrono date algorithms (public domain).
+- Fairhead & Bretagnon (1990), A&A 229, 240 — the full TDB−TT series
+  the Circular 179 truncation derives from.

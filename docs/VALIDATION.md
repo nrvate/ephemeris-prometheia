@@ -1,0 +1,326 @@
+# Validation against JPL Horizons
+
+JPL Horizons is the independent referee (M5). The Swiss Ephemeris comparisons
+in [ENGINE.md](ENGINE.md) show agreement with another implementation. Horizons
+is JPL's own reduction of the same DE ephemerides and SBDB orbits, so it
+separates *our* errors from *model choices*.
+
+That distinction is the whole reason this corpus exists, and it is why
+[CROSS-TEST.md](CROSS-TEST.md) makes Horizons the adjudicator rather than the
+other server: agreement with another implementation is evidence, but two
+implementations can converge on the same wrong answer, and once they have,
+nothing in either codebase can tell. Note in particular the two rows below
+that are *not* usable as an anchor — Horizons' apparent place carries a
+documented −53 mas equinox offset and a 42 mas obliquity difference, and its
+Sun-centred "apparent" is referred to the Sun's equator.
+
+- **Corpus:** 39 requests, declared in `tools/fetch/horizons_fetch.py` and
+  fetched on 2026-09-17, strictly sequentially with 5 s pauses.
+  `tools/gen/gen_horizons_corpus.py` turns the responses into
+  `tests/horizons_corpus.inc`: 245 observer rows and 63 vector rows, with
+  per-request provenance. Horizons output is a US-government work.
+- **Test:** `tests/test_horizons.cpp`, in the pre-commit gate. It needs the
+  DE440 binary under `ephe/` and SKIPs without it. It takes 0.2 s.
+- **Horizons' sources:** DE441 for planets. For small bodies, it integrates
+  SBDB solutions (Ceres: JPL#48, the same solution as our sample catalog) with
+  16 asteroid perturbers (SB441-N16) and relativity. Earth orientation comes
+  from IERS EOP, 1962-01-20 to 2026-09-16.
+
+## Results
+
+### Positions that depend on no model choice
+
+These are gated at every epoch (1800–2100) and from all observers.
+
+| quantity | measured max | gate |
+|---|---:|---:|
+| Sun & planets, astrometric RA/Dec (ICRF, light time), geocentric + Sun-centred | **6 µas** | 100 µas |
+| Sun & planets, astrometric, topocentric (3 sites) | **11 µas** | 100 µas |
+| Moon, astrometric, geocentric | 0.021″ (at 1800; ≤ 0.006″ 1900–2100) | 0.03″ |
+| Moon, astrometric, topocentric (1981–2026) | 0.008″ | 0.015″ |
+| light-time range, Sun & planets geo/helio · topo · Moon | 1.1 m · 3.6 m · 5.7 m | 3 · 10 · 10 m |
+
+- **Beyond DE440's span** (with DE441 behind it, −3000 to 9000, 8 epochs;
+  [DE.md](DE.md), "DE441"): Sun & planets ≤ 8.3 µas and 3.8 m, Moon
+  ≤ 124 µas (at 9000; ≤ 31 µas through 5000) and 0.15 m, geocentric
+  astrometric, gated at 12 µas / 6 m and 180 µas / 0.4 m.
+- **Light time and frame:** the astrometric agreement means the light-time
+  solution, observer geometry and ICRF frame agree with JPL at the µas level.
+  What remains is DE440 vs DE441.
+- **Topocentric observers:** these include Longyearbyen at 78°N and Paranal at
+  2.6 km. They run with Horizons' own Earth rotation. UT1 is solved from its
+  local apparent sidereal time, because its TDB−UT column is TDB−UTC after
+  1962.
+
+### Apparent place of date (1962–2026)
+
+Horizons refers apparent RA/Dec to the EOP-corrected IAU 1976/80 equinox,
+which it documents as offset −53 mas from the IAU 2006/2000A equinox we use.
+Its ecliptic of date also uses the IAU 1980 obliquity, 42 mas larger. Once
+those published offsets are removed:
+
+| quantity | measured max | gate |
+|---|---:|---:|
+| dRA − 51.8 mas (Sun & planets) | 1.0 mas | 3 mas |
+| dDec (Sun & planets) | 0.8 mas | 2 mas |
+| Moon dRA − offset · dDec (geo + 3 topocentric sites) | 3.4 · 8.0 mas | 6 · 10 mas |
+| ecliptic dLon·cos b − 48 mas · dLat | 8.7 · 45.7 mas | 12 · 50 mas |
+
+- **Precession and nutation:** these confirm our IAU 2006/2000A
+  implementation, aberration, deflection and topocentric reduction to the
+  mas level.
+- **Outside Horizons' EOP era (1800, 1900, 2050, 2100):** Horizons falls back to
+  plain IAU 1976/80, and the apparent positions differ from ours by up to
+  0.52″. That is the older precession model, and those rows are reported only.
+- **Sun-centred observers:** Horizons refers "apparent" RA/Dec to the **Sun's
+  equator**. Latitudes match a rotation to the solar pole (286.13°, 63.87°)
+  exactly, and longitudes differ by a constant 14.56°. Those quantities are not
+  comparable, so only the Sun-centred astrometric rows are used.
+
+### Small bodies
+
+Six numbered asteroids, all from `tests/data/sample-100.epm` — Ceres, Pallas,
+Vesta, Iris, Hygiea and Cybele — plus the scattered-disk TNO 145451 Rumina
+(elements and covariance from `tests/data/covariance-7.epm`; within ±100 yr
+it agrees with Horizons to ≤ 21 km, 0.0005″, since planets dominate out there). Epochs are the element epoch (2026-06-08) and
+±10, 25, 50 and 100 years.
+
+| span from element epoch | astrometric, rms · max over 6 bodies | gate |
+|---|---:|---:|
+| 0 | max 0.0016″; heliocentric 0.1–4 km | 0.005″; 10 km |
+| ±10 yr | 0.041″ · 0.12″ | 0.15″ |
+| ±25 yr | 0.17″ · 0.39″ | report |
+| ±50 yr | 0.89″ · 2.5″ (Hygiea) | report |
+| ±100 yr | 2.9″ · 8.7″ (Hygiea), 4.4″ (Pallas), others ≤ 1.7″ | report |
+
+With the Sun's post-Newtonian term (added after the first measurement), the
+rms fell from 0.066″ to 0.041″ at ±10 yr and from 0.22″ to 0.17″ at ±25 yr.
+Beyond that, the missing asteroid perturbers dominated.
+
+**With JPL's asteroid perturbers** (`add_perturbers("sb441-n16.bsp")`, the
+16 masses Horizons integrates with):
+
+| span from element epoch | astrometric, max over 7 bodies | heliocentric, typical | gate |
+|---|---:|---:|---:|
+| 0 | 0.0016″ | 0.1–4 km | 0.005″ |
+| ±10 yr | **0.0053″** (was 0.12″) | 0–13 km | 0.01″ |
+| ±25 yr | 0.019″ (was 0.39″) | 1–25 km | report |
+| ±50 yr | 0.024″ (was 2.5″) | 1–60 km | report |
+| ±100 yr | 0.071″ (was 8.7″) | 13–154 km (Hygiea 27,814 → 49 km, Pallas 8,644 → 49 km) | report |
+
+Serving the 16 kernel bodies straight from the kernel was also measured and
+rejected: its trajectories come from 2021 solutions, 1–125 km off Horizons
+near the present (Pallas 42 km, Cybele 125 km at the epoch), while
+integrating the current catalog elements with the other 15 as perturbers is
+within 5 km there. The gate `horizons_small_bodies_sb441` (0.13 s) runs when
+`ephe/sb441-n16.bsp` (or `$PROMETHEIA_SB441`) is present and SKIPs
+otherwise; the long-arc report prints both columns.
+
+**Centuries and millennia from the element epoch (measured 2026-09-29).**
+With DE441 behind DE440 the engine can integrate a catalog body as far as
+the planets reach, and SB441-N16 itself spans −7999 to 9000. Horizons
+refuses a numbered asteroid before 1599-12-11, so JPL publishes no
+reference outside roughly 1600–2500. Ceres, Pallas and Vesta, heliocentric
+geometric, against Horizons at 1600–2499
+(`horizons_small_bodies_centuries`, run by `tools/scheduled.sh`):
+
+| configuration | worst over 1600–2499 | at 1800 / 2200 |
+|---|---:|---:|
+| with the SB441-N16 perturbers | **0.90″** (Ceres, 1600), 342 km | ≤ 0.17″ / ≤ 0.12″ |
+| no perturber kernel | 75″ (Pallas, 1700), 28,700 km | 17″ / 6″ |
+| the kernel's own trajectories (2021 solutions) | 2.2″ | 0.34″ / 0.43″ |
+
+Beyond JPL's window, our integration against the kernel's own trajectory,
+which has its own drift, is the only yardstick. Ceres, Pallas and Vesta
+differ from it by 3.6–9.2″ at 1000, 1.4–29″ at year 0, 19–140″ at −3000
+and 0.3–19″ at 5000. Without a perturber kernel they differ by 12–67″,
+13–99″, 27–384″ and 16–52″ at those years. Over millennia the error grows
+to arcminutes, not degrees, because the perturbations are largely
+periodic.
+
+**Between the stored samples (2026-11-01).** A catalog body's trajectory is
+stored as cubics through 128 samples a year, 2.85 days apart, and a deep
+perihelion or a close encounter happens inside one of them. Every comparison
+above asked at instants where that does not show: main-belt bodies, or
+near-Earth bodies away from perihelion. So these tables did not find it, and
+astromcp's refused fit of Apophis did. Against Horizons, geometric vectors at
+49 half-hour instants through the 2029 flyby and 41 half-day instants through
+a perihelion of Icarus (0.19 AU), `flyby-geo-apophis` and
+`perihelion-helio-icarus` in `tools/fetch/horizons_fetch.py`:
+
+| | before, median | before, worst | after, median | after, worst |
+|---|---:|---:|---:|---:|
+| Apophis, geocentric | 34,547 km | 78,368 km | 2.5 km | 15 km |
+| Icarus, heliocentric | 3,367 km | 30,071 km (221″) | 1.1 km | 1.4 km (0.010″) |
+
+- **Closest approach** of Apophis went from 40,285 km to 38,017 km from the
+  Earth's centre, at 21:46 TT, one-minute sampling.
+- **What remains** is not this interpolation: tightening it tenfold moves
+  neither median. Where it comes from is untested. The candidates are the
+  catalog's elements against Horizons' solutions (JPL#220 and JPL#196), and the
+  force model, whose Earth and Moon are themselves cubics 2.85 days apart.
+  Apophis's worst is a day after closest approach.
+- **Who moves.** See ENGINE.md, "Small bodies". Every body of Astrolog's
+  13,808-body catalog was integrated across 1900–2100: 181 have a segment a
+  cubic cannot hold (1.31%). Over ±10 years it is 168, so a body's flyby decides
+  when it is flagged, and these counts hold for the span named. Against the
+  previous commit, at 40 random instants over 1900–2100 for those 181 and for
+  every 10th other body:
+  - 60,489 of 61,760 answers were identical to the bit;
+  - 152 bodies moved, all of them flagged;
+  - seen from Earth they moved 0.009″ at the median and 0.18″ at the 90th
+    percentile, with Icarus at 29″, Phaethon (3200) 7″ and Talos (5786) 3.6″.
+    858130 moved furthest, which is the Kepler solver below.
+  - Across every 50th of the 1.58M bodies over ±10 years, 2.63% are flagged.
+
+**What the check leaves behind** (measured 2026-11-01). The trigger is an
+estimated position error of 1e-8 AU, 1.496 km, so a segment under it stays a
+cubic. Measured from that side, against a build that refines every segment
+over 1e-11 AU, heliocentric positions at random instants over ±10 years on
+Astrolog's catalog:
+
+| bodies | instants | worst | seen from Earth |
+|---|---:|---:|---:|
+| 300 random bodies of numbers 1–10000, none flagged | 90,000 | 0.49 km | 0.0012″ |
+| the 90 just under the trigger: flagged at 3e-9 AU, not at 1e-8 | 225,000 | 1.495 km | 0.0062″ |
+| the 168 flagged, in the segments left as cubics | 134,400 | 2.30 km | 0.013″ |
+| those 168 with the trigger raised to 1e-7 AU (a fault) | 134,400 | 21.4 km | 0.17″ |
+
+- **The bound is the measured 2.3 km, not the trigger.** The estimate assumes
+  a steady fourth derivative, so a segment on a fast stretch can be half as
+  wrong again as it says.
+- **Raising the trigger shows up at once** in this comparison.
+- **Not bounded here:** a body close to the Earth just under the trigger,
+  where 2.3 km is a larger angle. The table's arcseconds are what these bodies
+  reached in these 20 years.
+
+**The Kepler solver (2026-11-01).** Newton from E = +π can wander for M just
+below 0 at high e, and it stopped wherever its iterations ran out. It returned
+a state half an orbit off with no error, for 0.3% of mean anomalies at e = 0.83,
+2% at 0.95 and 11% at 0.999, near M = ±π. A residual check now sends those to
+bisection, so every answer that was right is unchanged.
+- **Real bodies:** one record of 1.58M, 858130 (e 0.91, M 3.42). It was wrong
+  at every instant sampled, 116° on the sky on 2026-11-11, and that is a sampled
+  figure, not a maximum: its phase in its orbit was wrong.
+- **An outside check:** Astrolog compared Icarus and 858130 at 12:00 UT with
+  Swiss Ephemeris's asteroid files, output against output. 858130 now agrees to
+  the printed second on both dates compared, 2026-07-11 and 2026-11-11, and
+  Icarus to 1″ on 2026-07-11, near perihelion, where the old build was 21″ out.
+- **User elements** (`prometheia_calc_elements`, hypotheticals) were exposed
+  at any date near M = ±π, for e ≥ 0.8.
+- **How it stayed hidden:** tests held `kepler_propagate` to itself, and the
+  error needs an element set in a narrow range of M. A new test of the memo
+  found it, as a 2 AU error at 2 instants of 3,000.
+
+**Pinning the perturber grid (2026-10-27).** The perturber tables' samples
+now sit on one fixed grid instead of starting at the first instant an engine
+was asked for (ENGINE.md, "Memo"). Every figure in this section was re-run
+afterwards (`horizons_small_bodies*`, `horizons_sigma_calibration`,
+`horizons_small_bodies_centuries`) and is unchanged at its printed
+precision. The change moved each catalog answer once. Measured against the
+previous build on DE440, SB441-N16 and the refreshed catalog, with one
+process per body and instant:
+
+| body | 2026 | worst of six instants, 1600–2598 | geocentric apparent, worst |
+|---|---:|---:|---:|
+| Ceres, Pallas, Juno, Vesta, Hygiea | ≤ 1.04 m | 62 m | 0.00006″ |
+| Eros | 1.1 m | 301 m | 0.0007″ |
+| Chiron, Pholus, Sedna, Eris, Makemake | 0 m | 4.4 m | < 0.000001″ |
+| 1P/Halley | 5.5 m | 43 km | 0.0006″ |
+| 2P/Encke | 1.1 m | 151 km | 0.011″ |
+| Apophis | 5.7 m | 0.45 AU (2670000.5) | 19° |
+
+Apophis's 2029 Earth encounter magnifies any difference. Before the pin,
+its answer away from its epoch already changed with the order of requests,
+by the same mechanism. Before the pin, asking for a comet first moved Eros
+by up to 159 m, Vesta 30 m and Ceres 21 m (1900–2100). After it, the
+answer is the same whatever came first.
+
+**Centaurs (measured 2026-10-27).** Chiron and Nessus are a century from
+their element epochs at 1900 and 2100. Encounters with the giant planets
+amplify every difference there. They were compared against Horizons'
+heliocentric geometric vectors at 1900, 2000 and 2100 (`centaur-helio-*` in
+`tools/fetch/horizons_fetch.py`, a measurement rather than a fixture). The
+run used DE440, the refreshed catalog and the SB441-N16 perturbers, the 16
+Horizons integrates with.
+
+| body | 1900 | 2000 | 2100 |
+|---|---:|---:|---:|
+| Chiron (2060) | 7.5 km | 1.1 km | 8.6 km |
+| Nessus (7066) | 31.3 km | 0.5 km | 9.2 km |
+
+Seen from the Earth, each is within 0.001″. The astromcp port's parity run
+found Nessus 112″ and 267″ from the Swiss Ephemeris at 1900 and 2100, and
+Chiron 0.6″. Those gaps are on the other side's precomputed file, not here.
+
+**Where the integration refuses:** with a kernel loaded, an instant outside
+its span is a coverage error naming the kernel's span (per-object errCode
+3, JSON `outside-coverage`). The trimmed `sb441-n16-de440span.bsp` covers
+1550–2650 and the full kernel −7999 to 9000. **Without a kernel, a catalog
+body is refused more than 100 years (and a day, for light time) from its
+element epoch** (maintainer, 2026-09-29). There the no-kernel error is
+8.7″, and at 400 years it is 75″. The refusal is the same coverage error,
+and it names `tools/fetch/de_fetch.py --only sb441`, which fetches and
+provisions the kernel (`small_bodies_need_the_kernel_past_a_century`).
+
+- **Frame fix at the element epoch:** the first measurement showed 40–100 km
+  here. SBDB elements are in **JPL's J2000 ecliptic**: the ICRF rotated by the
+  IAU 1976 obliquity 84381.448″, with no frame bias. The engine had seeded them
+  through the IAU 2006 mean ecliptic plus frame bias, 0.042″ + 23 mas apart. It
+  now uses JPL's definition, and the residual at the element epoch fell to
+  metres–kilometres.
+- **Long arcs:** growth beyond ±10 years is our force model. The Sun and planets
+  act as point masses plus the Sun's relativistic term, with no asteroid
+  perturbers. Horizons integrates with the 16 SB441-N16 asteroids. Hygiea's jump between +25 and +50 years is consistent with a
+  close approach to one of the big perturbers.
+- **Uncertainties.**
+  - *The first measurement* propagated SBDB's per-element 1σ sigmas as
+    uncorrelated and gave values roughly 10–1000× larger than Horizons' own
+    full-covariance 3σ figures (Ceres 0.04″ against < 0.0005″, Pallas 1.8″
+    against 0.014″; Rumina a flat 30–60″ against 0.05–8″). The correlations
+    the bulk SBDB query does not return are what constrain these orbits.
+  - *Now* `sigma_arcsec` comes only from JPL's full covariance
+    (fetched on demand, EPM1 `kCovariance`; absent otherwise). With the
+    covariances of the six corpus asteroids and Rumina
+    (`tests/data/covariance-7.epm`), JPL's POS_3sigma divided by our
+    3·`sigma_arcsec` is 1.00–1.05 at most epochs over ±100 years and never
+    outside [0.84, 1.43]. That spread is expected: POS_3sigma is the RSS
+    of both error-ellipse semi-axes, ours the major one (ratio in [1, √2]),
+    and JPL prints 0.001″ steps. Rumina: 7.98″ against 7.985″ at −100 yr,
+    0.04″ against 0.053″ near its observed arc, 6.25″ against 6.251″ at
+    +100 yr. Ceres stays below 0.0005″ on both sides.
+  - *Gate* (`horizons_sigma_calibration`, 0.4 s): all seven bodies within
+    10 years of the element epoch — JPL/ours in [0.97, 1.45] where JPL
+    reports ≥ 0.02″, and consistent within JPL's rounding below.
+- **Running the report:** the long-arc rows and the uncertainty comparison are
+  a report case, skipped by default because the ±100-year and sigma
+  integrations take ~4 s (Release):
+  `build/test_horizons -tc=horizons_small_bodies_long_arc_report --no-skip`.
+
+## Findings carried back to the Swiss Ephemeris comparison
+
+- **Topocentric Moon:** ours matches Horizons to 0.008″. The 0.13″ SWE
+  difference is on SWE's side, consistent with a site rotated about the mean
+  pole.
+- **Heliocentric light time:** ours matches Horizons' Sun-centred astrometric
+  positions to 6 µas. SWE's ~1% longer heliocentric light time, up to 0.8″, is
+  on SWE's side.
+- **Moon in the J2000 frame:** the 0.0011″ Moon residual against SWE had no
+  explanation. Our geocentric astrometric Moon matches Horizons to < 0.0001″
+  at 1975, 2000 and 2026, so that residual is SWE's as well.
+
+## Refreshing the corpus
+
+This is a verification fixture, not part of release ingestion: a catalog or ΔT
+release does not change it. Refresh it deliberately when what it pins changes:
+a new DE, a rebuilt `sample-100.epm`, or a Horizons model change you want to
+track. To refresh:
+
+1. Delete `horizons-raw/`.
+2. Run `tools/fetch/horizons_fetch.py` (39 requests, ~4 minutes; check
+   `--list` first).
+3. Run `tools/gen/gen_horizons_corpus.py`.
+4. Re-run the gate and review any moved residual before committing.
+
+`--check` on the generator exits 1 when the committed `.inc` differs from the
+cache.

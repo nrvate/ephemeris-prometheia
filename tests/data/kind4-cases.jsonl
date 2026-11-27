@@ -1,0 +1,4 @@
+{"token":"case-a","name":"A one-term","set":"Prometheia kind-4 cross-check","citation":"invented","epoch":2415020.0,"equinox":"J2000","origin":"sun","M":[10],"a":[41],"e":[0.02],"w":[20],"node":[30],"i":[1.5]}
+{"token":"case-b","name":"B M1=0 node drifts","set":"Prometheia kind-4 cross-check","citation":"invented","epoch":2415020.0,"equinox":"J2000","origin":"sun","M":[10,0],"a":[41,0],"e":[0.02,0],"w":[20,0],"node":[30,1.0],"i":[1.5,0]}
+{"token":"case-c","name":"C full M(T)","set":"Prometheia kind-4 cross-check","citation":"invented","epoch":2415020.0,"equinox":"J2000","origin":"sun","M":[10,400],"a":[41],"e":[0.02],"w":[20],"node":[30],"i":[1.5]}
+{"token":"case-d","name":"D earth origin","set":"Prometheia kind-4 cross-check","citation":"invented","epoch":2451545.0,"equinox":"J2000","origin":"earth","M":[0],"a":[0.01],"e":[0.05],"w":[60],"node":[40],"i":[5]}

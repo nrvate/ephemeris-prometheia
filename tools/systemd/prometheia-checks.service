@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# The checks tools/gate.sh cannot run, on a schedule. Nothing in this
+# repository installs this: it is here to be read, edited and installed by
+# hand, because a unit file that starts running because a script copied it
+# is a surprise on somebody's machine.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp tools/systemd/prometheia-checks.* ~/.config/systemd/user/
+#   $EDITOR ~/.config/systemd/user/prometheia-checks.service   # set the path
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now prometheia-checks.timer
+#   systemctl --user start prometheia-checks.service           # run it once
+#   journalctl --user -u prometheia-checks -n 50               # what it said
+#
+# To stop it again: systemctl --user disable --now prometheia-checks.timer
+[Unit]
+Description=Ephemeris Prometheia: the checks the pre-commit gate cannot run
+Documentation=file:%h/ephemeris-prometheia/docs/SERVER.md
+
+[Service]
+Type=oneshot
+# Set this to the working tree. There is no default worth guessing.
+WorkingDirectory=%h/ephemeris-prometheia
+ExecStart=%h/ephemeris-prometheia/tools/scheduled.sh
+# --with-cross is deliberately not here. The cross-test reads the Astrolog
+# side's daemon, and a thing that reaches outside this tree should be asked
+# for by a person, not by a timer.
+TimeoutStartSec=3600
+Nice=10

@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""Fetch JPL's ephemeris files (DE440, DE441, the SB441-N16 asteroid
+perturber kernel) with checksums, and provision what derives from them.
+
+The engine reads JPL's DE binaries directly (docs/DE.md), and integrates
+small bodies with the 16 masses of SB441-N16 (docs/INGESTION.md, "Asteroid
+perturber kernel"). None is committed -- DE441 is ~2.6 GB, the full kernel
+646 MB -- so they are acquired here, by committed machinery, and verified
+against pinned SHA-256s:
+
+  * strictly sequential, one file at a time, a pause between requests;
+  * a generic User-Agent, nothing that identifies us;
+  * streamed to `<file>.part` and renamed only when whole, hashing as it
+    goes, so an interrupted pull never leaves a plausible-looking file;
+  * retries only on transport errors and 5xx, with backoff (a 4xx means the
+    request itself was refused, and repeating it helps nobody);
+  * `--probe` sends HEAD requests only, to confirm names and sizes before a
+    large download is started;
+  * a derived file (the kernel cut to DE440's span, made by
+    build/prometheia-spk-trim; DE441 cut to the centuries before DE440, made
+    by build/prometheia-de-trim) is made after its source and verified
+    against its own pin, so either file can be checked on any machine.
+
+DE441's cuts are for a client that answers before 1550 but cannot ship
+2.8 GB: loaded behind DE440 (add_ephemeris), linux_p1000p1550.441 (51.1 MB)
+or linux_m3000p1550.441 (423.0 MB) answer exactly as the whole of DE441 does
+over their span (docs/DE.md, "Cutting a span").
+
+Which to fetch: with DE440 alone the cut kernel suffices (1550-2650). A
+small body more than 100 years from its element epoch is refused without
+a kernel, and beyond 1550-2650 it needs the full one (-7999..9000), which
+is what DE441's span calls for (docs/VALIDATION.md, "Small bodies").
+
+JPL's ephemerides are US-government work. Sources:
+https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/ (docs/DE.md) and
+https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/.
+
+Usage:
+    tools/fetch/de_fetch.py --list
+    tools/fetch/de_fetch.py --dir /nvm/work/ephe --only de441 --probe
+    tools/fetch/de_fetch.py --dir /nvm/work/ephe --only de441
+    tools/fetch/de_fetch.py --dir ephe --only sb441        # kernel + DE440-span cut
+    tools/fetch/de_fetch.py --dir /nvm/work/ephe --verify
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fetchlog  # noqa: E402
+
+USER_AGENT = "curl/8.5.0"  # generic: nothing that identifies us (CLAUDE.md)
+BASE = "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/"
+# A set's files live under BASE + set name, unless named here.
+SET_URL = {"sb441": "https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/"}
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PAUSE_S = 5.0
+CHUNK = 1 << 20
+
+# set -> [(file, pinned sha256 or None)]. DE440's pins are the ones in ephe/SHA256SUMS
+# since 2026-09-16; DE441's from its first fetch, 2026-09-29.
+SETS = {
+    "de440": [
+        ("linux_p1550p2650.440",
+         "29915576d0a6555766b99485ac3056ee415e86df4fce282611c31afb329ad062"),
+        ("header.440", "0f4636b663e6f00af9efa2b605ef23635489f56b23dd1a5e3821d3acc6ac3359"),
+        ("testpo.440", "45084a7f406b8e41032e7d99dd8042d4df97a9f752a68c06d1a27af16693429f"),
+    ],
+    "de441": [
+        ("linux_m13000p17000.441",
+         "476096486def4e41bfceb29aa27f50784da0bce318902bcf7b88caad058cd4da"),
+        ("header.441",
+         "376cd6f6766356ba0f4c25dc5a7ff8130ea2826f3c34149e33c1e6ac970d6e7c"),
+        ("testpo.441",
+         "e60c08ced7741a07d4dfe89b124afb4b1648bd1e3d0eb68dd9a79bf6990bb9c2"),
+    ],
+    # JPL's asteroid perturbers (IOM 392R-21-005, Farnocchia 2021), -7999..9000;
+    # the pin is the one in ephe/SHA256SUMS since 2026-09-17.
+    "sb441": [
+        ("sb441-n16.bsp", "919d612ce3c72a78fc7158f9120156542d0f21e6b8b052e4c1339c759747fd90"),
+    ],
+}
+
+# Files made from a fetched one, per set: (name, source, tool in build/, its
+# arguments, pinned sha256). Each cut is bit-identical to its source inside
+# its span (docs/SPK.md, docs/DE.md) and names no tool version, so the pin
+# holds across releases.
+DERIVED = {
+    "sb441": [
+        ("sb441-n16-de440span.bsp", "sb441-n16.bsp", "prometheia-spk-trim",
+         ["--from", "2287184.5", "--to", "2688976.5"],
+         "e7b67e3281583f53115849e74993d76da08c974f987916c9293541f9a0147f09"),
+    ],
+    # 1000-01-01 and -3000-01-01 (Julian calendar) up to DE440's first epoch.
+    "de441": [
+        ("linux_p1000p1550.441", "linux_m13000p17000.441", "prometheia-de-trim",
+         ["--from", "2086307.5", "--to", "2287184.5"],
+         "19661f2c7946105cbd0832aad71089520eb3038b915975092542c4680f507cbf"),
+        ("linux_m3000p1550.441", "linux_m13000p17000.441", "prometheia-de-trim",
+         ["--from", "625307.5", "--to", "2287184.5"],
+         "73001e4703b538f2896317b21b37f5599f48d098564c63d20fc70a87c8a9e9b6"),
+    ],
+}
+# Cuts made before the comment dropped the tool version (2026-09-29): the same
+# records, a comment reading "prometheia-spk-trim 0.1.0". Accepted by --verify.
+LEGACY = {"a31b839a9b265725da293b0c7a927f7a9dfaa0de4cdb5da6772f7b406d8f2376":
+          "an older prometheia-spk-trim's cut, the same records"}
+
+
+def url_of(de, name):
+    return f"{SET_URL.get(de, BASE + de + '/')}{name}"
+
+
+def derive(directory, sets, force, verify_only):
+    """Make (or, with verify_only, check) each derived file; count failures."""
+    bad = 0
+    for de in sets:
+        for name, source, tool, args, pin in DERIVED.get(de, []):
+            trim = os.path.join(REPO, "build", tool)
+            path, src = os.path.join(directory, name), os.path.join(directory, source)
+            if verify_only:
+                if not os.path.exists(path):
+                    print(f"MISSING  {name}")
+                    bad += 1
+                    continue
+                digest = sha256_file(path)
+                state = "ok" if digest == pin else ("ok" if digest in LEGACY else "CHANGED")
+                bad += state != "ok"
+                note = f" ({LEGACY[digest]})" if digest in LEGACY else ""
+                print(f"{state:10s} {name} {digest}{note}")
+                continue
+            if os.path.exists(path) and not force:
+                print(f"present  {name} (derived; use --force to remake)")
+                continue
+            if not os.path.exists(src):
+                print(f"cannot make {name}: {source} is not in {directory}")
+                bad += 1
+                continue
+            if not os.access(trim, os.X_OK):
+                print(f"cannot make {name}: {trim} is not built "
+                      f"(cmake --build build --target {tool})")
+                bad += 1
+                continue
+            part = path + ".part"
+            subprocess.run([trim, src, part] + args, check=True)
+            digest = sha256_file(part)
+            if digest != pin:
+                print(f"{name}: made, but sha256 {digest} DIFFERS from pin; {part} kept")
+                bad += 1
+                continue
+            os.replace(part, path)
+            print(f"{name}: made from {source}, sha256 {digest} (matches pin)")
+    return bad
+
+
+def request(url, method="GET"):
+    """Open url, retrying transport errors and 5xx with backoff; never 4xx."""
+    for wait in (0, 5, 10, 20, 40):
+        if wait:
+            fetchlog.log(f"  retry in {wait} s")
+            time.sleep(wait)
+        fetchlog.log(f"{method} {url}")
+        try:
+            req = urllib.request.Request(url, method=method, headers={"User-Agent": USER_AGENT})
+            return urllib.request.urlopen(req, timeout=120)
+        except urllib.error.HTTPError as e:
+            fetchlog.log(f"  HTTP {e.code}")
+            if e.code < 500:
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            fetchlog.log(f"  {e}")
+    raise SystemExit(f"giving up on {url}")
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(CHUNK), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def download(url, path):
+    """Stream url to path via path.part; return (bytes, sha256)."""
+    part = path + ".part"
+    h = hashlib.sha256()
+    n = 0
+    with fetchlog.Timer() as t, request(url) as resp, open(part, "wb") as out:
+        expected = int(resp.headers.get("Content-Length") or 0)
+        for block in iter(lambda: resp.read(CHUNK), b""):
+            out.write(block)
+            h.update(block)
+            n += len(block)
+    if expected and n != expected:
+        raise SystemExit(f"{url}: {n} bytes arrived of {expected}; {part} kept, not renamed")
+    os.replace(part, path)
+    fetchlog.log(f"  200 {n} bytes {t.seconds:.1f} s")
+    return n, h.hexdigest()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dir", default=None, help="where the files go (required unless --list)")
+    ap.add_argument("--only", action="append", choices=sorted(SETS), help="set(s) to act on")
+    ap.add_argument("--list", action="store_true", help="print the declared files and pins")
+    ap.add_argument("--probe", action="store_true", help="HEAD each file: name and size only")
+    ap.add_argument("--verify", action="store_true", help="check files already in --dir")
+    ap.add_argument("--force", action="store_true", help="fetch even if present")
+    args = ap.parse_args()
+    sets = args.only or sorted(SETS)
+    todo = [(de, name, pin) for de in sets for name, pin in SETS[de]]
+    if args.list:
+        for de, name, pin in todo:
+            print(f"{url_of(de, name)}\n  pinned {pin or '(not pinned)'}")
+        for de in sets:
+            for name, source, tool, trim_args, pin in DERIVED.get(de, []):
+                print(f"{name} (made from {source}: {tool} {' '.join(trim_args)})"
+                      f"\n  pinned {pin}")
+        return 0
+    if not args.dir:
+        ap.error("--dir is required")
+    os.makedirs(args.dir, exist_ok=True)
+    manifest_path = os.path.join(args.dir, "de_manifest.json")
+    manifest = json.load(open(manifest_path)) if os.path.exists(manifest_path) else {}
+    bad = 0
+    first = True
+    for de, name, pin in todo:
+        path = os.path.join(args.dir, name)
+        url = url_of(de, name)
+        if args.verify:
+            if not os.path.exists(path):
+                print(f"MISSING  {name}")
+                bad += 1
+                continue
+            digest = sha256_file(path)
+            state = "ok" if digest == pin else ("not pinned" if pin is None else "CHANGED")
+            bad += state == "CHANGED"
+            print(f"{state:10s} {name} {digest}")
+            continue
+        if not first:
+            time.sleep(PAUSE_S)
+        first = False
+        if args.probe:
+            with request(url, "HEAD") as resp:
+                size = int(resp.headers.get("Content-Length") or 0)
+            print(f"{name}: {size} bytes ({size / 1e9:.2f} GB)")
+            continue
+        if os.path.exists(path) and not args.force:
+            print(f"present  {name} (use --force to refetch; --verify to check)")
+            continue
+        n, digest = download(url, path)
+        note = "" if pin is None else (" (matches pin)" if digest == pin else " (DIFFERS from pin)")
+        bad += pin is not None and digest != pin
+        print(f"{name}: {n} bytes sha256 {digest}{note}")
+        manifest[name] = {"url": url, "bytes": n, "sha256": digest,
+                          "fetched_utc": fetchlog.utc()}
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2, sort_keys=True)
+    if not args.probe:
+        bad += derive(args.dir, sets, args.force, args.verify)
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

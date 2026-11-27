@@ -1,0 +1,779 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// The JSON tools (server/json_tools.hpp) on the synthetic kernel: the answers
+// are the engine's, names resolve as documented, and failures are typed.
+#include <algorithm>
+#include <cmath>
+
+#include "json_tools.hpp"
+#include "mcp.hpp"
+#include "synthetic_spk.hpp"
+#include <doctest/doctest.h>
+
+using namespace prometheia;
+using namespace prometheia::server;
+using jsontools::Json;
+
+namespace {
+
+Json run(Engine& e, const char* tool, const Json& args, jsontools::ToolError* err = nullptr,
+         size_t catalogs = 0) {
+    jsontools::Context ctx;
+    ctx.engine = "test";
+    ctx.catalogs = catalogs;
+    jsontools::ToolError scratch;
+    auto r = jsontools::call(e, ctx, tool, args, err ? err : &scratch);
+    return r.ok() ? r.value() : Json(nullptr);
+}
+
+} // namespace
+
+TEST_CASE("json_positions_are_the_engines") {
+    synth::TempFile tf("json-pos");
+    Engine e = synth::open_synthetic(tf);
+    const Json out = run(e, "positions", {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}});
+    REQUIRE(out.is_object());
+    const Json& r = out["results"][0];
+    CHECK(r["error"].is_null());
+    CHECK(r["object"]["resolved"] == "Sun");
+    CHECK(r["object"]["naif"] == 10);
+    auto want = e.calc(10, 2451545.0, CalcOptions{});
+    REQUIRE(want.ok());
+    CHECK(r["rows"][0]["longitude_deg"].get<double>() == want.value().pos.lon_deg);
+    CHECK(r["rows"][0]["latitude_deg"].get<double>() == want.value().pos.lat_deg);
+    // The Sun's own light is not deflected by the Sun.
+    CHECK(r["provenance"]["corrections"] == Json({"light-time", "aberration"}));
+}
+
+TEST_CASE("json_times_and_names") {
+    synth::TempFile tf("json-names");
+    Engine e = synth::open_synthetic(tf);
+    // UTC with an offset is the same instant as its Z form.
+    const Json a = run(e, "convert_time", {{"time", "2000-01-01T14:00:00+02:00"}});
+    const Json b = run(e, "convert_time", {{"time", "2000-01-01T12:00:00Z"}});
+    CHECK(a["jd_tt"] == b["jd_tt"]);
+    CHECK(std::fabs(a["jd_tt"].get<double>() - (2451545.0 + 64.184 / 86400.0)) < 1e-9);
+    // A star by name; an unknown name is a typed per-object error, not a guess.
+    const Json out = run(e, "positions",
+                         {{"time", "2000-01-01T12:00:00Z"},
+                          {"observer", "barycentric"},
+                          {"objects", {"Spica", "Nosuchbody", Json{{"point", "sideways"}}}}});
+    REQUIRE(out["results"].size() == 3);
+    CHECK(out["results"][0]["object"]["kind"] == "star");
+    CHECK(out["results"][0]["provenance"]["corrections"] ==
+          Json({"gravitational-deflection", "aberration"}));
+    CHECK(out["results"][1]["error"]["code"] == "unknown-name");
+    CHECK(out["results"][2]["error"]["code"] == "invalid-arguments");
+}
+
+TEST_CASE("json_outside_coverage_is_named") {
+    // An instant the ephemeris does not span is its own per-object error,
+    // classified by the engine's error type (CoverageError), not its words.
+    synth::TempFile tf("json-coverage");
+    Engine e = synth::open_synthetic(tf);
+    const Json out =
+        run(e, "positions",
+            {{"time", {{"jd_tt", 2451545.0 + 100.0 * 365.25}}}, {"objects", {"Jupiter"}}});
+    REQUIRE(out["results"].size() == 1);
+    CHECK(out["results"][0]["error"]["code"] == "outside-coverage");
+}
+
+TEST_CASE("json_clock_times_before_1972_are_ut1") {
+    // A clock time before 1972 is read as UT1 and given back as "ut1"
+    // (maintainer, 2026-09-19): agents ask for birth charts by clock time.
+    synth::TempFile tf("json-ut1");
+    Engine e = synth::open_synthetic(tf);
+    const Json a = run(e, "convert_time", {{"time", "1955-03-01T10:00:00+01:00"}});
+    REQUIRE(a.is_object());
+    CHECK(a["jd_ut1"] == 2435167.875);
+    CHECK(a["ut1"] == "1955-03-01T09:00:00.000Z");
+    CHECK_FALSE(a.contains("utc"));
+    const Json b = run(e, "convert_time", {{"time", {{"jd_ut1", 2435167.875}}}});
+    CHECK(a["jd_tt"] == b["jd_tt"]);
+    const Json rows = run(e, "positions", {{"time", "1955-03-01T09:00:00Z"}, {"objects", {"Sun"}}});
+    CHECK(rows["results"][0]["rows"][0]["time"]["ut1"] == "1955-03-01T09:00:00.000Z");
+    // From 1972 it is UTC, leap seconds and all; before, there are none.
+    CHECK(run(e, "convert_time", {{"time", "1972-01-01T00:00:00Z"}}).contains("utc"));
+    jsontools::ToolError err;
+    CHECK(run(e, "convert_time", {{"time", "1971-12-31T23:59:60Z"}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+}
+
+TEST_CASE("json_rows_say_what_their_delta_t_rests_on") {
+    // Far from the present the Delta T under a clock time is modelled, and
+    // at the Moon it is worth 0.5" a second: every row carries the value
+    // and which of the model's spans it came from.
+    synth::TempFile tf("json-dt");
+    Engine e = synth::open_synthetic(tf);
+    const std::pair<const char*, const char*> cases[] = {
+        {"1955-03-01T09:00:00Z", "observed"},
+        {"1000-03-20T12:00:00Z", "reconstructed"},
+        {"-1000-03-20T12:00:00Z", "before the eclipse record"},
+        {"2200-03-20T12:00:00Z", "predicted"},
+    };
+    for (const auto& [when, basis] : cases) {
+        CAPTURE(when);
+        const Json c = run(e, "convert_time", {{"time", when}});
+        REQUIRE(c.is_object());
+        CHECK(c["delta_t_basis"].get<std::string>().rfind(basis, 0) == 0);
+        CHECK(c["delta_t_s"].get<double>() ==
+              doctest::Approx((c["jd_tt"].get<double>() - c["jd_ut1"].get<double>()) * 86400.0)
+                  .epsilon(1e-6));
+    }
+    const Json rows = run(e, "positions", {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}});
+    const Json& t = rows["results"][0]["rows"][0]["time"];
+    CHECK(t["delta_t_basis"] == "observed: USNO");
+    // UTC after the last leap second is TAI - 37 s; the row says how far
+    // that is from UT1: under a second now, minutes by 2100.
+    CHECK(std::fabs(t["ut1_minus_utc_s"].get<double>()) < 0.9);
+    const Json far = run(e, "convert_time", {{"time", "2100-01-01T00:00:00Z"}});
+    const double drift = far["ut1_minus_utc_s"].get<double>(); // time_of, as every row
+    CHECK(drift == doctest::Approx(69.184 - far["delta_t_s"].get<double>()).epsilon(1e-9));
+    CHECK(drift < -100.0);
+    CHECK(t["delta_t_s"].get<double>() == doctest::Approx(63.83).epsilon(1e-3));
+}
+
+TEST_CASE("json_bad_arguments_are_whole_call_errors") {
+    synth::TempFile tf("json-bad");
+    Engine e = synth::open_synthetic(tf);
+    jsontools::ToolError err;
+    CHECK(run(e, "positions", {{"objects", {"Sun"}}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+    CHECK(run(e, "positions", {{"time", "yesterday"}, {"objects", {"Sun"}}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+    CHECK(run(e, "nosuchtool", Json::object(), &err).is_null());
+    CHECK(err.code == "unknown-tool");
+    CHECK(run(e, "positions",
+              {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}, {"zodiac", "nosuchzodiac"}},
+              &err)
+              .is_null());
+    CHECK(err.code == "invalid-arguments");
+}
+
+TEST_CASE("json_tools_list_their_schemas") {
+    const auto t = jsontools::tools();
+    REQUIRE(t.size() == 5);
+    for (const auto& tool : t) {
+        CHECK(!tool.description.empty());
+        CHECK(tool.input_schema["type"] == "object");
+    }
+    CHECK(jsontools::llms_txt().find("positions") != std::string::npos);
+}
+
+// The MCP dispatcher (server/mcp.hpp): JSON-RPC 2.0, whatever the transport.
+TEST_CASE("mcp_dispatcher") {
+    synth::TempFile tf("json-mcp");
+    Engine e = synth::open_synthetic(tf);
+    jsontools::Context ctx;
+    ctx.engine = "test";
+    mcp::Dispatcher d(e, ctx, "0.0.0");
+    const auto req = [](int id, const char* method, Json params = Json::object()) {
+        return Json{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}, {"params", params}};
+    };
+    // Version negotiation: a supported revision is echoed, another gets ours.
+    auto init = d.handle(req(1, "initialize", {{"protocolVersion", "2025-03-26"}}));
+    REQUIRE(init);
+    CHECK((*init)["result"]["protocolVersion"] == "2025-03-26");
+    CHECK((*init)["result"]["serverInfo"]["name"] == "prometheia-json");
+    init = d.handle(req(2, "initialize", {{"protocolVersion", "1999-01-01"}}));
+    CHECK((*init)["result"]["protocolVersion"] == mcp::kProtocolVersions[0]);
+    // A notification has no answer.
+    CHECK_FALSE(d.handle(Json{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}}));
+    // Tools: listed with schemas; a call answers text and structured content.
+    auto list = d.handle(req(3, "tools/list"));
+    CHECK((*list)["result"]["tools"].size() == 5);
+    auto ok =
+        d.handle(req(4, "tools/call",
+                     {{"name", "positions"},
+                      {"arguments", {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}}}}));
+    CHECK((*ok)["result"]["isError"] == false);
+    CHECK((*ok)["result"]["structuredContent"]["results"][0]["object"]["resolved"] == "Sun");
+    CHECK((*ok)["result"]["content"][0]["type"] == "text");
+    // A tool's own failure is a result the agent reads; a protocol error is not.
+    auto bad =
+        d.handle(req(5, "tools/call", {{"name", "positions"}, {"arguments", Json::object()}}));
+    CHECK((*bad)["result"]["isError"] == true);
+    auto unknown_tool = d.handle(req(6, "tools/call", {{"name", "nosuch"}}));
+    CHECK((*unknown_tool)["error"]["code"] == -32602);
+    auto unknown_method = d.handle(req(7, "nosuch/method"));
+    CHECK((*unknown_method)["error"]["code"] == -32601);
+    CHECK((*d.handle(Json{{"not", "rpc"}}))["error"]["code"] == -32600);
+    // Resources: the agent-facing summary.
+    auto read = d.handle(req(8, "resources/read", {{"uri", "prometheia://llms.txt"}}));
+    CHECK((*read)["result"]["contents"][0]["text"].get<std::string>().find("positions") !=
+          std::string::npos);
+    // A batch answers each request, and skips the notifications.
+    auto batch = d.handle(Json::array({req(9, "ping"), Json{{"jsonrpc", "2.0"}, {"method", "x"}}}));
+    REQUIRE(batch);
+    CHECK(batch->size() == 1);
+}
+
+TEST_CASE("json_wrong_types_are_errors_not_exceptions") {
+    // Every argument of every tool, at top level and inside a site or a time,
+    // given every JSON type: the call answers or refuses, and never throws.
+    synth::TempFile tf("json-types");
+    Engine e = synth::open_synthetic(tf);
+    const Json kinds[] = {Json(3.5),
+                          Json(-7),
+                          Json("x"),
+                          Json(true),
+                          Json(nullptr),
+                          Json::array({1, "a"}),
+                          Json::object({{"k", 1}})};
+    const Json base = {{"time", "2000-01-01T12:00:00Z"}, {"objects", {"Sun"}}};
+    const char* nested[][2] = {{"site", "lon_deg"}, {"site", "lat_deg"}, {"site", "height_m"},
+                               {"time", "utc"},     {"time", "jd_tt"},   {"time", "jd_ut1"},
+                               {"series", "start"}, {"series", "count"}, {"series", "step_days"},
+                               {"zodiac", "user"}};
+    const char* object_keys[] = {"naif",         "body",  "star",   "asteroid",
+                                 "hypothetical", "point", "method", "of"};
+    size_t calls = 0;
+    for (const jsontools::Tool& t : jsontools::tools()) {
+        for (const auto& [key, schema] : t.input_schema["properties"].items()) {
+            for (const Json& k : kinds) {
+                Json args = base;
+                args["observer"] = "topocentric";
+                args["site"] = {{"lon_deg", 1.0}, {"lat_deg", 2.0}};
+                args[key] = k;
+                jsontools::ToolError err;
+                CHECK_NOTHROW(run(e, t.name.c_str(), args, &err));
+                ++calls;
+            }
+        }
+    }
+    for (const auto& n : nested) {
+        for (const Json& k : kinds) {
+            Json args = base;
+            args["observer"] = "topocentric";
+            args["site"] = {{"lon_deg", 1.0}, {"lat_deg", 2.0}};
+            if (std::string(n[0]) == "series") {
+                args.erase("time");
+                args["series"] = {
+                    {"start", "2000-01-01T00:00:00Z"}, {"count", 2}, {"step_days", 1}};
+            } else if (std::string(n[0]) == "time") {
+                args["time"] = Json::object();
+            } else if (std::string(n[0]) == "zodiac") {
+                args["zodiac"] = Json::object();
+            }
+            args[n[0]][n[1]] = k;
+            CHECK_NOTHROW(run(e, "positions", args));
+            // And each member of a user zodiac.
+            Json z = base;
+            z["zodiac"] = {{"user", {{"epoch_jd_tt", 2451545.0}, {"ayanamsa_deg", 23.0}}}};
+            z["zodiac"]["user"][std::string(n[1]) == "utc" ? "epoch_jd_tt" : "ayanamsa_deg"] = k;
+            CHECK_NOTHROW(run(e, "positions", z));
+            calls += 2;
+        }
+    }
+    for (const char* key : object_keys) {
+        for (const Json& k : kinds) {
+            Json args = base;
+            args["objects"] = Json::array({Json{{key, k}}, Json{{"point", "mean node"}, {key, k}}});
+            CHECK_NOTHROW(run(e, "positions", args));
+            ++calls;
+        }
+    }
+    CHECK(calls > 100);
+    // The protocol layer: a method, params or id of the wrong type.
+    mcp::Dispatcher d(e, jsontools::Context{}, "0.0.0");
+    for (const Json& k : kinds) {
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", k}}));
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", k}, {"id", 1}, {"method", "ping"}}));
+        CHECK_NOTHROW(
+            d.handle(Json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", k}}));
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", "2.0"},
+                                    {"id", 1},
+                                    {"method", "tools/call"},
+                                    {"params", {{"name", "positions"}, {"arguments", k}}}}));
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", "2.0"},
+                                    {"id", 1},
+                                    {"method", "initialize"},
+                                    {"params", {{"protocolVersion", k}}}}));
+        CHECK_NOTHROW(d.handle(Json{{"jsonrpc", "2.0"},
+                                    {"id", 1},
+                                    {"method", "resources/read"},
+                                    {"params", {{"uri", k}}}}));
+        CHECK_NOTHROW(mcp::method_name(Json{{"method", k}}));
+    }
+    auto r = d.handle(Json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", 5}});
+    REQUIRE(r);
+    CHECK((*r)["error"]["code"] == -32600);
+}
+
+TEST_CASE("json_hostile_messages") {
+    synth::TempFile tf("json-hostile");
+    Engine e = synth::open_synthetic(tf);
+    mcp::Dispatcher d(e, jsontools::Context{}, "0.0.0");
+    const auto nested = [](int depth) {
+        return std::string(size_t(depth), '[') + std::string(size_t(depth), ']');
+    };
+
+    SUBCASE("nesting is refused unparsed past kMaxDepth") {
+        // prometheia-json crashed (stack overflow) on 500,000 levels, which
+        // a 1 MiB body holds (fuzz_json, 2026-09-18).
+        std::string why;
+        CHECK(!mcp::parse(nested(mcp::kMaxDepth), &why).is_discarded());
+        CHECK(mcp::parse(nested(mcp::kMaxDepth + 1), &why).is_discarded());
+        CHECK(why.find("nested") != std::string::npos);
+        CHECK(mcp::parse(nested(500000), &why).is_discarded());
+        // Brackets inside strings are text, not nesting.
+        const std::string text = "{\"a\":\"" + nested(1000) + "\\\"[\"}";
+        CHECK(!mcp::parse(text, &why).is_discarded());
+        CHECK(mcp::parse("{\"a\":", &why).is_discarded());
+        CHECK(why == "not JSON");
+    }
+    SUBCASE("an id that is not a string, number or null is answered with null") {
+        // JSON-RPC 2.0, sections 4 and 5; the dispatcher echoed it (fuzz_json).
+        for (const Json& id : {Json::object({{"a", 1}}), Json::array({1}), Json(true)}) {
+            for (const Json& m :
+                 {Json{{"id", id}}, Json{{"jsonrpc", "2.0"}, {"id", id}, {"method", "ping"}}}) {
+                auto r = d.handle(m);
+                REQUIRE(r);
+                CHECK((*r)["id"].is_null());
+                CHECK((*r)["error"]["code"] == -32600);
+            }
+        }
+        auto r = d.handle(Json{{"jsonrpc", "2.0"}, {"id", "x"}, {"method", "ping"}});
+        REQUIRE(r);
+        CHECK((*r)["id"] == "x");
+    }
+    SUBCASE("the log never carries the client's method string") {
+        CHECK(mcp::method_for_log(Json{{"method", "tools/call"}}) == "tools/call");
+        CHECK(mcp::method_for_log(Json{{"method", "1990-06-15 Zurich\nforged line"}}) == "unknown");
+        CHECK(mcp::method_for_log(Json::array()) == "batch");
+    }
+    SUBCASE("a site is on the Earth: -12 km to the Karman line") {
+        // 4e19 m cost 30 s of CPU per small body (fuzz_json, 2026-09-18).
+        const auto at = [&](double h) {
+            jsontools::ToolError err;
+            const Json args = {{"time", "2000-01-01T12:00:00Z"},
+                               {"observer", "topocentric"},
+                               {"site", {{"lon_deg", 8.55}, {"lat_deg", 47.37}, {"height_m", h}}},
+                               {"objects", {"Sun"}}};
+            return !run(e, "positions", args, &err).is_null();
+        };
+        CHECK(at(-12000.0));
+        CHECK(at(100000.0));
+        CHECK_FALSE(at(-12000.5));
+        CHECK_FALSE(at(100000.5));
+        CHECK_FALSE(at(4e19));
+    }
+    SUBCASE("a reply with bytes that are not UTF-8 still goes out") {
+        const Json bad = {{"text", std::string("a\xff"
+                                               "b")}};
+        CHECK_THROWS(bad.dump());
+        CHECK(mcp::wire(bad) == "{\"text\":\"a\xef\xbf\xbd"
+                                "b\"}");
+    }
+}
+
+TEST_CASE("json_vocabulary_matches_the_registries") {
+    synth::TempFile tf("json-words");
+    Engine e = synth::open_synthetic(tf);
+    // A.5's body observer: the engine's Center::Body, by name or NAIF id.
+    CalcOptions o;
+    o.center = Center::Body;
+    o.center_body = 5;
+    auto want = e.calc(10, 2451545.0, o);
+    REQUIRE(want.ok());
+    for (const Json& center : {Json("Jupiter"), Json(5)}) {
+        const Json out = run(e, "positions",
+                             {{"time", {{"jd_tt", 2451545.0}}},
+                              {"objects", {"Sun"}},
+                              {"observer", "body"},
+                              {"center", center}});
+        REQUIRE(out.is_object());
+        CHECK(out["results"][0]["rows"][0]["longitude_deg"].get<double>() ==
+              want.value().pos.lon_deg);
+    }
+    // Seen from the Sun, nothing is deflected by it.
+    Json from_sun = run(e, "positions",
+                        {{"time", {{"jd_tt", 2451545.0}}},
+                         {"objects", {"Earth"}},
+                         {"observer", "body"},
+                         {"center", "Sun"}});
+    CHECK(from_sun["results"][0]["provenance"]["corrections"] ==
+          Json({"light-time", "aberration"}));
+    jsontools::ToolError err;
+    CHECK(run(e, "positions",
+              {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}, {"observer", "body"}}, &err)
+              .is_null());
+    CHECK(err.code == "invalid-arguments");
+    // A.7's word, and the old one still read.
+    for (const char* word : {"gravitational-deflection", "deflection"}) {
+        const Json out = run(
+            e, "positions",
+            {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Jupiter"}}, {"corrections", {word}}});
+        CHECK(out["results"][0]["provenance"]["corrections"] == Json({"gravitational-deflection"}));
+    }
+    // A.14: the three methods this engine does not compute are named, and
+    // refused as unsupported; never answered with another method.
+    for (const char* m : {"interpolated", "osculating-barycentric", "focal-point"}) {
+        const Json out =
+            run(e, "positions",
+                {{"time", {{"jd_tt", 2451545.0}}},
+                 {"objects", {{{"point", "aphelion"}, {"of", "Earth"}, {"method", m}}}}});
+        CHECK(out["results"][0]["error"]["code"] == "unsupported");
+        CHECK_FALSE(out["results"][0].contains("rows"));
+    }
+    // The Sun's orbit is geocentric, the Earth's reflected: its apsides are
+    // its perigee and apogee, and its interpolated method is refused.
+    {
+        const Json out =
+            run(e, "positions",
+                {{"time", {{"jd_tt", 2451545.0}}},
+                 {"objects",
+                  {{{"point", "perihelion"}, {"of", "Sun"}},
+                   {{"point", "aphelion"}, {"of", "Sun"}, {"method", "interpolated"}}}}});
+        REQUIRE_MESSAGE(out["results"][0].contains("rows"), out.dump());
+        CHECK(out["results"][0]["object"]["resolved"] == "Sun mean perigee");
+        CHECK(out["results"][1]["error"]["code"] == "unsupported");
+    }
+    // The provenance names the model behind a mean point, and only there.
+    {
+        const Json out =
+            run(e, "positions",
+                {{"time", {{"jd_tt", 2451545.0}}},
+                 {"objects",
+                  {{{"point", "ascending-node"}, {"of", "Moon"}},
+                   {{"point", "ascending-node"}, {"of", "Jupiter"}},
+                   {{"point", "perihelion"}, {"of", "Sun"}},
+                   {{"point", "ascending-node"}, {"of", "Jupiter"}, {"method", "osculating"}},
+                   "Jupiter"}}});
+        REQUIRE_MESSAGE(out["results"][4].contains("rows"), out.dump());
+        CHECK(out["results"][0]["provenance"]["model"] == "Moon: Simon et al. 1994");
+        const char* planets = "mean elements: DE440 secular fit, 1550-2650";
+        CHECK(out["results"][1]["provenance"]["model"] == planets);
+        CHECK(out["results"][2]["provenance"]["model"] == planets);
+        CHECK_FALSE(out["results"][3]["provenance"].contains("model"));
+        CHECK_FALSE(out["results"][4]["provenance"].contains("model"));
+    }
+    // §3.5a: a zodiac defined at the instant has no anchor plane, and
+    // capabilities says so before the agent asks.
+    const Json caps = run(e, "capabilities", Json::object());
+    bool saw_instant = false, saw_epoch = false;
+    for (const Json& z : caps["zodiacs"]) {
+        const bool anchor = std::find(z["sidereal_planes"].begin(), z["sidereal_planes"].end(),
+                                      Json("anchor")) != z["sidereal_planes"].end();
+        if (z["name"] == "true-citra") {
+            saw_instant = true;
+            CHECK_FALSE(anchor);
+            CHECK(z["defined"] == "at the instant");
+        }
+        if (z["name"] == "lahiri") {
+            saw_epoch = true;
+            CHECK(anchor);
+        }
+    }
+    CHECK(saw_instant);
+    CHECK(saw_epoch);
+    // The dates served, and the precession a request without one gets.
+    CHECK(caps["precession_default"] == "vondrak2011");
+    REQUIRE(caps["dates"]["ephemerides"].size() == 1);
+    const Json& span = caps["dates"]["ephemerides"][0];
+    CHECK(span["source"] == std::string(e.source()));
+    CHECK(span["from_jd_tdb"].get<double>() < 2451545.0);
+    CHECK(span["to_jd_tdb"].get<double>() > 2451545.0);
+    CHECK(span["from"].is_string());
+    CHECK(run(e, "positions",
+              {{"time", {{"jd_tt", 2451545.0}}},
+               {"objects", {"Sun"}},
+               {"zodiac", "true-citra"},
+               {"sidereal_plane", "anchor"}},
+              &err)
+              .is_null());
+    CHECK(err.message.find("no anchor") != std::string::npos);
+    CHECK_FALSE(run(e, "positions",
+                    {{"time", {{"jd_tt", 2451545.0}}},
+                     {"objects", {"Sun"}},
+                     {"zodiac", "lahiri"},
+                     {"sidereal_plane", "anchor"}})
+                    .is_null());
+}
+
+// An agent that cannot tell "not served on this deployment" from "misspelled"
+// keeps guessing spellings. Both answers say which.
+TEST_CASE("json_says_when_no_catalog_is_loaded") {
+    synth::TempFile tf("json-catalog");
+    Engine e = synth::open_synthetic(tf);
+
+    const Json none = run(e, "capabilities", Json::object());
+    CHECK(none["asteroids"]["loaded"] == false);
+    CHECK(none["asteroids"]["catalogs"] == 0);
+    CHECK(std::string(none["asteroids"]["note"]).find("no small-body catalog") !=
+          std::string::npos);
+    const Json loaded = run(e, "capabilities", Json::object(), nullptr, 2);
+    CHECK(loaded["asteroids"]["loaded"] == true);
+    CHECK(loaded["asteroids"]["catalogs"] == 2);
+
+    // The same distinction in the per-object error, where an agent meets it.
+    const Json args = {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Chiron"}}};
+    const std::string without = run(e, "positions", args)["results"][0]["error"]["message"];
+    const std::string with =
+        run(e, "positions", args, nullptr, 1)["results"][0]["error"]["message"];
+    CHECK(without.find("no small-body catalog loaded") != std::string::npos);
+    CHECK(with.find("no small-body catalog loaded") == std::string::npos);
+    CHECK(with.find("catalog body has that name") != std::string::npos);
+}
+
+// `prefix` reached the star index and nothing else until 2026-09-20: "node"
+// and "Lili" found a star and never "true node" or "lilith".
+TEST_CASE("json_lookup_prefix_reaches_every_kind") {
+    synth::TempFile tf("json-prefix");
+    Engine e = synth::open_synthetic(tf);
+    const auto names = [&](const char* q, bool prefix) {
+        std::vector<std::string> out;
+        // Bound to a local: `for (... : run(...)["matches"])` reads a
+        // subobject of a temporary that is already gone.
+        const Json got = run(e, "lookup", {{"query", q}, {"prefix", prefix}});
+        for (const Json& m : got["matches"]) {
+            const Json& o = m["object"];
+            out.push_back(o.is_string()                ? o.get<std::string>()
+                          : o.contains("body")         ? o["body"].get<std::string>()
+                          : o.contains("hypothetical") ? o["hypothetical"].get<std::string>()
+                                                       : std::string());
+        }
+        return out;
+    };
+    const auto has = [](const std::vector<std::string>& v, const char* w) {
+        return std::find(v.begin(), v.end(), w) != v.end();
+    };
+    // The distinguishing word of a point's name is usually last, so a prefix
+    // anchored at the start would answer "true" and never "node".
+    const std::vector<std::string> node = names("node", true);
+    CHECK(has(node, "true node"));
+    CHECK(has(node, "mean node"));
+    CHECK(has(node, "south node"));
+    CHECK(has(names("apogee", true), "natural apogee"));
+    CHECK(has(names("jup", true), "jupiter"));
+    // Exact is still exact: a half-name matches nothing without the flag.
+    CHECK(names("node", false).empty());
+    CHECK(has(names("true node", false), "true node"));
+    CHECK(has(names("mars", false), "mars"));
+}
+
+// A clock time with no offset was read as UTC and called "utc" in the answer:
+// the one wrong number this surface could hand back in silence.
+TEST_CASE("json_a_naive_clock_time_is_refused") {
+    synth::TempFile tf("json-naive");
+    Engine e = synth::open_synthetic(tf);
+    jsontools::ToolError err;
+    for (const char* naive : {"1990-06-15T14:30:00", "1990-06-15T14:30", "1990-06-15 14:30:00"}) {
+        CHECK(run(e, "convert_time", {{"time", naive}}, &err).is_null());
+        CHECK(err.code == "invalid-arguments");
+        CHECK(err.message.find("UTC offset or a Z") != std::string::npos);
+    }
+    // The zoned forms and a bare date (a date, not a clock time) still work,
+    // and the two zoned forms are the same instant.
+    const Json z = run(e, "convert_time", {{"time", "1990-06-15T12:30:00Z"}});
+    const Json off = run(e, "convert_time", {{"time", "1990-06-15T14:30:00+02:00"}});
+    REQUIRE(z.is_object());
+    // The offset form crosses the day through a JD and back, so the two agree
+    // to well under a millisecond rather than bit for bit.
+    CHECK(std::fabs(z["jd_tt"].get<double>() - off["jd_tt"].get<double>()) < 1e-8);
+    const Json day = run(e, "convert_time", {{"time", "1990-06-15"}});
+    REQUIRE(day.is_object());
+    CHECK(day["utc"] == "1990-06-15T00:00:00.000Z");
+    // Wherever a time is read: a series start too, not only `time`.
+    CHECK(run(e, "positions",
+              {{"series", {{"start", "2026-01-01T00:00:00"}, {"step_days", 1}, {"count", 2}}},
+               {"objects", {"Sun"}}},
+              &err)
+              .is_null());
+    CHECK(err.code == "invalid-arguments");
+}
+
+// Provenance named the frame, the corrections and the zodiac but never the
+// observer, so a geocentric answer and a topocentric one -- arcseconds apart
+// -- carried byte-identical provenance once they left the request behind.
+TEST_CASE("json_provenance_names_the_observer") {
+    synth::TempFile tf("json-prov");
+    Engine e = synth::open_synthetic(tf);
+    const Json t = {{"jd_tt", 2451545.0}};
+    const Json geo = run(e, "positions", {{"time", t}, {"objects", {"Sun"}}});
+    const Json topo = run(e, "positions",
+                          {{"time", t},
+                           {"observer", "topocentric"},
+                           {"site", {{"lon_deg", -78.47}, {"lat_deg", -0.18}, {"height_m", 2850}}},
+                           {"objects", {"Sun"}}});
+    const Json& pg = geo["results"][0]["provenance"];
+    const Json& pt = topo["results"][0]["provenance"];
+    CHECK(pg["observer"] == "geocentric");
+    CHECK_FALSE(pg.contains("site"));
+    CHECK(pt["observer"] == "topocentric");
+    REQUIRE(pt.contains("site"));
+    CHECK(pt["site"]["lon_deg"] == -78.47);
+    CHECK(pt["site"]["height_m"] == 2850.0);
+    CHECK(pg != pt);
+    // A body centre names the body, under "center" rather than "site".
+    // Jupiter's barycentre is one of the synthetic kernel's three bodies.
+    const Json body =
+        run(e, "positions",
+            {{"time", t}, {"observer", "body"}, {"center", "Jupiter"}, {"objects", {"Sun"}}});
+    const Json& pb = body["results"][0]["provenance"];
+    CHECK(pb["observer"] == "body");
+    CHECK(pb["center"]["naif"] == 5);
+    CHECK_FALSE(pb.contains("site"));
+    // The Sun seen from the Sun is degenerate on this kernel; ask for Earth.
+    const Json helio =
+        run(e, "positions", {{"time", t}, {"observer", "heliocentric"}, {"objects", {"Earth"}}});
+    CHECK(helio["results"][0]["provenance"]["observer"] == "heliocentric");
+}
+
+// An argument this engine does not serve -- houses, aspects, a misspelling --
+// was dropped in silence and the answer looked like the one asked for.
+TEST_CASE("json_an_unknown_key_is_refused_by_every_tool") {
+    synth::TempFile tf("json-keys");
+    Engine e = synth::open_synthetic(tf);
+    jsontools::ToolError err;
+    const Json t = {{"jd_tt", 2451545.0}};
+    CHECK(
+        run(e, "positions", {{"time", t}, {"objects", {"Sun"}}, {"housesystem", "placidus"}}, &err)
+            .is_null());
+    CHECK(err.code == "invalid-arguments");
+    CHECK(err.message.find("\"housesystem\"") != std::string::npos);
+    // A near miss of a real key is refused by the same rule.
+    CHECK(run(e, "positions", {{"time", t}, {"objects", {"Sun"}}, {"correction", {"light-time"}}},
+              &err)
+              .is_null());
+    CHECK(err.code == "invalid-arguments");
+    // Every documented key still passes, together.
+    const Json all = run(e, "positions",
+                         {{"time", t},
+                          {"objects", {"Sun"}},
+                          {"observer", "topocentric"},
+                          {"site", {{"lon_deg", 8.55}, {"lat_deg", 47.37}, {"height_m", 500}}},
+                          {"frame", "true-of-date"},
+                          {"coordinates", "ecliptic"},
+                          {"corrections", {"light-time", "aberration"}},
+                          {"zodiac", "tropical"},
+                          {"precession", "iau2006"},
+                          {"rates", true}},
+                         &err);
+    REQUIRE(all.is_object());
+    CHECK(all["results"][0]["error"].is_null());
+
+    // The same rule on the other three tools. A mistyped "prefix" matched
+    // exactly and answered nothing, which reads as "no such name".
+    CHECK(run(e, "lookup", {{"query", "node"}, {"prefixx", true}}, &err).is_null());
+    CHECK(err.message.find("\"prefixx\"") != std::string::npos);
+    CHECK(run(e, "capabilities", {{"verbose", true}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+    CHECK(run(e, "convert_time", {{"time", t}, {"scale", "tt"}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+    // And what each does read still works.
+    CHECK(run(e, "lookup", {{"query", "node"}, {"prefix", true}})["matches"].size() > 0);
+    CHECK(run(e, "capabilities", Json::object()).contains("limits"));
+    CHECK(run(e, "convert_time", {{"time", t}}).contains("jd_tt"));
+}
+
+// The sidereal plane moves the latitude by a degree and the precession model
+// the longitude by milliarcseconds, and neither appeared in the answer: the
+// same blindness as the observer, in the two arguments left.
+TEST_CASE("json_provenance_names_the_plane_and_the_precession") {
+    synth::TempFile tf("json-plane");
+    Engine e = synth::open_synthetic(tf);
+    const auto ask = [&](const Json& extra) {
+        Json a = {{"time", {{"jd_tt", 2451545.0}}}, {"objects", {"Sun"}}};
+        for (const auto& kv : extra.items())
+            a[kv.key()] = kv.value();
+        return run(e, "positions", a);
+    };
+    const Json date = ask({{"zodiac", "lahiri"}, {"sidereal_plane", "date"}});
+    const Json inv = ask({{"zodiac", "lahiri"}, {"sidereal_plane", "invariable"}});
+    CHECK(date["results"][0]["provenance"]["zodiac"]["plane"] == "date");
+    CHECK(inv["results"][0]["provenance"]["zodiac"]["plane"] == "invariable");
+    // The two answers differ, so the provenance had to.
+    CHECK(date["results"][0]["rows"][0]["latitude_deg"] !=
+          inv["results"][0]["rows"][0]["latitude_deg"]);
+    CHECK(date["results"][0]["provenance"] != inv["results"][0]["provenance"]);
+    // Precession appears where it entered the answer: an of-date frame or a
+    // sidereal zodiac, and not in a tropical answer on fixed axes.
+    CHECK(ask(Json::object())["results"][0]["provenance"]["precession"] == "vondrak2011");
+    CHECK(ask({{"precession", "vondrak2011"}})["results"][0]["provenance"]["precession"] ==
+          "vondrak2011");
+    CHECK(ask({{"frame", "icrf"}})["results"][0]["provenance"].contains("precession") == false);
+    CHECK(ask({{"frame", "icrf"},
+               {"zodiac", "lahiri"}})["results"][0]["provenance"]["precession"] == "vondrak2011");
+}
+
+// Houses (docs/HOUSES.md): the engine's numbers, by token or letter, with an
+// unserved system and a polar refusal as per-system errors.
+TEST_CASE("json_houses_are_the_engines") {
+    synth::TempFile tf("json-houses");
+    Engine e = synth::open_synthetic(tf);
+    const Json site = {{"lon_deg", 8.55}, {"lat_deg", 47.37}};
+    const Json t = {{"jd_tt", 2451545.0}};
+    const Json out = run(
+        e, "houses", {{"time", t}, {"site", site}, {"systems", {"placidus", "W", "gauquelin"}}});
+    REQUIRE(out.is_object());
+    REQUIRE(out["results"].size() == 3);
+    frames::GeoSite g;
+    g.lon_rad = 8.55 * 3.14159265358979323846 / 180.0;
+    g.lat_rad = 47.37 * 3.14159265358979323846 / 180.0;
+    auto want = e.houses(houses::System::Placidus, 2451545.0, g);
+    REQUIRE(want.ok());
+    const Json& p = out["results"][0];
+    CHECK(p["error"].is_null());
+    CHECK(p["system"]["token"] == "placidus");
+    for (int k = 0; k < 12; ++k)
+        CHECK(p["rows"][0]["cusps_deg"][k].get<double>() == want.value().houses.cusp_deg[k]);
+    CHECK(p["rows"][0]["mc_deg"].get<double>() == want.value().houses.angles.mc_deg);
+    CHECK(p["rows"][0]["obliquity_deg"].get<double>() == want.value().obliquity_deg);
+    CHECK(p["provenance"]["precession"] == "vondrak2011");
+    CHECK_FALSE(p["provenance"].contains("zodiac"));
+    CHECK(out["results"][1]["system"]["token"] == "whole-sign");
+    CHECK(out["results"][2]["error"]["code"] == "unsupported");
+
+    // Inside a polar circle Placidus is refused by name; Porphyry answers.
+    const Json polar = run(e, "houses",
+                           {{"time", t},
+                            {"site", {{"lon_deg", 0.0}, {"lat_deg", 70.0}}},
+                            {"systems", {"P", "porphyry"}}});
+    CHECK(polar["results"][0]["error"]["code"] == "undefined-at-latitude");
+    CHECK(polar["results"][0]["error"]["message"].get<std::string>().find("Porphyry") !=
+          std::string::npos);
+    CHECK(polar["results"][1]["error"].is_null());
+
+    // Topocentric at 78.2 deg is refused, with the same code, at the hours
+    // its cusps fall out of zodiacal order.
+    int out_of_order = 0;
+    for (int hour = 0; hour < 24; ++hour) {
+        const Json at = {{"jd_tt", 2451545.0 + hour / 24.0}};
+        const Json topo = run(e, "houses",
+                              {{"time", at},
+                               {"site", {{"lon_deg", 15.63}, {"lat_deg", 78.22}}},
+                               {"systems", {"topocentric"}}});
+        const Json& err = topo["results"][0]["error"];
+        if (err.is_null())
+            continue;
+        ++out_of_order;
+        CHECK(err["code"] == "undefined-at-latitude");
+        CHECK(err["message"].get<std::string>().find("fall out of zodiacal order") !=
+              std::string::npos);
+    }
+    CHECK(out_of_order > 0);
+
+    // Sidereal: the ayanamsha and the zodiac are in the answer.
+    const Json sid = run(e, "houses", {{"time", t}, {"site", site}, {"zodiac", "lahiri"}});
+    CHECK(sid["results"][0]["rows"][0].contains("ayanamsa_deg"));
+    CHECK(sid["results"][0]["provenance"]["zodiac"]["token"] == "lahiri");
+
+    // Whole-call refusals: no site, a key houses does not read, a fixed plane.
+    jsontools::ToolError err;
+    CHECK(run(e, "houses", {{"time", t}}, &err).is_null());
+    CHECK(err.code == "invalid-arguments");
+    CHECK(run(e, "houses", {{"time", t}, {"site", site}, {"observer", "topocentric"}}, &err)
+              .is_null());
+    CHECK(err.message.find("\"observer\"") != std::string::npos);
+    CHECK(run(e, "houses",
+              {{"time", t}, {"site", site}, {"zodiac", "lahiri"}, {"sidereal_plane", "invariable"}},
+              &err)
+              .is_null());
+    CHECK(run(e, "houses", {{"time", t}, {"site", {{"lon_deg", 0.0}, {"lat_deg", 90.0}}}}, &err)
+              .is_null());
+
+    // capabilities lists the eleven.
+    const Json caps = run(e, "capabilities", Json::object());
+    CHECK(caps["house_systems"].size() == 11);
+}

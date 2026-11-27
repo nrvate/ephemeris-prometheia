@@ -1,0 +1,2654 @@
+# Cross-testing two servers
+
+A plan for the first live session between `prometheiad` and `astrolog-ephd`,
+written before the session rather than during it. Astrolog's phase 6 brings up
+a remote adapter and a v4 daemon on their side; at that point four pairings
+exist where today there is one, and the point of writing this now is that the
+useful decisions are the ones made before anyone is mid-debug.
+
+This is a **test plan, not a gate**. Nothing here runs in `tools/gate.sh` — it
+needs two daemons and two codebases. The permanent artefacts it should leave
+behind are a recorded leg table and, where a disagreement turns out to be real,
+a test in whichever repo was wrong.
+
+## The rule that matters most
+
+**Neither side changes code to make the other's number match until an
+independent anchor has adjudicated.**
+
+Two implementations converging on each other is not validation; it is the exact
+mechanism by which both end up wrong in the same direction, and it is
+unrecoverable afterwards because the disagreement that would have revealed it
+is gone. This is not hypothetical between these two projects. We have already
+produced, on the same day, two confident and wrong attributions that agreement
+would have cemented:
+
+- Our first light-time measurement on Jupiter's node read 20.83″ and looked
+  like a clean confirmation of the peer's reading. It was an artefact of
+  retarding the observer along with the source, which is aberration in
+  disguise. The tell was two columns agreeing to four digits.
+- Their first attribution of a 14-assertion failure was a sticky `tid_acc` in
+  a Swiss fork. Specific, plausible, and wrong — the fork was not linked into
+  the binary at all.
+
+Both were caught by an independent check. Neither would have been caught by
+the other server agreeing.
+
+So: a leg is **green** when both servers agree *and* the answer sits inside the
+anchor's tolerance. Two servers agreeing with each other and not with the
+anchor is a **finding**, not a pass, and it is the most interesting outcome
+this exercise can produce.
+
+## The matrix
+
+|  | `prometheiad` | `astrolog-ephd` |
+|---|---|---|
+| **Astrolog's client** | the first external consumer of our DATA/META — the event this is for | their own gate; runs already |
+| **`prometheia-wire-client`** | what we test today | an independent reader against their daemon |
+
+The two diagonal cells carry the new information. Their client against our
+server exercises everything that has never been exercised: our wire, chunking,
+error taxonomy, CANCEL, priority and caches, driven by a consumer with its own
+assumptions rather than by the tests we wrote for ourselves. Our client against
+their daemon gives them a second opinion from a reader that is not their own
+gate — the same independence that found 85/85 on their v4 fixtures.
+
+Both servers should also be run through `tools/check/corrapplied.py`, which
+compares a server only with itself and therefore presumes nothing about either
+engine.
+
+**Done, 2026-09-18.** Against `astrolog-ephd`, 27 of 29 cases were checked,
+with all three checks running on all 27; against `prometheiad`, 27 of 29.
+Both pass. The skips are legitimate on both servers: the Sun seen from the
+Sun's centre, and a node seen from its own body. Against `astrolog-ephd`, the
+truthfulness of deflection or aberration asked for alone is *inapplicable*,
+because Swiss cannot drop light time on its own. That server honours exactly
+masks 7, 0, 3, 5 and 1, and the tool reports the gap rather than passing it.
+The first run had printed OK after checking zero cases. The tool now fails
+on that, and fixing it exposed that `prometheiad` was under-advertising its
+masks (SERVER.md, "Correction masks").
+
+## The anchors, and which one adjudicates what
+
+Measured, and documented in [VALIDATION.md](VALIDATION.md) and
+[ENGINE.md](ENGINE.md).
+
+| anchor | what it settles | our measured agreement |
+|---|---|---|
+| JPL `testpo.440` (13,201 points) | DE interpolation itself | 1.4e-14 AU |
+| JPL Horizons, **astrometric ICRF** | light time, observer geometry, frame | 6 µas geo, 11 µas topo; Moon ≤ 0.006″ 1900–2100 |
+| JPL Horizons, small bodies + SB441-N16 | perturbed integration | 0.0053″ at ±10 yr |
+| `swetest`, differential | precession/nutation of date | 0.0005″ |
+
+**Reduce every disagreement to astrometric ICRF before taking it to Horizons.**
+This is the non-obvious part and it comes out of our own corpus. Horizons
+refers *apparent* RA/Dec to the EOP-corrected IAU 1976/80 equinox, which is a
+documented −53 mas from the IAU 2006/2000A equinox we use, and its ecliptic of
+date uses an obliquity 42 mas larger. Comparing apparent places to Horizons
+therefore means subtracting published constants first, and in a live session a
+51.8 mas constant offset is very easy to mistake for a real disagreement.
+Astrometric ICRF has no such correction and is the clean referee.
+
+Two further traps in the anchor itself, both already paid for:
+
+- **Sun-centred "apparent" from Horizons is referred to the Sun's equator.**
+  Latitudes match a rotation to the solar pole exactly; longitudes differ by a
+  constant 14.56°. Those rows are not comparable and must not be used as an
+  anchor. Only the Sun-centred *astrometric* rows are.
+- **Outside Horizons' EOP era** (before 1962, after 2026) it falls back to
+  plain IAU 1976/80 and apparent positions diverge from ours by up to 0.52″.
+  Anchor legs stay inside the EOP era; anything outside it is reported, never
+  gated.
+
+## Which disagreements are defects, and which are expected
+
+The most valuable thing this document can do is say, in advance, which numbers
+are allowed to differ. Otherwise a known model difference eats an evening.
+
+**Tier 1 — must agree to roundoff.** Geometric positions (corrections mask 0)
+of DE bodies, both servers reading the same DE440 file, in ICRF. Nothing
+model-dependent remains: this is the same Chebyshev data evaluated twice. A
+disagreement here is a defect in one of the two, and `testpo.440` says which.
+
+**That premise is false for `astrolog-ephd` in its default configuration,**
+and the first draft of this plan got it wrong. Per the Astrolog side: their
+daemon links the Swiss library, which by default reads Swiss's own `.se1`
+files — a compressed re-fit of the JPL integration with its own segmentation
+and a stated fidelity of about 0.001″ for the planets — and their bundled set
+is DE441, not DE440 (measured from the running binary, not read off a
+filename). A default-configuration mask-0 leg therefore has a floor set by
+that refit, not by roundoff, and `testpo.440` cannot adjudicate it: testpo
+validates JPL's interpolation, and the refit is a generation downstream.
+
+So a tier 1 leg **must put `astrolog-ephd` in its JPL mode, reading the same
+DE440 file this server reads**, and must say so in the leg row. It is not the
+default, and a leg that forgets it silently becomes a tier 2 leg wearing a
+tier 1 label. *As of 2026-09-18 `astrolog-ephd` has no JPL mode at all* (it
+always reads `.se1`), so no tier 1 leg can run against it yet. The runbook
+says what runs instead.
+
+**Tier 2 — must agree to ~1 mas.** Astrometric and apparent places of bodies;
+osculating orbit points. Measured precedent between these two engines: Jupiter's
+osculating ascending node, ours 20.8367″ against theirs 20.837001″; lunar orbit
+points to 0.0002″; the Moon's own apparent place 11.4249″ against 11.424861″.
+A disagreement above a few mas here is worth chasing; Horizons adjudicates.
+
+**Default-configuration mask-0 legs belong here too**, recorded with the reason
+"Swiss `.se1` refit of DE441, not the DE itself" so nobody chases it twice. The
+band for those is set by the refit's documented fidelity, and should be written
+as that — our own measurement would only rediscover a number that already has
+a source.
+
+**Tier 3 — expected to differ; agreement is not the test.** These are model
+choices, not errors, and a gate on them would be wrong:
+
+- **Mean elements.** Our mean nodes differ from theirs by 0.006–0.025″ because
+  our mean-element fits are different fits. Report the number; do not chase it.
+- **ΔT.** Different models, legitimately. Pin the ΔT explicitly in the request
+  (v4 §3.5 lets the client send a value or a table) so that a ΔT difference
+  cannot masquerade as a position difference. **Every numeric leg should send
+  its own ΔT.** On the Astrolog side this is more than hygiene: their library
+  derives ΔT from the DE number of the file currently loaded, so their ΔT
+  depends on which dataset is open and on *when* it is asked relative to the
+  first file open — the bug they fixed in phase 4c, worth 0.037 s at 1900.
+  Sending ΔT removes that whole axis. Ours takes no ephemeris state
+  ([TIME.md](TIME.md)).
+- **Ayanamsa variants**, where the definitions differ.
+- **Small-body solutions**, unless both sides are demonstrably on the same
+  SBDB solution and the same perturber set.
+
+**Courtesy tier — recorded, never gated.** Quantities that are not portable by
+construction, per [ORBIT-POINTS.md](ORBIT-POINTS.md) and v4 §3.5a:
+
+- **Orbit points with a proper subset of the corrections.** An astrometric
+  lunar node is 19.105″ from the apparent one here, because barycentric
+  retardation is left with nothing to cancel it, and a few mas in an engine
+  that retards geocentrically. Both are self-consistent, both report
+  `corrApplied = {lightTime}` truthfully, and they differ by 19″. Corrections
+  on an orbit point are interoperable applied **in full or not at all**.
+- **The Moon's orbit points generally** — the two-routes case. They already
+  re-pinned these as the courtesy tier in `1fe84a8`.
+
+For planetary orbit points, the **mask-0 leg is the portable comparison**: light
+time there is thousandths of an arcsecond, so a geometric leg cannot drift the
+way an apparent one can when either engine changes its correction conventions.
+That is what moved 10.5″ under them in the first place.
+
+**The elements tier — self-adjudicating.** A kind-4 answer is a pure function
+of the elements the client sent: two-body motion by a rule both sides agreed,
+with the mean motion taken from the Gaussian constant and not from either
+server's ephemeris ([HYPOTHETICALS.md](HYPOTHETICALS.md)). No model choice is
+left to hide behind, so two implementations must agree to the precision of
+their Kepler solvers, and any disagreement is a defect in one of them. That
+makes it the one leg in this plan that needs no external anchor. It is also
+the one where a disagreement is *informative* rather than ambiguous.
+
+It runs as a fixture rather than a live diagonal. The reason was recorded
+as "the Astrolog client does not send kind 4", which is true and is not the
+binding constraint: this harness drives both servers with our own client.
+The binding constraint, measured 2026-09-20, is that `astrolog-ephd` does
+not *serve* kind 4 -- it advertises `caps kinds 47`, bit 4 clear, where ours
+advertises 63 -- so a kind-4 request to it would draw ERROR 11, correctly.
+A fixture is the right shape for a question only one implementation can
+answer. The protocol owner generates element sets and answers
+from its implementation; this server is checked against them, numbers only.
+The first cases are the ones that are degrees apart under a wrong rule:
+
+- two sets differing only in the term count, a century from the epoch;
+- two terms with M's second coefficient zero and the node drifting — the case
+  a count-keyed rule freezes;
+- a genuine M(T) set, where the polynomial is the whole mean anomaly;
+- an Earth-centred orbit, which pins the mass-ratio divisor.
+
+Compare at TT (the `_ut` forms bring in each engine's Delta T and belong to a
+different tier), geometric first, then with each correction.
+
+**First run, 2026-09-18.** The four cases above were run once by hand, with
+inputs from this side and answers from both. All four match. The worst
+disagreement is 0.3 mas, on an Earth orbit of a = 0.01 AU after 173
+revolutions. The case that separates the corrected rule from the frozen
+one lands on the corrected rule on both sides. Every row that disagrees at
+all is one where the mean motion enters, and each disagreement grows with
+the mean anomaly accumulated. That traces to a single cause: Swiss
+implementations carry k as a truncated decimal in degrees per day,
+1.4 × 10⁻¹² relative off the protocol's value. This is a **known, quantified,
+one-cause difference**, worth about 2 × 10⁻⁷″ on the Hamburg points (under
+half an orbit a century). It is recorded rather than "fixed", because fixing
+it on the Astrolog side would put that one Swiss consumer out of step with
+every other. A cross-test that sees it should stop, not chase it.
+
+**Now a gate.** The committed fixture arrived the same day, with its
+generator and digest. It is vendored at
+`third_party/ephproto/v4/elements/FIXTURE.tsv`, and
+`ephproto4_kind4_elements_fixture` holds the engine to all eight rows. The
+bound is derived from the known difference's cause, not tuned: 1.446 × 10⁻¹²
+times the mean anomaly the row accumulates, with 20% headroom, over a
+roundoff floor. Nudging the Earth mass ratio by 1.5 × 10⁻⁷ fails it by four
+orders of magnitude.
+
+**The mean obliquity of date, a known difference until their fork follows
+(2026-09-29; their ledger S8).** Both sides precess by Vondrák 2011, and
+§3.5a (Astrolog `d0286de`) now defines the mean obliquity as the angle
+between the model's two poles, which is ours. Their server's obliquity is
+the paper's fitted ε_A series. Measured as swetest's printed output
+(`swetest_mean_obliquity_is_the_epsilon_a_series`), not read from any code.
+So every **ecliptic-of-date** row differs by the pole angle minus the
+series: 4.7 mas at 1560, 16.6 mas at 2640, 0.2″ at year 0, 1.0″ at −1000,
+17.6″ at −5000, 46″ at −13000, 3.6″ at 7000 and 65″ at 15000. That is
+mostly in latitude (the ecliptic tilts about the equinox). Equator-of-date
+and J2000/ICRF rows are untouched. Within 1550–2650 the difference is
+below every leg's tolerance. Outside it, a row that differs by about this
+amount is this item, not a finding, until the fork's release after ts.16
+lands and is measured closing it.
+
+## The bisection ladder
+
+When a number disagrees, add one thing at a time. Each rung isolates exactly
+one stage, and the rung where it breaks is the answer.
+
+1. **Mask 0, ICRF, J2000.** Raw ephemeris interpolation and nothing else.
+   Breaks here → the DE reader or the file. `testpo.440` settles it — but only
+   if `astrolog-ephd` is in JPL mode on the same file. In its default
+   configuration, a break at this rung is first a question about the `.se1`
+   refit, not a defect.
+2. **Mask 1 (light time), ICRF.** Adds the light-time solution.
+   Breaks here → the retardation loop, its convergence, or which body is
+   retarded. For an orbit point, remember that retarding the *observer* is
+   numerically indistinguishable from aberration.
+3. **Full corrections, ICRF.** Adds deflection and aberration.
+   Breaks here → the correction models. Horizons astrometric adjudicates the
+   light-time part; the observer-velocity term shows up as ~20″ at J2000.
+4. **Apparent of date.** Adds precession, nutation, equinox and obliquity.
+   Breaks here → frames. `swetest` differential adjudicates at 0.0005″, and
+   Horizons only after the published −53 mas equinox and 42 mas obliquity
+   offsets are removed.
+5. **Observer changes** (topocentric, heliocentric, planet-centred) last, one
+   at a time. The correction narrowing is **by observer, not by kind**:
+   measured on Saturn at J2000, the observer-velocity term is 0.0000″
+   barycentric, 0.0107″ at the Sun, 10.4372″ geocentric, 8.7706″ centred on
+   Jupiter.
+
+## Legs the numeric matrix cannot see
+
+Two legs proposed by the Astrolog side. Both test something every other leg
+assumes rather than checks.
+
+**The silent-fallback leg.** Swiss does not fail when a file is missing or an
+instant is out of its coverage: for the main planets it silently answers from
+its analytic Moshier model instead. They measured it — with every ephemeris
+directory removed, the Sun still computes, 0.04″ off, with no error and no
+flag. That is a server answering from a different model than the one its
+`datasetId` names, which is the class `corrapplied.py` exists for, one level up.
+So: request an instant outside the pinned ephemeris's coverage, and an object
+the pinned set does not cover, and require **either** a per-object error (3,
+out of range; 4, data missing) **or** a truthful source string — never a
+silent substitution. Run it against both servers. It needs to be a named leg,
+because every other leg in the matrix would pass while being quietly answered
+by a different model.
+
+**Chunk, grid and list equivalence.** The same question asked as one grid, as
+several chunks and as an explicit instant list must give identical bytes. The
+v4 row formula is normative — row *r* is `(jd1+jd2) + (double)(r·stepNs)/86400e9`,
+computed from *r*, never accumulated — and a server that accumulates drifts at
+large *r*. That presents as a position disagreement that walks with row index,
+which is easy to misread as physics. A 10,000-row grid compared on the
+*implied times* isolates it in one leg.
+
+## Measurement traps to encode in the harness
+
+- **Drive the client with a one-source chain.** Astrolog's client now has a
+  fallback chain: when the selected source cannot answer an object, the next
+  one does, and the chart still comes out with a notice. A leg pointing their
+  client at `prometheiad` with a chain of `prometheia,swiss` would, on any
+  failure, show our engine agreeing with Swiss to the bit — because it *is*
+  Swiss. That is the two-implementations-converging failure arriving through a
+  side door, and it is unrecoverable for the same reason. Pin the chain to the
+  single source under test and assert the fallback notice is absent on every
+  numeric leg. The Astrolog side is making this a named precondition of their
+  harness.
+
+Every one of these has cost this project or the Astrolog project real time.
+
+- **Compare angular separations, never longitude differences.** A degree of
+  longitude is a degree of sky only on the equator. Their 0.063″ "disagreement"
+  on the Moon was the cosine factor at 5.17° latitude and nothing else.
+- **Use `atan2(|a×b|, a·b)`, never `acos(a·b)`.** The cosine of a
+  milliarcsecond rounds to exactly 1.0 in f64, so an `acos` separation returns
+  a clean zero for every small angle — a false negative sitting precisely at
+  the deflection scale, which reads as a server correctly applying nothing.
+  This bug was in `corrapplied.py` before it was ever pointed at anyone.
+- **Do not gate on `corrApplied`.** v4 §3.5a forbids it and the field cannot
+  bear it: our lunar orbit points agree to 0.0002″ while reporting *different*
+  `corrApplied`, and our mean nodes differ by up to 0.025″ with *identical*
+  `corrApplied`. It explains a difference; it never predicts one.
+- **Suspiciously exact agreement is evidence about the measurement.** Two
+  independent quantities matching to four digits, or a column of exact zeros
+  where the physics says small-but-nonzero, means look at the instrument.
+- **A check that has never gone red is not known to work.** Fault-inject before
+  trusting a green: `corrapplied.py` had two bugs that only a deliberately
+  broken server revealed, one of which made a whole check vacuous.
+  - **And a falsification recorded as prose is a measurement taken once.**
+    Every "fault-injected four ways" in these documents was done by hand and
+    never repeated; nothing re-ran any of them, so they describe a build that
+    may be two months gone. `tools/check/loadselftest.py` (2026-09-20) is the
+    structural version for one tool, and the Astrolog side's
+    `ephsrv-soak.sh --selftest` is theirs. **Every checker under
+    `tools/check/` now has one**, and since 2026-09-29 so do `crosstest.py`'s
+    legs for every reference the harness computes itself ("The legs' own
+    selftest", below); the legs graded only against the other server have
+    their reach measured by `blindspots.py` instead.
+  - **The adjudicators are the second leg, and the only one that re-runs
+    on every commit** (`tools/check/adjudicatetest.py`, 2026-09-20). The
+    three `adjudicate_*` functions decide what a disagreement *means* —
+    the code that turns a gap into `expected-difference`,
+    `unadjudicated` or a `finding` against another project — and they
+    are pure functions of the results table, so 29 cases drive them from
+    hand-built rows with no client, no daemon and no ephemeris, in under
+    a tenth of a second. That is why it is in `tools/gate.sh` while every
+    other falsification here is not: the cost of a cross-test leg is the
+    two servers, not the judgement.
+    - Half the cases are negative, because the branch that turns a right
+      server into a finding is the one where evidence is *absent* rather
+      than contradicting — which is exactly how record u's six false
+      findings happened, one leg over.
+    - Every row's verdict is asserted, not just the row under test: an
+      adjudicator that excuses its row and also touches its anchor is
+      wrong in a way that reading one row cannot see.
+    - **Coverage is traced, not claimed, and the list of adjudicators is
+      found rather than kept.** The script discovers every `adjudicate_*`
+      in `crosstest.py`, runs each under `trace`, and fails if any
+      executable line was never reached, naming the line. A branch added
+      with no case fails the gate rather than being found by a peer;
+      proven by deleting a case, which named the three lines it orphaned.
+      A *fourth* adjudicator is covered the moment it exists — a list
+      here would have rotted toward green, reporting three of four as
+      complete, which is the failure this file exists to catch. An
+      adjudicator `crosstest.py` defines and never calls decides nothing,
+      so that is named and refused too, and named **first**: "write cases
+      for it" is the wrong instruction for dead code, and asking the more
+      specific question first is the same rule the cases follow. That
+      ordering was wrong when written — both injections reported "no case
+      drives it", the right input reaching the wrong check — and the
+      session's own lesson applied to the thing enforcing it.
+    - It pinned one thing worth knowing: a topocentric row consults its
+      geocentric row *after* that row has been adjudicated, so a
+      geocentric gap the anchor excused carries the topocentric one with
+      it. Deliberate — the branch admits `expected-difference` — but it
+      is an order dependency in a table, and a case now holds it still.
+  - **It is not enough to ask whether a broken input went red; the *named*
+    assertion has to be the one that caught it.** Otherwise a gate whose
+    bound has been deleted still passes, because a neighbouring check reds on
+    the same input. Both sides found this the same day: they by weakening a
+    bound to a number nothing could exceed, we by making the cache check fire
+    unconditionally, which failed two cases including one that was otherwise
+    reddening correctly on its own assertion.
+- **A number a check reports is a number the check should assert.** The
+  Astrolog side's, 2026-09-20: a soak script named its farm size three
+  times and never counted what landed on disk, so it would have reported a
+  full run over a fraction of one. The same shape was here twice, in the
+  two places this file quotes row counts from. `crosstest.py`'s corpus
+  readers opened whatever `horizons-raw/` held — a gitignored directory, a
+  fetch anyone can interrupt — and a truncated corpus read out as "N of N
+  agree" with a smaller N that nothing compared to anything. Every
+  committed request carries its own `TLIST`, so the expected instant count
+  is derivable rather than a second copy, and `corpus_rows()` now refuses a
+  file holding fewer. `_star_records()` was the same defect over a
+  *committed* file: a regex walking `src/star_catalog.inc`, which on any
+  drift in the record layout would match fewer lines, quietly shrink the
+  star set, and report the remainder as the catalogue. It now counts the
+  entries inside `kStarRecords[]` and demands a match for every one — 9,290
+  of 9,290 — so the drift that used to shrink the leg fails it instead.
+  Falsified both ways in both readers (a truncated copy, a claim of one
+  more instant; a drifting record line, a renamed array), each with its own
+  message.
+
+- **Anything that re-states the spec in a second place needs its own oracle,
+  or it is a copy waiting to go stale.** A server is graded against Horizons
+  and against the other server; nothing grades the *measuring* code against
+  the protocol the same way, and both harness defects of 2026-09-20 were
+  readers of a protocol record rather than computations: `ratesweep.py`'s
+  absolute-vs-per-AU unit, and `corrapplied.py` reading A.3 0x0004 while
+  ignoring 0x0014 — a narrower copy of a rule `wirelib.py` had already
+  implemented correctly and offered as `permitted(observer, kind, mask)`. A
+  second copy of a decision does not have to be wrong when it is written; it
+  only has to stop being updated. So: call the shared parser, and when a
+  check reads a declaration, read *every* record that carries one. (The
+  Astrolog side arrived at the same rule from their four near-copies of an
+  object→target mapping, two of which also counted the Earth.)
+- **A restart is not a rebuild, and a script that prints a commit beside a
+  binary is printing HEAD, not provenance.** The Astrolog side's, 2026-09-20,
+  and the same shape as the trap above with the binary itself as the stale
+  copy. Closing the question "was the running spare built from these
+  sources" meant rebuilding and comparing; their first restart found nothing
+  to rebuild, so the daemon came back up on the same binary and the gap was
+  still open while the restart *looked* like it had closed it. They had to
+  `touch` the two sources to force a real comparison — the fault-injection
+  step in another costume, refusing to trust a green until it was capable of
+  going red. The rebuild then came out byte-identical
+  (`1734d363…`, 1,735,488 bytes), which is what makes record `v`'s subject
+  known rather than recorded.
+  - What this side can check without reading their tree: the size, the
+    hash, the mtime, and that `/proc/<pid>/exe` points at the real file and
+    not a deleted inode. That is identity, not provenance; provenance is
+    theirs to establish and ours to attribute to them.
+
+## Runbook (draft, 2026-09-18)
+
+Since 2026-09-20 the whole of this side's half runs as
+`tools/check/crossrun.py --record` ("One command", below). What follows is
+what that sequence does, and why each step is in it.
+
+The principles above say what counts as a pass. This says what is actually
+run, by whom, in what order. It is a draft for both sides to amend: the
+Astrolog side owns everything that drives its client or its daemon.
+
+### Setup, recorded in the leg table's header
+
+- **Versions.** Both servers' `datasetId`, the Prometheia commit and the
+  Astrolog `ephv4` commit.
+- **Files.** `prometheiad` reads `ephe/linux_p1550p2650.440` (DE440).
+  `astrolog-ephd` always reads Swiss `.se1` files (the refit of DE441); it
+  has **no JPL mode**. Launch it as `astrolog-ephd --bind 127.0.0.1 --port N
+  --threads 1 --ephe "<tree>/ephem;<tree>"`. `--ephe` is its whole search
+  path, and the tree root holds `sefstars.txt` and `seorbel.txt`: without it,
+  stars and the hypothetical bodies do not compute.
+- **Time.** Every numeric leg is a TT grid or instant list and sends its own
+  ΔT, so no ΔT model enters.
+- **Their client** runs a single-source chain, and every numeric leg asserts
+  that the fallback notice is absent.
+
+### Who drives which cell
+
+| cell | driver | status |
+|---|---|---|
+| our client → both daemons | `tools/check/crosstest.py`: one request, sent to each daemon, diffed as angular separation, checked against the anchor where one exists, written to the leg table | **run**: legs 2, 6, 7, 9 (below) |
+| their client → `prometheiad` | their harness, the live parity group pointed at `prometheiad` | Astrolog side |
+| their client → their daemon | their gate | exists |
+| both daemons, self-consistency | `tools/check/corrapplied.py` | **run every time** by `crossrun.py`; both servers OK, 2026-09-20 |
+
+### Legs, in order (each is cheap to stop at)
+
+1. **Error contract first** (the cheapest leg: one object per case, and a
+   disagreement about what an error *means* would otherwise surface
+   misattributed inside a numeric leg). Both directions, each daemon against
+   its written contract. **Run once, 2026-09-18**, with the Astrolog client
+   against `prometheiad`. Every case matched except "Beta Sco", where the
+   *documentation* was wrong: SERVER.md called it ambiguous, while STARS.md
+   and the server resolve it to the brightest component.
+2. **Surfaces.** Each side parses the other's WELCOME. The output is a table
+   of advertised capabilities side by side (kinds, masks per observer,
+   zodiacs, segments, limits). It is a record, not a verdict: it says which
+   of the legs below can run against which daemon.
+3. **Silent fallback.** An out-of-coverage instant and an uncovered object
+   must come back as error 3 or 4, or with a truthful source string.
+4. **Delivery equivalence.** The same question as one grid, in chunks, and
+   as an instant list gives identical bytes. A 10,000-row grid is compared
+   on its implied times.
+5. **CANCEL and priority**, their client against `prometheiad`: ERROR 10
+   before the answer is whole, nothing cached, interactive before prefetch.
+6. **Both servers, the same question** (split from the anchor leg: agreement
+   between the two and agreement with the sky are different claims, with
+   different failure modes). Mask 0, ICRF, geocentric, with the ten corpus
+   bodies at its eight epochs. With no JPL mode in `astrolog-ephd`, this is
+   tier 2: DE440 against Swiss's `.se1` refit of DE441, within the refit's
+   documented fidelity. A true tier-1 leg waits on a JPL mode, which is a
+   feature for the maintainer to decide on.
+7. **Each server against Horizons: astrometric ICRF at the corpus's own points.** Mask 1,
+   equatorial ICRF, at exactly the corpus's instants, bodies and observers
+   (geocentric, heliocentric, three topocentric sites). Each server is
+   compared with Horizons as well as with the other. This server's own
+   agreement with Horizons is 6 µas geocentric ([VALIDATION.md](VALIDATION.md)).
+8. **Tier 2: apparent of date** for every observer kind, with the
+   bisection ladder on any break.
+9. **Hamburg points by name** (kind 3). `astrolog-ephd` serves kind 3: its
+   token table is compiled in, and the elements come from `seorbel.txt` on
+   `--ephe`.
+   Expect about 10⁻⁷″: the same elements, differing only by k. Kronos
+   carries the compiled-in-table trap (HYPOTHETICALS.md), so the
+   `astrolog-ephd` leg records which table it read.
+10. **Segments.** The Astrolog client has no SEGDATA decoder yet, so this
+    leg waits on one. Until then, `prometheia-wire-client --segments` covers
+    `prometheiad`'s side.
+
+### First run, 2026-09-18
+
+`docs/crosstest/2026-09-18.tsv`: 734 rows, legs 2, 6, 7, 8 and 9 plus the
+heliocentric anchor. `prometheiad` on DE440 and `astrolog-ephd` on its Swiss
+files, both on loopback, driven by `prometheia-wire-client`. Verdicts: 394
+agree, 6 expected-difference, 205 findings, 40 findings attributed to the
+Astrolog server by the anchor, 1 unadjudicated, 66 unanswered.
+
+- **Each server against Horizons, geocentric** (astrometric ICRF, ten bodies
+  at the corpus's epochs). `prometheiad`: 2–4 µas for the Sun and planets,
+  5.8 mas for the Moon, reproducing VALIDATION.md through the wire.
+  `astrolog-ephd`: 0.3–0.8 mas for the planets and 1.2 mas for the Moon, its
+  refit's fidelity. So the geocentric gap between the servers is the refit.
+- **Both servers, the same question** (mask 0): within 2 mas except the
+  Moon, whose DE440-against-DE441 gap (21 mas at 1800) the anchor marks as
+  expected.
+- **Hamburg points by name**: within 0.62 mas at 1900, 2000 and 2100, and
+  the distances to 10⁻¹² AU.
+- **Apparent place from other observers** is where the findings are, each
+  bisected to one term by varying the mask or the ΔT sent:
+  - **Heliocentric light time**, attributed by the anchor. From the Sun's
+    centre, astrometric, `prometheiad` is 1–6 µas from Horizons and
+    `astrolog-ephd` 0.38″ (Mercury), 0.28″ (Venus) and 0.11″ (Mars).
+    Geometric positions agree to 0.3 mas, and light time alone moves Venus
+    24.208″ on one server and 24.452″ on the other: the retardation itself
+    differs by 1%.
+  - **Earth rotation ignored the ΔT a request sends.** Rows are asked at
+    TT, so ΔT enters only through the observer's Earth rotation (UT1 =
+    TT − ΔT). Changing the ΔT sent by 100 s moved `prometheiad`'s
+    topocentric Moon by 16.9″ and `astrolog-ephd`'s by 0.000″: its
+    topocentric rotation used Swiss's own ΔT. §3.5 makes the request's ΔT
+    govern, and this was the whole of the 12″ topocentric Moon gap.
+  - **Deflection advertised but not applied** for barycentric and
+    planet-centred observers. Masks 0, 1 and 5 agree, and the gap appears
+    only with the deflection bit: 3.2″ on Venus from the barycentre at
+    J2000, 7 mas on Mars from Jupiter. `astrolog-ephd`'s WELCOME lists
+    mask 7 for those observers, and its `corrApplied` claims deflection.
+    `corrapplied.py` could not see it, because checking deflection alone
+    needs a mask that server cannot express. Only a second engine could.
+- **Smaller:** error 4 where 3 is meant, at the first instant of the Swiss
+  files (1800-01-01, with light time); and Venus 2.03 mas from Horizons at
+  its 2020 inferior conjunction, just over the 2-mas band. That is plausibly
+  the refit seen from 0.29 AU, a question for the Astrolog side.
+- **A harness bug this run caught in itself**: the first full run
+  adjudicated every apparent-place gap against the *geocentric* anchor, and
+  called 204 rows expected. That hid the ΔT and deflection findings. An
+  anchor now judges only rows from its own observer.
+- **Not yet run:** legs 3–5, which the Astrolog client can drive, and the
+  topocentric anchor, which needs Horizons' UT1 recovered from its sidereal
+  time first.
+
+### Rerun, 2026-09-18 (Astrolog fixes cd92ffd and 8a7ba36)
+
+Against an `astrolog-ephd` built at 10:01, which carries the ΔT and
+error-code fixes but not e9d406e (WELCOME narrowing). Output kept in
+`build/xtest/rerun.tsv`, not committed. Verdicts: 411 agree, 6
+expected-difference, 188 findings, 40 findings attributed to the Astrolog
+server, 1 unadjudicated, 66 unanswered.
+
+- **Topocentric Earth rotation: fixed.** Worst topocentric Moon gap 12″ →
+  0.129″, topocentric findings 25 → 8. The residue is not the sidereal
+  time: see the next section.
+- **Error codes: mostly fixed.** At 1800-01-01, outside `astrolog-ephd`'s
+  coverage, 57 rows now answer 3. Nine still answer 4: every
+  Jupiter-centred row at that instant, where the other observers answer 3.
+- **Unchanged, as expected from this binary:** heliocentric light time (the
+  40 attributed rows), and the deflection gap from the barycentre and from
+  Jupiter.
+- **The Astrolog side's position on those, not yet settled:**
+  - heliocentric light time is Swiss's model, and their golden gate is
+    bit-exact against Swiss. The anchor still puts `prometheiad` at µas and
+    theirs at 0.38″ from Horizons; they asked for this side's definition.
+  - WELCOME is narrowed, but their server still *accepts* masks it no
+    longer advertises (heliocentric mask 7). `prometheiad` answers those
+    with ERROR 11 as §3.5a requires, so a client that sends heliocentric
+    mask 7 works against one server and fails against the other.
+  - Jupiter-centred keeps its full advertisement. The 7 mas deflection gap
+    on Mars remains unadjudicated: no anchor observes from Jupiter.
+
+### Second rerun, 2026-09-18: three new anchors, and what they settled
+
+Against the `astrolog-ephd` built at 10:16 (through e9d406e, the narrowed
+WELCOME). Output in `build/xtest/rerun2.tsv`, not committed; a dated
+record waits for a build of 4b1e375. Verdicts: 540 agree, 173
+expected-difference, 27 findings, 16 findings attributed to the Astrolog
+server, 49 unadjudicated. Nothing is left unanswered.
+
+The harness gained:
+
+- **The topocentric anchor** (`topo` leg). Horizons prints its local
+  apparent sidereal time at the site; `build/prometheia-ut1` solves the
+  ΔT that reproduces it under this library's GAST
+  (`frames::ut1_from_sidereal_time`, shared with `tests/test_horizons.cpp`),
+  and both servers are sent that ΔT. Fault-injected: a 1 s ΔT error turns
+  12 of our rows into `finding (ours)`.
+- **The barycentric anchor** (`bary` leg): the Sun from the barycentre,
+  geometric, against one Horizons vectors request (`bary-sun` in
+  `tools/fetch/horizons_fetch.py`), judged as a length.
+- **Refusals** (in `surfaces`): every (observer, mask) a server does not
+  list is sent, and anything but ERROR 11 is recorded.
+- **Masks from WELCOME.** The apparent leg now sends the fullest mask
+  both servers list for each observer, not a fixed one.
+
+What they found:
+
+- **`astrolog-ephd` places a topocentric observer about the mean pole.**
+  With Horizons' own Earth rotation sent to both servers, `prometheiad`'s
+  topocentric Moon is 8.3 mas from Horizons, and `astrolog-ephd`'s is
+  0.165″. The geocentric Moon agrees to 1.6 mas at the same instants.
+  Recovering the observer's offset from the two topocentric vectors gives
+  100–290 m, horizontal (vertical under 2 m), in a direction that turns
+  from epoch to epoch. Varying the ΔT sent does not remove it, so it is not
+  the rotation angle. It is the nutation pole offset: rotating our site
+  vector by (Δε, −Δψ sin ε) with a four-term nutation reproduces the
+  measured offset to 1–3 m at all 15 rows, and the opposite sign misses by
+  twice the offset. Their site vector is rotated by sidereal time but not
+  taken through nutation. This is the whole of the topocentric Moon
+  residue in the apparent leg too (0.02–0.13″).
+- **The barycentric gap is the Sun's position, not a correction.** Masks 0
+  and 1 give the same 0.23″ as mask 1 did. Against Horizons, ours is 3e-7
+  km (DE440 and DE441 are the same fit over these epochs), and theirs
+  0.04–1.05 km. That is inside the refit's fidelity (2 mas at 1 AU is 1.45
+  km); it looks large from the barycentre only because the Sun is 0.005 AU
+  away. Marked expected-difference by the anchor.
+- **Deflection from the barycentre is no longer compared.**
+  `astrolog-ephd` now lists only masks 0 and 1 there, and at the Sun's
+  centre, so the harness sends mask 1.
+
+Agreed with the Astrolog side, and recorded as expected-difference with
+the reason in each row:
+
+- **Heliocentric light time.** They keep Swiss's, because `astrolog-ephd`
+  must serve the numbers the desktop library computes, and have reported
+  it upstream with this side's definition. The harness marks a
+  heliocentric row expected only where the geometric (mask 0) answers
+  agree, so the difference is confined to light time.
+- **Accepting unlisted masks.** Their server answers masks it does not
+  list, on purpose: an orbit point from the Sun's centre honours bits that
+  a body there cannot, and WELCOME's per-observer list cannot say so.
+  Their client now narrows every request to a listed mask (fixed in their
+  4b1e375), so an Astrolog cast works against `prometheiad`. The spec
+  question stays open: §3.5a says ERROR 11, and a per-kind list would let
+  both servers keep it.
+- **Coverage.** A row one server refuses as outside its data's span
+  (errCode 3) is a legitimate answer. The nine Jupiter-centred rows at
+  1800 that answered 4 now answer 3.
+
+Still open:
+
+- **Deflection seen from Jupiter**, 7 mas on Mars, unadjudicated. Their
+  account: Swiss deflects the target as seen from the Earth and then
+  re-centres on Jupiter; ours deflects with the observer at Jupiter. No
+  anchor observes from Jupiter.
+- **Venus at its 2020 inferior conjunction**, 2.03 mas from Horizons, and
+  Mercury from the barycentre in 2100, 2.01 mas from ours. Both are just
+  over the 2 mas band, and plausibly the refit.
+
+### The record, 2026-09-18 (`docs/crosstest/2026-09-18b.tsv`)
+
+The Astrolog side confirmed the mean-pole site in the source. The site
+routine can nutate, but every internal call site asks it not to, so the
+site is built about the mean pole and used against a true-of-date
+geocentric vector. The cause is upstream Swiss, not `astrolog-ephd`'s
+wiring. They have reported it upstream, because it reaches every
+topocentric chart the desktop application draws. The harness records it
+as expected-difference only where the two servers' geocentric answers
+agree at the same instant and the gap is no larger than the nutation
+offset can make it: 0.2″ on the Moon, 1 mas elsewhere. Fault-injected:
+with that band cut to 0.01″, 42 rows go back to findings.
+
+Against the 10:16 build (its Jupiter coverage fix predates the 4b1e375
+commit), 827 rows: 540 agree, 209 expected-difference, 5 findings, 2
+findings attributed to the Astrolog server, 49 unadjudicated. What
+remains:
+
+- **Venus at its 2020 inferior conjunction** (six rows across legs,
+  2.03–2.31 mas) and **Mercury from the barycentre in 2100** (2.01 mas):
+  just over the 2 mas band, plausibly the refit, and a question for the
+  Astrolog side.
+- **Deflection seen from Jupiter** (48 rows) and the 1800 Moon, whose
+  anchor row is outside `astrolog-ephd`'s coverage: unadjudicated.
+
+The header now also records the daemon binary's build time, because a
+commit can postdate the build that ran. `astrolog-ephd` moved to port
+47391 for these runs: their harness binds 47291 itself, and on a shared
+machine one harness ended up testing the other's daemon. `crosstest.py`
+now refuses to run when both endpoints answer with the same server and
+dataset.
+
+### Third record, 2026-09-18 (`docs/crosstest/2026-09-18c.tsv`)
+
+Two changes closed everything but one row.
+
+- **Bands that follow the refit's actual error.** The Astrolog side
+  measured Swiss's `.se1` against the DE file inside one process. The
+  compression error is fixed in *position*: the same third of a kilometre
+  on Mars at 0.37 AU and at 1.85 AU. So Swiss's documented "1 mas" is a
+  typical figure at typical distances, not a bound. Our own sweep against
+  Horizons gives worst values of 0.44–0.74 km for the Sun through Mars,
+  1.9 km for Jupiter, 4.5–8.3 km beyond. `REFIT_KM` in `crosstest.py`
+  holds those values plus about a third. The band is the larger of that
+  length and the old 2 mas angle. The length widens it only at close
+  range: from the barycentre the refit's errors are larger (about 21 km
+  on Neptune), so the geocentric length must not tighten it. The Venus and
+  Mercury edge rows are inside the band now: the compression, seen close up.
+- **A deflection referee where Horizons cannot observe.** The `deflection`
+  leg takes each server's mask-3 answer from Jupiter's centre. It compares
+  that answer with the textbook solar deflection (USNO Circular 179, the
+  NOVAS form, written in Python from the formula) applied to the same
+  server's mask-1 answer. `prometheiad` agrees to 3 × 10⁻¹⁰″;
+  `astrolog-ephd` is off by up to 0.54″, with Mars in 2075 bent 800 times
+  more than the geometry allows. It also bends the Sun's own light (22 mas
+  from Jupiter in 2075), which the Sun cannot do to itself. The Astrolog
+  side's account was that Swiss deflects as if the observer were the
+  Earth. Modelled that way (Earth-seen deflection as a displacement,
+  re-centred on Jupiter), it does not reproduce their numbers either, so
+  the cause is theirs to find. Fault-injected: a 1% change in the
+  textbook's GM turns the largest of our rows red (0.65 mas against a
+  0.2 mas band).
+
+Verdicts (899 rows): 555 agree, 210 expected-difference, 111 findings
+attributed to the Astrolog server (all deflection from a planet centre:
+63 in the deflection leg, 48 apparent-place rows it adjudicates), 1
+unadjudicated (the 1800 Moon, whose anchor is outside their coverage).
+
+### Fourth record, 2026-09-18 (`docs/crosstest/2026-09-18d.tsv`)
+
+The Astrolog side traced the planet-centred deflection in the source. Swiss
+re-bases aberration on the centring body, but its deflection routine takes
+no observer and uses the Earth's Sun geometry on a vector relative to
+Jupiter. The result corresponds to no observer anywhere, which is why the
+"seen from the Earth, re-centred" model could not reproduce it. It is
+upstream Swiss. `astrolog-ephd` (050a5a4) no longer claims the term:
+WELCOME lists 0/1/5 from a planet centre, and corrApplied says the same.
+
+The deflection leg now judges each server that lists masks 1 and 3 from a
+body centre, and records a server that does not as not advertising the
+term. Our deflection is still refereed on every run, and a run in which
+neither server lists the masks fails rather than skipping.
+
+Verdicts (901 rows): 675 agree, 203 expected-difference (each row gives
+its reason), no findings, 1 unadjudicated (the 1800 Moon, whose anchor is
+outside `astrolog-ephd`'s coverage).
+
+### After the per-kind drop, 2026-09-18 (`docs/crosstest/2026-09-18e.tsv`)
+
+The refusal leg now covers every (observer, kind, mask) for bodies and
+orbit points: a listed mask (0x0004 union 0x0014) must be served, and an
+unlisted one must draw ERROR 11. `astrolog-ephd` now enforces what it
+lists, and adds masks 3, 5 and 7 for orbit points from the Sun's centre
+and the barycentre. All 160 checks agree. Fault-injected two ways:
+treating every mask as listed gives 48 findings, and ignoring 0x0014
+misjudges exactly the six orbit-point pairs it exists for. The
+"permissive by decision" expected-difference is gone, because the
+divergence it recorded is retired. The whole record has 1034 rows: 831
+agree, 180 expected-difference, no findings, and 1 unadjudicated (the
+1800 Moon).
+
+### Orbit points and sidereal planes become standing legs, 2026-09-18
+
+Today's orbit-point and sidereal findings came from ad-hoc probes, so both
+checks are now legs of `crosstest.py`.
+
+- **`points`:** 24 orbit points (the Moon's mean and osculating nodes and
+  apsides, and those of Mercury, Mars, Jupiter and Saturn) at the corpus
+  epochs, by direction and by distance, mask 0, true ecliptic of date.
+  Bands per class, from the first measurement:
+  - the Moon 1″ / 5 km (measured ≤ 0.49″, 1 km);
+  - osculating planetary points 3″ / 1500 km (≤ 1.8″, 780 km; the refit's
+    state errors reach the elements amplified);
+  - the inner planets' and Mars's mean points 2″ / 500 km.
+  Jupiter's and Saturn's mean points differ by up to 3300″ because mean
+  elements are model-defined: ours are fitted to DE440, and Swiss's come
+  from VSOP87. Its published manual says so, and says the two "are
+  considerable" apart. Recorded as expected-difference with that citation. A second check
+  holds the rule that a node lies on its frame's ecliptic: the Moon's mean
+  node in the J2000 frame must have zero J2000 latitude.
+- **`sidereal`:** the three A.8 planes for Fagan-Bradley and Lahiri, five
+  bodies. Planes 0 and 1 are judged by what the sidereal rotation adds to
+  the same body's tropical gap at that instant: 0.003″, the documented
+  ayanamsa agreement. Plane 2 is unadjudicated while its latitudes agree
+  (≤ 0.05″) and its longitude offset is one constant across bodies
+  (spread ≤ 0.02″). That is a difference of origin, open in the protocol.
+
+Fault-injected: tightening the Moon's point band, the plane-2 spread and
+the sidereal extra gives 211 findings.
+
+First results, all on the Astrolog side and sent:
+- Their Moon node in the J2000 frame sits 0.006–10″ off the J2000
+  ecliptic: they compute nodes on the ecliptic of date and convert.
+- At 1800-01-01, the first instant of their files, their osculating
+  points answer errCode 4, except the true descending node, which answers
+  with the ascending node's distance (Δ 49,839 km). It looks like a
+  fallback at the file edge.
+
+### Fixed stars, 2026-09-18
+
+The `stars` leg asks 29 named stars (the royal stars, the brightest
+navigational stars, Algol, Polaris and the Pleiades' Alcyone) at 1900, 2000
+and 2100, apparent, tropical and Lahiri. Both servers read
+Hipparcos-derived catalogues with proper motion, and they agree to
+0.008″. The band is 0.02″; a 0.0005″ band gives 134 findings.
+
+α Centauri is handled separately, because the catalogues differ in what
+its names mean:
+- Our Rigil Kentaurus is α Cen A and our Toliman is α Cen B, as the IAU
+  names them. They are 16.45″ apart at J2000.
+- `astrolog-ephd` answers both names with one α Cen entry, which lies
+  between A and B. Rigil Kentaurus is recorded as unadjudicated (a
+  catalogue convention: the system against component A). Toliman is a
+  finding on their side, since a client asking for B gets something else.
+
+### The §3.5a sentences, and α Centauri, 2026-09-18 (evening)
+
+- **The invariable plane's origin** (the `sidereal` leg's plane-2 rows):
+  the Astrolog side measured its own plane 2 against its own plane 0 and
+  found its zero point moves with the zodiac. A plane cannot know which
+  zodiac was asked for. The proposed §3.5a sentence takes Prometheia's
+  reading (the zero-point direction projected onto the plane), and the
+  Astrolog side will change. When they do, those rows should agree, and the
+  leg's plane-2 branch then judges like planes 0 and 1.
+- **The node-frame rule** (the `points-frame` rows): the amendment puts a
+  node on the mean ecliptic of date in every frame, and both maintainers
+  approved it. Prometheia changed, and the check now compares the two
+  servers' J2000-frame node of date. It found that `astrolog-ephd`'s
+  J2000-frame node is not the node of date rotated. Its J2000 latitude is
+  0.9″ at 1900, where the tilt between the ecliptics of 1900 and 2000 puts
+  ours at 47″, and the servers differ by 6–51″ away from 2000. Ours is held
+  to the rule by an engine test built from the public frame matrices.
+- **α Centauri:** the Astrolog side's `sefstars.txt` now puts Toliman at
+  α Cen B and Proxima Centauri at α Cen C (ephv4 `9e9e5c4`). Their file is
+  deliberately no longer byte-identical to Swiss's. The `stars` leg's
+  Toliman row should then agree; not yet re-run.
+
+### The sidereal sweep, and two re-verifications, 2026-09-18 (`docs/crosstest/2026-09-18g.tsv`)
+
+Against `astrolog-ephd` from Astrolog `qt` at `91e427e`: 2,226 rows, with
+agree 1,809, expected-difference 313, finding 7, finding (theirs) 64,
+unadjudicated 2 and unanswered 9.
+- **`sidsweep`, a new leg.** Every A.11 zodiac token is asked on every A.8
+  plane at 1950-07-01 and 2075-01-01, which are off every token's anchor
+  epoch. It is graded per server, on what a plane request does:
+  - a token WELCOME does not list must draw ERROR 11;
+  - a listed token's planes 1 and 2 must each move the answer from plane 0,
+    and a row bit-identical to plane 0 is a finding.
+
+  That grading was suggested by the Astrolog side: a plane accepted and
+  ignored is invisible to any comparison with a server that was never asked.
+  - **`prometheiad`:** lists 3 of the 48 tokens (Fagan/Bradley, Lahiri and
+    user). All three move on both planes, and the 45 unlisted tokens draw
+    ERROR 11. All 288 rows agree.
+  - **`astrolog-ephd`:** lists all 48. Sixteen star- and frame-anchored
+    tokens answer plane 0 for planes 1 and 2 at both epochs, which is 64
+    findings. They match the Astrolog side's own prediction and their
+    registry §4.1 (fix decided, pending). The rows say so; they stay
+    findings.
+  - A caution for a later widening: at a token's own anchor epoch, plane 1
+    *is* plane 0, and an identical row is then correct.
+- **Plane 2, graded under Part A.** Both maintainers approved the projected
+  zero point on 2026-09-18. `astrolog-ephd`'s constant offset (−31.51″
+  Fagan/Bradley, −30.42″ Lahiri) is now expected-difference, pending their
+  fix. It becomes `agree` when the offset closes.
+- **The 7 findings** are the J2000-frame Moon node (`points-frame`). The
+  Astrolog side confirmed it; their registry §4.2 records it with the fix
+  pending.
+- **Re-verified:**
+  - Their `9bb48a5`: the osculating descending node at 1800 now answers
+    errCode 3 (outside coverage) rather than a fallback.
+  - Their `9e9e5c4`: Toliman now agrees, 0.04″ apart.
+- **α Cen A (Rigil Kentaurus) still differs by 6.23″,** and it is a
+  definition rather than a finding.
+  - Ours is the Hipparcos α Cen A.
+  - Theirs sits about 6″ from A toward B, roughly the pair's centre of mass.
+  - FK5 538 cannot choose between them. At 2000 it is 6.8″ from ours and
+    2.5″ from theirs, and ours runs to 28.6″ by 1900: the 80-year AB orbit
+    against a straight line (STARS.md, "Known limits").
+
+### Two Astrolog fixes verified, 2026-09-18 (`docs/crosstest/2026-09-18h.tsv`)
+
+Against Astrolog `qt` at `b89f510`: agree 1,817, expected-difference 313,
+finding (theirs) 64, unadjudicated 1 (the 1800 Moon) and unanswered 9.
+- **The J2000-frame node** (their `b89f510`, registry §4.2): all 8
+  `points-frame` rows agree. The 7 findings of record g are gone.
+- **α Cen A** (their `554288b`): Rigil Kentaurus is 0.007″ from ours, where
+  it was 6.23″.
+  - Their old entry sat 38% of the way from A to B. The Astrolog side
+    measured that it was neither A, nor the photocentre, nor the centre of
+    mass: a ground-based centroid of the unresolved pair.
+  - The `stars-alcen` rows now judge both names against `ALCEN_BAND`
+    (0.1″, an estimate). The two sides read the pair from different
+    catalogues.
+- **Still open, theirs:** the 64 `sidsweep` rows and the plane-2 offset,
+  both pending their registry §4.1. They will refuse the zodiacs whose zero
+  point is defined at the instant (errCode 2) on planes 1 and 2, and the
+  sweep grades such a refusal `refused`.
+
+### Their §4.1, and the anchor's nutation, 2026-09-18 (`docs/crosstest/2026-09-18i.tsv`)
+
+Against Astrolog `qt` at `4f9c2a1`, where planes 1 and 2 became their own
+arithmetic:
+- **`sidsweep`:** the record says all 288 of their rows agree. **That count
+  is wrong** (see the correction under record j).
+- **The fixed planes now disagree by a zodiac-dependent constant, identical
+  on planes 1 and 2:** Fagan/Bradley 3.31″, Lahiri 16.78″. That is 140
+  findings. Plane 1 had agreed to 0.003″ while Swiss computed it.
+  - The constants are the nutation in longitude at each anchor epoch:
+    −3.303″ at 1950-01-01 and +16.778″ at 1956-03-21.
+  - Their zero point placed the true ayanamsa of t0 on the mean ecliptic of
+    t0. On a mean frame it is the mean value (true less Δψ(t0)), which is
+    how our anchors are held.
+  - About 0.015″ is left on plane 2. That is the ~20 mas between their
+    mean-J2000 construction and our ICRF one, which they predicted.
+- The plane-2 branch now grades any offset as a finding, since their
+  implementation has landed.
+
+### No findings, 2026-09-18 (`docs/crosstest/2026-09-18j.tsv`)
+
+Against Astrolog `qt` at `284b321`, their one-flag fix for record i's
+anchor: agree 1,951, expected-difference 243, unadjudicated 1 (the 1800
+Moon), unanswered 9, **no findings.**
+- Plane 1 is back to ≤ 0.0013″.
+- Plane 2's origin offset closed to −0.005 … +0.003″ for both zodiacs.
+- **Correction, found by the Astrolog side:** the sweep's 288/288 for
+  `astrolog-ephd` in records i and j is overstated.
+  - Their server refuses the zodiacs defined at the instant (`true-citra`,
+    `galcent-*` and others) on both fixed planes, with errCode 2.
+  - A refused object's rows are NaN. The leg's "did it move" test took a
+    NaN separation, which is neither equal nor small, as movement.
+  - The harness now treats NaN rows as no answer. An explicit refusal
+    grades `refused`, which is protocol-correct, not a finding.
+  - The corrected count is in record k.
+  - Records i and j are left as they were written. Their TSVs still grade
+    those refused rows `agree`; this note is the correction.
+- Their own gate now reproduces Swiss's anchor-ecliptic answer with their
+  in-house arithmetic (54 comparisons, 0.01″). Without the flag, all 54 fail
+  by Δψ(t0).
+- The record's header marks their binary STALE: it was rebuilt after the
+  daemon started, most likely by their `make check`. The numbers show the
+  fix in effect.
+
+### The sweep corrected, 2026-09-18 (`docs/crosstest/2026-09-18k.tsv`)
+
+Against Astrolog `qt` at `114f2a5`, marked `+dirty` by the harness because
+their tree had uncommitted changes at build time. The sweep leg treats a
+refusal's NaN rows as no answer:
+agree 1,903, expected-difference 243, **refused 48**, unadjudicated 1,
+unanswered 9, **no findings**.
+- **`astrolog-ephd` refuses twelve tokens on both fixed planes** (errCode
+  2): the eleven zodiacs defined at the instant, and `true-sheoran`. Their
+  other 36 tokens move on both planes.
+- Sheoran's zodiac is anchored at an epoch per its published definition
+  (−60° at the winter solstice of 4174 BCE), so its refusal is their
+  choice, not the proposed §3.5a clause. The protocol allows it.
+- `prometheiad` lists three tokens here (it did not yet list the new ones):
+  288/288.
+
+### Zodiacs defined at the instant, 2026-09-18 (`docs/crosstest/2026-09-18l.tsv`)
+
+`prometheiad` now lists the eleven zodiacs defined at the instant
+([FRAMES.md](FRAMES.md)).
+
+The Astrolog daemon predates their `9df1a4e` binary, and the header says
+STALE. That commit only changes when they refuse on the fixed planes, which
+this record does not depend on.
+
+Totals: agree 1,911, expected-difference 243, refused 70, unadjudicated 1,
+unanswered 9, and 135 findings (theirs), all in the new leg:
+- **`sidinstant`, plane 0.** Their anchor is the apparent position, so every
+  row differs by the anchor's aberration. The published definition takes
+  the anchor's true position; the Astrolog side agrees and will adopt it as
+  a third §3.5a sentence.
+  - Spica −4.4 … −5.3″ and ζ Psc +3.0 … +3.8″, which are the stars'
+    aberration they measured independently.
+  - δ Cnc +18.1 … +18.6″ and λ Sco −20.6 … −20.8″.
+  - The Galactic Centre −20.4″ for every mode anchored on it.
+- **`galequ-iau1958` −0.18″:** a different ICRS realisation of the IAU 1958
+  pole. Ours matches both Liu et al.'s transfer and the Hipparcos
+  catalogue's (ERFA) to 12 mas, and the Astrolog side accepts ours.
+- **`galequ-true` and `galequ-mula`** agree to 4 mas: the anchor is a pole,
+  which has no aberration.
+- **`sidsweep`, ours:** 14 tokens, 266 rows agree, and 22 refused. The
+  refusals are the eleven on plane 1 at both epochs, as the clause says.
+
+### The true anchor, 2026-09-18 (`docs/crosstest/2026-09-18m.tsv`)
+
+Against the Astrolog daemon from their clean `b0b6a19`, which includes the
+true anchor (`789f3c2`).
+- The header reads `b0b6a19+dirty` and STALE. The harness names the tree and
+  binary as they are now, and they had rebuilt from a working tree after
+  launching. Their launch script printed the running daemon's commit
+  (`b0b6a19`, clean).
+
+Totals: agree 2,031, expected-difference 243, refused 70, unadjudicated 1,
+unanswered 9, and 15 findings (theirs).
+- **`sidinstant`:** the aberration pattern of record l is gone.
+  - The star modes agree to 0.002–0.023″.
+  - The Galactic-Centre modes agree to −0.064 … +0.022″, drifting with the
+    epoch.
+  - The modern-pole node modes agree to 4 mas.
+  - What remains is the anchors' data: the stars from two catalogues, and
+    Sgr A*'s place and motion from different sources. The leg allows it with
+    `INSTANT_ANCHOR_BAND`, 0.1″ (an estimate).
+- **The 15 findings** are `galequ-iau1958` at −0.18″, the ICRS transfer of
+  the IAU 1958 pole. Adopting Liu et al.'s transfer is before their
+  maintainer.
+- **Wilhelm's zodiac** agrees with the rest since ours moved to the mean pole
+  of date (FRAMES.md).
+
+### Binary orbits, and the clause on both sides, 2026-09-18 (`docs/crosstest/2026-09-18n.tsv`)
+
+Against the Astrolog daemon from their clean `9fbdc21`. The header reads
+`+dirty` because their working tree had changed since; the harness names the
+tree, not the running binary.
+
+Totals: agree 2,041, expected-difference 257, refused 46, unadjudicated 1,
+unanswered 9, and 15 findings (theirs).
+- **The §3.5a clause is on both sides** (their `031f3c9`). Each server
+  refuses plane 1 for the zodiacs defined at the instant and answers plane
+  2 from the instant's zero point: 24 refusals theirs, 22 ours.
+- **Binary stars** ([STARS.md](STARS.md), "Binary stars"). Sirius, Procyon,
+  and α Cen A and B now carry their orbits here. Their server keeps the
+  straight line.
+  - The `stars` and `stars-alcen` rows for these four are
+    expected-difference only when the servers differ by exactly our bend,
+    computed independently by `binary_orbits.py`. They do, to 3 mas.
+  - α Cen B − A is the orbit's 14.11″ here, and 16.47″ on theirs.
+- **The 15 findings** are `galequ-iau1958`'s pole transfer, which is with
+  their maintainer.
+
+### Rates, a new leg, 2026-09-18 (`docs/crosstest/2026-09-18p.tsv`)
+
+Every leg before this one grades positions. Each row carries six numbers,
+but no leg ever looked at the three rates. The retrograde flag depends on
+the sign of one, so this was a blind spot, not a detail.
+
+- **`rates`, a different oracle.** Each server's reported rates are checked
+  against a five-point central difference of its own positions, one request
+  of five rows at t − 2h … t + 2h. Grading each server against itself sees
+  a wrong sign, unit or frame in either one, with nothing to agree on.
+  - **The grid:** 8 objects (Sun, Moon, Mercury, Mars, Jupiter, Pluto, the
+    Moon's mean node, Sirius), 8 configurations (geocentric apparent in
+    three frames, astrometric ICRF, heliocentric, topocentric Zurich,
+    `lahiri`, `true-citra`), 2 epochs.
+  - **Bands:** 1e-6 °/day, and 6e-6 °/day topocentric (an estimate, twice
+    the measured 2.9e-6). Distance rates: 1e-9 AU/day per AU of distance.
+- **Two traps in the method,** both measured.
+  - **The step must be exact in binary:** h = 1/1024 day. At h = 0.001
+    day, the 40 µs quantization of a JD double alone showed as 7e-7 °/day
+    on the Moon.
+  - **Three points are not enough topocentrically.** The Moon's diurnal
+    parallax makes the three-point truncation about 4e-5 °/day. Five points
+    bring it to about 3e-10.
+- **It found two defects of ours, both fixed** (ENGINE.md, "Rates";
+  ORBIT-POINTS.md):
+  - The engine's own rate step, 0.001 day, is also a three-point difference.
+    Its truncation was 2.6e-5 °/day on a topocentric Moon. At 1/4096 day it
+    is 2.9e-6.
+  - The Moon's points jittered by 1.2 mas topocentrically: their retarded
+    epoch lacked the rounding recovery bodies have. Now 8 µas.
+- **Ours now:** all 126 rows pass. Worst 1.6e-6 °/day (the topocentric mean
+  node), 7e-7 geocentric, distance 6.5e-11 AU/day.
+- **Theirs:** 95 of 126 rows miss (reported to the Astrolog session as
+  numbers).
+  - Topocentric Moon: up to 8.2e-4 °/day.
+  - `true-citra`: every body 5e-5 to 1e-4 °/day in longitude, where
+    `lahiri` is within 1e-6. The instant-defined zodiac's own motion looks
+    to be missing from the rates.
+  - Distance rates up to 1.8e-6 AU/day per AU of distance; longitude and
+    latitude rates generally 1e-6 to 1e-5 °/day.
+  - **Diagnosed by the Astrolog session** (their registry 2.6–2.8, measured
+    against the library directly): each miss is a correction whose own rate
+    of change is left out. The distance rate lacks the light time's change
+    (Pluto 4.7e-5 AU/day, 2.9e-11 geometric). The ecliptic-of-date latitude
+    rate lacks the obliquity nutation's motion; the miss is predicted as
+    |dε/dt · sin λ| for each body, to a ratio of 0.95–1.01. The longitude
+    rate lacks light time, and aberration for the Sun. The topocentric Moon
+    is Swiss's and is kept.
+  - **Conformance failures, not a spec gap.** §3.5a's "Rates" already says
+    the rate columns are the time derivatives of the coordinates answered,
+    "including every change of the pipeline with time (light time,
+    aberration, precession, nutation, the ayanamsa...)". A gap was first
+    suspected here and withdrawn once the section was read. Ours conforms
+    (ENGINE.md, "Rates"). §3.5a's one honest way not to conform is META's
+    `ratesApprox` with the largest difference stated in A.3 0x0013. Their
+    stated figure was 3e-6 °/day, measured at 4.05e-3 (the topocentric
+    lunar node), and corrected to 5e-3 at their `429c764`.
+- **Heliocentric runs at mask 1.** From the Sun the advertised masks
+  (A.3 `0x0004`, `0x0014`) differ by object kind, and §3.5a makes any
+  unlisted mask ERROR 11 for the whole request. Mask 1 is listed for every
+  kind in the leg by both servers. (First recorded here as an `astrolog-ephd` refusal;
+  it is the protocol working as written, as the Astrolog session confirmed
+  at their `9431473`.)
+- **The other legs are unchanged from record o.**
+
+### Range, graded against Horizons, 2026-09-18 (`docs/crosstest/2026-09-18q.tsv`)
+
+The same audit's second gap. The `horizons` legs compared directions only,
+so a distance error was invisible to every leg except `points` and `bary`.
+Horizons' `delta`, the light-time range, is what mask 1 answers, and it was
+already in the corpus.
+
+- **Ours:** 1.1 m geocentric at worst (the outer planets), 0.25 m
+  heliocentric. Graded at 5 m, an estimate at 4× that. With the band set to
+  1 mm, 68 rows turn into findings, so the check does fire.
+- **Theirs:** 1–22 km (Mercury heliocentric 22 km, Neptune 15.6 km, the
+  Sun 1 km, the Moon 3 m). Recorded in each row's note, not graded:
+  nothing published gives a band for their compressed files.
+- **Verdicts otherwise identical to record p.**
+
+### Both sides on their orbits, 2026-09-18 (`docs/crosstest/2026-09-18r.tsv`)
+
+Run against Astrolog's build at their `13d3e5e` (the binary orbits applied)
+and `1ecb8b9` (the plane-2 star origin), on a spare port.
+
+- **Binaries:** Sirius and Procyon agree to 2–8 mas at every epoch and in
+  both zodiacs, where they used to differ by the 1.3–1.5″ bend. The `stars`
+  leg now grades them as ordinary stars, so the separation checks
+  direction. A row at the bend's size would mean one side lost its orbit.
+  α Cen A agrees to 7 mas; B − A is 14.11″ against 14.13″.
+- **Natural apsides at the actual passages** (a new check in `points`):
+  each server's natural point against its own Moon, at passages found by
+  bisection.
+  - Ours is within 0.002″; theirs within 44″ (band 72″, an estimate from
+    their 0.016° measured over 1990–2010).
+  - Unlike the between-passage bands, this sees direction.
+- **Rates:** their `true-citra` misses fell to `lahiri`'s level after their
+  `46cf57d`. The rest (91 rows, 1e-6 to 8e-4 °/day) are their library's
+  speeds, reported to them.
+- **Everything else is unchanged from record q.**
+
+### Orbit points from elsewhere, 2026-09-18 (`docs/crosstest/2026-09-18s.tsv`)
+
+The `points` leg asked everything from the Earth's centre, so a point seen
+from anywhere else was a coordinate no check could see. It now also asks
+every point from the Sun, the barycentre and Mars's centre, at masks 0 and
+1. A point is a place in space (ORBIT-POINTS.md, "From any observer"), so
+two servers should agree there as they do geocentrically. The Moon's points
+are also held to the Earth answered in the same request: from anywhere they
+must lie within 0.003 AU of it. At mask 1 they must also be retarded as the
+Earth is, within 1″ (ours 0.19″ at worst). That check says whose a
+difference is. Run against Astrolog's `429c764` on the spare port.
+
+- **It found one defect of ours, fixed.** `prometheiad` refused a planet's
+  own points from its centre (Mars's perihelion from Mars) as "the
+  observer is the object". Now answered; the body alone is refused.
+- **From the Sun and the barycentre at mask 0 the servers agree:** the
+  Moon's points to 0.021″, the inner planets' and Mars's mean points to
+  0.58″, osculating points to 1.6″, as geocentrically.
+- **Findings, theirs:**
+  - At mask 1 their Moon points from the Sun or barycentre are their mask-0
+    answer: no light time. The Earth beside them moves 20.9″. That is
+    15,000 km of the Earth's motion in 500 s, which a point riding with it
+    shares.
+  - From Mars's centre they refuse most points (errCode 2). But they answer
+    the Moon's mean apogee and its osculating nodes and apogee, at
+    0.23–2.4 AU from the Earth, where the Moon's points cannot be.
+    This is the ~31° gap HANDOFF once parked as a definition question. It
+    is not one: nothing reachable from the Earth by 0.003 AU is 31° from
+    it as seen from Mars.
+  - Rates (`rates` now includes Mars's mean perihelion): their mean
+    perihelia put the latitude itself in the latitude-rate column. From
+    the Sun, Mars's reads −1.77351 against a latitude of −1.77351°; the
+    same holds for Jupiter's. The osculating perihelia and the mean nodes
+    are right.
+- **Refusals recorded, not graded:** from the Sun and barycentre they
+  refuse the Moon's mean apogee and osculating nodes and apogee. At 1650
+  they refuse the Earth itself, so those nine rows have no Earth to hold
+  to and stay unattributed.
+- **Everything else is unchanged from record r.** The `rates` leg has the
+  same 91 rows of theirs, plus Mars's mean perihelion's 16.
+
+### Record s adjudicated, 2026-09-19 (`docs/crosstest/2026-09-19t.tsv`)
+
+The Astrolog session's answers to record s's three findings, and a rerun
+against their build with the fix (their tree at `02bb758`).
+
+- **The Moon's points from Mars were theirs, fixed at their `d3d8d76`.** All
+  are now refused (errCode 2), which conforms.
+- **No light time on the Moon's points from the Sun or barycentre** is how
+  their library computes points, and their `corrApplied` says so for those
+  objects. corrApplied states what applies to an object structurally
+  (SERVER.md), as ours says a star carries no light time. So the leg now
+  grades such a row as expected-difference: their `corrApplied` lacks light
+  time, and the two differ by about the Earth's light-time motion (≤ 25″,
+  20,000 km). Without that statement it stays a finding.
+- **The mean perihelia's latitude-rate column holding the latitude** is
+  their library's, confirmed by them calling it directly. The true rate,
+  differenced, is 2.8e-7 °/day. The 16 `rates` rows stay findings (theirs)
+  until a run grades a build with the fix.
+
+  This entry first said the fix "goes to their maintainer" because a golden
+  test pinned those columns bit for bit. That was wrong and is recorded
+  rather than quietly deleted: **a gate asserting the wrong thing is a
+  second defect, not a reason to keep serving the first.** The Astrolog
+  session reached the same sentence independently, was corrected for it by
+  its own maintainer, and fixed both (their `d1f1287`, registry §1.5).
+- **Left unattributed:** six rows at 1650, where they refuse the Earth, so
+  a Moon point has nothing to be held to.
+
+### Record u, 2026-09-20 (`docs/crosstest/2026-09-20u.tsv`)
+
+Astrolog's fixes of 2026-09-19 and 2026-09-20, graded rather than taken on
+trust. Against their daemon on the spare port (47392), binary built
+04:52:29 local, their tree at `96aef21`. They named the build `a0536b3`;
+that commit was rewritten while the run was in progress, to move its author
+to a noreply address, and the only content difference to `96aef21` is
+`CLAUDE.md`. The served binary never changed and the harness records its
+build time and checks the pid on the port it queried.
+
+Totals: agree 2,543, expected-difference 449, refused 46, refused (theirs)
+548, finding (theirs) 99, unadjudicated 1, unanswered 9. **No findings
+against this side.**
+
+**What the run confirms, by measurement:**
+
+- **The binary-star offsets** (their `13d3e5e`): the `stars` leg is 174 of
+  174 agree, at a 0.02″ band over 29 stars, three epochs, tropical and
+  Lahiri, and α Cen by both names. Their own grading against our fixtures
+  was 0.40 mas on Sirius; ours holds them 50× looser than that and they
+  pass with nothing to report.
+- **The mean-apsis rates** (their `d1f1287`): the Moon's mean node is 16 of
+  16 agree and Mars's mean perihelion is 16 of 16 agree, against our
+  five-point central difference of their own served positions. In record t
+  both were findings.
+  **This agreement is a regression pin, not an independent verdict.** The
+  Astrolog session says it checked its fix against the numbers this side
+  reported, so the two are no longer independent. The method is still
+  ours and applied to their wire, which is why it is worth recording; it
+  is not worth calling confirmation.
+- **The plane-2 star origin** (their `1ecb8b9`): `sidsweep` is 530 agree,
+  46 refused by us, no findings. Record t had 64 findings there.
+- **Their advertised rate bound.** They advertise `ratesDegPerDay = 5e-3`
+  and `ratesAuPerDay = 1e-4` **at the time of this record**; they moved the
+  AU figure to `4e-3` afterwards ("The chase does not converge", below, and
+  read off their wire again 2026-09-20). Measured off their wire by our five-point
+  difference, their worst is **8.22e-4 °/day** in longitude and 3.88e-4
+  °/day in latitude (the topocentric Moon at Zurich), and 1.77e-6 AU/day
+  per AU in distance (Mercury, geocentric). The advertisement holds. Their
+  own sweep reports a larger worst, 4.05e-3 °/day, because it reaches
+  epochs this leg does not.
+  Ours over the same rows: 1.58e-6 °/day and 6.47e-11 AU/day per AU, inside
+  A.3's default of 1e-5 and 1e-9, which is why we still send no `0x0013`.
+
+**What remains, all previously known:**
+
+- 84 `rates` rows of theirs, the body speeds their library computes
+  (`ratesApprox`), down from 91;
+- 15 `sidinstant` rows, the IAU 1958 pole, recorded on their side as an
+  ICRS-transfer difference rather than a defect;
+- 548 refusals of theirs in `points-observer`, mostly points from Mars's
+  centre and everything at 1800, where their files end;
+- the 1800 Moon, still the one unadjudicated row.
+
+**The run found two defects in this harness, not in either server**
+(`03f905a`), and both of them misread a correct server:
+
+- A Moon point from the Sun or barycentre is held to the Earth answered
+  beside it, and separately a server's `corrApplied` states whether light
+  time applies to that point at all. The grading demanded **both** before
+  it would call a light-time difference expected. Their server refuses the
+  Earth at 1800, so the anchor was missing, the `corrApplied` statement was
+  discarded, and six rows fell through to a bare `finding` — which reads as
+  ours. `corrApplied` now stands alone, as record t already said it should,
+  and a gap neither the anchor nor `corrApplied` can attribute is
+  `unadjudicated` rather than somebody's finding.
+- The staleness warning matched any process whose name began with the
+  daemon's and whose binary had been replaced. A second, older
+  `astrolog-ephd` was up on another port, so the first cut of this record
+  carried `STALE` about a daemon under test that was current. It now
+  resolves the pid listening on the port actually queried, and says so when
+  it cannot.
+
+Fault-injected: with the `corrApplied` evidence removed, the six rows
+become `unadjudicated` and 56 more become findings, so the branch carries
+the leg rather than never running.
+
+## The rate sweep, and what a bound is worth
+
+`tools/check/ratesweep.py` asks one server whether its RATE columns
+describe its own positions, over a deliberately wide object list: bodies,
+both nodes and both apses of six bodies in mean and osculating form, the
+natural apsides, and stars, across eleven observer/frame configurations and
+five epochs — 3,575 requests. The oracle is the server's own positions,
+five rows at t±2h differenced five-point at h = 1/1024 day. It reads the
+bound in force off the wire (A.3 `0x0013`, or the registry's default of
+1e-5 °/day and 1e-9 AU/day when absent) and exits non-zero if the server
+missed its own advertisement. It needs a daemon, so it is not in the gate.
+
+**Why breadth is the whole point.** A bound is only as wide as the object
+list that measured it, and a check written beside a server measures the
+objects its author had in mind. Astrolog advertised 3e-6 °/day when its
+sweep was geocentric only, then 5e-3 when its sweep had bodies and the
+Moon's points but no planetary apsides. Neither number was dishonest; both
+were the width of a list. That is the one thing a server's own rate check
+structurally cannot do for itself, which is why each side should run this
+against the other.
+
+**The distance tolerance is absolute AU/day, not per AU.** Both
+`ephproto.h` and `registries.json` write it as "1e-9 AU/day" with no
+qualifier, and §3.5a's own worked example (3e-5 AU/day for Uranus) only
+reads as absolute. This side measured and reported the *relative* figure as
+though it were the bound until 2026-09-20, when the Astrolog session
+pointed at the units. The two differ by the body's distance: a factor of 5
+at Jupiter, 30 at Pluto, and about 3e7 at a star. `ratesweep.py` now
+reports both and tests the bound against the absolute one.
+
+**Ours, 2026-09-20** (`docs/crosstest/2026-09-20-ratesweep-ours.tsv`):
+3,525 answered, worst 3.6e-6 °/day (the Moon's osculating perihelion,
+topocentric). In the corrected unit the worst **solar-system** row is
+1.7216e-10 AU/day, inside A.3's default by about sixfold, so the claim
+behind sending no `0x0013` survives the correction for everything in the
+solar system.
+
+### The geocentric deflection leg, 2026-09-20
+
+`deflection-geo` (`docs/crosstest/2026-09-20-deflection-geo.tsv`). Asked
+for by the Astrolog session: the planet-centred leg found 0.544" because no
+anchor observes from Jupiter, but the term both servers *do* advertise —
+geocentric solar deflection — had never been refereed against a textbook by
+either project. The `apparent` leg grades the servers against each other,
+which cannot see a term they both get wrong, and Horizons' apparent place
+carries frame offsets that swamp 1.75".
+
+Same `grav_vec` from USNO Circular 179, same construction: each server's
+mask-3 answer against the textbook bending applied to its own mask-1
+answer, so only the bending is compared.
+
+**The leg has to hunt for its own test.** Deflection falls off roughly as
+1/elongation — 1.75" at the limb, 0.004" at quadrature — so a calendar grid
+would leave almost every row carrying a term below the band, and both
+servers would "pass" by never being asked. Each body is therefore searched
+over 800 instants for its smallest elongation, with a wide-elongation row
+kept as a control, and **every row records the size of the term it
+tested**, so a verdict is legible as one. The search runs against our
+server only: it chooses where to look, and both servers are then asked the
+same instants, so a bias in the scan cannot flatter either.
+
+Result: **10 rows, all agree.** Ours within 0.000000", theirs within
+0.000011". Nine of the ten carry a term above the band, so nine of them
+graded something: Jupiter at 0.318 deg elongation carries 1.2032" of
+bending, Saturn 0.5135", Venus 0.3606", Mars 0.3212".
+
+The tenth is worth keeping. Mercury at 0.339 deg elongation carries a term
+of 0.0000", because that is an *inferior* conjunction — the planet is
+between the Earth and the Sun, so its light never passes the Sun and there
+is nothing to bend. The row is recorded as grading nothing rather than as
+an agreement, which is the distinction the term column exists to make.
+
+Fault-injected: a 1% change in the textbook's GM turns four rows red on
+both servers at up to 0.012" against the 0.0002" band. The control rows
+stay green, as they should — 1% of 0.005" is below the band.
+
+### The topocentric deflection leg, 2026-09-20
+
+`deflection-topo` (`docs/crosstest/2026-09-20-deflection-topo.tsv`). Both
+servers advertise the same term for a *topocentric* observer (A.5 value 1),
+and neither project had refereed that either. `leg_deflection_geo` became
+`_leg_deflection_at`, which takes the observer bit and the flags that place
+it; the geocentric leg is that function with bit 0 and no site. The
+topocentric one runs the same construction from Zurich (8.55, 47.37, 500 m)
+and Quito (−78.47, −0.18, 2850 m), with `--topo` on **every** request in a
+row — the body, the Sun, and the elongation scan — because the textbook
+formula needs the observer-to-body and observer-to-Sun vectors of one
+observer, and a geocentric Sun in a topocentric row would test the mixture.
+
+Result: **20 graded rows, all agree**, ours within 0.000000" and theirs
+within 0.000011" — the same figures as the geocentric leg, from the same
+four bodies at conjunction (Jupiter's term is 1.2063" at Zurich, 1.2034" at
+Quito). Fault-injected the same way: 1% on the textbook GM turns four rows
+per site red and leaves the controls green.
+
+**Agreement on those rows was never the part worth measuring.** Each row
+grades a server against its own mask-1 answer, so a server that silently
+ignored the site would return geocentric directions for both masks and the
+row would still read "agree" — which is exactly how the frozen topocentric
+orbit points read for months, position column at the Earth's centre while
+the rate column moved with the site. So the leg measures the two things
+that verdict cannot see, and grades them:
+
+| | ours | theirs | floor |
+|---|---|---|---|
+| Zurich vs its own geocentric answer | 11.5576" | 11.5574" | 0.5" |
+| Quito vs its own geocentric answer | 15.4138" | 15.4139" | 0.5" |
+| Zurich vs Quito | 19.3633" | 19.3632" | 0.5" |
+
+Those are diurnal parallaxes, arcseconds where the deflection band is
+0.0002", so the site reaches the computation on both servers and the two
+sites are distinct. The floor is graded on the *largest* shift over the
+rows, not on each one: a body near a site's zenith or nadir shifts along
+the line of sight and can move very little. Fault-injected by dropping
+`--topo`: all twenty deflection rows stay green and the three site rows go
+red, which is the blindness they exist to cover.
+
+### The arrival leg, 2026-09-20
+
+`arrival` (`docs/crosstest/2026-09-20-arrival.tsv`). The topocentric leg
+above needed three rows that ask whether the site reached the computation,
+because a row graded against a server's own other answer measures
+consistency and never arrival. That question had never been put to the
+other observers, and every leg that judges a server against its own answer
+inherits the same blindness. This asks it.
+
+Geometric, mask 0, so nothing but the observer's own position is in the
+answer; four bodies at three epochs; both servers. Eight rows in two
+shapes, and the shapes matter more than the numbers:
+
+**Seven ask whether two observers differ.** Each of heliocentric,
+barycentric, Jupiter's centre, Mars's centre and the Sun's centre against
+the geocentric answer — an observer that never arrived answers
+geocentrically — then two pairs chosen for a specific confusion:
+
+| | ours | theirs |
+|---|---|---|
+| bary vs helio | 1581.1857" | 1581.1852" |
+| centre Jupiter vs centre Mars | 206173.7988" | 206173.7988" |
+
+The first is a server that treats the barycentre as the Sun; the second
+one that honours "a body's centre" without reading *which* body. Both
+clear the 1" floor by orders, so the offset is being read rather than
+assumed.
+
+**One asks the opposite.** A heliocentric observer and an observer at the
+Sun's centre are the same place, and at mask 0 they have nothing left to
+disagree about, so that row is graded *at most* 0.0002". Both servers:
+0.0000".
+
+Fault-injected in both directions. Never sending the observer flag turns
+all seven distinctness rows red — **and leaves the same-place row green**,
+which is correct and is the reason that row cannot stand alone: two
+observers that never arrived are trivially equal. Pointing the same-place
+row at Mars's centre instead of the Sun's turns it red at 218856".
+
+### The distance tolerance cannot be met for a star, by either server
+
+218 rows of ours and 32 of theirs exceed the bound in force once it is read
+absolutely. **Every one is a fixed star, and none is a solar-system
+object.** It is not a defect on either side: it is a floor in the
+representation.
+
+Polaris is served at 2.7356e7 AU by both servers. One f64 ulp there is
+6.07e-9 AU, so a five-point difference over h = 1/1024 day — whose
+numerator carries |1| + |8| + |8| + |1| = 18 ulp and is divided by
+12h = 0.0117 day — has a noise floor of about **9.3e-6 AU/day** before any
+arithmetic happens. A.3's default of 1e-9 AU/day is roughly four orders
+below what the column can represent. Ours measures 2.47e-5 AU/day there
+(a few times the floor) and theirs 7.48e-3.
+
+*Corrected 2026-09-29: one f64 ulp at 2.7356e7 AU is **3.73e-9 AU**
+(`math.ulp(27356391.0)`), not 6.07e-9, so that floor is **5.7e-6 AU/day**,
+not 9.3e-6. Every conclusion here survives the smaller number — the default
+is still nearly four orders below the floor — but the figure was wrong and was
+carried into HANDOFF.md and into messages to the Astrolog side.*
+
+So **§3.5a's distance tolerance is unmeetable for a star at any conformance
+level**, and a server that says nothing is claiming something it cannot
+deliver. This is a question for the protocol rather than for either
+implementation, and it is with the Astrolog session, who own it. Until
+there is a sentence, this side records the solar-system figure as the
+meaningful one and says so rather than quietly dropping the star rows.
+
+**Closed, 2026-09-20, and not by any of the three shapes either side had
+on the table.** The Astrolog session found that the outlier they had held
+the bound open for — Polaris from Quito at 1900, 7.4824e-3, 11× the next
+star row — was an **f32 artifact**. At f32 the ulp of 2.7356e7 AU is
+3.26 AU, so the distance column cannot move over a 4-hour window: its
+central difference is identically zero and the "discrepancy" is the
+server's own rate with the sign taken off. Their §3.5a now says the
+comparison is **defined on f64 positions**, one sentence for every object,
+and the existing numbers stand.
+
+Reproduced here on our engine at their request (`prometheia-wire-client`
+`--f32` against 47190, Polaris, Quito, JD 2415020.498046875, five rows at
+h = 1/1024 day): all five distances bit-identical at 27356390, and the
+longitude and latitude columns bit-identical too. Two unrelated
+implementations freeze the same column, so it is the wire type rather than
+either engine's rounding.
+
+**Our sweep was already reading f64**, which is why our figures do not
+move: nothing in `tools/check/` passes `--f32`, and the recorded
+Polaris/Quito/1900 row (2.4722e-05 AU/day, `2026-09-20-ratesweep-ours.tsv`
+line 2731) recomputes exactly from the f64 distances, which span 8274 ulp
+over that window. Nor did this side ever advertise `0x0013`, so no bound
+of ours was describing the artifact.
+
+What survives unchanged is the reason the sentence was needed: at f64 the
+floor is still ~9e-6 AU/day for Polaris, four orders above A.3's 1e-9
+default. The case was never that the star rows are large — it is that the
+default sits below what the column can represent. Their 4e-3 clears the
+floor; the default does not, for any server, at any precision.
+
+Worst **non-star** absolute, for comparison: ours 1.7216e-10 AU/day, theirs
+9.0324e-5 (Saturn's osculating aphelion, topocentric, 2026).
+
+**The chase does not converge, which is the argument for the sentence.**
+Astrolog moved the advertised figure 1e-4 → 2e-4 → 4e-3 as each sweep
+widened, and this side suggested 1e-4 at a moment when its own table
+already showed 7.48e-3 on their wire — a suggestion that was false by 75×
+against data we held. At 4e-3 (their `21eaee2`) exactly one row still
+exceeds it: **Polaris, topocentric at Quito, 1900, 7.4824e-3 AU/day**,
+1.87× the bound, and an outlier — the next-worst star row is 6.7e-4,
+eleven times smaller.
+
+*Qualified 2026-09-20 ("The standing row is not one row"): "exactly one
+row" is a statement about this sweep's grid, and the grid samples **one
+ΔT per configuration**. Sweeping ΔT at that same instant puts eight of
+eleven values over the bound. The adjudication below is unaffected — it
+never rested on the count — but the count was the width of a list, which
+is the failure this document has now recorded four times.* A bound wide enough to cover it with any headroom
+would be ~2e-2 AU/day, which is 3 million km a day and describes nothing.
+No honest number exists while an absolute tolerance is applied to a column
+whose ulp is 6e-9 AU. The fix is a sentence in §3.5a, not a larger
+number.
+
+### What each leg can see arriving (2026-09-20, `tools/check/blindspots.py`)
+
+A leg asks both servers a question and compares the answers. If the argument
+that makes the question interesting reaches **neither** server, both answer
+the same thing, the comparison agrees, and the row is green. This was met
+on the deflection leg the same day: dropping `--topo` left all twenty of its
+rows green, and only the site-shift rows — which compare a server with its
+*own* other answer — noticed.
+
+`blindspots.py` measures it for every leg. It runs the leg with our daemon
+on **both** endpoints (`crosstest.py --self-compare`), which makes every
+cross-server verdict trivially `agree`, so only a leg's non-comparative
+checks can still go red; records every argument the leg actually sent, from
+the client's own argv rather than from a list written beside it; then
+re-runs once per argument with that argument stripped from every request.
+Green with the argument gone means the leg cannot tell it arrived. Each drop
+asserts that it removed something, because a drop that dropped nothing is a
+green that proves nothing.
+
+Eighteen legs, all measured, none red before the drops. The record is
+`tools/check/blindspots.json`, and a later run that finds a leg has *stopped*
+seeing an argument reds against it.
+
+**The result that matters: `--deltat` is blind in 18 of 18 legs.** Not one
+leg can tell whether the field arrived. This document says every numeric leg
+sends delta T explicitly so that neither server's own model enters the
+comparison — and nothing checks that it did. Within the hour that finding
+was made, `deltaTSec` turned out to move a number on the wire by 21× (below).
+
+`--jd` is blind in 13 of 18: if the epoch failed to arrive, most legs would
+compare two servers at whatever instant they defaulted to and agree. The
+legs that do see it are the ones with an outside anchor — `horizons`,
+`helio`, `topo`, `bary` — which is the same lesson as the deflection leg's
+site-shift rows: **a non-comparative check is the only kind that survives
+both servers being wrong together.**
+
+Blind in N of 18, as first measured: `--deltat` 18, `--obj` 18 (dropping it
+breaks the WELCOME probe before any leg, so it is recorded as unreachable
+rather than unseen), `--jd` 13, `--corrections` 9, `--eq` 7, `--icrs` 7,
+`--center` 4, `--helio` 4, `--bary` 3, `--topo` 3, `--count` 3, `--step` 3,
+`--j2000` 3, `--sid` 3, `--sid-plane` 1. Legs seeing nothing at all then:
+`same`, `apparent`, `sidinstant`.
+
+**Delta T arrives, 2026-09-29.** Every request that sends one `--deltat`
+now also asks for the ΔT column (A.10 bit 8) where the server advertises
+it, and each row must report exactly the value sent; the `deltat-arrival`
+rows grade it per leg and server. The `arrival` leg also asks a
+topocentric Moon at ΔT 0 and 100 on one connection (the client's repeated
+`--deltat`) and again on fresh ones: the two must differ and each must
+equal its fresh twin, the stale-observer shape. Re-measured
+(`tools/check/blindspots.json`): **`--deltat` is now seen by all 18
+legs**, and no leg sees nothing. Blind in N of 18 now: `--obj` 18 (as
+above), `--jd` 13, `--corrections` 9, `--eq` 7, `--icrs` 7, `--center` 4,
+`--helio` 4, `--bary` 3, `--topo` 3, `--step` 3, `--j2000` 3, `--sid` 3,
+`--count` 2, `--sid-plane` 1.
+
+**The epoch arrives too, the same day.** For every (server, epoch) a
+request sends, the harness asks that server once for the geometric Sun and
+Moon and holds them to low-precision theories — Meeus ch. 25 for the Sun
+(measured 0.012° from DE440 over 1552–2650, band 0.1°) and the six largest
+terms of ch. 47 for the Moon (0.28°, band 1°). The Moon is there because
+this harness's epochs are mostly 1 January, where the Sun alone cannot tell
+1900 from 2000 (0.2° apart); the Moon separates every epoch used by 20
+bands or more. `epoch-arrival` rows grade it per leg and server; only a
+request at J2000 itself, the client's default, passes with `--jd` dropped,
+correctly. Re-measured: **`--jd` is blind in 1 leg of 18** (`surfaces`,
+which grades refusals, not epochs), down from 13. Blind in N of 18 now:
+`--obj` 18, `--corrections` 9, `--eq` 7, `--icrs` 7, `--center` 4, `--helio`
+4, `--bary` 3, `--topo` 3, `--count` 3, `--step` 3, `--j2000` 3, `--sid` 3,
+`--sid-plane` 1, `--jd` 1. The record committed with the ΔT change had
+`points` seeing `--count`; it does not — that run re-read `crosstest.py`
+while it was being edited, and one leg's run caught it mid-change. This
+record is from a run with the harness unchanged throughout.
+
+Found on the way, by a review of the change:
+the `helio` leg ran outside any `leg_*` function, so the check could not
+name it and skipped it; it is now a leg function, and a request made
+outside one is still checked under a label that says so.
+
+**An option can also be half tested**, and a whole-option drop reports it
+covered. One option, two effects, one of them reaching nothing: the Astrolog
+side hit exactly this — their gate sends `deltaTSec` and reds when it is
+dropped, so their tool called it covered, while the Earth-rotation half of
+that same field reached nothing and hid a defect. The idea is theirs,
+2026-09-20, offered as the limit of their own copy of this tool.
+
+So for an option whose value is a bitmask, each set bit is cleared in turn
+as well, the value coming from the leg's own argv. It found one on its first
+run: **`apparent` sees `--corrections` and is blind to its deflection bit** —
+clearing bit 2 from the mask 7 leaves every row green, so nothing in that leg
+would notice deflection ceasing to be applied.
+
+Two things had to be got right first. A leg that sends `--corrections 0`
+produces no bit trial, because there is no bit to clear and substituting a
+nonzero value there would *add* a correction — a hand-run probe of this made
+exactly that mistake and reported `bary` blind to a bit it never sends. And a
+leg that sends two different masks produces two trials per bit, so the record
+labels each by the value it was cleared from (`--corrections=7~2`); labelling
+by the bit alone collided and filed one result under the other's name.
+
+**What this cannot see**: whether a leg asks the right question, whether its
+band is the right band, and anything needing two different servers. It
+measures reach, not correctness. The half-tested hole is closed only for
+options the tool knows to be masks — an option with two effects that is not a
+bitmask still reports covered, and finding that needs someone to ask what the
+option means and check there is a row per meaning. **A floor on coverage, not
+a ceiling**, which is how the Astrolog side put it and is worth repeating
+rather than rounding up. It agrees with the one reach measurement made by
+hand before it existed — `deflection-topo` sees `--topo` — which is the only
+independent check of it there is.
+
+### Finding, theirs: `deltaTSec` moves a topocentric star's reported distance rate by 21x
+
+**2026-09-20.** Polaris, corrections 7, five rows at h = 1/1024 d centred on
+JD 2415020.5, f64. `reported` is the centre row's `ddist`; `differenced` is
+the five-point central difference of the five answered distances.
+
+| observer | server | `deltaTSec` | reported | differenced |
+|---|---|---|---|---|
+| geocentric | ours | 69.2 | −7.901892e-03 | −7.884979e-03 |
+| geocentric | ours | absent | −7.901892e-03 | −7.884979e-03 |
+| geocentric | theirs | 69.2 | −7.993480e-03 | −7.894516e-03 |
+| geocentric | theirs | absent | −7.993480e-03 | −7.894516e-03 |
+| topo Quito | ours | 69.2 | −7.911927e-03 | −7.887204e-03 |
+| topo Quito | ours | absent | −7.894883e-03 | −7.895152e-03 |
+| **topo Quito** | **theirs** | **69.2** | **−4.013042e-04** | **−7.883708e-03** |
+| **topo Quito** | **theirs** | **absent** | **−8.434959e-03** | **−7.884026e-03** |
+
+Geocentric, the field changes nothing on either server, bit for bit, as it
+should: Earth rotation does not enter. Topocentric on theirs the reported
+rate moves by a factor of 21 while the five distances are **bit-identical**
+between the two requests and their difference moves by 3e-7.
+
+**Why it is not the harness.** Their five-point difference and ours agree to
+four figures at this cell (−7.883708e-03 against −7.887204e-03), through two
+independent clients and two engines. The positions are right on both sides;
+one column on one side is not. At 1900 a supplied 69.2 s and the true ΔT of
+about −2.7 s are 72 s apart, which is 0.3° of Earth rotation.
+
+**It explains the standing row.** The 7.4824e-3 AU/day of "The chase does
+not converge" is this: our sweep sends `deltaTSec`, the Astrolog side's own
+probe did not, and they measured 3.9949e-04 where we measured 7.4824e-03.
+The row is now attributable rather than mysterious, and if the rate column
+is corrected it may go away, which is a better outcome than a wider bound.
+
+**Ours is not clean either, two orders milder.** At the same cell our miss
+goes from 2.68e-07 without the field to 2.47e-05 with it, a hundredfold on a
+much smaller number. That is ours to explain and is recorded here rather
+than only in a message.
+
+### The same instant, a different delta T (2026-09-20)
+
+**Their root cause, and a rebuild.** The Astrolog session traced the
+topocentric `deltaTSec` behaviour to a **stale observer**: on a connection
+loop that has already answered at instant *t*, a later request at the same
+*t* and the same site with a different `deltaTSec` is answered with the
+earlier request's Earth rotation. A change of *site* does invalidate it,
+which is why no leg had ever caught it. It is deterministic at one thread
+and depends on which loop takes the connection above that, so **the same
+request can answer differently between runs**. They are fixing it in their
+server and have surfaced the underlying fix to their maintainer.
+
+Only the observable behaviour is recorded here. Their message also carried
+internals of the Swiss library; this project does not read those and has not
+used them (CLAUDE.md, "Cleanroom"), and the check below was written from the
+behaviour alone.
+
+**Rebuild notice.** `astrolog-ephd` on :47392 is being rebuilt for the fix,
+so its mtime and size move. Records identify that binary by mtime and size,
+so rows taken before 2026-09-20 and after it are **different builds** and
+must not be compared as one.
+
+**Does ours do it?** No. Asked for the topocentric Moon at one instant and
+site with `deltaTSec` 0 then 100, and at a second instant with 100 then 0,
+our answers depend on the value and not on the order:
+
+| instant | order | ΔT=0 longitude | ΔT=100 longitude | apart |
+|---|---|---|---|---|
+| JD 2451545.25 | 0 then 100 | 226.207579419 | 226.203863076 | 13.379″ |
+| JD 2451545.75 | 100 then 0 | 232.799518932 | 232.803080083 | 12.820″ |
+
+A stale observer would have made each pair identical and each instant's pair
+equal to whichever value was asked first.
+
+**The fixed build, measured 2026-09-20 12:22 local.** Their binary on :47392
+is 1735824 bytes, sha256 `9e9e56a70dbc263b…`, pid 4064228 — confirmed from
+this side by reading the running process's own image, not from their
+message. Their distinctness leg is green on it.
+
+**The standing row did not go away.** Polaris, topocentric Quito,
+JD 2415020.5 with `deltaTSec` 69.2 still reads reported −4.013041749e-04
+against a differenced −7.883707682e-03, a miss of **7.4824e-03** —
+bit-for-bit what the previous build gave. The observer-cache fix was a fix
+for a different defect, as they withdrew the inference for.
+
+**The fork fix, and a third build (13:37 local).** `astrolog-ephd` on
+:47392 is now 1739128 bytes, sha256 `9635191d6ee5ec6c…`, pid 86423 —
+confirmed from this side by reading the running process's own image. The
+12:22 binary is superseded, so rows taken between 12:22 and 13:37 are a
+**third, intermediate** build and must not be pooled with either. Their
+account, stated observably: the defect was *at one instant and site, a
+later request with a different `deltaTSec` got the earlier request's Earth
+rotation; a site change invalidated and a `deltaTSec` change did not*, and
+the fix is that *a `deltaTSec` change now forces the observer to be
+recomputed*. It is in their Swiss fork rather than their server; the
+server-side workaround stays in the binary deliberately, because their
+deployment pin still names the unfixed library. Their engine string on
+the wire still reads `2.10.03-ts.14`, consistent with that.
+
+**Re-verified here on the new build.** Ten rounds of the order probe
+above, both orders, topocentric Moon: every pair differs, and every round
+is identical to the last. The vacuity guard is what makes that worth
+anything — if ΔT moved nothing at this site and instant the pairs would
+agree for the wrong reason — and it does not fire: the pairs sit 13.4″
+and 12.8″ apart, the same separations ours gives. One limit worth
+stating, because it is the difference between this probe and the defect
+it tests: our client sends one `deltaTSec` per run, so these are separate
+connections, not two ΔT values down one. The probe is weaker than the
+behaviour it is aimed at, and a same-connection version would need a
+client change.
+
+**The standing row is not one row.** They predicted the Polaris cell
+unchanged and asked for nothing; it is unchanged. But that cell had only
+ever been sampled at one ΔT. Sweeping ΔT at the same instant — with the
+five-point difference recomputed per cell, since ΔT moves the positions
+too — the row turns out to be the visible edge of a region:
+
+| ΔT (s) | their reported | their differenced | miss | ours |
+|---|---|---|---|---|
+| 0 | −7.898072e−03 | −7.884026e−03 | 1.40e−05 | 3.62e−05 |
+| 20 | −8.462413e−03 | −7.883708e−03 | 5.79e−04 | 3.23e−05 |
+| 25 | | | 1.25e−04 | |
+| 30 | | | **7.15e−03** | |
+| 35 | | | **7.49e−03** | |
+| 40 | −4.538965e−04 | −7.886569e−03 | **7.43e−03** | 1.76e−05 |
+| 60 | −1.007572e−03 | −7.884661e−03 | **6.88e−03** | 1.19e−05 |
+| 69.2 | −4.013042e−04 | −7.883708e−03 | **7.48e−03** | 2.47e−05 |
+| 80 | −4.320065e−04 | −7.886887e−03 | **7.45e−03** | 2.21e−05 |
+| 100 | −9.694922e−04 | −7.881165e−03 | **6.91e−03** | 2.23e−05 |
+| 140 | −9.050384e−04 | −7.884026e−03 | **6.98e−03** | 2.57e−05 |
+
+**Eight of the eleven ΔT values tested exceed their advertised `4e-3`**,
+and the transition sits between 25 and 30 s — which brackets every ΔT a
+twentieth-century date actually carries. Their *differenced* value is
+stable at −7.884e−03 across the whole sweep, so their positions are
+consistent and it is the rate column that moves: the same shape Sirius
+showed, at a different scale.
+
+**It is this instant, though.** At J2000.0, and at the same epoch shifted
+by 2/1024 d (169 s), every ΔT tested is clean — 6.6e−06 to 9.5e−04. So
+the over-bound region is one instant wide in JD and open-ended in ΔT
+above about 30 s, rather than a property of topocentric star rates in
+general. Ours sits between 1.2e−05 and 3.6e−05 at every cell in this
+table, well inside the same bound.
+
+Relayed to them on 2026-09-20. It changes what the row means — a single
+sample over a bound is a curiosity, a bound exceeded at eight of eleven
+ΔT values at one instant is a shape with an edge to find — and it was
+measurable only because the sweep recomputes the oracle per cell instead
+of comparing every ΔT against one differenced value.
+
+**They reproduced it, and found the width.** Their `69d282d`, registry
+§2.11a, kept apart from §2.11 so the fixed observer-cache defect and this
+one are not read as one thing — ours survives the fork fix unchanged,
+which is the evidence that they are different. Their transition is
+between 28 and 30 s, the same values, and `swe_fixstar2_r` called
+directly returns them bit for bit, so it is the library and their server
+relays it. At ΔT 69.2, sweeping the instant: 2415020.4990 → 1.7e-04,
+**2415020.5000 → 7.5e-03**, .5005 → 7.6e-03, .5008 → 4.1e-04, .5010 →
+7.1e-04. About **1e-3 day wide**, on a standard epoch rather than an
+arbitrary date.
+
+Worth recording for its own sake: they had an explanation — that the
+region is TT in `[epoch, epoch + ΔT/86400]`, the window where UT has
+crossed the epoch and TT has not, which predicts a width of 8.0e-04 d at
+ΔT 69.2 and matches the measured edge — and they tested it at ΔT 140,
+where it predicts twice the window and the measurement is clean. The
+region gets *narrower* with larger ΔT. They recorded the mechanism as
+unknown rather than shipping the story that fit two thirds of the data.
+
+### The ΔT axis becomes part of the sweep, 2026-09-20
+
+`tools/check/ratesweep.py` now re-measures its worst cells across ΔT 0,
+30 and 140 after the grid, under a seventh assertion —
+**`deltat-undersampled`**, a cell inside the bound at the swept ΔT and
+outside it at one the grid does not sample. It is named apart from
+`exceeds-advertisement` on purpose: "the bound is exceeded here" and "the
+bound is exceeded only where this grid does not look" are different
+statements, and the second is about the grid. `tools/check/ratestest.py`
+gained the matching case (`fakewire.py` gained a ΔT-conditional error),
+and with the pass disabled that scenario prints "within its
+advertisement everywhere this sweep reached" and exits 0 — the silent
+pass it exists to refuse. It is **a floor on coverage, not a ceiling**:
+cells are ranked by their error at the swept ΔT, so a cell clean there
+and ruinous elsewhere is caught only if it ranks anyway.
+
+**It found two more cells on its first real run, and they are not at
+1900.** Polaris, `--only Polaris`, against `9635191d…`:
+
+| instant | site | ΔT 0 | ΔT 30 | ΔT 69.2 | ΔT 140 |
+|---|---|---|---|---|---|
+| JD 2461300.5 (2026) | Quito, −78.47, −0.18, 2850 | **8.2445e−03** | 2.9652e−04 | 6.6996e−04 | 1.5371e−04 |
+| JD 2461300.5 (2026) | Zurich, 8.55, 47.37, **500** | 2.3449e−04 | 3.5782e−05 | 4.6339e−04 | **7.5870e−03** |
+| JD 2461300.5 (2026) | Zurich, 8.55, 47.37, **400** | 1.6945e−04 | 3.0828e−04 | 7.3518e−05 | **7.5972e−03** |
+
+Confirmed by hand on a separate code path from the sweep, and independently
+by the Astrolog side against `libswe` with no server at all — their figures
+agree with both rows to four digits.
+
+They retitled their entry from "at the 1900.0 epoch" to **scattered
+(instant, ΔT, site) cells**, quoting the wrong sentence in it rather than
+deleting it, and noted the two consequences neither side predicted: ΔT **0**
+is one of the values that goes over and any client may send it, and 69.2 —
+the value both sweeps used — is clean at both sites. It is reachable from
+ordinary inputs, not an exotic instant to document around.
+
+The two Zurich rows are here because the first hand check ran at 400 m while
+the sweep's configuration is 500 m, and the mismatch was visible from their
+side before it was visible from this one. Both altitudes exceed the bound at
+ΔT 140 and neither does anywhere else, so nothing about the finding moves —
+but **a hundred metres changes the miss by an order of magnitude** at the ΔT
+values that stay inside the bound (3.1e−04 against 3.6e−05 at ΔT 30), which
+makes the site a third scattered axis rather than a label on the other two. That epoch is
+one of the ones reported clean — and it is clean, **at ΔT 69.2**, which
+is the only ΔT it had been asked at. So the region is not confined to
+1900.0, the two sites go over at *different* ΔT, and the narrowing was
+bounded by a fixed axis exactly as the original count was. Third
+instance of that shape in one day, and this time it was in a conclusion
+rather than a count.
+
+**The rule that came out of it**, because four instances in a week is a
+pattern and not a run of luck — a floor that was exact when written, a
+count that was the width of a list, a bound measured on five bodies and
+stated about every object, and this, a conclusion about which epoch a
+defect lived at. The first draft of the check was "grep any sentence
+with *all*, *every* or *only*". That is wrong: **"the region is at the
+1900.0 epoch"** has none of the three and was the worst of the four. The
+quantifier is a symptom. The question to put to a claim is not *does
+this generalise?* but **which axes were varied to produce this, and
+which were held?** — and a claim naming no axis at all is the one to
+distrust first. In Astrolog's words, who found the better half: *a count
+invites the question "how many?" and a conclusion invites nothing.*
+
+**And on our own server the pass found nothing, which is also a
+result.** Nine cells widened, no hidden cell: our star distance-rate
+error is ΔT-independent, consistent with it being the f64-ulp stencil
+artefact already diagnosed. What the same run did surface is ours, not
+theirs: `prometheiad` sends **no `0x0013` record at all**, so the A.3
+default of 1e-9 AU/day is the bound in force, and **all 60 Polaris rows
+exceed it**, worst 2.4722e-05 — four decades. That is the same question
+their 4e-3 raised, pointed here, and it is open (HANDOFF.md).
+
+**The fuller grid, both servers, Polaris, corrections 7.** `miss` is
+|reported − differenced|, AU/day:
+
+| observer | ΔT | theirs (fixed) | ours |
+|---|---|---|---|
+| geocentric | absent / 0 / 69.2 / 200 | 9.896e-05 (all four) | 1.691e-05 (all four) |
+| topo Quito | absent | 5.509e-04 | 2.683e-07 |
+| topo Quito | 0 | 1.405e-05 | 3.617e-05 |
+| topo Quito | 69.2 | 7.482e-03 | 2.472e-05 |
+| topo Quito | 200 | 7.683e-03 | 1.340e-05 |
+
+Three things this says that the earlier, thinner table did not:
+
+- **Geocentrically both servers are already wrong**, by a constant that no
+  `deltaTSec` moves — 9.9e-05 theirs, 1.7e-05 ours, against a differencing
+  floor of ~3e-07. Earth rotation cannot enter a geocentric answer, so this
+  is a plainer defect underneath the ΔT one, and it is on both sides. It is
+  0.2% of the rate on ours, which is the size of a physical term present in
+  one path and not the other.
+- **The ΔT dependence runs opposite ways.** Theirs is near-clean at ΔT = 0
+  and breaks at 69.2 and 200; ours is worst at ΔT = 0 and shrinks as the
+  value grows. Two different defects that happen to live in the same cell.
+- **Our topocentric no-ΔT figure of 2.683e-07 is the floor** and is *better*
+  than our own geocentric figure, which a topocentric answer has no business
+  being. That, rather than the ΔT response, is the thread to pull.
+
+A previous message to the Astrolog side described ours as firing "as soon as
+`deltaTSec` is supplied at all". That was true of the topocentric rows we
+had then and not of the geocentric ones we had not measured; corrected to
+them and here.
+
+**Ours is diagnosed** (ENGINE.md, "Rates"): it is one f64 ulp of a star's
+position differenced over the engine's 42-second stencil, not a missing
+term. Polaris sits at 4.093e15 km where one ulp is 0.50 km, and
+`ulp / (2h · kAuKm)` is 6.8e-06 AU/day against 1.48e-05 measured; every star
+measured lands within a factor of three of its own floor over a hundredfold
+range of distance. It survives `corrections 0`, so no correction causes it,
+and it is stable while the checking step moves 8x, so it is not the check's
+floor either. A smaller step makes it worse. The fix is to compute a star's
+rate analytically rather than by differencing, which is **not done** because
+it changes a wire value.
+
+**And the two channels are one mechanism.** The same quantisation puts the
+same error into the transverse velocity, and a longitude rate is that
+divided by *r* — at 2.7e7 AU, 1.9e-11 °/day, against 3.7e-12 to 9.5e-12
+measured. A distance-rate miss and a longitude-rate miss are therefore not
+comparable numbers, and "the angular channel is clean, so the missing term
+is radial" does not follow from the two figures alone. Relayed to the
+Astrolog side, who reached the opposite reading from their own pair.
+
+### Finding, theirs: a topocentric orbit point's position and rate describe different observers
+
+**2026-09-20** (`docs/crosstest/2026-09-20-ratesweep-theirs.tsv`, their
+`96aef21`). 2,871 answered; eight rows exceed their advertised 5e-3 °/day,
+worst **7.93e-2 °/day**, sixteen times the advertisement. Every one is the
+Moon's **osculating aphelion**, topocentric, at 1800, 1900, 2000 and 2026.
+
+The sweep found it; comparing the requests says what it is. For the Moon's
+osculating ascending node, descending node and aphelion, and for the
+natural apogee, their server returns a **byte-identical position** for a
+topocentric request and a geocentric one, while the **rate columns
+differ**:
+
+    301.A.o at JD 2451545.0, mask 7, theirs
+      geocentric   lon 252.99417262479935   dlon 1.637617849392534
+      topocentric  lon 252.99417262479935   dlon 1.6792064513889216
+
+So the site reaches the rate and not the place. The two columns describe
+different observers, and differencing the positions cannot reproduce the
+rate beside them — by 0.042 °/day here and 0.079 °/day at 1800. The same
+three-way comparison on ours moves both columns, as diurnal parallax on a
+point 0.0027 AU away must.
+
+Not every point is affected: the osculating perihelion, the mean points and
+the Moon itself all move with the site on their server. Ruled out on this
+side first — the two sites in the sweep (Zurich and Quito) were confirmed
+to produce genuinely different Moon positions through the same client, so
+the identical answers are theirs and not our argument parsing.
+
+Their own sweep reports worst 4.05321e-3 °/day, the topocentric lunar
+osculating node at 1800. This sweep reproduces that figure to six digits
+(4.0532e-3) — it is just under their 5e-3 and so never tripped their
+check. The aphelion, twenty times worse, was not in their list.
+
+**Fixed the same day, at their `b631333`**
+(`docs/crosstest/2026-09-20-ratesweep-theirs-fixed.tsv`). Their account:
+Swiss's `SE_TRUE_NODE`, `SE_MEAN_APOG`, `SE_OSCU_APOG` and `SE_INTP_APOG`
+are geocentric definitions that it does not serve topocentrically and does
+not say so, returning the geocentric position under `SEFLG_TOPOCTR` while
+still moving the rate columns; their server passed that through. The named
+points now fall through to `swe_nod_aps`, which honours the site, at the
+cost of the 0.06″ by which its direction differs from the named body's.
+Topocentric with the interpolated method has no correct destination there
+and is now refused rather than answered wrongly.
+
+All eight rows are gone: the osculating apogee falls 7.93e-2 → 2.5e-6
+°/day. Re-measured here, their worst is now **1.3939e-3 °/day**, and it is
+no longer an orbit point — it is the topocentric Moon itself, their
+registry §2.6.
+
+The fix also closes a gap against *our* answers, which self-consistency
+alone could not have shown: their topocentric lunar osculating points now
+sit **0.089″–0.32″** from ours, about the `swe_nod_aps` direction
+difference they described. Before it, the aphelion differed by the whole
+diurnal parallax, some 3,600″.
+
+### Vega: one database at two vintages, 7 km/s apart, 2026-09-20
+
+Raised by the Astrolog side, recorded on theirs as registry §4.4 (their
+`799992e`), and confirmed here. Both servers' star distance rates for Vega
+disagree while the distances agree, in AU and AU/day, geocentric apparent,
+JD 2451545.0:
+
+| star | server | distance | reported rate | differenced rate |
+|---|---|---|---|---|
+| Vega | ours | 1584110.505 | −7.253626e−03 | −7.253885e−03 |
+| Vega | theirs | 1584285.200 | −1.160224e−02 | −1.135381e−02 |
+| Sirius | ours | 544038.133 | −3.783236e−03 | −3.783097e−03 |
+| Sirius | theirs | 544048.304 | −3.655958e−03 | −3.783623e−03 |
+
+The distances agree to 0.011%, which is the parallax and not the argument.
+Two different things are in this table and Sirius is what separates them:
+
+- **Sirius is a rate column.** Their *differenced* rate agrees with ours to
+  five digits (−3.783623e−03 against −3.783097e−03) while their *reported*
+  one does not. Whatever the difference is, it is in what the column
+  carries, not in where the star is going.
+- **Vega is the catalogue.** Their differenced rate disagrees too, so the
+  two engines disagree about how Vega's distance changes with time.
+
+The Astrolog side has written that separation up as method (their §2.12
+is the Sirius rate column): a distance-rate disagreement is either a rate
+column or a catalogue line, and **one star cannot tell them apart**. Two
+stars and four numbers can, and it needed neither of the tools either
+project built that day.
+
+In km/s, which is the unit the disagreement is actually in:
+
+| star | catalogue RV, ours | measured, ours | measured, theirs |
+|---|---|---|---|
+| Sirius | −5.5 | −6.550 | −6.551 |
+| Vega | −13.5 | −12.560 | −19.659 |
+
+The gap between a catalogue RV and a measured rate is the observer's own
+motion projected on the star, and Sirius shows it is not in dispute: where
+the catalogues agree the two servers land 0.001 km/s apart. Vega's own
+projection is +0.940 km/s (−13.5 catalogue against −12.560 measured), so
+applying it to their −19.659 recovers the radial velocity their catalogue
+must hold: **−20.60 km/s**, against our −13.5.
+
+Ours is what our sources say, by the rule `docs/STARS.md` already states —
+SIMBAD's value where quality is A–C, else the Bright Star Catalogue's.
+SIMBAD gives HIP 91262 −13.5 ± 0.4, quality C; the BSC's own field for
+HR 7001 independently reads −14.
+
+**It is one database at two vintages, not two catalogues.** Asked for a
+source name and a number and nothing else, the Astrolog side answered
+(their `27e1056`): −20.6, from Swiss's `sefstars.txt`, whose own header
+records updates *"with data from the SIMBAD Astronomical Database"* on
+11 Jan 2006, 22 May 2016 and 4 Jan 2018. Ours is current SIMBAD. Two
+projects citing the same database carefully, landing 7 km/s apart — which
+is a better-posed problem than a disagreement between sources, because
+the resolution is a re-query and not an argument, and it explains how
+this happened to two careful trees at once.
+
+Nothing is changed on either side. −20.6 is a real published value: Vega
+is a pole-on rapid rotator and its measured radial velocity has a wide
+literature spread. Editing a shipped catalogue against its upstream is a
+maintainer's call in both trees, and it is parked in both.
+
+The value was **derived before it was looked up**, which is the part of
+this worth keeping. +0.940 applied to their −19.659 gave −20.60; the file
+carries −20.6, exact to the digit it holds. The provenance above is
+theirs, reported to us; the number is ours, measured. No file of theirs
+was read to get either.
+
+What the cross-test can say is narrower and worth keeping: a star's
+radial velocity reaches the wire *only* through the distance rate. It
+moves no position — the direction is proper motion and parallax, and the
+distance is parallax alone — so every position leg is green on Vega and
+always would be.
+
+### The instrument gap this fell through
+
+The Astrolog side's framing, kept in their words because it names the hole
+better than a description of it would:
+
+> One instrument compares two engines on positions, the other compares one
+> engine with itself on rates, and this falls exactly between them. A
+> third — two engines on rates — would see it, and neither of us has one.
+
+That is the literal state of the two tools. The `stars` leg compares
+`prometheiad` with `astrolog-ephd` on **positions**, in arcseconds.
+`tools/check/ratesweep.py` and the `rates` leg compare one engine's
+reported rate with its own five-point difference — **one engine, with
+itself**. A quantity that both engines report self-consistently and
+differently from each other is invisible to both, and Vega is one.
+
+This is recorded **named, not filled**. Filling it means choosing which
+rate is right, and as they put it, nothing on either side can: a rate
+disagreement between two engines needs an outside reference, and for a
+star's distance rate there is no Horizons row to ask — the anchor the
+other legs lean on does not serve fixed stars. Vega was found by a human
+reading four numbers, not by an instrument, and the honest record says so.
+
+They split this out as their own §4.4a so that solving Vega would not
+read as closing the hole, and stated the reason more sharply than this
+section first did: **the one class of object where the gap exists is the
+one class the usual referee cannot adjudicate.** Horizons serves the
+bodies whose rates can be graded from outside; fixed stars are both where
+it cannot and where a catalogue line reaches the wire through a rate and
+nothing else. The two facts are the same fact.
+
+That Vega was solved anyway, by four numbers and no tool, is not evidence
+the gap does not matter. It is what having no instrument looks like when
+someone happens to look.
+
+### Our star distance rate, computed in closed form, 2026-09-29
+
+The fix diagnosed at `1dc0767` ("Ours is diagnosed", above) is in, on the
+maintainer's decision of 2026-09-29: a fixed star's distance rate is
+computed from its straight-line velocity and the observer's, not
+differenced (ENGINE.md, "Rates", with the before/after table). **It
+changes a value on the wire**: our star distance-rate column moves by up to
+2.3e-5 AU/day on Polaris and by 1e-7 or less for the nearer stars. Star
+positions, angular rates, and everything that is not a fixed star are
+unchanged.
+
+What it does to the rows above: our side of the Polaris table falls from
+1.3e-5–3.6e-5 to the checking difference's own floor. It does **not** make
+us meet A.3's 1e-9 AU/day default as §3.5a measures it, because §3.5a
+measures by differencing f64 positions, and at h = 1/1024 that difference
+cannot resolve Polaris's rate below ~5.7e-6 AU/day however exact the rate
+is. What `0x0013` should say is the next item (HANDOFF.md).
+
+**The sweep after the fix** (`docs/crosstest/2026-09-29-ratesweep-ours.tsv`,
+our daemon at `dd3d14d`; 3,905 of 3,960 answered; varied: five epochs
+1800–2100, twelve observer/frame/zodiac configurations including Zurich at
+500 m and Quito at 2,850 m, ΔT 0/30/140 on the worst cells, and 66 objects
+— bodies, nodes and apsides mean and osculating, the natural apsides, five
+stars). Worst angular 3.6e-6 °/day, the Moon's osculating perihelion from
+Quito. Worst non-star distance rate 1.72e-10 AU/day, unchanged. Worst star
+**7.05e-6 AU/day** (Polaris, Quito, 2026), down from 2.47e-5, and every
+one of the 299 star rows lies at its own h = 1/1024 floor, 18·ulp(r)/12h.
+Held fixed, and so the limit of the claim: the star list. The catalogue
+has 3,135 stars whose floor exceeds 1e-5 AU/day, the farthest (χ Aur,
+0.01 mas) 5.9e-3, so no absolute figure a sweep of five stars could
+recommend would be true of the catalogue as §3.5a measures it.
+
+**The rate sentence, approved on this side 2026-09-29** (worked out with
+the Astrolog session, who carry it to their maintainer; their maintainer
+delegated the wording to the two sessions): *"Rates are compared with a
+five-point central difference of the server's own f64 positions at h =
+1/1024 day. 0x0013's degPerDay bounds the angular rate error absolutely;
+its auPerDay bounds |distance-rate error| / max(1 AU, r), so it is
+absolute within 1 AU and relative beyond. Absent 0x0013: 1e-5 °/day and
+1e-9 AU/day under that reading."* Why each part:
+- **The step stays 1/1024.** The Astrolog side first proposed 1/32 to lower
+  the star floor; at 1/32 a topocentric Moon's five-point truncation alone
+  is 2.5e-4 °/day in longitude (measured, Quito, 2000 and 2026), 25 times
+  the default bound, where 1/1024 gives 2e-6.
+- **max(1 AU, r), not r.** Theirs, and better than this side's pure
+  relative version: the Moon and its points (0.0027 AU) keep an absolute
+  bound instead of one 400 times tighter. It loosens every object beyond
+  1 AU by its distance, not only stars — said so in the sentence's
+  rationale rather than "it moves only stars".
+- Under it, measured as above: 3.6e-6 °/day, 1.7e-10 per AU for the solar
+  system, and ≤ 2.6e-13 per AU for the stars (the floor at 1/1024 is at
+  most 3.4e-13 per AU for any distance). Nothing is advertised until the
+  sentence is in §3.5a and vendored here.
+
+**In §3.5a and vendored, the same day** (Astrolog `5f11726`; our
+`registries.json` `ad449ae6…`, whose A.3 tag 19 now reads the bound this
+way). `ratesweep.py` grades the distance column per max(1 AU, r), and its
+selftest pins that reading: the control puts its objects at 1e6 AU with
+1e-5 AU/day of error, inside the bound as read now and 100× over it as
+read before, and grading the absolute column again reds exactly that case.
+Our server under it (`docs/crosstest/2026-09-29-ratesweep-ours-graded.tsv`,
+the same axes as above): **within the A.3 default everywhere the sweep
+reached**, the ΔT pass included — 3.6e-6 °/day and 1.7e-10 per max(1 AU, r)
+against 1e-5 and 1e-9. **So `prometheiad` sends no `0x0013`**, and that is
+now a true statement rather than an unmet one: the default describes us
+with 2.8× and 5.8× headroom, and a tighter figure would claim more than a
+66-object grid can back.
+
+### Record w, 2026-09-29 (`docs/crosstest/2026-09-29w.tsv`)
+
+The joint review's C2 cell (this client against `astrolog-ephd`), with our
+daemon at `2906ecc` and theirs on :47392 at the 2026-09-20 13:37 build
+(pid 1766928, 1,739,128 bytes, sha256 `9635191d6ee5ec6c…`, read from
+`/proc` here). 3,758 rows, **identical to record v verdict for verdict**:
+agree 2,584, expected-difference 449, finding (theirs) 99, refused 46,
+refused (theirs) 548, unadjudicated 1, unanswered 9. `corrapplied.py` OK
+on both. Our sweep is the one above.
+
+**One new cell against their bound, and it is the Moon.** The sweep's ΔT
+pass: the topocentric Moon from Quito at JD 2415020.5, `deltaTSec` 140,
+reports 16.347988 °/day where a five-point difference of its own
+longitudes gives 16.341381 — a miss of **6.6e-3 °/day**, over their
+5e-3. At ΔT 69.2, the value the grid sweeps, the same cell misses by
+1.2e-3 and is inside. Checked by hand through the raw client as well as
+through the sweep: their differenced value agrees with ours to 3e-5 °/day,
+so it is their rate column (their registry §2.6, the topocentric Moon
+rates kept from Swiss), and ours misses by 8.4e-7 at both ΔT. Reported to
+them the same day. The Astrolog side has parked fixed-star work, so their
+advertised 4e-3 AU/day still does not cover topocentric star rows (their
+§2.11a); say so beside any comparison published before that changes.
+
+### Record x, 2026-09-29 (`docs/crosstest/2026-09-29x.tsv`): their rates, differenced
+
+Against the Astrolog build that differences its body rates from its own
+positions (their `218b00e`; daemon pid 1881350, 1,738,752 bytes, sha256
+`da91998a6f018ee2…`, mtime 2026-09-29 12:13:23, read from `/proc` here),
+with the ΔT arrival checks in every leg for the first time. 3,794 rows:
+agree 2,699, expected-difference 449, finding (theirs) 20, refused 46,
+refused (theirs) 548, unadjudicated 1, unanswered 9.
+
+- **The `rates` leg: 84 standing findings against them fall to 5,** and all
+  five are Sirius — a fixed star, whose rates they have parked
+  (STARS_BACKLOG.md). Every solar-system row agrees.
+- **ΔT arrives on both servers in every leg** (`deltat-arrival`: 17 legs ×
+  2 servers, every row reporting the value sent), and the two new `arrival`
+  rows agree on both: ΔT moves a topocentric Moon ~17″, and one connection
+  answers as a fresh one does — their stale observer stays fixed.
+- The other 15 findings are the standing `galequ-iau1958` pole transfer.
+
+**Their advertised bound is exceeded on one class it did not measure.**
+They now send `0x0013` = 5e-5 °/day and 2e-5 (read per max(1 AU, r)),
+measured over three observers. The sweep
+(`docs/crosstest/2026-09-29-ratesweep-theirs.tsv`) finds 33 of 3,147 rows
+over it, **every one a Jupiter or Saturn osculating orbit point seen
+topocentrically** from Zurich or Quito — the one body class they kept on
+their library's rates — worst 1.01e-4 °/day (Saturn's osculating
+aphelion, Quito, 2026), twice the figure. Reported to them the same day.
+
+### Record y, 2026-09-29 (`docs/crosstest/2026-09-29y.tsv`): their orbit points, differenced
+
+Against their `418841e` (pid 1965814, sha256 `aa78581909005975…`, mtime
+12:30:49, read from `/proc`), where every orbit-point row is differenced
+too and `ratesApprox` stays only on fixed stars. They now advertise
+`0x0013` = 3e-5 °/day and 1e-9. **Their sweep is within it everywhere it
+reached** (`docs/crosstest/2026-09-29-ratesweep-theirs-osc.tsv`: 3,147
+answered, none over, the ΔT pass included); their worst rows are all
+parked stars. Every leg verdict is identical to record x, so differencing
+moved no position. First record with the `epoch-arrival` rows (below).
+
+**Set 26, their 80,000 AU hypothetical, is a definition, not a defect.**
+Elements: epoch J2000, equinox of date, circular, in the ecliptic. They
+measured Swiss's solver converged (τ = 462.04 d; one pass and convergence
+agree) and its direction 63.7″ from B(t−τ) − E(t) built with the equinox at
+t − τ: 462 days of general precession. So the question is which instant an
+equinox of date means under light time. Ours takes the **emission
+instant**, as HYPOTHETICALS.md states — measured: 63.61″ and 63.62″ from
+the same elements with the equinox pinned to t, at J2000.0 and 2026.
+That is the physically consistent reading (an element set defines the
+body's state as a function of time, frame included, and the light arriving
+at t left at t − τ), and it is the §3.5a clarification agreed with the
+Astrolog side: *"under light time, the instant evaluated is the emission
+instant, for the elements and for an equinox of date alike."* Swiss then
+differs by the precession over τ, 64″ here and nothing measurable on a body
+with a short light time.
+
+**Five more element sets refereed the same day** (their stock elements,
+astrometric, geocentric, J2000 ecliptic, JD 2461300.5 TT). Ours equals
+B(t−τ) − E(t), built from our own geometric outputs, to under 3e-9″ for
+every one, with τ consistent to 1e-13 s. Against Swiss:
+- the two **Earth-centred** sets (their 17, 19) agree to 0.001″ — so the
+  definition holds for geocentric orbits, and the 0.4″/3.6″ their own
+  reconstruction showed there was in the reconstruction (retracted by
+  them);
+- 18 and 24 differ by 0.063″ and 0.041″, which is S6 (precession × τ);
+- **16 (a fast inner orbit, τ 0.005 d) differs by 0.103″**, where
+  precession accounts for 0.0007″ — ours and their independent
+  reconstruction agree, so this one is Swiss's. The Astrolog side then
+  found Swiss's answer depends on whether speeds are asked for: 0.103″ from
+  ours without, 0.024″ with (what Astrolog users see). Open on their side,
+  mechanism unknown;
+- set 26's 65.15″ is S6 (63.6″) plus the kind-4 mean-anomaly rule: its
+  file writes M = 0.0 + 0.0·T, which the protocol reads as M at epoch plus
+  the Gaussian mean motion (1.457″ by t−τ), and Swiss holds fixed. Its
+  56,000 km distance difference (4.7e-9 relative) is unexplained — not the
+  Sun's motion over τ (482,000 km along that line), nor a barycentric
+  rather than heliocentric focus (the Sun's offset along it is 194,000 km
+  at t and 676,000 km at t − τ). Left open, on their side.
+
+### Record z, 2026-09-29 (`docs/crosstest/2026-09-29z.tsv`): their ts.16 build, our Vondrák default
+
+Their :47392 was pid 2142244, sha256 `2ba4769d4d6c7b00…`, 1741784 bytes,
+binary mtime 14:14:26, engine "Swiss Ephemeris 2.10.03-ts.16", Astrolog
+`be6762f`. Ours was HEAD `0447aeb`, with precession now defaulting to
+Vondrák 2011. Verdicts: agree 2731, expected-difference 450, finding 1,
+finding (theirs) 20, refused 46, refused (theirs) 548, unadjudicated 1,
+unanswered 9. Against record y only the `apparent` leg changed. Both rate
+sweeps pass their advertisements, and corrapplied passes on both sides.
+
+- **Their fictitious-body fix is visible.** All 24 `hamburg` rows moved
+  closer to ours (worst 0.62 → 0.56 mas), and none moved away.
+- **The one finding was the harness's.** It is Mercury, barycentric,
+  light time only, true ecliptic of date, at 2100. The servers were
+  2.221 mas apart against a 2.214 mas band, where record y had 2.014 mas.
+  Our answer moved 0.22 mas, which is the Vondrák default; theirs did not
+  move. Taken apart with the frame dropped, 1.31 mas of the gap remains in
+  ICRF, and that is their `.se1` refit, which is all the band allowed for.
+  The other −0.99 mas is in longitude only in the date frame. That equals
+  their nutation in longitude minus ours at 2100: swetest prints 3.2894″,
+  our full IAU 2000A gives 3.2884″, so Swiss's default is truncated (0.5
+  mas at 1800 and at J2000). A true-of-date row carries the two sides'
+  frame models as well as the refit, and the `apparent` band had never
+  included them. It stayed inside only because our IAU 2006 frame
+  happened to sit 0.2 mas nearer theirs. The band now adds
+  `DATE_FRAME_BAND` = 1.7 mas: our apparent places against swetest's on
+  the same DE440, Sun and planets at the leg's eight epochs, worst 1.67
+  mas at 1800. That is measured, not tuned. Re-run with the legs its
+  adjudication needs, the row agrees and nothing else moves. S8's
+  obliquity is ~0 at these epochs (under 0.1 mas), so it is not part of
+  this.
+- **Their nutation was IAU 2000B, their S9** (Astrolog `3336574`; closed by ts.17, record aa).
+  §3.5a names IAU 2000A "or the server's advertised equivalent", and they
+  advertise none. By their measurement, full 2000A costs them 14× per row
+  for 0.97 mas. Their maintainer chooses between three options: state
+  2000B as the equivalent with its 1 mas bound, move to 2000A, or move to
+  2000A with a per-instant memo. `DATE_FRAME_BAND` stays until they say.
+
+### Record aa, 2026-09-29 (`docs/crosstest/2026-09-29aa.tsv`): their ts.17, S8 and S9 closed
+
+Their :47392 was pid 2228443, sha256 `00c25a7326cd8825…`, 1766576 bytes,
+binary mtime 14:41:48, engine 2.10.03-ts.17, Astrolog `0e6fa3f`. That build
+runs full IAU 2000A nutation, interpolated on quarter-day nodes (their S9),
+and takes the mean obliquity as the pole angle (their S8). Verdicts: agree
+2737, expected-difference 445, finding (theirs) 20 (the parked rates 5 and
+sidinstant 15), unadjudicated 1, unanswered 9, and no finding against
+either side. Both rate sweeps stay within their advertisements.
+
+- **The frame models now agree to 0.06 mas.** This is measured as (ours −
+  theirs) in the true ecliptic of date minus the same in ICRF, which
+  cancels their refit and leaves only the frame models. Over the
+  `apparent` leg's epochs and the geocentric and barycentric observers the
+  worst is 0.060 mas, against ~1 mas at 2100 and 1.67 mas at 1800 before.
+  The measurement reports an injected 1 mas as 1.06.
+  `DATE_FRAME_BAND` falls from 1.7 to 0.1 mas. Under it every
+  `apparent` row still agrees, the closest 0.11 mas inside its band.
+- **S8 is closed within their span.** Their files answer only a modern
+  span (errCode 3 at year 0, 1500, 2700 and beyond), so the arcsecond
+  epochs cannot be reached on their server. At 2390, where the series
+  obliquity would have put 5.0 mas between us, the frame term is
+  ≤ 0.13 mas (Sun, Mars, Jupiter). Their own figures for the pole angle
+  minus the series match ours at every epoch they quote.
+
+### The `hypotheticals` leg, 2026-09-29
+
+The `hamburg` leg compares the eight Hamburg points heliocentric and
+geometric (mask 0), so it holds the elements alone. Their G27 fix changed
+light time solved on the orbit, and that path appears only with
+corrections on. No leg had compared it, and `neptune-leverrier`, which both
+servers serve, was compared nowhere. The new leg takes every token both
+WELCOMEs advertise (A.3 0x0011), so a token either side adds is compared
+the day both serve it. It asks for them geocentric, true ecliptic of date,
+at the fullest mask both list for kind 3 (7), at 1900, 2000 and 2100.
+The band is `HAMBURG_BAND` + `DATE_FRAME_BAND`. Against their ts.17:
+
+- **The Hamburg points agree to 0.012 mas** at apparent place, with range
+  within 2e-9 AU. That is their G27 fix measured on the wire, and it is
+  better than the ≤ 0.0005″ they reported.
+- **`neptune-leverrier` differs by 100″, 219″ and 301″** (1900, 2000, 2100),
+  growing with time, with range 0.003–0.007 AU apart. The two servers
+  resolve it to different names ("Neptune (Le Verrier)" and "Leverrier
+  (Neptune)"). Kind 3 elements are server-defined (A.15), so this can be
+  two element sets under one token and not an engine defect. Ours is Le
+  Verrier's own printed orbit (Comptes rendus 23, 1846, p. 432;
+  HYPOTHETICALS.md). **Resolved the same day, a definition difference.**
+  Their set, as numbers, is the stock seorbel.txt set 12, citing W. G.
+  Hoyt, *Planets X and Pluto* (1980), p. 63: a 36.15 for Le Verrier's
+  36.154, M 34.05° for his 34.033°, with the same e, perihelion, epoch and
+  equinox. Our engine on those numbers, sent as kind 4, is 0.055, 0.013
+  and 0.010 mas from their answer, so the whole 100–301″ is the two
+  printed sets. The leg now re-proves this every run: for a token in
+  `DEFINITIONS` it asks our server for the other side's elements
+  (`tools/check/definitions/`), and marks the row expected-difference only
+  if that lands within the band of theirs. Shifting their M by 0.01° keeps
+  all three rows findings. Ours stays Le Verrier's own print: his is the
+  primary source, and Hoyt rounded it.
+
+`blindspots.py` measures the leg's reach as `--columns --deltat --hyp
+--jd`. It is blind to the correction bits, because it asks for no Sun or
+Moon for the epoch check to grade. Against a real second server, the
+comparison itself sees a dropped correction.
+
+### Sidereal orbit points, 2026-09-29
+
+The Astrolog side's own gate, running their real server source against
+`prometheiad`, found a defect in Swiss: a sidereal node or apsis carried
+the whole nutation in longitude, 12.8″ in 1990 and 17.4″ in 1900. It is
+fixed in their fork's ts.18 (their G30). Their sidereal nodes had been
+12.8″ off ours, and **no leg here asked for an orbit point in a sidereal
+zodiac**, so our cross-test could not see it. That is the reciprocal
+check's lesson again: a peer's defect names a path we should hold too.
+
+The `sidereal` leg now asks for the Moon's mean and osculating node and
+apogee (`301.a.m`, `301.a.o`, `301.A.m`, `301.A.o`) with its bodies, on the
+date and anchor planes, where each row is graded against its own tropical
+gap plus `SIDEREAL_EXTRA` (3 mas). Against their ts.18 all 128 point rows
+agree, the worst 1.7 mas beyond the tropical gap. The pre-fix 12.8″ would
+be a finding by three orders of magnitude. The points stay off the
+invariable plane: that check reads a constant origin offset across
+objects, which assumes every object's tropical gap is at the mas level,
+and the mean points' is up to 0.5″ (their definitions). `blindspots.json`
+records the leg now seeing `--node`.
+
+### Our v0.7.3 through Astrolog's own gates, 2026-09-29
+
+The Astrolog side rebuilt its prometheia source against v0.7.3 (`838d965`,
+C ABI 6) and ran two gates. Their cross-engine gate
+(`tools/ephsrv-prometheia.sh`, their real server source against
+`prometheiad`) passed 69 of 69, every scenario's worst identical to the run
+before the full TDB−TT series. The planets 0.2226″, small bodies 0.85″
+and rates 1.8e-4 °/day are two orbit solutions and their refit, printed to
+0.0001″. Their prometheia suite group passed 171 of 171, including the 78
+Object Selections bodies, the elements path and the long-span leg. At our
+suggestion their gate gained a leg (their `88adc58`): a catalog with no
+perturber kernel and Ceres at 1900. Our library refuses it with status 7,
+their chain falls through to Swiss with no warning, and changing the
+mapping of status 7 turns the leg red.
+
+### The legs' own selftest, 2026-09-29 (`tools/check/legtest.py`)
+
+The fault injections written up above — "1% on the textbook GM reds four
+rows", "a 1 s ΔT error turns 12 rows into findings", "a 1 mm range band
+gives 68 findings" — were each done by hand once. `legtest.py` re-runs
+them: with our daemon on both endpoints (`--self-compare`, so only a leg's
+graded reference can go red), `PROMETHEIA_XTEST_SABOTAGE` perturbs one
+reference the harness computes itself, and a case passes only when the red
+rows are **exactly** the target leg's.
+
+| sabotage | reference | red |
+|---|---|---|
+| none (control) | — | nothing |
+| `deflection-gm` | the textbook solar GM, +1% | `deflection-geo`, 4 rows |
+| `topo-deltat` | ΔT recovered from Horizons' sidereal time, +1 s | `horizons-topo`, 26 rows |
+| `horizons-range` | Horizons' light-time range, +10 m | `horizons`, 80 rows |
+| `bary-sun` | Horizons' barycentric Sun, +10 km | `horizons-bary`, 8 rows |
+
+A seventh case holds the rule that makes this safe: the harness refuses a
+sabotage unless both endpoints are our own server, so a deliberately wrong
+reference can never grade another project's server. Meta-falsified: a
+sabotage that no longer reaches its reference fails exactly its own case.
+It needs our daemon, so `tools/scheduled.sh` runs it beside `blindspots.py`.
+
+### What it leaves behind
+
+The leg table, committed as a dated record under `docs/crosstest/`. Every
+`finding` row becomes a test in whichever repository was wrong, citing the
+row. Nothing here enters `tools/gate.sh`, because it needs two daemons.
+
+## What each leg records
+
+One row per leg, machine-readable, so the session is reproducible afterwards
+and so a later regression has something to diff against:
+
+    epoch (TT, two-part) · object · observer · frame · plane · corrections mask
+    · ΔT sent · prometheiad answer · astrolog-ephd answer · separation (arcsec)
+    · anchor value and source · tier · verdict
+
+A verdict is `agree`, `expected-difference` (with the tier-3 reason), or
+`finding`. "Both servers agree, anchor disagrees" is a `finding`.
+
+## What this does not test
+
+Worth stating so nobody reads a green matrix as more than it is.
+
+- **Robustness.** Neither the numeric legs nor the protocol legs feed malformed
+  input. Since 2026-09-18 that is `tools/fuzz.sh`'s job (SERVER.md,
+  "Fuzzing"): libFuzzer over the codec and over the session. Its first
+  10-minute runs gave 2.36 million session inputs with no failure, and one
+  codec finding: DATA's non-finite values. It runs by hand, not in the gate,
+  and it is single-connection, so it says nothing about the next item.
+- **Load and duration.** Not in these legs, which are single-client and
+  short-session. Since 2026-09-18, `prometheia-load` covers `prometheiad`
+  (SERVER.md, "Load and soak"): 64 connections for 5 minutes at about 35,600
+  requests a second, with memory flat and nothing leaked, and the
+  per-address caps holding. It has not been pointed at `astrolog-ephd`.
+  - Until 2026-09-20 it also could not have said much if it had been: it
+    counted answers that *arrived* and never looked at their numbers, which
+    is the blindness the `arrival` leg was built to fix, in a second place.
+    It now re-asks fixed instants under load and grades them against the
+    same server's idle answer (SERVER.md, "Load and soak", "The canaries").
+    Nothing in it is ours-only — it speaks v4 and takes `--host`/`--port`
+    — so pointing it at their spare is a matter of their consent and a
+    quiet machine, not of code.
+  - What it would and would not show. It would show contention changing
+    *their* answers, their caps and their memory over a run. It would not
+    say whether their numbers are right: the baseline is their own idle
+    answer. That comparison is what every other leg here is for.
+
+#### Pointed at `astrolog-ephd`, 2026-09-20
+
+With the Astrolog session's consent and on terms agreed with them
+beforehand — their spare on 47392 only, 16 connections, 30 s, `--rows 1`,
+default canaries, **their caps and budget left exactly as they were**.
+Their daemon: `6dc840a`, `1734d363…`, 1,735,488 bytes, `--threads 2`,
+verified from this side by `/proc/<pid>/exe` before the run. 06:41:59Z to
+06:42:30Z.
+
+    answered   39997 (1333 req/s)
+    latency    p50 1.26  p90 2.07  p99 3.41  max 9.74 ms
+    errors     ERROR 6 x 351241
+    refused    0 at the upgrade (503)
+    failures   0
+    canaries   2463 answers graded, 0 differed
+    server     rss 29.4 -> peak 89.4 -> 89.4 MB after close; fds 38 -> 22
+
+Three results, in order of what they are worth.
+
+1. **Their answers do not change under contention.** 2,463 canary answers
+   graded against their own pre-load answers, every value bit for bit, the
+   shape, and every object's `resolvedNaif` against the id asked for. None
+   differed. This is consistency, not correctness — their numbers against
+   ours is every other leg's question — but it is the first statement
+   anyone has of that kind about their server.
+2. **Their compute budget matches ours to one request in twenty thousand,
+   and neither of us fitted it to the other.** The throttling is the whole
+   reason the throughput is 1,333/s rather than the 43,000/s ours gives
+   unthrottled, and it is the measurement, not an obstacle to one. At ten
+   cells a request: the first 10 s answered **19,999**, which is the
+   100,000-cell bucket's 10,000 requests plus 10,000 cells a second
+   refilling for ten seconds; the second and third windows answered 1,000
+   and 999 a second, which is the refill exactly. Our own limits run
+   (SERVER.md, "Load and soak") gave the same arithmetic for `prometheiad`:
+   "exactly 20,000 ten-cell requests were answered". Two independent
+   implementations of A.3's budget, landing on the same numbers. No leg
+   covers the limiter, and this is the only evidence either side has that
+   it is read the same way.
+   - Their advertised limit is `cellsPerSec` 10000 and `maxCells` 100000,
+     which is also where ours sits by default.
+   - 351,241 ERROR 6 in 30 s, every one honoured by waiting out its
+     `retryAfterMs`. No connection was dropped and no upgrade refused. The
+     Astrolog session asked beforehand that a run coming back mostly
+     ERROR 6 be taken as the answer rather than tuned around, which is
+     what made this a result instead of a retry at different settings.
+3. ~~**Their resident memory rose through the run and did not come back.**~~
+   **Settled the same day, and it turned into a finding against both of us.**
+   The Astrolog side measured their own growth against two `--cache-mb`
+   points: it tracks the cap and plateaus (8 MB cap → 8 MB grown, flat by
+   100 distinct windows; 64 → 64), and at their shipped 256 MB default the
+   plateau is about 285 MB. Our 29.4 → 89.4 over 30 s was that curve caught
+   before the knee. Marking it "not a finding" was right, and asking rather
+   than filing is what got it measured instead of argued.
+   - **The real finding was that neither project asserted anything about
+     memory.** A result cache that stopped evicting would have passed every
+     check on either side. They gated it in their soak's leg (e); ours is
+     `prometheia-load --memory-bound` (SERVER.md, "The memory bound"), with
+     the same pairing they arrived at: a bound *and* proof the cache is
+     really filling, because a bound alone passes a server that caches
+     nothing. That is the arrival row's lesson a third time, now in a
+     resource check.
+   - Our numbers, `--threads 1`: cap 8 → grew 11.3 MB, flat at 20.8 MB from
+     t=5s through t=60s over 818,169 requests; cap 64 → grew 89.3 MB; cap 0
+     → grew 0.1 MB and answered nothing from cache. Growth is about 1.4x the
+     cap at both points.
+   - Their own probe had been wrong before their server was interesting:
+     400 large windows moved RSS by 10 MB and they were one step from
+     concluding the cache was not storing, until `/metrics` showed **14
+     misses in 401 requests** — the rest were ERROR 6, discarded by their
+     own loop, after the first request drained the 100,000-cell bucket.
+     "Take the answer if it comes back ERROR 6" was advice they had given us
+     and then needed for their own harness. Fourth instrument defect in two
+     days across both projects, and the fourth time the program was fine.
+
+   The original observation, kept because the reasoning is the point:
+
+   **Their resident memory rose through the run and did not come back.**
+   29.4 MB at the first sample, 48.1 / 68.8 / 89.4 at ten-second marks, and
+   still 89.4 a second after every connection had closed, while open files
+   fell 38 → 22. **This run cannot tell a filling cache from unbounded
+   growth**, because it never plateaued inside 30 s, and a result cache
+   that has not filled yet looks exactly like this. Ours does the same
+   thing and is understood: it reaches 369 MB within 30 s as the caches
+   fill (64 MB a loop) and then stays there for the rest of a 5-minute
+   soak. Theirs was still climbing when the run ended, which is a statement
+   about the run's length and not about their server. **Not a finding**,
+   and it was not reported to them as one; a longer run at the same
+   settings would settle it, and is theirs to want.
+- **Kinds 3 and 4 against the Astrolog client.** This server now serves
+  named hypotheticals and bodies from elements; the Astrolog client does not
+  request them from any server, because its user's own element file defines
+  those bodies and a local Kepler solution is exact. So there is no
+  diagonal cell for them. Kind 4 is tested another way, below, and more
+  strongly than anything else here.
+
+### One command, 2026-09-20 (`tools/check/crossrun.py`)
+
+The cross-test needed two daemons, so it stayed out of `tools/gate.sh` — and
+nothing else ran it either. Every record above exists because someone
+remembered the whole sequence: start ours, check theirs is up, run
+`crosstest.py`, then `corrapplied.py` and `ratesweep.py` against each
+server, read four outputs, write up what changed. `tools/check/crossrun.py`
+is that sequence:
+
+    tools/check/crossrun.py --record
+
+It builds what it needs, starts `prometheiad` unless something already
+answers on the port, runs the four steps, stops **only the process it
+started**, and prints one summary. It never starts, stops or restarts their
+daemon: 47392 is the spare the Astrolog side put up for cross-tests and is
+the default, 47391 is theirs and is not ours to touch. If theirs is not
+answering it prints their launch line and stops, rather than proceeding
+with half a matrix.
+
+**The record is a file, not a verdict.** What it means still has to be read
+and written up here, by whoever ran it.
+
+**What it adds beyond convenience** is the diff. This matrix carries 99
+standing findings against their server and 548 rows their client does not
+ask for, all adjudicated above; a run that reproduces them exactly has
+found *nothing*, and a summary that says "99 findings" every time is one
+nobody reads by the third run. So the run compares its table against the
+previous record, by leg and verdict, and says either what changed or that
+nothing did.
+
+**Exit status is exactly "did any assertion fire"** (2026-09-20), over five
+named assertions, and four of them were silent failures. A record asked for
+and never written printed its own path in the summary and exited 0; a record
+with no rows read out as "this run found nothing new" about nothing; a
+comparison that raised printed a line to stderr and exited 0; and a run
+interrupted during the first step exited 0 with a summary of nothing. The
+comparison also diffed leg by leg across the whole table, so a narrowed run
+(`--legs`) reported every leg it had not run as `N -> 0` — a change in
+*their* server where the only thing that changed was what was asked. It now
+compares the legs both records carry and names the rest as not compared.
+Exit 2 is reserved for "could not run" — their daemon down, ours not coming
+up, the binaries missing — because a script pointed at another project's
+server must never let that read as a finding, or as a pass.
+`tools/check/crossruntest.py` drives one case per assertion with scripted
+steps (`fakecross.py`) and two sockets in place of the daemons, so it starts
+no daemon and never touches theirs; `tools/scheduled.sh` runs it.
+
+**First run, `docs/crosstest/2026-09-20v.tsv`** (3,758 rows, ours
+`1f70d75`, theirs `astrolog-ephd/2.0` built 2026-09-20T04:57:10Z). The
+header records a build time and not only a commit because a commit can
+postdate the binary; here the two are reconciled. **The record is valid for
+their `5558135`**: the Astrolog session reports that nothing the daemon
+compiles changed between `21eaee2` and `5558135` — the day's commits are
+elsewhere in their tree — and that rebuilding both commits *in the same
+path* gives one binary, the differing hash they first saw being 88 bytes of
+embedded build directory. That is their statement about their own source,
+which this side does not read (CLAUDE.md, "Cleanroom"). What is checked
+here: the process serving 47392 is still the same file, `mtime`
+2026-09-20T04:57:10Z, 1,735,488 bytes, so the record measures the daemon
+that is still running. Against
+record `u` the whole matrix is identical, verdict for verdict, except the
+three legs that did not exist when `u` was written:
+
+| leg | rows | verdict |
+|---|---|---|
+| `deflection-geo` | 10 | all agree |
+| `deflection-topo` | 23 | all agree |
+| `arrival` | 8 | all agree |
+
+That is the reproduction `u` never had: the same servers, the same
+questions, a different hour, the same 3,717 answers.
+
+**And the first run found a defect — in our own instrument.** Two
+`corrapplied.py` FAILs against their server: `Jupiter asc node` seen
+heliocentrically and barycentrically, whose `corrApplied` claimed
+deflection and aberration that "no mask WELCOME honours for this observer
+carries". Their WELCOME does declare them — in A.3 **0x0014**, the per-kind
+record (`corrkind observers 12 kinds 2 corrections 3/5/7`: helio and bary,
+kind 1, an orbit point). `corrapplied.py` read only 0x0004, the per-observer
+record, and `wirelib.py` had parsed 0x0014 and offered `permitted()` for
+exactly this since the per-kind drop. The check now unions both, and both
+servers pass; removing the union again reds exactly those two rows. Their
+server was doing what it advertised, in the record our tool did not read.
+
+The standing reds a clean run still prints, both adjudicated above:
+`ratesweep` on either server, for the Polaris distance row (§3.5a's
+distance tolerance cannot be met for a star), and the 99 `rates` and
+`sidinstant` findings against theirs. The runner exits non-zero when any
+step does; the diff is what says whether that means anything.

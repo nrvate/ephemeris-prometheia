@@ -1,0 +1,15 @@
+# crosstest 2026-09-20T04:57:04Z
+# ours   prometheiad/0.8.0 dataset Prometheia 0.7.0, JPL DE440 binary/linux_p1550p2650.440/-#7ddcde20 prometheia 80cb198
+# theirs astrolog-ephd/2.0 dataset astrolog-ephd/2.0/swiss 2.10.03-ts.14/files#a1e5f2aa astrolog 97a18db+dirty binary built 2026-09-20T04:46:31Z
+# angles in arcsec; positions lon/lat or RA/Dec in degrees; docs/CROSS-TEST.md
+leg	epoch_tt	object	observer	frame	plane	mask	deltat	ours	theirs	anchor	anchor_source	sep_servers	sep_ours_anchor	sep_theirs_anchor	band	tier	verdict	note	req_ours	req_theirs
+deflection-geo	2451727	4	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	9.905e-05	6.346e-11	7.064e-07	2.000e-04	3	agree	elongation 0.872 deg; the textbook term here is 0.3212"	1095004373	1106821797
+deflection-geo	2453083	4	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	1.469e-04	4.041e-11	1.245e-10	2.000e-04	3	agree	elongation 59.971 deg; the textbook term here is 0.0039"	1111898259	1122343171
+deflection-geo	2452075	5	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	3.414e-04	3.769e-10	1.080e-05	2.000e-04	3	agree	elongation 0.318 deg; the textbook term here is 1.2032"	1129019473	1138904963
+deflection-geo	2452155	5	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	1.479e-04	1.943e-11	3.599e-10	2.000e-04	3	agree	elongation 59.893 deg; the textbook term here is 0.0058"	1152897811	1154489113
+deflection-geo	2452365	6	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	7.673e-04	2.153e-11	4.081e-10	2.000e-04	3	agree	elongation 59.797 deg; the textbook term here is 0.0064"	1169897031	1171603863
+deflection-geo	2452815	6	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	4.011e-04	1.567e-10	1.267e-06	2.000e-04	3	agree	elongation 0.804 deg; the textbook term here is 0.5135"	1185581905	1187833261
+deflection-geo	2451633	199	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	3.546e-04	2.369e-11	3.669e-10	2.000e-04	3	agree	elongation 27.817 deg; the textbook term here is 0.0026"	1201165313	1211424481
+deflection-geo	2452767	199	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	6.813e-04	5.124e-12	3.695e-11	2.000e-04	3	agree	elongation 0.339 deg; the textbook term here is 0.0000", below the 0.0002" band: this row grades nothing	1216575129	1228276969
+deflection-geo	2451705	299	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	5.018e-04	1.152e-10	1.784e-06	2.000e-04	3	agree	elongation 0.529 deg; the textbook term here is 0.3606"	1233979273	1243844801
+deflection-geo	2451927	299	geo	ICRF	equator	3	69.2				textbook deflection (USNO Circular 179) on each server's own mask-1 answer	2.671e-04	8.412e-11	2.735e-10	2.000e-04	3	agree	elongation 47.091 deg; the textbook term here is 0.0017"	1257765193	1261133693

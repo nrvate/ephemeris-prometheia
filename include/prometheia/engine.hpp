@@ -1,0 +1,725 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+// prometheia::Engine — the positions API. An Engine owns one planetary
+// ephemeris (a JPL DE binary or a NAIF SPK kernel, detected from the
+// file) and answers calc(body, time, options) with ecliptic or
+// equatorial coordinates, their daily rates, and the provenance of the
+// answer.
+//
+// Pipeline for one query (details and validation in docs/ENGINE.md):
+//   1. TT -> TDB; observer barycentric state (Earth, Earth + site, Sun
+//      or the barycentre).
+//   2. Light time: the body's barycentric position at t - tau, iterated
+//      to convergence.
+//   3. Gravitational deflection by the Sun, then relativistic annual
+//      (and diurnal, when topocentric) aberration.
+//   4. ICRF -> frame bias -> IAU 2006 precession -> IAU 2000A nutation
+//      as the requested frame demands, then spherical coordinates; a
+//      sidereal option then rotates the longitude zero point by the
+//      zodiac's ayanamsha.
+// Rates come from central differences of the whole pipeline (h = 1/4096
+// day) with the TDB offset held fixed across the stencil (ENGINE.md,
+// "Rates"), so they are rates of the *apparent* coordinates. A fixed star's
+// distance rate is the exception: it is computed in closed form, since a
+// difference of its 1e5..1e10 AU distance is one f64 ulp (ENGINE.md, "Rates").
+//
+// Body identity is the NAIF integer ID, the same key the catalog uses
+// for small bodies. For Mars through Pluto the JPL planetary files carry
+// system barycentres only (IDs 4-9); the planet-centre IDs 499..999 are
+// answered only by an ephemeris that has them. Bodies the ephemeris
+// does not know are looked up in the catalogs added with add_catalog()
+// — small bodies by SPK-ID, integrated on demand.
+//
+// Threading: what an Engine loads (ephemerides, catalogs, perturbers,
+// hypotheticals) is a Corpus. A frozen Corpus is read-only and is shared by
+// any number of Engines, one per thread (Engine::open_context). An Engine
+// itself caches records, frames and integrated trajectories, and is used by
+// one thread at a time. Engine::open builds a private Corpus, as before.
+// There is no process-wide state.
+#ifndef PROMETHEIA_ENGINE_HPP
+#define PROMETHEIA_ENGINE_HPP
+
+#include <cstddef>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "prometheia/catalog.hpp"
+#include "prometheia/error.hpp"
+#include "prometheia/frames.hpp"
+#include "prometheia/houses.hpp"
+#include "prometheia/time.hpp"
+
+namespace prometheia {
+
+namespace body {
+constexpr int kSolarSystemBary = 0;
+constexpr int kEarthMoonBary = 3;
+constexpr int kSun = 10;
+constexpr int kMercury = 199;
+constexpr int kVenus = 299;
+constexpr int kEarth = 399;
+constexpr int kMoon = 301;
+constexpr int kMars = 4; // system barycentres from here on
+constexpr int kJupiter = 5;
+constexpr int kSaturn = 6;
+constexpr int kUranus = 7;
+constexpr int kNeptune = 8;
+constexpr int kPluto = 9;
+} // namespace body
+
+// Where the observer is.
+enum class Center {
+    Geocentric,   // the geocentre
+    Topocentric,  // a site on the WGS84 ellipsoid (CalcOptions::site)
+    Heliocentric, // the Sun's centre
+    Barycentric,  // the solar-system barycentre
+    Body,         // the centre of CalcOptions::center_body (planet-centred)
+};
+
+// Reference frame of the output.
+enum class Frame {
+    ICRF,       // ICRF axes; ecliptic output uses the J2000 mean obliquity
+    J2000,      // mean equator and equinox of J2000.0 (ICRF + frame bias)
+    MeanOfDate, // + IAU 2006 precession
+    TrueOfDate, // + IAU 2000A nutation (equinox of date)
+};
+
+enum class Coords {
+    Ecliptic,   // longitude, latitude
+    Equatorial, // right ascension, declination
+};
+
+// Sidereal zodiac for the output. Tropical (the default) answers plain
+// positions; the other modes subtract the zodiac's ayanamsha from the
+// ecliptic longitude of date. The integer values of the published
+// modes follow the Swiss Ephemeris command-line numbering (swetest
+// -ay<mode>). User anchors the zodiac at an explicit epoch and value
+// (CalcOptions::sidereal_epoch_jtdb, sidereal_ayanamsa_deg — the MEAN
+// ayanamsha at that TT epoch).
+//
+// The rest are defined at the instant rather than at an epoch: a star, the
+// Galactic Centre or the galactic node held at a fixed sidereal longitude on
+// the true ecliptic of date, at its true position (no aberration, no
+// deflection), per the published definitions (docs/FRAMES.md, "Zodiacs
+// defined at the instant"). They have no anchor epoch, so the ecliptic of
+// the anchor epoch (SiderealPlane::EclipticOfAnchor) is refused for them.
+enum class SiderealMode : int {
+    Tropical = -1,
+    FaganBradley = 0,
+    Lahiri = 1,
+    Raman = 3,                      // (Y - 397) x 50 1/3", a linear rule (docs/FRAMES.md)
+    GalacticCentre0Sag = 17,        // Sgr A* at 240°
+    TrueCitra = 27,                 // Spica (alpha Vir) at 180°
+    TrueRevati = 28,                // zeta Psc at 359°50'
+    TruePushya = 29,                // delta Cnc at 106°
+    GalacticCentreGilBrand = 30,    // Sgr A* at the golden section of 0° Sco..0° Aqu
+    GalacticEquatorIau1958 = 31,    // the galactic node (IAU 1958 pole) at 240°
+    GalacticEquatorTrue = 32,       // the galactic node (Liu et al. 2011 pole) at 240°
+    GalacticEquatorMula = 33,       // the galactic node (Liu et al. 2011 pole) at 246°40'
+    TrueMula = 35,                  // lambda Sco at 240°
+    GalacticCentreMulaWilhelm = 36, // Sgr A* projected along its hour circle to 246°40'
+    GalacticCentreCochrane = 40,    // Sgr A* at 270°
+    User = 255,
+};
+
+// The plane a sidereal longitude is counted along (protocol v4 A.8). The
+// ecliptic of date subtracts the ayanamsha as it moves; the other two are
+// fixed planes where longitude is counted from the zodiac's zero point with
+// no precession term: the mean ecliptic and equinox of the zodiac's anchor
+// epoch t0, or the invariable plane of the solar system
+// (frames::kInvariablePoleIcrf), with the zero point (longitude A0 on the
+// ecliptic of t0) projected onto it. The fixed planes need ecliptic
+// coordinates and ignore CalcOptions::frame (their plane is the frame);
+// Position::ayanamsa_deg reports A0 for them (docs/FRAMES.md). A zodiac
+// defined at the instant has no t0: the ecliptic of the anchor epoch is
+// refused, and on the invariable plane the zero point is sidereal longitude
+// 0 on the mean ecliptic of the instant asked, with its mean ayanamsha
+// reported.
+enum class SiderealPlane : int {
+    EclipticOfDate = 0,
+    EclipticOfAnchor = 1,
+    Invariable = 2,
+};
+
+// Precession model of the date frames (and of the sidereal zodiacs' drift).
+// IAU 2006 is the standard near the present; Vondrak, Capitaine & Wallace
+// (2011) stays valid over +-200 millennia (docs/FRAMES.md). Nutation is IAU
+// 2000A either way.
+// Vondrak, Capitaine & Wallace 2011 is the default (maintainer, 2026-09-29):
+// within 1550-2650 it agrees with IAU 2006 to 0.01", and outside it IAU 2006
+// parts from it by arcseconds at 3000 years and degrees at 10,000, so one
+// model serves every date the ephemerides reach with no seam (docs/FRAMES.md).
+enum class Precession : int {
+    IAU2006 = 0,
+    Vondrak2011 = 1,
+};
+
+// A point of a body's orbit, for Engine::calc_orbit_point.
+enum class OrbitPoint {
+    AscendingNode,  // where the orbit crosses the ecliptic northward
+    DescendingNode, // ... southward
+    Perihelion,     // the nearest point (perigee for the Moon)
+    Aphelion,       // the farthest point (apogee); elliptic orbits only
+};
+
+// Which orbit: the osculating one of the body's state at the instant, the
+// mean one (docs/ENGINE.md, "Nodes and apsides"), or, for the Moon's apogee
+// and perigee only, the natural one: interpolated between the Moon's actual
+// passages through them (docs/ORBIT-POINTS.md, "The natural apsides"). The
+// values are protocol v4's A.14 methods 0-2.
+enum class OrbitElements {
+    Mean,
+    Osculating,
+    Interpolated,
+};
+
+// The reference plane and equinox a set of orbital elements is given in
+// (ephemeris protocol v4, A.16).
+enum class ElementEquinox {
+    J2000,    // mean ecliptic and equinox of J2000.0
+    B1950,    // ... of B1950.0 (JD 2433282.4235 TT), dynamically; not FK4
+    J1900,    // ... of J1900.0 (JD 2415020.0 TT)
+    OfDate,   // ... of the instant the elements are evaluated at
+    Explicit, // ... of PolynomialElements::equinox_jd_tt
+};
+
+// The body the elements' orbit is about: the protocol's "centre" (v4 A.21),
+// named origin here so it cannot be read as the observer's Center.
+enum class ElementOrigin {
+    Sun,
+    Earth,
+};
+
+// A body defined by its orbital elements rather than by an ephemeris: a
+// hypothetical planet, a predicted one, a fictitious moon. Each element is a
+// polynomial in T = (t_TT - epoch) / 36525 Julian centuries, and the motion is
+// pure two-body Keplerian about its origin, with no perturbations. This is
+// ephemeris protocol v4's kind 4; docs/HYPOTHETICALS.md has the conventions.
+struct PolynomialElements {
+    double epoch_jd_tt = 2451545.0;
+    ElementEquinox equinox = ElementEquinox::J2000;
+    double equinox_jd_tt = 0.0; // ElementEquinox::Explicit only; zero otherwise
+    ElementOrigin origin = ElementOrigin::Sun;
+    int n_terms = 1; // 1..5: the terms each polynomial below uses
+    // Coefficients of T^0 .. T^(n_terms-1), in the protocol's order: mean
+    // anomaly (deg), semi-major axis (AU), eccentricity, argument of
+    // perihelion (deg), ascending node (deg), inclination (deg).
+    double mean_anomaly[5] = {};
+    double semi_major_axis[5] = {};
+    double eccentricity[5] = {};
+    double arg_perihelion[5] = {};
+    double ascending_node[5] = {};
+    double inclination[5] = {};
+};
+
+struct CalcOptions {
+    Center center = Center::Geocentric;
+    Frame frame = Frame::TrueOfDate;
+    Coords coords = Coords::Ecliptic;
+    SiderealMode sidereal = SiderealMode::Tropical;
+    SiderealPlane sidereal_plane = SiderealPlane::EclipticOfDate; // with a sidereal zodiac
+    Precession precession = Precession::Vondrak2011;
+    double sidereal_epoch_jtdb = 0.0;   // SiderealMode::User anchor epoch
+    double sidereal_ayanamsa_deg = 0.0; // SiderealMode::User anchor value
+    bool light_time = true;             // retarded position of the body
+    bool deflection = true;             // Sun's gravitational light bending
+    bool aberration = true;             // observer-velocity aberration
+    bool speed = true;                  // compute daily rates (3x the work)
+    bool sigma = true;                  // catalog bodies: sigma_arcsec (12 extra integrations)
+    frames::GeoSite site{};             // Center::Topocentric only
+    // Center::Body only: the observing body's NAIF ID / SPK-ID, answered like
+    // any body (ephemeris or catalog). Light time, deflection and
+    // aberration are applied for an observer there, moving with the body.
+    int center_body = body::kSun;
+
+    // Presets. apparent(): what an observer sees, in the true equinox of
+    // date. astrometric(): light time only (ICRF-style catalogue place).
+    // geometric(): instantaneous positions, no corrections.
+    static CalcOptions apparent() { return CalcOptions{}; }
+    static CalcOptions astrometric() {
+        CalcOptions o;
+        o.deflection = o.aberration = false;
+        return o;
+    }
+    static CalcOptions geometric() {
+        CalcOptions o;
+        o.light_time = o.deflection = o.aberration = false;
+        return o;
+    }
+};
+
+struct Position {
+    // Ecliptic: longitude [0, 360), latitude; equatorial: right
+    // ascension [0, 360), declination. Degrees; distance in AU.
+    double lon_deg = 0.0;
+    double lat_deg = 0.0;
+    double dist_au = 0.0;
+    double lon_speed = 0.0;  // degrees/day
+    double lat_speed = 0.0;  // degrees/day
+    double dist_speed = 0.0; // AU/day
+    // The same vector in rectangular form, in the output frame.
+    double xyz_au[3] = {0.0, 0.0, 0.0};
+    double vel_au_day[3] = {0.0, 0.0, 0.0};
+};
+
+struct Provenance {
+    std::string_view source;      // e.g. "JPL DE440 binary" (valid while the Engine lives)
+    int denum = 0;                // DE number when known, else 0
+    double light_time_days = 0.0; // tau applied (0 without light_time)
+    Precession precession = Precession::Vondrak2011; // the model used
+    // The model behind a quantity the ephemeris alone does not fix: a mean
+    // orbit point's elements, an interpolated apsis. Empty otherwise; a
+    // named hypothetical's element set is its source, as it always was.
+    // A static string, valid while the Engine lives; absent from the C API.
+    std::string_view model;
+};
+
+struct CalcResult {
+    Position pos;
+    Provenance provenance;
+    // 1-sigma uncertainty of the body's direction on the sky, in
+    // arcsec: the square root of the larger eigenvalue of the position
+    // covariance projected on the plane perpendicular to the
+    // observer->body line, divided by the observer->body distance. The
+    // covariance is the orbit solution's full element covariance (the
+    // record's kCovariance block, at its own epoch) propagated through the
+    // same integration that produces the position; the observer is exact.
+    // Present (>= 0, zero for an all-zero covariance) only for catalog
+    // bodies whose record carries a covariance — otherwise absent: the
+    // planetary ephemeris publishes none, and per-element sigmas alone are
+    // uncorrelated summaries that would overstate it 10-1000x (measured
+    // against JPL Horizons), so they are not used. Eigenvalues survive the frame
+    // rotations, so this is frame-independent and ignores the
+    // light-optics corrections (deflection, aberration).
+    std::optional<double> sigma_arcsec;
+
+    // The longitude shift applied for a sidereal output (degrees): the
+    // zodiac's true ayanamsha in the of-date frames, its mean value for
+    // the J2000/ICRF frames (whose ecliptic is the mean ecliptic of
+    // J2000, where the ayanamsha has a fixed value). Absent for a
+    // tropical request.
+    std::optional<double> ayanamsa_deg;
+};
+
+namespace hypotheticals {
+struct Body;
+}
+
+// The data engines read, loaded once: the planetary ephemerides, the
+// small-body catalogs, an asteroid perturber kernel and the hypothetical
+// bodies. Built with open and the add_* calls (each as Engine's), then
+// frozen; a frozen Corpus refuses add_* and is safe to read from any number
+// of threads, through one Engine each (Engine::open_context).
+class Corpus {
+public:
+    static Result<std::shared_ptr<Corpus>> open(const std::string& ephemeris_path);
+    ~Corpus();
+
+    Result<void> add_ephemeris(const std::string& ephemeris_path);
+    Result<void> add_catalog(const std::string& catalog_path);
+    Result<void> add_perturbers(const std::string& spk_path);
+    Result<void> add_hypotheticals(const std::string& element_file_path);
+
+    // No more add_* after this; engines may now share the Corpus.
+    void freeze();
+    bool frozen() const;
+
+    struct Data; // the contents (src/engine.cpp)
+
+private:
+    Corpus();
+    friend class Engine;
+    std::unique_ptr<Data> d_;
+};
+
+class Engine {
+public:
+    Engine();
+    ~Engine();
+    Engine(Engine&&) noexcept;
+    Engine& operator=(Engine&&) noexcept;
+
+    // Opens a planetary ephemeris: a JPL DE binary or a DAF/SPK kernel
+    // (detected by content, not extension).
+    static Result<Engine> open(const std::string& ephemeris_path);
+
+    // An engine reading a frozen Corpus that other engines may share: its
+    // own caches, the Corpus's data. ArgumentError for a Corpus not frozen.
+    // Its add_* calls are refused (ArgumentError); add to the Corpus before
+    // freezing it instead.
+    static Result<Engine> open_context(std::shared_ptr<const Corpus> corpus);
+    // The Corpus this engine reads (Engine::open's private one included).
+    std::shared_ptr<const Corpus> corpus() const;
+
+    // Adds a further planetary ephemeris behind the ones already open, for
+    // the instants they do not cover: each ephemeris read goes to the first
+    // file whose span holds it, and falls through only on a coverage error.
+    // So DE440 opened first and DE441 added answers 1550-2650 from DE440 and
+    // -13000..17000 outside it from DE441 (docs/DE.md, "DE441"). Provenance
+    // names the file that answered. The GM constants stay the first file's.
+    Result<void> add_ephemeris(const std::string& ephemeris_path);
+
+    // Adds a small-body catalog (an EPM1 container, docs/FORMAT.md).
+    // Catalog bodies answer calc() under their SPK-ID — the same NAIF
+    // integer ID space as the planets. Positions come from on-demand
+    // integration of the catalog's osculating elements in a barycentric
+    // point-mass force field built from the engine's own ephemeris
+    // (Sun plus Mercury..Pluto at their system barycentres; Earth and
+    // Moon split from the Earth-Moon barycentre), memoized per body.
+    // Records carrying a full covariance also answer CalcResult::
+    // sigma_arcsec. May be called more than once; the newest catalog
+    // wins when several carry the same body, and any small-body
+    // positions and uncertainties cached so far are invalidated.
+    Result<void> add_catalog(const std::string& catalog_path);
+
+    // Adds an asteroid perturber kernel (a NAIF SPK file of heliocentric
+    // segments for numbered asteroids under ids 2000000 + number, such as
+    // JPL's sb441-n16.bsp). Every body with a known mass — the DE file's
+    // MAnnnn constant, or the built-in DE440 table for the SB441-N16 set —
+    // joins the force model for catalog bodies; a body never perturbs itself
+    // (the SBDB SPK-ID 20000000 + number is matched). The kernel's bodies are
+    // still integrated from the catalog's current elements: the kernel's own
+    // trajectories come from older orbit solutions (measured tens of km off
+    // the current ones near the present). Replaces an earlier perturber
+    // kernel and invalidates the integrated trajectories and uncertainty
+    // tracks. Without a kernel a catalog body is served within 100 years (and
+    // a day) of its element epoch and refused beyond with a CoverageError;
+    // with one, as far as the kernel spans (docs/VALIDATION.md, "Small
+    // bodies"; tools/fetch/de_fetch.py --only sb441 provisions it).
+    Result<void> add_perturbers(const std::string& spk_path);
+
+    // Drops every memoized small-body trajectory and uncertainty track (they
+    // rebuild on the next query that needs them). Integrated trajectories are
+    // kept for the engine's lifetime otherwise — a few kilobytes per body per
+    // year of coverage — so a long-running process or a whole-catalog sweep
+    // calls this to bound memory. The perturber tables are kept, and so are
+    // the windows the corpus keeps for all its engines, which are bounded.
+    void release_small_bodies();
+    // Small-body windows this engine integrated itself, ever, and those the
+    // corpus keeps for all its engines (docs/ENGINE.md, "Threads").
+    uint64_t small_body_windows_integrated() const;
+    size_t small_body_windows_kept() const;
+    // Segments of a body's own track this engine integrated that a cubic could
+    // not hold, so that it sampled them more finely (docs/ENGINE.md).
+    uint64_t small_body_segments_refined(int spkid) const;
+
+    // Resolves a small body by its primary designation or proper name —
+    // "1", "Ceres", "ceres" — to its SPK-ID, the integer calc() takes.
+    // Matching is ASCII-case-insensitive. The index is built from the
+    // catalogs added with add_catalog(); when several of them carry the
+    // same name, the newest one wins. NotFound when no loaded catalog
+    // answers the name (planets are not indexed; address those by their
+    // NAIF IDs directly).
+    Result<int> lookup(std::string_view name) const;
+
+    // A catalog body's identities: its primary designation and proper name
+    // (docs/FORMAT.md's string pool), for consumers that must present a
+    // catalog body by name — the protocol's LOOKUP answers. NotFound for a
+    // body no loaded catalog carries; the newest catalog wins, as lookup()
+    // does. The name is empty for a body catalogued by designation alone.
+    struct BodyNames {
+        std::string designation, name;
+        std::string provisional_designation; // a numbered body's old one (1.2 catalogs)
+    };
+    Result<BodyNames> names(int spkid) const;
+
+    // Position of `body` at a TT Julian date.
+    Result<CalcResult> calc(int body, double jd_tt, const CalcOptions& opts = {});
+
+    // Same, at a UT1 Julian date, converted with the Delta T model.
+    Result<CalcResult> calc_ut(int body, double jd_ut1, const CalcOptions& opts = {});
+
+    // A node or apsis of `body`'s orbit, as a point in space seen by the
+    // options' observer in the options' frame (docs/ENGINE.md, "Nodes and
+    // apsides"). The orbit is heliocentric, or geocentric for the Moon and
+    // the Sun (the Sun's is the Earth's reflected through the focus), and
+    // the ecliptic is the mean ecliptic of date in every frame: the frame
+    // gives the coordinates, not which point it is. Corrections apply
+    // as sent, exactly as to a body (light time by the point's slow
+    // fixed-point, deflection with the Sun-observer skip, aberration); see
+    // docs/ORBIT-POINTS.md for why and what that is worth. Rates are
+    // central differences, as for calc(); sigma is never set.
+    // ArgumentError where the point is undefined (nodes of an orbit in the
+    // ecliptic, apsides of a circular orbit, the aphelion of an open one).
+    Result<CalcResult> calc_orbit_point(int body, OrbitPoint point, OrbitElements elements,
+                                        double jd_tt, const CalcOptions& opts = {});
+    Result<CalcResult> calc_orbit_point_ut(int body, OrbitPoint point, OrbitElements elements,
+                                           double jd_ut1, const CalcOptions& opts = {});
+
+    // A fixed star or deep-sky object of the compiled-in catalog
+    // (prometheia/stars.hpp; find its index with stars::find) as seen by the
+    // options' observer (docs/STARS.md, "Apparent place"). The catalog
+    // position moves along the star's straight-line space motion (proper
+    // motion, parallax, radial velocity) from its catalog epoch; the vector
+    // from the observer (parallax) then takes the Sun's deflection and
+    // aberration as options say, and the output frame and zodiac as for
+    // calc(). light_time does not apply: catalog positions are already
+    // directions of arrival. Distance is the parallax distance in AU, or
+    // kStarNoParallaxAu for objects without a parallax. sigma is never set.
+    static constexpr double kStarNoParallaxAu = 1e10;
+    // A body from polynomial orbital elements (PolynomialElements). The
+    // corrections apply exactly as for a body: light time is solved through
+    // the same two-body motion, and rates are those of the returned position.
+    Result<CalcResult> calc_elements(const PolynomialElements& elements, double jd_tt,
+                                     const CalcOptions& opts = {});
+    Result<CalcResult> calc_elements_ut(const PolynomialElements& elements, double jd_ut1,
+                                        const CalcOptions& opts = {});
+
+    // Named hypothetical bodies (docs/HYPOTHETICALS.md). The shipped element
+    // set is loaded when the engine opens; add_hypotheticals() adds an element
+    // file (JSON Lines), whose bodies win over any earlier definition of the
+    // same token. Adding invalidates the source strings of earlier results.
+    Result<void> add_hypotheticals(const std::string& element_file_path);
+    // The tokens defined, in the order they were first defined.
+    std::vector<std::string> hypothetical_tokens() const;
+    // A token's current definition (name, set, citation, elements), or
+    // nullptr. Matched ASCII case-insensitively, like every name here.
+    const hypotheticals::Body* hypothetical(std::string_view token) const;
+    // A named body, computed from its elements exactly as calc_elements()
+    // does; the result's provenance source is the element set's name.
+    Result<CalcResult> calc_hypothetical(std::string_view token, double jd_tt,
+                                         const CalcOptions& opts = {});
+    Result<CalcResult> calc_hypothetical_ut(std::string_view token, double jd_ut1,
+                                            const CalcOptions& opts = {});
+
+    Result<CalcResult> calc_star(size_t star_index, double jd_tt, const CalcOptions& opts = {});
+    Result<CalcResult> calc_star_ut(size_t star_index, double jd_ut1, const CalcOptions& opts = {});
+
+    // House cusps and the chart's angles at a site (docs/HOUSES.md): the
+    // true obliquity and apparent sidereal time of date under opts.precession,
+    // the site's geodetic latitude and east longitude (its height is not
+    // used). Tropical, or sidereal on the ecliptic of date (opts.sidereal):
+    // every longitude less the zodiac's true ayanamsha, and Whole Sign's
+    // houses from the sidereal Ascendant's sign. Only Frame::TrueOfDate and
+    // SiderealPlane::EclipticOfDate are served; the other CalcOptions fields
+    // do not enter. No ephemeris file is read, save for a zodiac defined by a
+    // star or the Galactic Centre at the instant.
+    struct HouseResult {
+        houses::Houses houses;
+        double jd_tt = 0.0, jd_ut1 = 0.0;
+        double obliquity_deg = 0.0;         // true obliquity of date
+        std::optional<double> ayanamsa_deg; // sidereal only
+        Precession precession = Precession::Vondrak2011;
+    };
+    Result<HouseResult> houses(houses::System system, double jd_tt, const frames::GeoSite& site,
+                               const CalcOptions& opts = {});
+    Result<HouseResult> houses_ut(houses::System system, double jd_ut1, const frames::GeoSite& site,
+                                  const CalcOptions& opts = {});
+
+    // Greenwich sidereal time as an angle, degrees in [0, 360), at a UT1
+    // Julian date (TT from the engine's Delta T): mean (GMST, IAU 2006: the
+    // Earth Rotation Angle plus the precession in right ascension) or
+    // apparent (GAST: plus the equation of the equinoxes, from the nutation
+    // and the mean obliquity under `precession`), the angle houses() takes
+    // its ARMC from. Add the east longitude for local sidereal time.
+    Result<double> sidereal_time_ut(double jd_ut1, bool apparent,
+                                    Precession precession = Precession::Vondrak2011);
+
+    // The obliquity of the ecliptic at a TT Julian date, degrees: mean
+    // under `precession`, or true (plus the nutation in obliquity), the one
+    // houses() uses.
+    Result<double> obliquity(double jd_tt, bool true_obliquity,
+                             Precession precession = Precession::Vondrak2011);
+
+    // A direction on the true equator and equinox of date (a body's
+    // topocentric apparent position, for one seen from the site) at a UT1
+    // instant, in the site's horizon (docs/FRAMES.md, "The horizon"): the
+    // hour angle from the local apparent sidereal time, sidereal_time_ut's
+    // GAST plus the east longitude. Geodetic latitude; polar motion is
+    // neglected. With an atmosphere the apparent altitude carries Bennett's
+    // refraction, down to the dip of the site's height (or -1 deg); without
+    // one it equals the true altitude.
+    struct Horizontal {
+        double azimuth_deg = 0.0;           // from north through east, [0, 360)
+        double altitude_deg = 0.0;          // true: no refraction
+        double apparent_altitude_deg = 0.0; // refracted
+        double hour_angle_deg = 0.0;        // local apparent, [0, 360)
+    };
+    Result<Horizontal> horizontal_ut(double jd_ut1, const frames::GeoSite& site, double ra_deg,
+                                     double dec_deg, const frames::Atmosphere* atmosphere,
+                                     Precession precession = Precession::Vondrak2011);
+    // And back: an azimuth and an altitude (apparent, refraction removed,
+    // when `apparent`) to right ascension and declination of date.
+    struct Equatorial {
+        double ra_deg = 0.0; // [0, 360)
+        double dec_deg = 0.0;
+    };
+    Result<Equatorial>
+    equatorial_from_horizontal_ut(double jd_ut1, const frames::GeoSite& site, double azimuth_deg,
+                                  double altitude_deg, bool apparent,
+                                  const frames::Atmosphere* atmosphere,
+                                  Precession precession = Precession::Vondrak2011);
+
+    // Any object the engine computes: a body by NAIF id or catalog SPK-ID, a
+    // star by catalog index, a hypothetical body by token, or an orbit point
+    // of body `id` (point and method). calc_object() answers each by the
+    // call that computes it (calc, calc_star, calc_hypothetical,
+    // calc_orbit_point); rise_set_ut() finds its events. The object
+    // registry (prometheia/registry.hpp) gives every object's ObjectRef.
+    struct ObjectRef {
+        enum class Kind { Body, Star, Hypothetical, OrbitPoint } kind = Kind::Body;
+        long id = 0;
+        std::string token;
+        OrbitPoint point = OrbitPoint::AscendingNode; // OrbitPoint
+        OrbitElements method = OrbitElements::Mean;   // OrbitPoint
+    };
+    Result<CalcResult> calc_object(const ObjectRef& object, double jd_tt,
+                                   const CalcOptions& opts = {});
+
+    // The rotation, row-major with out = m * in, that carries an ICRF vector
+    // into the frame, coordinates and zodiac of `opts` at jd_tt. The engine
+    // forms every place in ICRF first, so an object's position (xyz_au) in
+    // `opts` is m times its position with the frame ICRF, equatorial
+    // coordinates and the tropical zodiac and every other option the same.
+    // Not its rate: a rotating frame adds dm/dt times the position. For
+    // fitters, which can then fit the ICRF place once and rotate it
+    // cheaply (docs/SEGMENTS.md). ArgumentError where calc would refuse the
+    // options' frame or zodiac.
+    Result<void> output_rotation(const CalcOptions& opts, double jd_tt, double m[9]);
+
+    // What an object looks like from the options' observer
+    // (docs/PHENOMENA.md): the phase angle at the object between the Sun and
+    // the observer, the illuminated fraction (1 + cos phase) / 2, the
+    // elongation from the Sun, the apparent diameter of the IAU mean radius,
+    // and the V magnitude with the published model that gave it. NaN where a
+    // quantity does not apply: a star's or a point's phase, a point's
+    // diameter, a magnitude outside its model's range (the model then says
+    // why), the elongation seen from the Sun.
+    struct Phenomena {
+        double phase_angle_deg = std::numeric_limits<double>::quiet_NaN();
+        double illuminated_fraction = std::numeric_limits<double>::quiet_NaN();
+        double elongation_deg = std::numeric_limits<double>::quiet_NaN();
+        double diameter_arcsec = std::numeric_limits<double>::quiet_NaN();
+        double magnitude = std::numeric_limits<double>::quiet_NaN();
+        std::string_view magnitude_model; // a static string
+    };
+    Result<Phenomena> phenomena(const ObjectRef& object, double jd_tt,
+                                const CalcOptions& opts = {});
+    Result<Phenomena> phenomena_ut(const ObjectRef& object, double jd_ut1,
+                                   const CalcOptions& opts = {});
+    Result<CalcResult> calc_object_ut(const ObjectRef& object, double jd_ut1,
+                                      const CalcOptions& opts = {});
+
+    // Rise, set and transit (docs/ENGINE.md, "Rise, set and transit").
+    enum class Event { Rise, Set, UpperTransit, LowerTransit };
+    struct RiseSetOptions {
+        int limb = 1;                  // +1 upper, 0 centre, -1 lower
+        bool refraction = true;        // Bennett, with `atmosphere`
+        frames::Atmosphere atmosphere; // 1013.25 hPa, 15 C
+        double dip_height_m = 0.0;     // the eye above the sea horizon
+        double window_days = 2.0;      // how far to look
+        bool backward = false;         // the last event before the start
+        Precession precession = Precession::Vondrak2011;
+    };
+    // jd_ut1 is the event when it falls in the window, else NaN: the limb
+    // stayed above (or below) the horizon throughout, or the other event
+    // was the only one there.
+    enum class Outcome { Found, AlwaysAbove, AlwaysBelow, NotInWindow };
+    struct EventResult {
+        double jd_ut1 = 0.0; // NaN unless Found
+        Outcome outcome = Outcome::Found;
+    };
+    // The first event strictly after jd_ut1_start (before, with backward)
+    // at a site. The position is the topocentric apparent one from the site
+    // (its height gives the parallax); an orbit point's is the geocentric
+    // apparent one, a direction with no parallax. Rise and set are where the limb's
+    // true altitude is -dip - R(-dip), so the apparent limb is on the
+    // observer's horizon; without refraction, -dip. Transits are where the
+    // local apparent hour angle is 0 or 180 deg.
+    Result<EventResult> rise_set_ut(const ObjectRef& object, Event event, double jd_ut1_start,
+                                    const frames::GeoSite& site, const RiseSetOptions& opts);
+
+    // Delta T model for UT inputs and topocentric Earth rotation. Not
+    // owned; nullptr restores the default (time::ObservedDeltaT).
+    void set_delta_t_model(const time::DeltaTModel* model);
+    // Delta T, TT - UT1 in seconds, at a TT instant, by the model calc_ut
+    // and the topocentric rotation use (0 for an engine that is not open).
+    double delta_t_seconds(double jd_tt) const;
+
+    // Human-readable description of the loaded ephemeris (every file, in
+    // order). The view is valid until add_ephemeris() or add_catalog().
+    std::string_view source() const;
+
+    // The planetary ephemeris files in the order they answer, each with the
+    // span it covers (JD, TDB). An instant no span holds is refused with a
+    // CoverageError. Features with narrower spans of their own (the
+    // planets' mean orbit points, 1550-2650) refuse separately.
+    struct EphemerisSpan {
+        std::string source;
+        double first_jd_tdb = 0.0, last_jd_tdb = 0.0;
+    };
+    std::vector<EphemerisSpan> ephemeris_spans() const;
+
+    // The small-body catalogs in the order they were added (a later one wins
+    // for a body both carry), each with the path it was added by and its
+    // record count; and the distinct bodies they answer between them. With
+    // one catalog that is its record count; with several it takes a pass
+    // over their indexes the first time, and is kept until add_catalog().
+    struct CatalogInfo {
+        std::string path;
+        uint64_t bodies = 0;
+    };
+    std::vector<CatalogInfo> catalogs() const;
+    Result<uint64_t> catalog_bodies() const;
+
+    // What the object registry (prometheia/registry.hpp) reads of the
+    // catalogs: a body's newest record with its names and the catalog
+    // (index into catalogs()) holding it, NotFound when none does; and every
+    // record of every catalog, catalog by catalog in the order added, so
+    // that a later catalog's record of a body follows an earlier one's.
+    struct CatalogBody {
+        catalog::Record record;
+        BodyNames names;
+        size_t catalog = 0;
+    };
+    Result<CatalogBody> catalog_body(int spkid) const;
+    // The TDB span in which a catalog body's own state can be integrated,
+    // read off the loaded files and its record without integrating: the
+    // planetary ephemeris's span, narrowed to the perturber kernel's, or
+    // without a kernel to 100 years either side of the element epoch.
+    // NotFound for a body the planetary ephemeris answers itself, or that
+    // no catalog carries.
+    Result<std::pair<double, double>> catalog_state_span(int spkid);
+    Result<void> for_each_catalog_record(
+        const std::function<void(size_t catalog, const catalog::Record&, const catalog::Names&)>&
+            fn) const;
+    Result<void> for_each_catalog_name(
+        const std::function<void(size_t catalog, uint64_t spkid, const catalog::Names&)>& fn) const;
+    // Catalog i's proper names folded by registry::fold, with their SPK-IDs,
+    // sorted and unique: the registry's index for names typed with accents
+    // or punctuation, and for prefixes. Built on first use with lookup()'s
+    // index, once for every engine on a corpus; valid until add_catalog()
+    // on that corpus.
+    Result<const std::vector<std::pair<std::string, uint64_t>>*>
+    catalog_folded_names(size_t catalog) const;
+
+    // The sidereal mean motion (deg/day) of an ephemeris body about its
+    // centre, from the mean elements the engine fits to DE440 (docs/ENGINE.md,
+    // "Nodes and apsides"): n = sqrt(GM / a^3) at J2000, with GM the Sun's
+    // and the body's. The Sun's is the Earth-Moon barycentre's (its
+    // geocentric orbit is the Earth's reflected); the Moon's is its mean
+    // longitude's rate (the fundamental arguments) less general precession.
+    // NotFound for a body with no mean elements.
+    Result<double> mean_motion_deg_day(int id) const;
+    // The sidereal rate (deg/day) at J2000 of a mean orbit point's longitude:
+    // the Moon's from the fundamental arguments, a planet's from the fit's
+    // h, k (apsides) and p, q (nodes). NotFound where there are no mean
+    // elements.
+    Result<double> orbit_point_mean_motion_deg_day(int id, OrbitPoint point) const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    Result<HouseResult> houses_at(houses::System system, double jd_tt, double jd_ut1,
+                                  const frames::GeoSite& site, const CalcOptions& opts);
+};
+
+} // namespace prometheia
+
+#endif // PROMETHEIA_ENGINE_HPP

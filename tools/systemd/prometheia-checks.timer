@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Daily, an hour after the machine is idle enough to have booted. See the
+# .service file for how to install; nothing here installs itself.
+[Unit]
+Description=Ephemeris Prometheia: run the scheduled checks daily
+
+[Timer]
+OnCalendar=daily
+# A missed run happens: a laptop asleep at 00:00 should still check today.
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target
