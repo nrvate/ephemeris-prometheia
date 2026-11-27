@@ -4,14 +4,32 @@ Notable changes to Ephemeris Prometheia. Accuracy and performance figures in
 this file are measured, not estimated; where a number is an estimate it says
 so. Each entry points at the document carrying the method.
 
-**Versioning.** `0.x` releases may change the C ABI. The C interface described
-in [docs/C_API.md](docs/C_API.md) is a cross-repo contract — the Astrolog
-project's ephemeris plugin builds against it — so any ABI change is
-communicated to known consumers *before* it lands, never shipped unannounced.
-That policy is what `0.x` means here: the interface is deliberate and
-documented, not that it is frozen.
+**Versioning.** Semantic versioning from 1.0.0. The C ABI of 1.0.0
+(`PROMETHEIA_ABI_VERSION` 6) is the 1.x ABI: within 1.x, functions, enumerated
+values and status codes are only appended, and no existing struct layout or
+signature changes. A change to one is 2.0, with a new ABI version. The C
+interface described in [docs/C_API.md](docs/C_API.md) is a cross-repo contract
+— the Astrolog project's ephemeris plugin builds against it — so any ABI change
+is communicated to known consumers *before* it lands, never shipped
+unannounced. The 0.x entries below record how the interface got here.
 
-## Unreleased
+## 1.0.0 — 2026-11-26
+
+The library, the tools and `prometheiad` are 1.0.0, one version from now on.
+The C ABI is 6, unchanged since 0.7.3: everything added below was appended,
+and no existing layout changed. Protocol v4 is unchanged.
+
+**What moves for anyone pinning values** (each in its entry below):
+- the dataset id's digest (`…#7d3c6f54` for DE440 alone);
+- a body behind the solar disc, by up to 1.19″ (the deflection taper);
+- a rate whose stencil straddled a TDB rounding step, by up to 0.05″/day
+  (the Moon);
+- catalog bodies: every answer once, by 0–6 m in 2026 (the fixed perturber
+  grid), and the few inside a deep perihelion or close encounter by much more
+  (Kepler's equation, sampling where a cubic cannot hold them);
+- the rise and set of orbit points, now without parallax;
+- houses whose cusps fall out of zodiacal order, now refused;
+- `prometheia.swe` (Python), removed.
 
 - **Month fits are 5-8 times cheaper** (docs/SEGMENTS.md, "Cost", "All of it
   together"): the four entries below on precession, nutation, rates and segment

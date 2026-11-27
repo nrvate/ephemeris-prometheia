@@ -13,6 +13,12 @@ one squashed root commit, `e794bb3`, whose tree is `initial` at
 `431205a`. `initial` is frozen and keeps the history, the tags and the
 hashes cited below. See [CLAUDE.md](../CLAUDE.md), "Git".
 
+**1.0.0, 2026-11-26.** The library, tools and `prometheiad` are 1.0.0,
+tagged `v1.0.0` on `main`. C ABI 6 is the 1.x ABI: from here, only
+appends within 1.x, and a layout or signature change is 2.0
+([C_API.md](C_API.md), "ABI stability"). Nothing below changed with it but
+the version strings and the dataset id (`…#7d3c6f54` for DE440 alone).
+
 **astromcp's port plan, Part A, is complete, and astromcp is building on
 it.** Requests now come from its live searches, not the plan. The peer
 sessions change; `ListAgents` names them. Astrolog's session hears about every
@@ -419,6 +425,14 @@ The full list, with its numbers, is CHANGELOG.md "0.7.0".
 
 ## Released
 
+- **v1.0.0**, published 2026-11-26
+  (https://github.com/nrvate/ephemeris-prometheia/releases/tag/v1.0.0),
+  the first release tagged on `main`.
+  - The library, tools and `prometheiad` are 1.0.0 (C ABI 6, the 1.x ABI).
+  - New since 0.7.3: everything in CHANGELOG 1.0.0, among it segments and
+    roots in C, eclipses, rise and set, phenomena, heliacal visibility, the
+    object registry, houses in C, and the shared corpus.
+  - Moves: the dataset id (`…#7d3c6f54`), and the answers that entry lists.
 - **catalog-20261102**, published 2026-11-02
   (https://github.com/nrvate/ephemeris-prometheia/releases/tag/catalog-20261102).
   `sbdb-20261102.epm` (EPM1 1.2, 1,581,053 records, sha256 `dfe74e5f…a63b`):

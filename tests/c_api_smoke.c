@@ -34,7 +34,7 @@ int prometheia_c_smoke(const char* kernel_path) {
         return 3;
     if (strstr(prometheia_engine_source(engine), "SPK") == NULL)
         return 4;
-    /* The ephemeris files and the span each answers (added after 0.7.3). */
+    /* The ephemeris files and the span each answers (added in 1.0.0). */
     {
         double first = 0.0, last = 0.0;
         const char* what = NULL;

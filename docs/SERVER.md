@@ -635,7 +635,7 @@ two sides agreed these semantics:
   ([ORBIT-POINTS.md](ORBIT-POINTS.md)). A server-defined model must name
   itself in the object's source string (§3.4). Ours do, in the three-field
   form `<engine> | <ephemeris> | <model>`: the engine is WELCOME's string up
-  to its first comma (`Prometheia 0.7.3`), the ephemeris the description it
+  to its first comma (`Prometheia 1.0.0`), the ephemeris the description it
   always sent, and the model one of `mean elements: DE440 secular fit,
   1550-2650` (the planets, the Earth and the Sun), `Moon: Simon et al.
   1994` (the Moon's mean points), `natural apsides: DE440 passages,

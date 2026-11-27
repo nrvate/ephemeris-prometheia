@@ -68,7 +68,7 @@ typedef struct prometheia_error {
 
 /* ---- Library ------------------------------------------------------------ */
 
-PROMETHEIA_API const char* prometheia_version(void); /* "0.7.3" */
+PROMETHEIA_API const char* prometheia_version(void); /* "1.0.0" */
 PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION */
 
 /* ---- Bodies (NAIF IDs; catalog bodies use their SPK-ID) ----------------- */
@@ -106,7 +106,7 @@ PROMETHEIA_API int prometheia_abi_version(void);     /* PROMETHEIA_ABI_VERSION *
 #define PROMETHEIA_SIDEREAL_TROPICAL (-1)
 #define PROMETHEIA_SIDEREAL_FAGAN_BRADLEY 0
 #define PROMETHEIA_SIDEREAL_LAHIRI 1
-#define PROMETHEIA_SIDEREAL_RAMAN 3 /* (Y - 397) x 50 1/3", a linear rule (after 0.7.3) */
+#define PROMETHEIA_SIDEREAL_RAMAN 3 /* (Y - 397) x 50 1/3", a linear rule (since 1.0.0) */
 /* Zodiacs defined at the instant (library 0.4): the anchor's true position
  * held at a fixed longitude on the true ecliptic of date. Numbered as the
  * ephemeris protocol's A.11 tokens. They have no anchor epoch, so
@@ -228,7 +228,7 @@ PROMETHEIA_API const char* prometheia_engine_source(const prometheia_engine* eng
  * run a few days past the years in its name; this is the span it answers.
  * *source, when asked for, is valid until the next call of this function or
  * prometheia_engine_add_ephemeris(). An index out of range is
- * PROMETHEIA_ERROR_ARGUMENT. Added after library 0.7.3; the ABI version is
+ * PROMETHEIA_ERROR_ARGUMENT. Added in library 1.0.0; the ABI version is
  * unchanged, as no layout changed.
  */
 PROMETHEIA_API int prometheia_engine_ephemeris_count(const prometheia_engine* engine);
@@ -246,7 +246,7 @@ PROMETHEIA_API prometheia_status prometheia_engine_ephemeris_span(const promethe
  * pass over their indexes and keeps the answer until a catalog is added.
  * *path, when asked for, is valid until the next call of _catalog_info or
  * prometheia_engine_add_catalog(). An index out of range is
- * PROMETHEIA_ERROR_ARGUMENT. Added after library 0.7.3; the ABI version is
+ * PROMETHEIA_ERROR_ARGUMENT. Added in library 1.0.0; the ABI version is
  * unchanged, as no layout changed.
  */
 PROMETHEIA_API int prometheia_engine_catalog_count(const prometheia_engine* engine);
@@ -293,7 +293,7 @@ PROMETHEIA_API prometheia_status prometheia_engine_add_ephemeris(prometheia_engi
  *
  * A dataset loads the files once; prometheia_context_open() gives an
  * ordinary engine on it, which every call taking an engine accepts and
- * prometheia_engine_close() frees. Added after library 0.7.3; the ABI
+ * prometheia_engine_close() frees. Added in library 1.0.0; the ABI
  * version is unchanged, as no layout changed.
  *
  *   - dataset_open and the _add_* calls take the files the engine calls do,
@@ -599,9 +599,9 @@ typedef double (*prometheia_delta_t_fn)(void* user, double jd_tt);
 PROMETHEIA_API void prometheia_engine_set_delta_t(prometheia_engine* engine,
                                                   prometheia_delta_t_fn fn, void* user);
 
-/* ---- Houses, sidereal time, obliquity, rotations (after 0.7.3) -------------
+/* ---- Houses, sidereal time, obliquity, rotations (1.0.0) -------------------
  *
- * docs/HOUSES.md. Added after library 0.7.3; the ABI version is unchanged,
+ * docs/HOUSES.md. Added in library 1.0.0; the ABI version is unchanged,
  * as no existing layout changed. Angles are degrees throughout.
  */
 
@@ -720,9 +720,9 @@ PROMETHEIA_API void prometheia_equatorial_to_ecliptic(double ra_deg, double dec_
                                                       double obliquity_deg, double* lon_deg,
                                                       double* lat_deg);
 
-/* ---- The horizon and refraction (after 0.7.3) -------------------------------
+/* ---- The horizon and refraction (1.0.0) -------------------------------------
  *
- * docs/FRAMES.md, "The horizon". Added after library 0.7.3; the ABI version
+ * docs/FRAMES.md, "The horizon". Added in library 1.0.0; the ABI version
  * is unchanged, as no existing layout changed. Degrees throughout.
  */
 
@@ -805,14 +805,14 @@ PROMETHEIA_API prometheia_status prometheia_refraction(double altitude_deg, int 
                                                        double height_m, double* out_deg,
                                                        prometheia_error* err);
 
-/* ---- Rise, set and transit (after 0.7.3) ------------------------------------
+/* ---- Rise, set and transit (1.0.0) ------------------------------------------
  *
- * docs/ENGINE.md, "Rise, set and transit". Added after library 0.7.3; the ABI
+ * docs/ENGINE.md, "Rise, set and transit". Added in library 1.0.0; the ABI
  * version is unchanged, as no existing layout changed.
  */
 
 /* What to find events of, and (prometheia_calc_object) what to compute.
- * ORBIT_POINT and ID were added with the object registry, after 0.7.3. */
+ * ORBIT_POINT and ID were added with the object registry, in 1.0.0. */
 #define PROMETHEIA_OBJECT_BODY 0         /* id: a NAIF id, or a catalog SPK-ID */
 #define PROMETHEIA_OBJECT_STAR 1         /* id: a star catalog index */
 #define PROMETHEIA_OBJECT_HYPOTHETICAL 2 /* token: a hypothetical body's */
@@ -922,7 +922,7 @@ PROMETHEIA_API double prometheia_delta_t(double jd_tt);
 /* An engine's own Delta T, seconds: its model, or the one installed with
  * prometheia_engine_set_delta_t. UT1 = TT - Delta T / 86400, so a caller
  * holding a TT result (a solar eclipse's contacts) can give its UT1 as the
- * engine would. NaN for a NULL engine. Added after library 0.7.3; the ABI
+ * engine would. NaN for a NULL engine. Added in library 1.0.0; the ABI
  * version is unchanged. */
 PROMETHEIA_API double prometheia_engine_delta_t(const prometheia_engine* engine, double jd_tt);
 
@@ -930,7 +930,7 @@ PROMETHEIA_API double prometheia_engine_delta_t(const prometheia_engine* engine,
    series, 787 terms (docs/TIME.md). */
 PROMETHEIA_API double prometheia_tdb_minus_tt(double jd_tt);
 
-/* ---- Phenomena and magnitudes (after 0.7.3) ---------------------------------
+/* ---- Phenomena and magnitudes (1.0.0) ---------------------------------------
  *
  * docs/PHENOMENA.md: the phase angle at the object between the Sun and the
  * observer, the illuminated fraction, the elongation from the Sun, the
@@ -938,8 +938,8 @@ PROMETHEIA_API double prometheia_tdb_minus_tt(double jd_tt);
  * published model that gave it (Mallama & Hilton 2018 for the planets,
  * Krisciunas & Schaefer 1991 for the Moon, Willmer 2018 for the Sun, H, G for
  * catalog bodies, the catalog's V for stars). NaN where a quantity does not
- * apply. The options' observer and corrections stand. Added after library
- * 0.7.3; the ABI version is unchanged, as no existing layout changed.
+ * apply. The options' observer and corrections stand. Added in library
+ * 1.0.0; the ABI version is unchanged, as no existing layout changed.
  */
 typedef struct prometheia_phenomena {
     double phase_angle_deg, illuminated_fraction, elongation_deg, diameter_arcsec, magnitude;
@@ -952,12 +952,12 @@ PROMETHEIA_API prometheia_status prometheia_calc_phenomena_ut(
     prometheia_engine* engine, const prometheia_object* object, double jd_ut1,
     const prometheia_options* opts, prometheia_phenomena* out, prometheia_error* err);
 
-/* ---- The object registry (after 0.7.3) --------------------------------------
+/* ---- The object registry (1.0.0) --------------------------------------------
  *
  * docs/REGISTRY.md: one id scheme for every object (naif:, sb:, orbit:, hyp:,
  * star:), what each object is, lookup across every namespace and listing.
  * The registry's indexes are built on first use and kept by the engine
- * handle until a catalog is added. Added after library 0.7.3; the ABI
+ * handle until a catalog is added. Added in library 1.0.0; the ABI
  * version is unchanged, as no existing layout changed.
  */
 #define PROMETHEIA_KIND_PLANET 0 /* the Sun, the planets (Mars-Pluto: barycentres), the Earth */
@@ -1411,7 +1411,7 @@ PROMETHEIA_API double prometheia_limiting_magnitude(double sky_brightness_nl,
  * or by a caller's own loop over the documented layout. A handle is
  * immutable once returned: any number of threads may evaluate it and read
  * its layout at once. It holds no reference to the engine, so it may
- * outlive it. Added after library 0.7.3; the ABI version is unchanged, as
+ * outlive it. Added in library 1.0.0; the ABI version is unchanged, as
  * no existing layout changed.
  */
 typedef struct prometheia_segments prometheia_segments;
@@ -1565,7 +1565,7 @@ PROMETHEIA_API void prometheia_segments_close(prometheia_segments* segments);
  * target: ingresses, aspects, phases, midpoints, stations, declination
  * crossings. Nothing but the handles is read: no engine, no lock, no thread
  * and no allocation, so any number of threads may search the same handles
- * at once. Added after library 0.7.3; the ABI version is unchanged.
+ * at once. Added in library 1.0.0; the ABI version is unchanged.
  */
 
 /* A handle's component, in the fit's coords (layout->coords). */

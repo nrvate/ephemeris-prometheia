@@ -54,7 +54,7 @@ prometheia_calc(eph, PROMETHEIA_EARTH, jd_tt, &opts, &r, &err);
 prometheia_engine_close(eph);
 ```
 
-**Which years the loaded files answer** (added after 0.7.3; ABI version
+**Which years the loaded files answer** (added in 1.0.0; ABI version
 unchanged, as no layout changed). `prometheia_engine_ephemeris_count` and
 `prometheia_engine_ephemeris_span(engine, i, &first_jd_tdb, &last_jd_tdb,
 &source, &err)` give each planetary file in the order it answers, with the
@@ -65,7 +65,7 @@ start or end a few days outside the years in its name. DE440 with
 `source` string lives until the next call of `_span` or
 `prometheia_engine_add_ephemeris()`.
 
-**Which catalogs are loaded** (added after 0.7.3; ABI version unchanged).
+**Which catalogs are loaded** (added in 1.0.0; ABI version unchanged).
 `prometheia_engine_catalog_count` and `prometheia_engine_catalog_info(engine,
 i, &bodies, &path, &err)` give each small-body catalog in the order it was
 added, with its record count and the path it was added by. A later catalog
@@ -77,7 +77,7 @@ catalog with a 100-body sample stacked on it (2026-10-25). This replaces
 parsing the `[N bodies]` text of a result's `source`, whose wording is not
 a contract.
 
-**Houses, sidereal time, obliquity, rotations** (added after 0.7.3; ABI
+**Houses, sidereal time, obliquity, rotations** (added in 1.0.0; ABI
 version unchanged, as no existing layout changed; announced to the Astrolog
 side first, 2026-10-27). [HOUSES.md](HOUSES.md) has the definitions.
 
@@ -138,7 +138,7 @@ if (prometheia_calc_houses_ut(eph, PROMETHEIA_HOUSES_PLACIDUS, jd_ut1,
 - **Cusp speeds** are not served. If they come, they come as a separate
   call with its own struct, so `prometheia_houses` keeps its layout.
 
-**The horizon and refraction** (added after 0.7.3; ABI version unchanged;
+**The horizon and refraction** (added in 1.0.0; ABI version unchanged;
 announced to the Astrolog side first, 2026-10-27). [FRAMES.md](FRAMES.md),
 "The horizon", has the definitions and the measurements.
 - `prometheia_horizontal_ut(engine, jd_ut1, lon, lat, height_m, ra, dec,
@@ -168,7 +168,7 @@ announced to the Astrolog side first, 2026-10-27). [FRAMES.md](FRAMES.md),
   with and without an atmosphere, at three latitudes. It round-trips through
   refraction to 2e-10″.
 
-**Rise, set and transit** (added after 0.7.3; ABI version unchanged;
+**Rise, set and transit** (added in 1.0.0; ABI version unchanged;
 announced to the Astrolog side first, 2026-10-27). [ENGINE.md](ENGINE.md),
 "Rise, set and transit", has the method and the measurements.
 - `prometheia_rise_set_ut(engine, &object, event, jd_ut1_start, lon, lat,
@@ -196,7 +196,7 @@ announced to the Astrolog side first, 2026-10-27). [ENGINE.md](ENGINE.md),
   with `==`: a body, a star and a hypothetical, all four events, both
   limbs, both directions.
 
-**Lunar eclipses** (added after 0.7.3; ABI version unchanged; to be announced
+**Lunar eclipses** (added in 1.0.0; ABI version unchanged; to be announced
 to the Astrolog side before it lands). [ECLIPSES.md](ECLIPSES.md) has the
 method and the measurements.
 - `prometheia_lunar_eclipse_next(engine, jd_start_tt, kinds, backward, &out,
@@ -266,7 +266,7 @@ printf("%s\n", r.source);    /* the element set's name */
   malformed element file gives `PROMETHEIA_ERROR_FORMAT`, with the file and
   line in the message.
 
-**Phenomena and magnitudes (after 0.7.3; ABI version unchanged).**
+**Phenomena and magnitudes (added in 1.0.0; ABI version unchanged).**
 `prometheia_calc_phenomena(_ut)(engine, object, jd, opts, out, err)` takes
 any `prometheia_object`. It fills a `prometheia_phenomena` with the phase
 angle, illuminated fraction, elongation, apparent diameter and V magnitude,
@@ -274,7 +274,7 @@ and names the published model that gave the magnitude. Quantities that do
 not apply are NaN. [PHENOMENA.md](PHENOMENA.md) has the formulas and the
 measured agreement with `swetest`.
 
-**The object registry (after 0.7.3; ABI version unchanged).** One id scheme
+**The object registry (added in 1.0.0; ABI version unchanged).** One id scheme
 for every object, and lookup, description and listing across all of them
 ([REGISTRY.md](REGISTRY.md)):
 
@@ -960,7 +960,7 @@ prometheia_status prometheia_context_open(const prometheia_dataset *dataset,
   `frame`: `PROMETHEIA_FRAME_ICRF` 0, `_J2000` 1, `_MEAN_OF_DATE` 2,
   `_TRUE_OF_DATE` 3. `coords`: `PROMETHEIA_COORDS_ECLIPTIC` 0, `_EQUATORIAL`
   1. `sidereal`: `PROMETHEIA_SIDEREAL_TROPICAL` −1, `_FAGAN_BRADLEY` 0,
-  `_LAHIRI` 1, `_RAMAN` 3 (added after 0.7.3), the instant-defined modes
+  `_LAHIRI` 1, `_RAMAN` 3 (added in 1.0.0), the instant-defined modes
   below, and `_USER` 255, which reads `sidereal_epoch_jd` (TT) and
   `sidereal_ayanamsa_deg` (the mean ayanamsha at that date). `precession`:
   `PROMETHEIA_PRECESSION_IAU2006` 0, `_VONDRAK2011` 1. `sidereal_plane`:
@@ -1034,7 +1034,7 @@ prometheia_status prometheia_context_open(const prometheia_dataset *dataset,
     NULL engine), so a caller holding a TT result can give its UT1 as the
     engine would;
   - `prometheia_tdb_minus_tt(jd_tt)`, in seconds at the geocentre.
-- **Library version.** `prometheia_version()` is a string ("0.7.3" as built
+- **Library version.** `prometheia_version()` is a string ("1.0.0" as built
   from this tree); `prometheia_abi_version()` is `PROMETHEIA_ABI_VERSION`.
 - **Sizes.** `PROMETHEIA_ERROR_MESSAGE_SIZE` is 256 and `PROMETHEIA_ID_SIZE`
   is 96 (the registry's id and token buffers). `PROMETHEIA_API` marks the
@@ -1045,13 +1045,17 @@ prometheia_status prometheia_context_open(const prometheia_dataset *dataset,
 `PROMETHEIA_ABI_VERSION` (currently 6; version 6 appended `prometheia_options.sidereal_plane` and the `PROMETHEIA_SIDEREAL_PLANE_*` constants, reviewed by the Astrolog side before it landed; version 2 added `prometheia_options.sigma`, version 3 `prometheia_options.precession`, version 4 `PROMETHEIA_CENTER_BODY` and `prometheia_options.center_body`, version 5 the hypothetical-body functions and the `prometheia_elements` and `prometheia_hypothetical` structs, purely additive) names the struct layouts and
 function signatures. Any change to them bumps the version, and bindings
 compare against `prometheia_abi_version()` at load time. **The check is
-equality, not `>=`, while we are on 0.x.** Versions 2 to 4 each appended
+equality, not `>=`.** Versions 2 to 4 each appended
 fields to `prometheia_options`, and a caller passes its own struct, so a
 newer library would read past the end of an older caller's struct. A
 binding refuses to bind when `prometheia_abi_version() !=
-PROMETHEIA_ABI_VERSION`. Before 1.0,
-expect the version to move as the engine grows (houses, fixed stars,
-transports). Enumerated values and error codes are only ever appended.
+PROMETHEIA_ABI_VERSION`.
+
+**Version 6 is the 1.x ABI.** Within library 1.x, functions, enumerated
+values and error codes are only appended, and no existing struct layout or
+function signature changes, so a binding built against any 1.x header binds
+to any later 1.x library. A change to a layout or a signature is library 2.0
+and a new ABI version, announced to known consumers before it lands.
 
 `ephem` ([EPHEM.md](EPHEM.md)) is a complete C99 program written against
 this header alone.

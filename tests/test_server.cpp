@@ -1295,7 +1295,7 @@ TEST_CASE("server_metrics_text") {
     CHECK(text.find("prometheiad_compute_seconds_count 1\n") != std::string::npos);
     CHECK(text.find("prometheiad_cells_computed_total 40\n") != std::string::npos);
     CHECK(text.find(
-              "prometheiad_build_info{server=\"prometheiad/0.11.0\",protocol=\"4\",tls=\"0\"} 1") !=
+              "prometheiad_build_info{server=\"prometheiad/1.0.0\",protocol=\"4\",tls=\"0\"} 1") !=
           std::string::npos);
 }
 

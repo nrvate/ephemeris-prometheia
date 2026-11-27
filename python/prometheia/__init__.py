@@ -69,7 +69,7 @@ else:
                 "equatorial_to_ecliptic", "houses_from_armc", "jd_from_ymdhms", "refraction",
                 "star_count", "star_find", "star_info", "star_lookup", "tdb_minus_tt",
                 "tt_to_utc", "utc_to_tt", "version"]
-__version__ = "0.7.3"
+__version__ = "1.0.0"
 
 
 class Client:

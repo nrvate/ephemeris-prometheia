@@ -45,8 +45,10 @@ headers, query strings, search queries or prompts to outside agents.
   merge.
 - Work on a feature branch made from `main`, and land each feature or
   rollup as one squash commit or PR. Push over SSH to `origin`, which
-  is the `github-nrvate` host alias. Never use the `gh` CLI for
-  anything.
+  is the `github-nrvate` host alias. Releases are tagged on `main`
+  (from `v1.0.0`) and published with `gh release create --verify-tag`;
+  `gh` must act as nrvate, which the untracked `.envrc` arranges through
+  direnv (`GH_TOKEN`). Check `gh api user --jq .login` first.
 - No hosted CI, ever: no GitHub Actions, no external runners. The gate
   is `tools/gate.sh`, run locally before every commit, and it must stay
   fast (seconds); anything slow goes behind `doctest::skip()`.

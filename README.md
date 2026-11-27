@@ -21,10 +21,11 @@ version and a plain statement of what is *not* in it:
 
 ## Status
 
-All six milestones complete, plus protocol version 4 (2026-09-17) and, in
-releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29), the work below the list.
-The last release is 0.7.3; what has landed since is under "Unreleased" in
-[CHANGELOG.md](CHANGELOG.md) and summarised after the list:
+All six milestones complete, plus protocol version 4 (2026-09-17), the work
+of releases 0.2.0 to 0.7.3 (2026-09-18 to 2026-09-29) and, in 1.0.0
+(2026-11-26), what is summarised after the list. The last release is 1.0.0,
+the first with a stable C ABI: within 1.x the C interface is only appended to
+([docs/C_API.md](docs/C_API.md), "ABI stability").
 
 - **EPM1 catalog container** — indexed, zstd-chunked, CRC-checked, no time
   axis; ~25 bytes/record synthetic, 87 B/body for the real 1.57M-body
@@ -174,7 +175,7 @@ The last release is 0.7.3; what has landed since is under "Unreleased" in
   request and error, joined to the client by request id, and never a
   birth date or place. [docs/SERVER.md](docs/SERVER.md), "Logging".
 
-Since 0.7.3 (unreleased; each item is in [CHANGELOG.md](CHANGELOG.md)):
+New in 1.0.0 (each item is in [CHANGELOG.md](CHANGELOG.md)):
 
 - **Segments and roots through the C API** — Chebyshev fits, root finding on
   them (also for sums of up to eight terms), and the exact span each object
@@ -246,7 +247,8 @@ cc -std=c99 app.c $(pkg-config --static --cflags --libs prometheia)
 `main` is the working branch: a single squashed root commit whose tree is the
 frozen `initial` branch at `431205a`. `initial` keeps the full bring-up
 history, the release tags (`v0.1.0` to `v0.7.3` and the catalog tags) and
-every commit hash the docs cite. Clone `main`; read history on `initial`.
+every commit hash the docs cite. Releases from `v1.0.0` on are tagged on
+`main`. Clone `main`; read history on `initial`.
 
 There is no hosted CI. Before committing, run the local gate —
 `tools/gate.sh` (clang-format 14 check, Release and ASan+UBSan builds, all
